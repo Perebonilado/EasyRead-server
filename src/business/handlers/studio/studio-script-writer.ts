@@ -114,6 +114,8 @@ export function carryOn(
   bible: StudioBible,
   outline: StudioOutline,
   narrator: NarratorRule | null,
+  /** Who the film is for: how long a quiet with action in it may run. */
+  audience: StudioBrief['audience'] | null = null,
 ): { scenes: CarriedScene[]; bible: StudioBible } {
   let grown = bible;
   let before: EndState | null = null;
@@ -123,10 +125,24 @@ export function carryOn(
     const found = (sheet: StorySheet) =>
       withFound(grown, sheet.set, mendSheet(sheet, grown, before));
     let sheet = mendSheet(given, grown, before).sheet;
-    let problems = checkSheet(sheet, found(sheet), planned, before, narrator);
+    let problems = checkSheet(
+      sheet,
+      found(sheet),
+      planned,
+      before,
+      narrator,
+      audience,
+    );
     if (errorsIn(problems).length) {
       sheet = repairSheet(sheet, grown, before, narrator);
-      problems = checkSheet(sheet, found(sheet), planned, before, narrator);
+      problems = checkSheet(
+        sheet,
+        found(sheet),
+        planned,
+        before,
+        narrator,
+        audience,
+      );
     }
     const plants = outline.story
       ? plantsOfScene(outline.story, outline, grown, k)
@@ -201,6 +217,7 @@ export async function writeStoryScript(
     bible,
     outline,
     narratorRuleOf(brief, bible),
+    brief.audience ?? null,
   );
   return { ...carried, drafts };
 }

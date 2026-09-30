@@ -60,6 +60,7 @@ import {
 import { FLOOR_BACK_K, FLOOR_FRONT_K, STATION_SHARES } from './scene-layout';
 import {
   SET_FRAMES,
+  raisedEye,
   setWidthFor,
   shapeOfStage,
   worldHeightOf,
@@ -1223,9 +1224,8 @@ let EYE: Record<PlaceKind, number> = { outdoor: 0, indoor: 0, vessel: 0 };
  * The set being built drawn in a frame: its size, where its people's
  * feet are, its floor lines and its eye line. The world's own sizes (a
  * kit unit, the ink, a grown-up's eyes above their feet) are measured in
- * the wide frame's height whatever the frame.
- * TODO(V3, studio-vertical-plan §3.1–3.2): the tall frame's raised eye
- * (frame.eyeLift), and the sky and floor it adds dressed.
+ * the wide frame's height whatever the frame. A tall frame's eye is
+ * raised (scene-shape raisedEye, studio-vertical-plan §3.2).
  */
 function useFrame(frame: SetFrame): void {
   frameW = frame.w;
@@ -1239,13 +1239,19 @@ function useFrame(frame: SetFrame): void {
     indoor: frame.floorLine.indoor * frame.h,
     vessel: frame.floorLine.vessel * frame.h,
   };
-  EYE = {
-    // A little above the horizon, as a child's eye sees a picture book:
-    // what stands at the far edge of the ground is not lost in the distance.
-    outdoor: floorLine.outdoor - 80,
-    indoor: FEET - 200 * UNIT - 0.05 * world,
-    vessel: FEET - 200 * UNIT - 0.05 * world,
-  };
+  // A tall frame's eye is raised above the people's heads (§3.2): one
+  // eye line, in or out of doors, so heads stacked in depth part.
+  const raised = raisedEye(frame, UNIT);
+  EYE =
+    raised !== null
+      ? { outdoor: raised, indoor: raised, vessel: raised }
+      : {
+          // A little above the horizon, as a child's eye sees a picture book:
+          // what stands at the far edge of the ground is not lost in the distance.
+          outdoor: floorLine.outdoor - 80,
+          indoor: FEET - 200 * UNIT - 0.05 * world,
+          vessel: FEET - 200 * UNIT - 0.05 * world,
+        };
 }
 useFrame(SET_FRAMES.wide);
 

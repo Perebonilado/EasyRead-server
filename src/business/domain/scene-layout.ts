@@ -27,7 +27,17 @@ import {
   type Spaced,
 } from './scene-spacing';
 import type { SceneLayout } from './scene-script';
-import { BOX_STAGE, STAGES, stageOf, type FilmShape } from './scene-shape';
+import {
+  BOX_STAGE,
+  SET_FRAMES,
+  STAGES,
+  TALL_PIECE_K,
+  TALL_SPOTS,
+  stageOf,
+  tallAcross,
+  tallDepth,
+  type FilmShape,
+} from './scene-shape';
 
 /** A wide scene's stagings: the reader's pane and the full screen (scene-shape's; a tall scene's are stagingsOf('tall')). */
 export const STAGINGS = {
@@ -790,7 +800,12 @@ export type StationShares = Record<keyof typeof STATION_SHARES, number>;
  * two people talking stand as far apart as they always have, and four
  * still stand clear of each other.
  */
-export function stationShares(largest: number): StationShares {
+export function stationShares(
+  largest: number,
+  /** A tall stage's spots are its own (scene-shape TALL_SPOTS): people stand in depth, not in a row. */
+  shape: FilmShape = 'wide',
+): StationShares {
+  if (shape === 'tall') return { ...TALL_SPOTS };
   const out = largest <= 2 ? 0.244 : largest === 3 ? 0.21 : 0.19;
   return {
     ...STATION_SHARES,
@@ -920,9 +935,30 @@ export function stationScale(
   things: readonly LaidThing[],
   largest: number,
   staging: StagingName,
-  /** TODO(V3, §3.2): tall fits ceil(largest / 2) across (two depth rows), a grown-up at most 0.42 of the height. */
+  /**
+   * The film's shape. A tall stage (studio-vertical-plan §3.2) fits only
+   * half its largest group across (the rest stand behind them), its people
+   * the same size in its units as on a wide stage (the same world, at the
+   * same scale per metre), their feet where its set's frame stands people.
+   */
   shape: FilmShape = 'wide',
 ): StationScale {
+  if (shape === 'tall') {
+    const area = content(staging, shape);
+    const [slot] = line(area, tallAcross(largest));
+    const wide = content(staging, 'wide');
+    const cap = (wide.h * TALLEST_ADULT) / figureFrame('adult')[3];
+    const units = things.flatMap((thing) =>
+      thing.kind === 'drawing' && thing.stands?.units
+        ? [fitInSlot(thing, slot).h / thing.stands.units]
+        : [],
+    );
+    return {
+      unit: units.length ? Math.min(cap, ...units) : null,
+      floor: SET_FRAMES.tall.feet,
+      slot,
+    };
+  }
   const area = content(staging, shape);
   const [slot] = line(area, Math.max(2, largest));
   const cap = (area.h * TALLEST_ADULT) / figureFrame('adult')[3];
@@ -1026,8 +1062,15 @@ export function layoutStations(input: {
   }[];
   things: ReadonlyMap<string, LaidThing>;
   staging: StagingName;
-  /** The film's shape: its stage's size. TODO(V3, §3.2): tall spots in depth and on diagonals. */
+  /**
+   * The film's shape: its stage's size. On a tall stage (studio-vertical-
+   * plan §3.2) a group whose depths nothing says stands in depth and on
+   * diagonals (scene-shape tallDepth), by their order across: two on a
+   * diagonal, whoever `opens` it (speaks first) the nearer.
+   */
   shape?: FilmShape;
+  /** At each step, who speaks first from it: on a tall stage, the nearer of two. */
+  opens?: readonly (string | null)[];
   scale: StationScale;
   features: ReadonlyMap<string, FeatureAcross>;
   /** The ways through (a gate, a door) standing on the people's ground, where they stand across it: kept clear of. */
@@ -1108,8 +1151,40 @@ export function layoutStations(input: {
     string,
     { station: string; x: number; d?: number; asked?: number }
   >();
+  /**
+   * How deep each at a spot of their own stands at a step when nothing
+   * says: on a wide stage as spreadDepth has a group; on a tall one, by
+   * their order across (scene-shape tallDepth), the one who opens a pair
+   * the nearer.
+   */
+  const spreadOf = (
+    step: (typeof input.steps)[number],
+    stepAt: number,
+  ): ((id: string) => number) => {
+    if (input.shape !== 'tall')
+      return (id) => spreadDepth(step.show.indexOf(id), step.show.length);
+    const shares: Record<string, number> = input.shares ?? STATION_SHARES;
+    const across = (id: string) => {
+      const at = step.at?.[id] ?? '';
+      return at in shares
+        ? shares[at]
+        : at.startsWith('@')
+          ? Number(at.slice(1)) || 0.5
+          : 0.5;
+    };
+    const order = [...step.show].sort((a, b) => across(a) - across(b));
+    const n = order.length;
+    const depths = new Map(order.map((id, i) => [id, tallDepth(i, n)]));
+    const opener = input.opens?.[stepAt];
+    if (n === 2 && opener && order[1] === opener) {
+      depths.set(order[0], tallDepth(1, 2));
+      depths.set(order[1], tallDepth(0, 2));
+    }
+    return (id) => depths.get(id) ?? 0.5;
+  };
   return input.steps.map((step, stepAt) => {
     const out: Record<string, Place> = {};
+    const spread = spreadOf(step, stepAt);
     const placed: {
       id: string;
       x: number;
@@ -1157,7 +1232,7 @@ export function layoutStations(input: {
             (was?.station === station && was.asked === asked
               ? was.d
               : undefined) ??
-            spreadDepth(step.show.indexOf(id), step.show.length))
+            spread(id))
           : undefined;
       /** Their feet and their size at a depth of the floor. */
       const floorHere = (dd: number | undefined) =>
@@ -1319,7 +1394,7 @@ export function layoutStations(input: {
               (was?.station === station && was.asked === asked
                 ? was.d
                 : undefined) ??
-              spreadDepth(step.show.indexOf(id), step.show.length))
+              spread(id))
           : undefined;
       const onFloor =
         depthed && d !== undefined
@@ -1601,7 +1676,13 @@ export function placeFeature(input: {
     feet = input.horizon + BACK_DEPTH * (input.floor - input.horizon);
     middle = painted.x + painted.w / 2;
   } else {
-    const k = input.back ? BACK_DEPTH : 1;
+    // On a tall stage a piece stands a step back of where people stand
+    // (TALL_PIECE_K): two on a diagonal stand before it, not in it.
+    const k = input.back
+      ? BACK_DEPTH
+      : input.shape === 'tall'
+        ? TALL_PIECE_K
+        : 1;
     u = input.unit * k;
     feet = input.horizon + k * (input.floor - input.horizon);
     const w = vw * u;

@@ -143,7 +143,19 @@ export interface GrammarInput {
    * as usual.
    */
   energy?: { cut: number; push: number };
+  /**
+   * A tall film's (studio-vertical-plan §3.3): no far-off shots (Richard,
+   * 2026-09-30). Every line has a shot on who says it, a medium close or
+   * over the shoulder of whom it is said to; a two-shot only where both
+   * faces fit (else the one it is on alone); no profile two-shot, no
+   * crowd seen the other way, and the whole stage never asked for: the
+   * camera rests on whoever matters at a medium. It cuts a little quicker.
+   */
+  tall?: boolean;
 }
+
+/** A tall film cuts this much quicker than a wide one (§3.3): phone viewers expect it. */
+export const TALL_CUT = 0.85;
 
 const middle = (p: Pick<ScenePlaceDto, 'x' | 'w'>) => p.x + p.w / 2;
 
@@ -155,8 +167,9 @@ const middle = (p: Pick<ScenePlaceDto, 'x' | 'w'>) => p.x + p.w / 2;
  */
 export function grammarCamera(input: GrammarInput): SceneCameraAsk[] {
   const { lines, W } = input;
+  const tall = input.tall === true;
   const plan = new Map<number, SceneCameraAsk>();
-  const cut = input.energy?.cut ?? 1;
+  const cut = (input.energy?.cut ?? 1) * (tall ? TALL_CUT : 1);
   const push = input.energy?.push ?? 1;
   /** Lines between the same two that make a conversation: fewer when snappy, more when slow. */
   const conversation = Math.max(2, Math.round(CONVERSATION_LINES * cut));
@@ -224,10 +237,25 @@ export function grammarCamera(input: GrammarInput): SceneCameraAsk[] {
       shot: 'crowd',
       on: line.speaker,
       with: null,
-      ...(input.reverseCrowd && crowdRun.n % 2 === 0
+      // Never the crowd seen as its own far shot in a tall film.
+      ...(input.reverseCrowd && !tall && crowdRun.n % 2 === 0
         ? { reverse: true as const }
         : {}),
     };
+  };
+  /**
+   * A tall film's shot on a line code has nothing else for: over the
+   * shoulder of whom it is said to, both on their feet; else a medium
+   * close on who says it.
+   */
+  const tallShot = (line: GrammarLine): SceneCameraAsk => {
+    const hearer = hearerOf(line);
+    return hearer &&
+      input.standing(line.speaker, line.startMs) &&
+      input.standing(hearer, line.startMs) &&
+      !input.tiny?.(hearer)
+      ? { beat: line.beat, shot: 'ots', on: line.speaker, with: hearer }
+      : { beat: line.beat, shot: 'close', on: line.speaker, with: null };
   };
   for (const run of runs) {
     crowdRun = null;
@@ -252,7 +280,7 @@ export function grammarCamera(input: GrammarInput): SceneCameraAsk[] {
       said.every((line) => input.onAt(line.startMs).includes(line.speaker));
     if (!talk) {
       for (const line of run) {
-        if (line.beat === first) continue;
+        if (line.beat === first && !tall) continue;
         const on = input.onAt(line.startMs);
         const hearer = hearerOf(line);
         if (toCrowd(line)) plan.set(line.beat, crowdShot(line));
@@ -265,6 +293,7 @@ export function grammarCamera(input: GrammarInput): SceneCameraAsk[] {
           });
         else if (strongly(line) && on.length >= 2 && mayClose(line))
           plan.set(line.beat, closeOn(line));
+        else if (tall) plan.set(line.beat, tallShot(line));
       }
       continue;
     }
@@ -299,12 +328,13 @@ export function grammarCamera(input: GrammarInput): SceneCameraAsk[] {
         continue;
       }
       n += 1;
-      if (line.beat === first) continue;
+      if (line.beat === first && !tall) continue;
       const faceToFace =
         near(line.speaker, other, line.startMs) &&
         input.standing(line.speaker, line.startMs) &&
         input.standing(other, line.startMs);
-      if (n === 1 || line === middleLine) {
+      // A tall film has no profile two-shot: over the shoulder from the first line.
+      if (!tall && (n === 1 || line === middleLine)) {
         // Opening it, or breathing in its middle: the two face to face.
         if (faceToFace)
           plan.set(line.beat, {
@@ -334,7 +364,10 @@ export function grammarCamera(input: GrammarInput): SceneCameraAsk[] {
         held.add(line.beat);
         continue;
       }
-      if (!on.includes(other)) continue;
+      if (!on.includes(other)) {
+        if (tall) plan.set(line.beat, closeOn(line));
+        continue;
+      }
       front ??= line.speaker;
       plan.set(line.beat, {
         beat: line.beat,
@@ -435,7 +468,25 @@ export function grammarCamera(input: GrammarInput): SceneCameraAsk[] {
         atMs: hero.atMs + hero.ms,
       },
     );
-  return out.sort(
+  // A tall film never asks for the whole stage: on a line, its own shot;
+  // after a hero's pose, a medium close on them.
+  const shots = tall
+    ? out.map((one): SceneCameraAsk => {
+        if (one.shot === 'profile') return { ...one, shot: 'two' };
+        if (one.shot !== 'wide') return one;
+        const line = lines.find((l) => l.beat === one.beat);
+        if (line && one.atMs === undefined)
+          return {
+            ...tallShot(line),
+            ...(one.after !== undefined ? { after: one.after } : {}),
+          };
+        const hero = input.heroes.find(
+          (h) => one.atMs !== undefined && h.atMs + h.ms === one.atMs,
+        );
+        return hero ? { ...one, shot: 'close', on: hero.who, with: null } : one;
+      })
+    : out;
+  return shots.sort(
     (x, y) =>
       (x.atMs !== undefined ? 1 : 0) - (y.atMs !== undefined ? 1 : 0) ||
       x.beat - y.beat ||

@@ -8,6 +8,7 @@ import type { SceneDto } from '../../../../contracts';
 import { composeScene } from '../../scene-compose';
 import { facesShown, type SceneScript } from '../../scene-script';
 import type { GatedDrawing } from '../../scene-svg';
+import type { FilmShape } from '../../scene-shape';
 import type { TimedBeat } from '../../scene-timing';
 import { outfitWords } from '../../scene-wear';
 import { FIGURE_SIGNS, faceId } from '../../scene-figure';
@@ -88,6 +89,8 @@ export function voiced(
   how: {
     stands?: boolean;
     drawn?: ReadonlyMap<string, GatedDrawing>;
+    /** The film's shape: a tall one composed on its 900 × 1600 stage. Absent, wide. */
+    shape?: FilmShape;
   } = {},
 ): { scene: SceneDto; beats: TimedBeat[] } {
   let t = (script.lead ?? 0) * 1000 + 300;
@@ -136,6 +139,7 @@ export function voiced(
     timing: 'voice',
     generator: 'scene-2',
     profile: { kind: 'fiction', tone: 'light', story: true, film: true },
+    ...(how.shape ? { shape: how.shape } : {}),
   });
   return { scene, beats };
 }

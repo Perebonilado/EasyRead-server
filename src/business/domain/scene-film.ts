@@ -14,7 +14,16 @@ import type {
   SceneThingDto,
 } from '../../contracts';
 import { HELD_IN_MS, HELD_MOVES, actionDoing, doingOf } from './scene-doings';
-import { SET_FRAMES, STAGES, setFrameFor, walkReach } from './scene-shape';
+import {
+  IN_BOX,
+  SET_FRAMES,
+  STAGES,
+  TALL_FIGURE_LEAST,
+  TALL_SHOT,
+  setFrameFor,
+  tallScale,
+  walkReach,
+} from './scene-shape';
 
 /** The player's timings, in milliseconds. */
 const MOVE_MS = 700;
@@ -780,6 +789,12 @@ export function viewOf(
   W: number,
   H: number,
   room: SetRoom = NO_ROOM,
+  /**
+   * Whom the stage is on at the step (its focus), where a person: on a
+   * tall stage the camera rests on them at a medium when no shot is asked,
+   * never the whole stage (TALL_FIGURE_LEAST). Absent, the whole stage.
+   */
+  focus: string | null = null,
 ): View {
   // An insert on a thing alone: where it is as it begins.
   if (shot?.shot?.kind === 'insert' && shot.shot.box) {
@@ -797,12 +812,29 @@ export function viewOf(
     if (kind === 'ots' && one && two)
       return otsView(one, two, W, H, other.span, pairSide(shot, places));
     if (kind === 'crowd' && one) return crowdReverseView(one, W, H, other.span);
-    return viewOf(frontOf(shot), show, turned, W, H, other);
+    return viewOf(frontOf(shot), show, turned, W, H, other, focus);
   }
-  const wide = wideView(show, places, W, H, room);
   const placed = (id: string | null) =>
     id && show.includes(id) ? places[id] : undefined;
   const one = shot ? placed(shot.target) : undefined;
+  if (tallFrame(W, H)) {
+    // A tall film never shows the whole stage: at rest, a medium on whom
+    // it is on (TALL_FIGURE_LEAST, Richard's decision).
+    const key = placed(focus);
+    if (!shot || !one)
+      return key
+        ? tallOne(
+            key,
+            TALL_SHOT.medium,
+            W,
+            H,
+            room.span,
+            0,
+            othersThan(focus ?? '', show, places, W),
+          )
+        : wideView(show, places, W, H, room);
+  }
+  const wide = wideView(show, places, W, H, room);
   if (!shot || !one) return wide;
   const two = placed(shot.part);
   const kind = shot.shot?.kind;
@@ -814,6 +846,20 @@ export function viewOf(
   }
   if (!kind && !two && shot.shot?.angle === 'low')
     return lowView(one, W, H, room.span);
+  // A tall story's shot (held until its end, as a story's are): by the
+  // tall grammar. A lesson's zoom on a drawing is framed as before.
+  if (tallFrame(W, H) && (shot as { untilMs?: number }).untilMs !== undefined)
+    return two
+      ? tallTwo(one, two, W, H, room.span)
+      : tallOne(
+          one,
+          TALL_SHOT.close,
+          W,
+          H,
+          room.span,
+          0,
+          othersThan(shot.target, show, places, W),
+        );
   if (two) {
     const x0 = Math.min(one.x, two.x);
     const y0 = Math.min(one.y, two.y);
@@ -845,6 +891,228 @@ export function viewOf(
     W,
     H,
     room.span,
+  );
+}
+
+// ── A tall film's camera (studio-vertical-plan §3.3) ──────────────────────
+
+/**
+ * Whether a stage is tall (9:16): its camera frames people by the tall
+ * grammar (scene-shape TALL_SHOT), never further out than a medium on
+ * whoever matters (TALL_FIGURE_LEAST, Richard's decision of 2026-09-30:
+ * no far-off shots in a tall film). A wide stage's camera is as it was.
+ */
+export const tallFrame = (W: number, H: number): boolean => H > W;
+
+/** In deep staging on a tall stage, the others' eyes are this far down the frame, above the one near. */
+export const TALL_DEEP_EYES = 0.24;
+
+/**
+ * Whom a tall film's camera rests on at step `k` when no shot is asked:
+ * the step's focus, in a story's scene (one whose people speak). Null on
+ * a wide stage, or a lesson's: there the rest is the whole stage. The
+ * player's restOn.
+ */
+export function restOn(
+  scene: Pick<SceneDto, 'steps' | 'effects' | 'stagings'>,
+  k: number,
+): string | null {
+  const { w: W, h: H } = scene.stagings.wide;
+  if (!tallFrame(W, H)) return null;
+  const step = scene.steps[k];
+  const focus = step?.focus;
+  if (!focus || !step.show.includes(focus)) return null;
+  return scene.effects.some((e) => e.do === 'say') ? focus : null;
+}
+
+/**
+ * A tall frame on one person: their figure `share` of the frame's height
+ * (never below TALL_FIGURE_LEAST), their eyes on its upper third, their
+ * face in the middle of the phone's safe box across (TALL_SHOT.across),
+ * `offset` of the frame's width off it (over a shoulder, away from the
+ * one near). Anyone else (`others`) the frame's side would cut in half is
+ * framed out, or taken in, by a small shift that keeps the face in the
+ * safe box (studio-vertical-plan §6.3). The player's tallOne.
+ */
+export function tallOne(
+  one: Pick<ScenePlaceDto, 'x' | 'y' | 'w' | 'h'>,
+  share: number,
+  W: number,
+  H: number,
+  span: readonly [number, number] = [0, 0],
+  offset = 0,
+  others: readonly Pick<ScenePlaceDto, 'x' | 'y' | 'w' | 'h'>[] = [],
+): View {
+  const least = tallScale(one.h, TALL_FIGURE_LEAST, H);
+  let s = tallScale(one.h, Math.max(TALL_FIGURE_LEAST, share), H);
+  let x = middleOf(one);
+  for (let n = 0; n < 8; n += 1) {
+    x = clearOfSides(
+      middleOf(one) + ((offset + 0.5 - TALL_SHOT.across) * W) / s,
+      s,
+      one,
+      others,
+      W,
+    );
+    const cut = halvedBy(x, s, others, W);
+    if (!cut) break;
+    // One who cannot be framed out nor in, standing near: the two
+    // together; else a little further out, never past a medium's floor.
+    if (twoFit(one, cut, W, H)) return tallTwo(one, cut, W, H, span);
+    if (s <= least + 1e-6) break;
+    s = Math.max(least, s * 0.9);
+  }
+  return settle(
+    {
+      s,
+      x,
+      y: one.y + one.h * IN_BOX.eyes + ((0.5 - TALL_SHOT.eyes) * H) / s,
+    },
+    W,
+    H,
+    span,
+  );
+}
+
+/**
+ * A tall view's middle across, `x` at scale `s`, moved as little as
+ * frames anyone of `others` a side would cut (TALL_CUTS: half their body,
+ * or part of their face) out of it, or else into it, while the face of
+ * `one` stays inside the phone's safe box across. As it was where neither
+ * can.
+ */
+export function clearOfSides(
+  x: number,
+  s: number,
+  one: Pick<ScenePlaceDto, 'x' | 'w'>,
+  others: readonly Pick<ScenePlaceDto, 'x' | 'w'>[],
+  W: number,
+): number {
+  const hw = W / (2 * s);
+  // Where the view's middle may go and keep the face in the safe box.
+  const face0 = one.x + one.w * IN_BOX.headLeft;
+  const face1 = one.x + one.w * IN_BOX.headRight;
+  const lo = face1 - hw + (TALL_SAFE_RIGHT * W) / s;
+  const hi = face0 + hw - (TALL_SAFE_LEFT * W) / s;
+  const halved = (at: number) => halvedBy(at, s, others, W) !== null;
+  if (!halved(x)) return x;
+  const tries: number[] = [];
+  for (const p of others)
+    for (const cut of TALL_CUTS) {
+      const b0 = p.x + p.w * cut.from;
+      const b1 = p.x + p.w * cut.to;
+      const bw = b1 - b0;
+      // Just past each edge of the cut: in by the right, out by the left,
+      // in by the left, out by the right.
+      tries.push(
+        b0 + bw * cut.most - hw + 2,
+        b1 - bw * cut.least + hw + 2,
+        b1 - bw * cut.most + hw - 2,
+        b0 + bw * cut.least - hw - 2,
+      );
+    }
+  const best = tries
+    .filter((at) => at >= lo && at <= hi && !halved(at))
+    .sort((a, b) => Math.abs(a - x) - Math.abs(b - x))[0];
+  return best ?? x;
+}
+
+/**
+ * What of someone a tall frame's side may not cut, across their box
+ * (from, to), and how much of it in the frame is a cut (more than
+ * `least`, less than `most`): their body in half, or any real part of
+ * their face.
+ */
+export const TALL_CUTS = [
+  { from: 0.22, to: 0.78, least: 0.25, most: 0.75 },
+  { from: IN_BOX.headLeft, to: IN_BOX.headRight, least: 0.1, most: 0.9 },
+] as const;
+
+/** Whom of `others` a tall view's side cuts (TALL_CUTS), its middle across at `x` at scale `s`; null for no one. */
+export function halvedBy<P extends Pick<ScenePlaceDto, 'x' | 'w'>>(
+  x: number,
+  s: number,
+  others: readonly P[],
+  W: number,
+): P | null {
+  const hw = W / (2 * s);
+  return (
+    others.find((p) =>
+      TALL_CUTS.some((cut) => {
+        const b0 = p.x + p.w * cut.from;
+        const b1 = p.x + p.w * cut.to;
+        const inside = Math.min(x + hw, b1) - Math.max(x - hw, b0);
+        const k = inside / Math.max(1, b1 - b0);
+        return k > cut.least && k < cut.most;
+      }),
+    ) ?? null
+  );
+}
+
+/** Whether two faces fit a tall frame together as close as the one it is on must be seen (tallTwo's own test). */
+export function twoFit(
+  one: Pick<ScenePlaceDto, 'x' | 'w' | 'h'>,
+  two: Pick<ScenePlaceDto, 'x' | 'w'>,
+  W: number,
+  H: number,
+): boolean {
+  const x0 = Math.min(
+    one.x + one.w * IN_BOX.headLeft,
+    two.x + two.w * IN_BOX.headLeft,
+  );
+  const x1 = Math.max(
+    one.x + one.w * IN_BOX.headRight,
+    two.x + two.w * IN_BOX.headRight,
+  );
+  return (
+    (TALL_SHOT.twoFaces * W) / Math.max(1, x1 - x0) >=
+    tallScale(one.h, TALL_FIGURE_LEAST, H)
+  );
+}
+
+/** The phone's safe box across a tall frame, as shares of its width: its left and right insets (scene-shape SAFE.tall). */
+const TALL_SAFE_LEFT = 0.06;
+const TALL_SAFE_RIGHT = 0.12;
+
+/**
+ * Two together on a tall frame: both faces within TALL_SHOT.twoFaces of
+ * the width, in the middle of the safe box across, the one it is on at
+ * least TALL_FIGURE_LEAST of the height and at most TALL_SHOT.two; their
+ * eyes about the upper third. Where both faces will not fit that close
+ * (they stand too far apart), the one it is on alone, at a medium. The
+ * player's tallTwo.
+ */
+export function tallTwo(
+  one: Pick<ScenePlaceDto, 'x' | 'y' | 'w' | 'h'>,
+  two: Pick<ScenePlaceDto, 'x' | 'y' | 'w' | 'h'>,
+  W: number,
+  H: number,
+  span: readonly [number, number] = [0, 0],
+): View {
+  const x0 = Math.min(
+    one.x + one.w * IN_BOX.headLeft,
+    two.x + two.w * IN_BOX.headLeft,
+  );
+  const x1 = Math.max(
+    one.x + one.w * IN_BOX.headRight,
+    two.x + two.w * IN_BOX.headRight,
+  );
+  const least = tallScale(one.h, TALL_FIGURE_LEAST, H);
+  const fit = (TALL_SHOT.twoFaces * W) / Math.max(1, x1 - x0);
+  // Too far apart to be seen together: the one it is on alone, the other
+  // framed out or in whole (tallOne never comes back here: they do not fit).
+  if (fit < least) return tallOne(one, TALL_SHOT.medium, W, H, span, 0, [two]);
+  const s = Math.max(least, Math.min(fit, tallScale(one.h, TALL_SHOT.two, H)));
+  const eyes = (one.y + one.h * IN_BOX.eyes + two.y + two.h * IN_BOX.eyes) / 2;
+  return settle(
+    {
+      s,
+      x: (x0 + x1) / 2 + ((0.5 - TALL_SHOT.across) * W) / s,
+      y: eyes + ((0.5 - TALL_SHOT.eyes) * H) / s,
+    },
+    W,
+    H,
+    span,
   );
 }
 
@@ -917,6 +1185,8 @@ export function otsView(
   span: readonly [number, number] = [0, 0],
   dir: -1 | 1 = (Math.sign(middleOf(one) - middleOf(near)) || 1) as -1 | 1,
 ): View {
+  if (tallFrame(W, H))
+    return tallOne(one, TALL_SHOT.ots, W, H, span, -dir * TALL_SHOT.otsOffset);
   const s = Math.min(
     OTS_MOST,
     Math.max(OTS_LEAST, (OTS_FILL * H) / (one.h * 0.62)),
@@ -1023,6 +1293,7 @@ export function crowdView(
   H: number,
   span: readonly [number, number] = [0, 0],
 ): View {
+  if (tallFrame(W, H)) return tallOne(one, TALL_SHOT.crowd, W, H, span);
   const s = Math.max(1, Math.min(CROWD_SCALE, (0.8 * W) / one.w));
   return settle(
     { s, x: middleOf(one), y: one.y + ((0.5 - CROWD_HEAD) * H) / s },
@@ -1042,6 +1313,20 @@ export function lowView(
   H: number,
   span: readonly [number, number] = [0, 0],
 ): View {
+  if (tallFrame(W, H)) {
+    // Them whole from low, their figure in the frame's middle.
+    const s = tallScale(one.h, TALL_SHOT.low, H);
+    return settle(
+      {
+        s,
+        x: middleOf(one),
+        y: one.y + (one.h * (IN_BOX.crown + IN_BOX.feet)) / 2,
+      },
+      W,
+      H,
+      span,
+    );
+  }
   const s = Math.max(
     1,
     Math.min(LOW_MOST, (0.86 * H) / (one.h * 1.08), (0.7 * W) / one.w),
@@ -1050,7 +1335,7 @@ export function lowView(
 }
 
 /** The people on the stage who are not `id`: not the set, not a crowd. */
-const othersThan = (
+export const othersThan = (
   id: string,
   show: readonly string[],
   places: Record<string, ScenePlaceDto>,
@@ -1083,6 +1368,31 @@ export function deepView(
   const side: -1 | 1 = middleOf(near) > mean ? 1 : -1;
   const x0 = Math.min(...others.map((p) => p.x));
   const x1 = Math.max(...others.map((p) => p.x + p.w));
+  if (tallFrame(W, H)) {
+    // Tall: the others' heads above the one near, who speaks, big and low.
+    const h0 = Math.min(...others.map((p) => p.x + p.w * IN_BOX.headLeft));
+    const h1 = Math.max(...others.map((p) => p.x + p.w * IN_BOX.headRight));
+    const eyes =
+      others.reduce((sum, p) => sum + p.y + p.h * IN_BOX.eyes, 0) /
+      others.length;
+    const s = Math.max(
+      1,
+      Math.min(TALL_SHOT.deepMost, (0.7 * W) / Math.max(1, h1 - h0)),
+    );
+    return {
+      view: settle(
+        {
+          s,
+          x: (h0 + h1) / 2 + (side * DEEP_OFFSET * W) / s,
+          y: eyes + ((0.5 - TALL_DEEP_EYES) * H) / s,
+        },
+        W,
+        H,
+        span,
+      ),
+      side,
+    };
+  }
   const y0 = Math.min(...others.map((p) => p.y));
   const y1 = Math.max(...others.map((p) => p.y + p.h * 0.75));
   const s = Math.max(
@@ -1115,11 +1425,13 @@ export function nearPlace(
   clear: readonly Pick<ScenePlaceDto, 'x' | 'y' | 'w' | 'h'>[],
   W: number,
   H: number,
-  o: { tall: number; edge: number; top: number } = {
-    tall: NEAR_TALL,
-    edge: NEAR_EDGE,
-    top: NEAR_TOP,
-  },
+  o: { tall: number; edge: number; top: number } = tallFrame(W, H)
+    ? TALL_SHOT.near
+    : {
+        tall: NEAR_TALL,
+        edge: NEAR_EDGE,
+        top: NEAR_TOP,
+      },
 ): ScenePlaceDto {
   const s = Math.max(1, view.s);
   const hs = o.tall * H;
@@ -1228,7 +1540,9 @@ export function nearOf(
       othersThan(shot.target, show, places, W),
       W,
       H,
-      { tall: DEEP_TALL, edge: DEEP_EDGE, top: DEEP_TOP },
+      tallFrame(W, H)
+        ? TALL_SHOT.deep
+        : { tall: DEEP_TALL, edge: DEEP_EDGE, top: DEEP_TOP },
     ),
     view: deep.view,
     // Near in deep staging, and speaking: sharp.

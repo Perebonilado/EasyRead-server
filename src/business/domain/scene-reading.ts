@@ -183,8 +183,9 @@ function wayOf(room: Room, k: number, id: string): Box | null {
 
 /**
  * How long a thing waits to move to its new place (timeline.ts moveWait):
- * where its way crosses something going, until that has mostly gone. So a
- * card never slides through one still fading.
+ * where the way of anything moving at the step crosses something going,
+ * until that has mostly gone, all of them together. So a card never
+ * slides through one still fading, nor into one still waiting.
  */
 export function moveWait(
   steps: readonly SceneStepDto[],
@@ -192,12 +193,15 @@ export function moveWait(
   id: string,
   room: Room | null,
 ): number {
-  if (!room || k === 0) return 0;
-  const way = wayOf(room, k, id);
-  if (!way) return 0;
+  if (!room || k === 0 || !wayOf(room, k, id)) return 0;
+  // All that move at a step move together, so none runs into one still waiting.
+  const ways = steps[k].show
+    .filter((one) => steps[k - 1].show.includes(one))
+    .flatMap((one) => wayOf(room, k, one) ?? []);
   for (const other of leaversAt(steps, k)) {
     const was = room.places[k - 1]?.[other];
-    if (was && meets(way, extentOf(was))) return Math.round(EXIT_MS * 0.85);
+    if (was && ways.some((way) => meets(way, extentOf(was))))
+      return Math.round(EXIT_MS * 0.85);
   }
   return 0;
 }

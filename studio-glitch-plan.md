@@ -117,8 +117,11 @@ stage was still: the compose audit was right. The overlaps came from four places
   and scene-reading.ts):
   - a newcomer arriving on something that is leaving waits until it has gone;
   - a newcomer on a mover's path waits until the mover has mostly moved;
-  - a mover whose path crosses a leaver waits for the leaver to go, and the leaver does
-    not linger to be read (`exitHold`).
+  - when any mover's path crosses a leaver, every mover at that step waits for the leaver
+    to go, all together so none runs into one still waiting; the leaver does not linger
+    to be read (`exitHold`);
+  - a moving drawing's stage-set labels go while it moves and return once it arrives,
+    so they never slide into place over something still leaving (`calloutsAt`).
 - *Words drawn in a drawing* (`scene-drawn-words.ts`, run in the gate):
   - Each run of drawn text is measured on ink maps against what is drawn around it.
     Text is judged about 30% wider than resvg sets it, because the stage's font (and Georgia,
@@ -152,8 +155,10 @@ and no remake was run.
 | Pictures that disagree with their labels | 3 | 0 (set in type) |
 | Drawn words over their drawing | 7 runs | 0 (moved clear) |
 
-Frames at 3:30–3:45, the label before and after, and the DOM overlap scans are in the
-session scratchpad `glitchfix/`.
+A DOM scan of the film in headless Chrome, every 250 ms, measures every visible run of
+text for overlaps. It found 17 frames with words on words as made, and 0 both after
+re-composing and with the player's fixes alone on the film as made. Frames at 3:30–3:45,
+the label before and after, and the scans are in the session scratchpad `glitchfix/`.
 
 ## Still open
 

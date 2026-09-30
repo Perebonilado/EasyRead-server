@@ -101,6 +101,7 @@ import {
   type StoryWeather,
   type StoryWorld,
 } from '../scene-story';
+import { genreNamed, toneNamed } from './studio-heard';
 
 // ── The brief ─────────────────────────────────────────────────────────────
 
@@ -295,8 +296,11 @@ export function briefOf(
             ) * 2,
           ) / 2
         : base.minutes,
+    // A tone in other words is the one it belongs to: "dry and ironic" is funny.
     tone: has('tone')
-      ? (oneOf(STUDIO_TONES)(said.tone) ?? base.tone)
+      ? (oneOf(STUDIO_TONES)(said.tone) ??
+        toneNamed(text(said.tone, 60)) ??
+        base.tone)
       : base.tone,
     setting: has('setting') ? textOrNull(said.setting) : base.setting,
     characters: has('characters')
@@ -317,7 +321,9 @@ export function briefOf(
       : undefined;
   const genre = genreFor(
     has('genre')
-      ? (oneOf(STUDIO_GENRES)(said.genre) ?? base.genre)
+      ? (oneOf(STUDIO_GENRES)(said.genre) ??
+          genreNamed(text(said.genre, 60)) ??
+          base.genre)
       : base.genre,
     out.audience,
   );

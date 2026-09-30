@@ -35,6 +35,10 @@ import {
 import { STAGE_PROPS } from '../../../business/domain/scene-props';
 import { BEAT_ROLES } from '../../../business/domain/studio/studio-story';
 import {
+  genreNamed,
+  toneNamed,
+} from '../../../business/domain/studio/studio-heard';
+import {
   RUBRIC_KEYS,
   type RubricKey,
 } from '../../../business/domain/studio/studio-script';
@@ -121,14 +125,26 @@ export const studioTurnSchema = z.object({
       idea: z.string().nullable().catch(null),
       audience: z.enum(STUDIO_AUDIENCES).nullable().catch(null),
       minutes: z.union([z.number(), z.string()]).nullable().catch(null),
-      tone: z.enum(STUDIO_TONES).nullable().catch(null),
+      // A tone or a genre written in words ("dry and ironic", "dark
+      // comedy") is caught as the one it belongs to, never lost.
+      tone: z
+        .enum(STUDIO_TONES)
+        .nullable()
+        .catch(({ input }) =>
+          typeof input === 'string' ? toneNamed(input) : null,
+        ),
       setting: z.string().nullable().catch(null),
       characters: z.string().nullable().catch(null),
       include: z.string().nullable().catch(null),
       // The maker's own choices, null unless they said them.
       narrator: z.enum(NARRATOR_MODES).nullable().catch(null),
       narratorCharacter: z.string().nullable().catch(null),
-      genre: z.enum(STUDIO_GENRES).nullable().catch(null),
+      genre: z
+        .enum(STUDIO_GENRES)
+        .nullable()
+        .catch(({ input }) =>
+          typeof input === 'string' ? genreNamed(input) : null,
+        ),
       ending: z.enum(STUDIO_ENDINGS).nullable().catch(null),
       pace: z.enum(STUDIO_PACES).nullable().catch(null),
       style: z.enum(STUDIO_STYLES).nullable().catch(null),

@@ -1244,3 +1244,173 @@ describe('the producer asks for a change to the story itself (story plan S3)', (
     ).toBeUndefined();
   });
 });
+
+describe('the producer gathers the brief, held to the maker’s own words', () => {
+  /** A new show at its brief, with what is said of it so far. */
+  function atTheBrief(so: Record<string, unknown> = {}) {
+    const studio = studioInMemory();
+    studio.shows.set('s1', {
+      ...studio.shows.get('s1')!,
+      brief: briefOf(so),
+      bible: null,
+    });
+    studio.episodes.set('e0', {
+      ...studio.episodes.get('e0')!,
+      phase: 'brief',
+      outline: null,
+    });
+    studio.scenes.clear();
+    /** The maker says `message`; the producer answers with `answer`. */
+    const say = async (message: string, answer: Record<string, unknown>) => {
+      for (const key of Object.keys(studio.answer)) delete studio.answer[key];
+      Object.assign(studio.answer, {
+        reply: 'Lovely.',
+        choices: [],
+        action: 'none',
+        ...answer,
+      });
+      const done = await studio.service.turn(
+        'u1',
+        's1',
+        { episodeId: 'e0', message },
+        () => undefined,
+      );
+      return {
+        reply: done.message.content,
+        brief: studio.shows.get('s1')!.brief,
+      };
+    };
+    return { studio, say };
+  }
+  const known = {
+    format: 'story',
+    audience: 'adults',
+    minutes: 2,
+    setting: 'New York',
+    genre: 'dark-comedy',
+    tone: 'funny',
+  };
+
+  it('keeps "a dark comedy" as the genre, a comic tone, and takes it as the idea', async () => {
+    const { say } = atTheBrief();
+    // As the producer answered Richard: the genre and the tone left out,
+    // and the idea asked for.
+    const { brief } = await say(
+      'A dark comedy for adults set in New York, about 2 minutes',
+      {
+        reply: "A dark comedy it is. What's the idea, the story in a line?",
+        brief: { audience: 'adults', minutes: 2, setting: 'New York' },
+      },
+    );
+    expect(brief).toMatchObject({
+      format: 'story',
+      genre: 'dark-comedy',
+      tone: 'funny',
+      idea: 'A dark comedy set in New York',
+    });
+  });
+
+  it('takes a genre the producer wrote in words, "dark comedy", as the genre', async () => {
+    const { say } = atTheBrief();
+    const { brief } = await say('A dark comedy for adults', {
+      brief: { audience: 'adults', genre: 'dark comedy', tone: 'serious' },
+    });
+    expect(brief.genre).toBe('dark-comedy');
+    expect(brief.tone).toBe('funny');
+  });
+
+  it('chooses the idea when the maker says "you pick", and never asks for it again', async () => {
+    const { say } = atTheBrief({ ...known, tone: null });
+    // The producer chose a logline, as it is asked to.
+    const chose = await say('You pick the idea, keep it funny', {
+      reply:
+        'Here is one: a hitman in Manhattan keeps failing because his targets are too polite.',
+      brief: {
+        idea: 'A hitman in Manhattan keeps failing because his targets are too polite',
+      },
+    });
+    expect(chose.brief.idea).toBe(
+      'A hitman in Manhattan keeps failing because his targets are too polite',
+    );
+    expect(chose.brief.tone).toBe('funny');
+  });
+
+  it('chooses the idea from what is known when the producer did not, and goes on to the outline', async () => {
+    const { studio, say } = atTheBrief({ ...known, tone: null });
+    const { reply, brief } = await say('Surprise me', {
+      action: 'outline',
+      brief: { idea: null },
+    });
+    expect(brief.idea).toBe('A dark comedy set in New York');
+    expect(reply).not.toMatch(/Before the outline/);
+    expect(studio.jobs).toEqual([expect.objectContaining({ kind: 'outline' })]);
+  });
+
+  it('accepts a loose idea as the idea: "a comedy based in New York"', async () => {
+    const { studio, say } = atTheBrief({
+      format: 'story',
+      audience: 'adults',
+      minutes: 2,
+    });
+    const { brief } = await say('A comedy based in New York', {
+      action: 'outline',
+      brief: { setting: 'New York' },
+    });
+    expect(brief).toMatchObject({
+      idea: 'A comedy set in New York',
+      genre: 'comedy',
+      tone: 'funny',
+    });
+    expect(studio.jobs).toEqual([expect.objectContaining({ kind: 'outline' })]);
+  });
+
+  it('keeps a dark comedy dark when the maker says "comedy" again', async () => {
+    const { say } = atTheBrief({ ...known, idea: '' });
+    const { brief } = await say('A comedy based in New York', {
+      brief: { genre: 'comedy' },
+    });
+    expect(brief.genre).toBe('dark-comedy');
+    expect(brief.tone).toBe('funny');
+  });
+
+  it.each(['Dry and ironic', 'Chaotic', 'Calm and deadpan', 'Warm but silly'])(
+    'takes the tone chip "%s" as funny, never serious',
+    async (chip) => {
+      const { say } = atTheBrief({ ...known, tone: null });
+      // As the producer read "Dry and ironic" for Richard: serious.
+      const { brief } = await say(chip, { brief: { tone: 'serious' } });
+      expect(brief.tone).toBe('funny');
+      expect(brief.genre).toBe('dark-comedy');
+    },
+  );
+
+  it('takes a comic chip as funny whatever the genre, and serious only when asked', async () => {
+    const mystery = atTheBrief({ ...known, genre: 'mystery', tone: null });
+    expect(
+      (await mystery.say('Dry and ironic', { brief: { tone: 'serious' } }))
+        .brief.tone,
+    ).toBe('funny');
+    const asked = atTheBrief({ ...known, genre: 'drama', tone: null });
+    expect(
+      (await asked.say('Serious, please', { brief: { tone: 'serious' } })).brief
+        .tone,
+    ).toBe('serious');
+    const fixed = atTheBrief({ ...known, tone: 'serious' });
+    expect(
+      (await fixed.say('funny, not serious', { brief: { tone: 'serious' } }))
+        .brief.tone,
+    ).toBe('funny');
+  });
+
+  it('asks for what is missing in words, the idea one that can be left to us', async () => {
+    const { say } = atTheBrief({
+      format: 'story',
+      audience: 'adults',
+      minutes: 2,
+    });
+    const { reply } = await say('go ahead', { action: 'outline' });
+    expect(reply).toBe(
+      'Before the outline, tell me what it is about (or say "you pick"), and how it should feel.',
+    );
+  });
+});

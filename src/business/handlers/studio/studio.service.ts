@@ -1,5 +1,6 @@
 import { isStoryChange, keptPersonas } from '../../domain/studio/studio-story';
 import { narratorRuleOf } from '../../domain/studio/studio-narrator';
+import { heardBrief } from '../../domain/studio/studio-heard';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { randomBytes, randomUUID } from 'node:crypto';
 import type {
@@ -27,6 +28,7 @@ import {
   storySheetOf,
   type SceneSheet,
   type StudioBible,
+  type StudioBrief,
   type StudioCharacter,
   type StudioOutline,
 } from '../../domain/studio/studio';
@@ -154,6 +156,15 @@ const REFUSAL =
  * Every show belongs to its maker: anything asked for by anyone else is
  * not found, never refused, so no one learns what exists.
  */
+/** What a brief still needs, asked in words: the idea may always be left to us. */
+const STILL_TO_SAY: Partial<Record<keyof StudioBrief, string>> = {
+  format: 'whether it is a story or an explainer',
+  idea: 'what it is about (or say "you pick")',
+  audience: 'who it is for',
+  minutes: 'how long it runs',
+  tone: 'how it should feel',
+};
+
 @Injectable()
 export class StudioService {
   private readonly logger = new Logger(StudioService.name);
@@ -583,6 +594,17 @@ export class StudioService {
     }
 
     let brief = briefOf(draft.brief, show.brief);
+    // Held to the maker's own words: the tone a chip names, the genre they
+    // said, an idea left to us or said loosely taken as the idea.
+    brief = briefOf(
+      heardBrief({
+        said: brief,
+        before: show.brief,
+        words: pasted ? '' : said,
+        gathering: episode.phase === 'brief' && !pasted,
+      }),
+      brief,
+    );
     if (pasted) brief = { ...brief, source: text.slice(0, SOURCE_CHARS) };
     const briefChanged = JSON.stringify(brief) !== JSON.stringify(show.brief);
     if (briefChanged) {
@@ -874,7 +896,7 @@ export class StudioService {
       return 'The scenes are written now: tell me which scene to change, and how.';
     const missing = briefMissing(show.brief);
     if (missing.length)
-      return `Before the outline, I still need: ${missing.join(', ')}.`;
+      return `Before the outline, tell me ${missing.map((m) => STILL_TO_SAY[m] ?? m).join(', and ')}.`;
     if (!(await this.studio.claimEpisode(episode.id, 'outline')))
       return episode.busy === 'outline' && briefChanged
         ? 'Noted. The outline is being written right now; once it is done I will write it again with that in it.'

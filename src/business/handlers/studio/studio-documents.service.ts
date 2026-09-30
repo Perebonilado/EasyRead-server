@@ -262,6 +262,15 @@ export class StudioDocumentsService {
         line: `Document: “${doc.props.title}”`,
       },
     );
+    // The producer takes it up at once, so a file given first (the Studio's
+    // front page) leads straight into the conversation: which part to explain.
+    await this.studio.addMessage({
+      showId: show.id,
+      episodeId: episode.id,
+      role: 'assistant',
+      content: `Got “${doc.props.title}”. Which part should the video explain? Pick chapters or pages on the card, or tell me, like “chapter 3” or “pages 40–55”.`,
+      meta: {},
+    });
     return { episodeId: episode.id };
   }
 

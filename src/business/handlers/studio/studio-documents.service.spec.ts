@@ -322,8 +322,12 @@ describe('its pages chosen on the card', () => {
       'Using Chapter 3: Osmosis (p. 41–58) of “Cell Biology”',
     ]);
     // A guess, so asked, with one chip to say yes; nothing written yet.
-    const [asked] = studio.said();
-    expect(studio.said()).toHaveLength(1);
+    // The producer's line on attach first, then the one chip.
+    const [took, asked] = studio.said();
+    expect(took.content).toMatch(
+      /^Got “.+”\. Which part should the video explain\?/,
+    );
+    expect(studio.said()).toHaveLength(2);
     expect(asked.content).toMatch(
       /^It reads like it's for .+\. Is that who it's for\?$/,
     );

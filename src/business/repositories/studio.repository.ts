@@ -111,6 +111,8 @@ export interface StudioMessageRecord {
   content: string;
   meta: {
     choices?: string[];
+    /** A second, optional row of choices, picked with the first (what the audience knows already). */
+    also?: string[];
     action?: string;
     refused?: boolean;
     /** An event, not something said: the content is its line. */

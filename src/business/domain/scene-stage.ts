@@ -161,6 +161,36 @@ const NAMED: [RegExp, LearningStage][] = [
     /\b(?:Nigerian Law School|Bar Part [IV]+|Bar finals?|call to (?:the )?bar)\b/i,
     'professional',
   ],
+  // The rest of the world's names for them (quick win 9): no region is
+  // the default.
+  [
+    /\b(?:[1-5](?:st|nd|rd|th)|first|second|third|fourth|fifth)[\s-]grade(?:rs?)?\b/i,
+    'early',
+  ],
+  [
+    /\b(?:(?:[6-9]|1[0-2])th|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth)[\s-]grade(?:rs?)?\b/i,
+    'middle',
+  ],
+  [/\b(?:PYP|IB Primary Years)\b/, 'early'],
+  [/\b(?:IB (?:Diploma|DP)|IBDP|MYP|IB Middle Years)\b/, 'middle'],
+  [
+    /\bAP (?:Biology|Chemistry|Physics|Calculus|Statistics|Psychology|(?:US |World |European )?History|English|Macroeconomics|Microeconomics|Economics|Computer Science|Environmental Science|Government)\b/,
+    'middle',
+  ],
+  [/\b(?:sixth[\s-]form|(?:lower|upper) sixth)\b/i, 'middle'],
+  [/\b(?:junior high|middle school)\b/i, 'middle'],
+  [
+    /\b(?:bachelor'?s|master'?s) (?:degree|programme|program|students?)\b/i,
+    'higher',
+  ],
+  [
+    /\b(?:first|second|third|final)[\s-]year (?:university|undergraduate|college) students?\b/i,
+    'higher',
+  ],
+  [
+    /\b(?:continuing (?:medical|professional) education|CME credits?)\b/i,
+    'professional',
+  ],
 ];
 
 /**
@@ -178,7 +208,17 @@ const HINTED: [RegExp, LearningStage][] = [
     /\b(?:WAEC|WASSCE|NECO|SSCE|BECE|GCSEs?|IGCSE|A-?levels?|KCSE|JAMB|UTME)\b/,
     'middle',
   ],
-  [/\bprimary school\b/i, 'early'],
+  [/\b(?:primary|elementary) school\b/i, 'early'],
+  [/\byear\s*[1-6]\b/i, 'early'],
+  [/\bstandard\s*[1-6]\b/i, 'early'],
+  [/\b(?:PSLE|KCPE|11[\s-]plus|eleven plus)\b/i, 'early'],
+  [
+    /\b(?:SAT|ACT prep|CBSE|ICSE|HSC|Matric|Gaokao|NCEA|VCE|HKDSE|Leaving Cert(?:ificate)?|Abitur|baccalaur[ée]at)\b/,
+    'middle',
+  ],
+  [/\b(?:freshman|freshmen|sophomores?)\b/i, 'higher'],
+  [/\b(?:NCLEX|USMLE|licensing exam)\b/i, 'professional'],
+  [/\b(?:onboarding|in-?service training)\b/i, 'professional'],
   [/\blecture notes?\b/i, 'higher'],
   [/\blecturer\b/i, 'higher'],
   [/\bfaculty of\b/i, 'higher'],

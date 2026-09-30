@@ -1,0 +1,41 @@
+{
+  "id": "grade5-water-cycle",
+  "said": "An explainer on the water cycle for my grade 5 class",
+  "expect": { "band": "primary-upper", "said": "Grade 5" },
+  "pictures": ["water vapour", "cloud"],
+  "scenes": [
+    {
+      "seconds": 30,
+      "teach": "Water moves around our planet in a loop called the water cycle. The sun warms water in seas, lakes and puddles, and it evaporates: it turns into an invisible gas called water vapour.",
+      "says": [
+        "Where does a puddle go on a sunny day?",
+        "The sun warms the water.",
+        "The water turns into a gas you cannot see.",
+        "We call this gas water vapour.",
+        "This change is called evaporation."
+      ]
+    },
+    {
+      "seconds": 30,
+      "teach": "Water vapour rises. High in the sky the air is cold, so the vapour cools and condenses into tiny drops of water. Millions of drops together make a cloud.",
+      "says": [
+        "The water vapour rises up into the sky.",
+        "High up, the air is cold.",
+        "The vapour cools and turns into tiny drops.",
+        "Lots of tiny drops together make a cloud."
+      ]
+    },
+    {
+      "seconds": 30,
+      "teach": "When the drops in a cloud join and grow heavy, they fall as rain, snow or hail. This is called precipitation. The water flows into rivers and back to the sea, and the cycle starts again.",
+      "says": [
+        "The drops join up and get heavy.",
+        "Then they fall as rain or snow.",
+        "The water runs into rivers and back to the sea.",
+        "What do you think happens to it next?",
+        "Yes! The sun warms it, and it all starts again."
+      ],
+      "question": 3
+    }
+  ]
+}

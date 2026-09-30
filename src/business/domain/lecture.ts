@@ -1278,7 +1278,7 @@ const MEANING_SIGNALS =
   /\b(?:which|that|this|it)\s+(?:just\s+|simply\s+)?means?\b|\bin other words\b|\bthat is,|\b(?:which|that|this|these|those|it|there)(?:\s+is|\s+are|'s|'re)\s+(?:just\s+|simply\s+|only\s+)?(?:a|an|the|when|what|how|where|like|one|any|some|about)\b|\b(?:is|are) (?:just|simply|only)\b|\bthink of (?:it|them|this|that) as\b|\b(?:is|are) (?:a|an|the|when|what|how|where|like)\b|,\s*(?:which|or|meaning|where)\b|[-\u2013\u2014]\s*(?:which|these are|this is|that is|meaning)\b|\bcalled\b|\bwe call\b|\bknown as\b|\bmeaning\b|\bthe name for\b|\bthe word for\b|: /i;
 
 /** A light stem, so "distributing" is the page's "distribute" and "distribution". */
-function plainStem(word: string): string {
+export function plainStem(word: string): string {
   if (word.length <= 4) return word;
   return word
     .replace(

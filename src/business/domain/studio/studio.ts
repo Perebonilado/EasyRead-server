@@ -102,6 +102,12 @@ import {
   type StoryWorld,
 } from '../scene-story';
 import { genreNamed, toneNamed } from './studio-heard';
+import {
+  AUDIENCE_BAND,
+  BAND_AUDIENCE,
+  whoOf,
+  type AudienceProfile,
+} from './studio-audience';
 
 // ── The brief ─────────────────────────────────────────────────────────────
 
@@ -200,7 +206,13 @@ export interface StudioBrief {
   format: StudioFormat | null;
   /** What it is about, in the maker's own words. */
   idea: string;
+  /** Whom it is for, in four words: derived from `who` where the maker said more. */
   audience: StudioAudience | null;
+  /**
+   * Whom it is for, as the maker said it (studio-audience.ts): an age
+   * band, what they know, their goal, their English. Absent until said.
+   */
+  who?: AudienceProfile;
   /** How long an episode runs. */
   minutes: number | null;
   tone: StudioTone | null;
@@ -309,6 +321,12 @@ export function briefOf(
     include: has('include') ? textOrNull(said.include, 600) : base.include,
     source: has('source') ? textOrNull(said.source, SOURCE_CHARS) : base.source,
   };
+  // Whom it is for: a profile said sets the four words; four words said
+  // that are not the profile's take its band back to theirs.
+  let who = has('who') ? whoOf(said.who, base.who) : base.who;
+  if (who && has('who')) out.audience = BAND_AUDIENCE[who.band];
+  else if (who && out.audience && BAND_AUDIENCE[who.band] !== out.audience)
+    who = whoOf({ band: AUDIENCE_BAND[out.audience] }, who);
   // The controls: each as said, else as it was; absent until chosen.
   const narrator = has('narrator')
     ? (oneOf(NARRATOR_MODES)(said.narrator) ?? base.narrator)
@@ -338,6 +356,7 @@ export function briefOf(
     : base.style;
   return {
     ...out,
+    ...(who ? { who } : {}),
     ...(narrator ? { narrator } : {}),
     ...(narratorCharacter ? { narratorCharacter } : {}),
     ...(genre ? { genre } : {}),

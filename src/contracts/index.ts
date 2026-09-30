@@ -2850,6 +2850,8 @@ export interface StudioBriefDto {
   format: StudioFormatName | null;
   idea: string;
   audience: 'young children' | 'children' | 'teens' | 'adults' | null;
+  /** Whom it is for, as the maker said it (an explainer's): absent until said; `audience` is derived from it. */
+  who?: StudioAudienceDto;
   minutes: number | null;
   tone: 'funny' | 'gentle' | 'exciting' | 'serious' | 'calm' | null;
   setting: string | null;
@@ -2865,6 +2867,28 @@ export interface StudioBriefDto {
   ending?: 'happy' | 'bittersweet' | 'twist' | 'open' | 'moral';
   pace?: 'gentle' | 'lively' | 'snappy';
   style?: 'picture-book' | 'bold-cartoon' | 'sitcom' | 'adventure' | 'cosy';
+}
+
+/** The age bands of an audience, youngest first, then the grown-ups. */
+export type StudioAudienceBand =
+  | 'early-years'
+  | 'primary-lower'
+  | 'primary-upper'
+  | 'secondary-lower'
+  | 'secondary-upper'
+  | 'university'
+  | 'professional'
+  | 'general-adult';
+
+/** Whom an explainer is for: each field but the band absent until said. */
+export interface StudioAudienceDto {
+  band: StudioAudienceBand;
+  /** Their words: "Grade 5", "Year 9", "first-year nursing". */
+  said?: string;
+  prior?: 'new' | 'some' | 'revising';
+  goal?: 'understand' | 'exam' | 'apply' | 'curious';
+  language?: 'fluent' | 'learning';
+  support?: 'normal' | 'extra';
 }
 
 export type StudioGenreName =
@@ -3285,6 +3309,8 @@ export interface StudioMessageDto {
   event: StudioEventDto | null;
   content: string;
   choices: string[];
+  /** A second, optional row of choices, picked with one of the first: tapped, it is said with it. */
+  also?: string[];
   refused: boolean;
   createdAt: string;
 }

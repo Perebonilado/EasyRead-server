@@ -1942,7 +1942,11 @@ export function stageStory(
       // has them react next.
       const next = sheet.beats[at + 1];
       const reacts = next?.kind === 'reaction' && next.who === beat.to;
-      const heard = raw.feeling ? LANDS[kitFaceOf(raw.feeling)] : undefined;
+      // A determined line is the kit's angry face, but frightens no one.
+      const heard =
+        raw.feeling && raw.feeling !== 'determined'
+          ? LANDS[kitFaceOf(raw.feeling)]
+          : undefined;
       if (beat.to && here.has(beat.to) && heard && !reacts) {
         const words = beat.say.split(/\s+/).filter(Boolean);
         const last = Math.max(0, words.length - 2);

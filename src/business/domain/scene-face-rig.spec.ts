@@ -241,15 +241,19 @@ describe('said versus felt: the eyes tell the truth', () => {
 });
 
 describe('reactions, varied and in character', () => {
-  it('never takes two lines running with the same face when it has another', () => {
+  it('takes lines like the last with the same face again, not a new one each time', () => {
     const proud = temperOf(['proud']);
     const aims: LineAim[] = ['jokes', 'jokes', 'jokes', 'teases', 'teases'];
     let last: string | null = null;
+    const taken: string[] = [];
     for (const [i, aim] of aims.entries()) {
       const r = reactionFace(aim, proud, (i * 0.37) % 1, last);
-      expect(r?.recipe).not.toBe(last);
+      taken.push(r!.recipe);
       last = r?.recipe ?? null;
     }
+    // Three jokes, one face; the teases, one of the faces it takes a tease with.
+    expect(new Set(taken.slice(0, 3)).size).toBe(1);
+    expect(taken[3]).toBe(taken[4]);
   });
 
   it('rolls the eyes only with the face that rolls them', () => {

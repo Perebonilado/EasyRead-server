@@ -33,6 +33,7 @@ import {
   type FeltFace,
 } from './scene-performance';
 import { withViews } from './scene-views';
+import { withFaces } from './scene-face-direct';
 import { cradleOf, guessAffordances, isCradle } from './scene-affordances';
 import { withInteractions, type TimedInteraction } from './scene-interact';
 import {
@@ -4555,6 +4556,14 @@ export function composeScene(input: ComposeInput): {
   // Which view of each one drawn from every side the camera sees, and
   // when (studio-views-plan §2): from where they walk and whom they face.
   composed.scene = withViews(composed.scene);
+  // A film's rigged faces given a rest and a rhythm (studio-faces-plan):
+  // each one's mood, and a face changed only for a reason, held, gentle
+  // for young children.
+  if (film)
+    composed.scene = withFaces(composed.scene, {
+      mood: script.mood,
+      young: input.profile?.stage === 'early',
+    });
   // How the film keeps its people in the room they have, as made: no one
   // through anyone, no face melted behind another, no one out of what
   // they lie in nor standing in a thing (scene-space), said.

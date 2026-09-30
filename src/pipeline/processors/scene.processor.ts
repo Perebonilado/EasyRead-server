@@ -160,6 +160,10 @@ import { buildSet, reverseSet } from '../../business/domain/scene-set-layout';
 import { RIG_VERSION, rigSheet } from '../../business/domain/scene-sheet-rig';
 import { withMouths } from '../../business/domain/studio/studio-audit';
 import { turnsCheck, turnsLine } from '../../business/domain/scene-turns-check';
+import {
+  faceRhythm,
+  faceRhythmLine,
+} from '../../business/domain/scene-face-rhythm';
 import { withFace } from '../../business/domain/scene-sheet-face';
 import {
   EMPTY_STORY,
@@ -981,6 +985,13 @@ export class SceneProcessor {
     // turn undone at once, held too briefly, or to the camera for nothing.
     if (Object.values(scene.acting ?? {}).some((one) => one.view?.length))
       this.logger.log(`${who}: turn check: ${turnsLine(turnsCheck(scene))}`);
+    // The face rhythm check: how often each rigged face changes, how long
+    // each is held, and any change crowded, swung to its opposite, or
+    // that does not fit the line it answers.
+    if (Object.values(scene.acting ?? {}).some((one) => one.face?.length))
+      this.logger.log(
+        `${who}: face rhythm: ${faceRhythmLine(faceRhythm(scene))}`,
+      );
     // Paper is every scene's look unless it says otherwise.
     if (input.theme && input.theme !== 'paper') scene.theme = input.theme;
     const finished = input.finish ? input.finish(scene) : scene;

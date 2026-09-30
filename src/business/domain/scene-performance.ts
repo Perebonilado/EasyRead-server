@@ -808,12 +808,18 @@ export function lineFace(
   if (!said || said === 'neutral') return null;
   const how: FaceHow =
     read.aim === 'threatens' || read.aim === 'accuses' ? 'slow' : 'ease';
+  // A smile over what is felt is a lie only when the line is one (a
+  // dodge): a brave, tender "Do not worry for me" over worry is not, and
+  // gives nothing away in a flash.
   if (own.felt)
     return {
       said,
       felt: own.felt as FaceRecipe,
       how,
-      lie: GLAD_RECIPES.has(said) && LOW_RECIPES.has(own.felt),
+      lie:
+        read.aim === 'dodges' &&
+        GLAD_RECIPES.has(said) &&
+        LOW_RECIPES.has(own.felt),
     };
   if (read.aim === 'dodges')
     return { said, felt: temper.shy ? 'fear' : 'guilty', how, lie: true };
@@ -844,7 +850,7 @@ export interface ReactionFace {
   how: FaceHow;
 }
 
-/** For each aim, the faces a listener may take it with, by temper: picked among so no one pulls the same face twice running. */
+/** For each aim, the faces a listener may take it with, by temper: one picked, and kept for the next line like it. */
 const TAKEN: Partial<
   Record<
     LineAim,
@@ -950,12 +956,12 @@ const TAKEN: Partial<
 })();
 
 /**
- * The face someone takes a line with, in character, varied: of the faces
- * their temper takes that aim with, one picked by `pick` (0 to 1, stable
- * for the line and the listener), never `last` (the face they took the
- * line before with) when there is another. So a proud one rolls their
- * eyes at one joke and looks bored at the next. Null where a line leaves
- * the face be.
+ * The face someone takes a line with, in character: of the faces their
+ * temper takes that aim with, one picked by `pick` (0 to 1, stable for
+ * the line and the listener); but `last` (the face they took the line
+ * before with) again where it is one of them, as people do: a face tried
+ * on each line in turn reads as a face that cannot settle
+ * (studio-faces-plan). Null where a line leaves the face be.
  */
 export function reactionFace(
   aim: LineAim,
@@ -970,9 +976,10 @@ export function reactionFace(
     (temper.shy && one.shy) ||
     (temper.lively && one.lively) ||
     one.any;
-  const open = list.filter((r) => r.recipe !== last);
-  const from = open.length ? open : list;
-  return from[Math.min(from.length - 1, Math.floor(pick * from.length))];
+  const again = list.find((r) => r.recipe === last);
+  return (
+    again ?? list[Math.min(list.length - 1, Math.floor(pick * list.length))]
+  );
 }
 
 /** A stable pick for a listener and a line: which of their faces they take it with. */

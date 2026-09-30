@@ -140,7 +140,11 @@ export interface SheetProblem {
     /** An explainer's words too hard for its audience (studio-plain): rides along on a send-back, never one alone. */
     | 'plain'
     /** A drawing whose picture is not what its label says (scene-picture-label): set in type by code; rides along on a send-back, never one alone. */
-    | 'picture';
+    | 'picture'
+    /** A check scene's question without its answers to pick (studio-checkpoint): rides along, never one alone. */
+    | 'checkpoint'
+    /** A first scene that does not open on a question, a surprise or a situation (studio-checkpoint): rides along. */
+    | 'cold-open';
   /** In plain words, for the writer. */
   message: string;
   /** The beat it is about, from 0; null for the whole scene. */

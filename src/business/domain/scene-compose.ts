@@ -4380,6 +4380,10 @@ export function composeScene(input: ComposeInput): {
           words: b.words,
           ...(delivery && delivery !== 'explain' ? { delivery } : {}),
           ...(who ? { who } : {}),
+          // A question's answers, for the player to pause on (scene-checkpoint).
+          ...(beat?.choices?.length
+            ? { choices: beat.choices.map((c) => ({ ...c })) }
+            : {}),
         };
       }),
       things: things.filter(

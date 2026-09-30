@@ -206,6 +206,17 @@ import {
   withPresets,
   withStill,
 } from '../../business/domain/studio/studio-clip';
+import {
+  coldOpen,
+  keepCheckpoint,
+} from '../../business/domain/studio/studio-checkpoint';
+import {
+  hostIn,
+  hostLooks,
+  hostOn,
+  withHost,
+} from '../../business/domain/studio/studio-host';
+import { ideaStarts } from '../../business/domain/scene-checkpoint';
 import { writeClipSheet } from '../../business/handlers/studio/studio-clip-writer';
 import { showTheme } from '../../business/domain/studio/studio-look';
 import { studioReading } from '../../business/domain/studio/studio-motion';
@@ -512,10 +523,21 @@ export function studioMakeOf(
           },
         }
       : {}),
-    ...(clipBefore
+    ...(clipBefore ? { drawn: new Map([[CLIP_CARD, clipCardDrawing()]]) } : {}),
+    // A lesson's ideas marked where each starts (scene-checkpoint), for the
+    // scrubber's ticks and "back one idea"; after a clip, its card told
+    // which scene it is a still of.
+    ...(!story
       ? {
-          drawn: new Map([[CLIP_CARD, clipCardDrawing()]]),
-          finish: (scene: SceneDto) => withStill(scene, clipBefore.id),
+          finish: (scene: SceneDto) => {
+            const ideas = ideaStarts(
+              script.beats,
+              episode.outline?.scenes[row.position]?.points ?? [],
+              row.sheet?.title ?? '',
+            ).filter((idea) => idea.beat < (scene.beats?.length ?? 0));
+            const marked = ideas.length ? { ...scene, ideas } : scene;
+            return clipBefore ? withStill(marked, clipBefore.id) : marked;
+          },
         }
       : {}),
   };
@@ -559,6 +581,7 @@ function outlineOnly(outline: StudioOutline | null): StudioOutline | null {
     title: outline.title,
     logline: outline.logline,
     scenes: outline.scenes,
+    ...(outline.next?.length ? { next: outline.next } : {}),
   };
 }
 
@@ -951,12 +974,17 @@ export class StudioProcessor {
         );
       bible = held.bible;
     }
+    // An explainer's host (studio-host): kept as the show had them, new
+    // when on and none, gone when off. Drawn by the kits, so free.
+    const hosted = withHost(bible, before, hostOn(show.brief), show.id);
+    bible = hosted.bible;
     // Which drawing the maker chose of anyone still as they were, kept;
     // and whoever the artist drew is drawn so until the maker chooses a
     // drawing of the kit's for them.
     bible = keptPersonas(keptDrawn(keptKits(bible, before), before), before);
     await this.studio.updateShow(show.id, { bible });
     if (before) await this.cast.forgetChanged(show.id, before, bible);
+    if (hosted.fresh) await this.offerHost({ ...show, bible }, episode, key);
     // Every animal and creature not drawn yet (new, or whose look changed)
     // drawn now, so the maker meets them before any film is made.
     if (story) await this.drawLater({ ...show, bible }, episode);
@@ -997,6 +1025,51 @@ export class StudioProcessor {
       `studio ${episode.id}: cast of ${bible.characters.map((c) => c.name).join(', ') || 'no one'}; places ${bible.sets.map((s) => s.name).join(', ') || 'none'}`,
     );
     return bible;
+  }
+
+  /**
+   * A new host's three looks offered on the thread's choosing card: a
+   * person (in use until the maker picks), an owl and one more animal,
+   * all drawn by the kits, nothing spent.
+   */
+  private async offerHost(
+    show: StudioShowRecord,
+    episode: StudioEpisodeRecord,
+    key?: string,
+  ): Promise<void> {
+    const host = hostIn(show.bible);
+    if (!host) return;
+    try {
+      await this.cast.changeWork(show.id, (work) =>
+        withOptions(
+          work,
+          host.id,
+          hostLooks(show.id).map((one) => ({
+            ...(one.figure ? { figure: one.figure } : {}),
+            ...(one.animal ? { animal: one.animal } : {}),
+            look: one.look,
+          })),
+          '',
+          Date.now(),
+          true,
+        ),
+      );
+      await this.log(
+        show,
+        episode,
+        {
+          what: 'cast',
+          step: 'cast',
+          characterId: host.id,
+          line: `${host.name} will host the show: they open each film and ask its questions. Pick how they look.`,
+        },
+        key && `${key}:host`,
+      );
+    } catch (error) {
+      this.logger.warn(
+        `studio ${episode.id}: the host's looks could not be offered: ${(error as Error).message}`,
+      );
+    }
   }
 
   /** The cast's animals and creatures with no drawing, set drawing on their own: never in the way of the cast. */
@@ -2421,6 +2494,9 @@ export class StudioProcessor {
     // Its words held to its audience by code: too-long sentences split and
     // stiff words made plain; what is still too hard rides along on the
     // one send-back, if there is one, and is otherwise only logged.
+    // Its checkpoint (studio-checkpoint): answers kept on a check scene's
+    // one question and on no other; and the first scene's cold open. What
+    // is missing of either rides along on the one send-back, if any.
     const plainOf = (draft: unknown) => {
       const written = explainerSheetOf({
         kind: 'explainer',
@@ -2428,14 +2504,25 @@ export class StudioProcessor {
         transition: 'cut',
         draft,
       });
-      return recipe
-        ? plainExplainer(written, {
+      const asked = keepCheckpoint(written, check);
+      const plain = recipe
+        ? plainExplainer(asked.sheet, {
             recipe,
             material: teach,
             terms: bible.pictures.map((p) => p.name),
             check,
           })
-        : { sheet: written, fixes: [], problems: [], measure: null };
+        : { sheet: asked.sheet, fixes: [], problems: [], measure: null };
+      const cold =
+        k === 0 ? coldOpen(plain.sheet.draft.beats, recipe?.wpm ?? 150) : null;
+      return {
+        ...plain,
+        problems: [
+          ...plain.problems,
+          ...(asked.problem ? [asked.problem] : []),
+          ...(cold ? [cold] : []),
+        ],
+      };
     };
     let plain = plainOf(first.value);
     let sheet = plain.sheet;

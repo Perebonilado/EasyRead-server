@@ -864,6 +864,7 @@ export class FakeLlmAdapter implements LlmGatewayPort {
     topicTitle: string;
     material: string;
     context: string;
+    profile?: string;
   }): Promise<LlmResult<SceneScriptDraft>> {
     const started = Date.now();
     const sentences = input.material
@@ -903,16 +904,39 @@ export class FakeLlmAdapter implements LlmGatewayPort {
         fitReason: null,
         title: input.topicTitle.slice(0, 60),
         mood: 'curious',
-        beats: says.map((say, i) => ({
-          say,
-          pause: i === says.length - 1 ? ('long' as const) : ('short' as const),
-          delivery:
-            i === 0
-              ? ('hook' as const)
-              : i === says.length - 1
-                ? ('recap' as const)
-                : ('explain' as const),
-        })),
+        beats: [
+          ...says.map((say, i) => ({
+            say,
+            pause:
+              i === says.length - 1 ? ('long' as const) : ('short' as const),
+            delivery:
+              i === 0
+                ? ('hook' as const)
+                : i === says.length - 1
+                  ? ('recap' as const)
+                  : ('explain' as const),
+          })),
+          // A scene its audience's recipe asks to check (studio-checkpoint):
+          // one question with its answers, and the answer said after it.
+          ...(/asks the viewer one question/.test(input.profile ?? '')
+            ? [
+                {
+                  say: 'Quick check: which part did we start with?',
+                  pause: 'long' as const,
+                  delivery: 'question' as const,
+                  choices: [
+                    { text: opening(says[0]), right: true },
+                    { text: 'the very end', right: false },
+                  ],
+                },
+                {
+                  say: `We started with ${opening(says[0]).toLowerCase()}.`,
+                  pause: 'long' as const,
+                  delivery: 'explain' as const,
+                },
+              ]
+            : []),
+        ],
         cast: [
           {
             id: 'main',
@@ -2068,6 +2092,14 @@ export class FakeLlmAdapter implements LlmGatewayPort {
         title: explainer ? 'A lesson' : 'Ada and Kofi',
         logline: 'Two friends play.',
         scenes,
+        // An explainer's "What next?" (studio-end), written with the outline.
+        next: explainer
+          ? [
+              'Why are most leaves green?',
+              'What do plants do at night?',
+              'How does water get up a tall tree?',
+            ]
+          : [],
       },
       usage: this.usage(started, input.brief.length / 4, 200),
     };
@@ -2518,6 +2550,33 @@ export class FakeLlmAdapter implements LlmGatewayPort {
    * The check of a scene made again as asked, offline: done when the film
    * reads differently now and code sees nothing wrong in it.
    */
+  /** "Now you explain it", faked: a point is got when its first word is in their words. */
+  studioTeachBack(input: {
+    topic: string;
+    points: string[];
+    answer: string;
+    who: string | null;
+  }): Promise<LlmResult<{ got: number[]; missing: number[]; reply: string }>> {
+    const started = Date.now();
+    const said = input.answer.toLowerCase();
+    const got: number[] = [];
+    const missing: number[] = [];
+    input.points.forEach((point, i) => {
+      const word = point.toLowerCase().match(/[a-z]{4,}/)?.[0];
+      (word && said.includes(word) ? got : missing).push(i + 1);
+    });
+    return Promise.resolve({
+      value: {
+        got,
+        missing: missing.slice(0, 3),
+        reply: missing.length
+          ? `Nice work! You explained ${got.length} of ${input.points.length} ideas. Can you add: ${input.points[missing[0] - 1]}?`
+          : 'Brilliant, you explained every idea!',
+      },
+      usage: this.usage(started, 300, 80),
+    });
+  }
+
   async studioCheck(input: {
     words: string;
     request: string;

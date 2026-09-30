@@ -475,6 +475,42 @@ describe('the score on the page', () => {
     ]);
   });
 
+  it("carries a question's answers onto its sentence for the player's checkpoint (Ask 9), and none onto any other", () => {
+    const scene = composeScene({
+      script: {
+        ...music,
+        beats: music.beats.map((b, i) =>
+          i === 4
+            ? {
+                ...b,
+                delivery: 'question' as const,
+                choices: [
+                  { text: 'The sea', right: true },
+                  { text: 'A hill', right: false },
+                ],
+              }
+            : b,
+        ),
+      },
+      drawings: new Map([
+        ['leaf', drawing()],
+        ['sun', null],
+      ]),
+      beats: long,
+      durationMs: 34_000,
+      timing: 'voice',
+      generator: 'scene-2',
+    }).scene;
+    expect(scene.beats[4]).toMatchObject({
+      delivery: 'question',
+      choices: [
+        { text: 'The sea', right: true },
+        { text: 'A hill', right: false },
+      ],
+    });
+    expect(scene.beats.filter((b) => b.choices)).toHaveLength(1);
+  });
+
   it("gives a story its instruments and its motif, and holds the music to the book's tone", () => {
     const scene = made({ kind: 'fiction', tone: 'neutral', story: true });
     expect(scene.sound?.palette).toBe('story');

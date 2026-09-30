@@ -134,7 +134,11 @@ export interface SheetProblem {
     | 'storyboard'
     | 'kept'
     /** An explainer's words too hard for its audience (studio-plain): rides along on a send-back, never one alone. */
-    | 'plain';
+    | 'plain'
+    /** A check scene's question without its answers to pick (studio-checkpoint): rides along, never one alone. */
+    | 'checkpoint'
+    /** A first scene that does not open on a question, a surprise or a situation (studio-checkpoint): rides along. */
+    | 'cold-open';
   /** In plain words, for the writer. */
   message: string;
   /** The beat it is about, from 0; null for the whole scene. */

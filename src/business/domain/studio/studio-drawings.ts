@@ -12,7 +12,7 @@
  * shows them.
  */
 import { createHash } from 'node:crypto';
-import { SPECIES } from '../scene-animal';
+import { SPECIES, animalOf, type AnimalSpec } from '../scene-animal';
 import type { FigureSpec } from '../scene-figure';
 import type { Cast, CharacterSheet } from '../scene-sheet';
 import { MAX_OPTIONS } from './studio-options';
@@ -34,6 +34,8 @@ export interface DrawingOption {
   id: string;
   sheet?: CharacterSheet;
   figure?: FigureSpec;
+  /** An animal the animal kit draws, with no artist (a show's host, studio-host). */
+  animal?: AnimalSpec;
   look?: string;
 }
 
@@ -72,17 +74,31 @@ export const figureStamp = (figure: FigureSpec) =>
     .digest('hex')
     .slice(0, 12);
 
-/** An option as kept: its drawing or its figure, and its id; null for one with neither. */
+/** A kit animal's own mark, as a figure's. */
+const animalStamp = (animal: AnimalSpec) =>
+  createHash('sha256')
+    .update(JSON.stringify(animal))
+    .digest('hex')
+    .slice(0, 12);
+
+/** An option as kept: its drawing, its figure or its kit animal, and its id; null for one with none. */
 function optionOf(raw: unknown): DrawingOption | null {
   const said = raw && typeof raw === 'object' ? (raw as DrawingOption) : null;
   const sheet = said?.sheet?.drawing?.svg ? said.sheet : undefined;
   const figure =
     said?.figure && typeof said.figure === 'object' ? said.figure : undefined;
-  if (!sheet && !figure) return null;
+  const animal =
+    !sheet && !figure && said?.animal ? animalOf(said.animal) : null;
+  if (!sheet && !figure && !animal) return null;
   return {
-    id: sheet ? drawnStamp(sheet) : figureStamp(figure!),
+    id: sheet
+      ? drawnStamp(sheet)
+      : figure
+        ? figureStamp(figure)
+        : animalStamp(animal!),
     ...(sheet ? { sheet } : {}),
     ...(figure && !sheet ? { figure } : {}),
+    ...(animal ? { animal } : {}),
     ...(typeof said?.look === 'string' ? { look: said.look } : {}),
   };
 }
@@ -294,7 +310,7 @@ export function chosen(
   const sheet = picked.sheet;
   // One a kit drew (an animal, a creature, a person) is its spec from now
   // on, and its look's words go with it.
-  const animal = sheet?.animal;
+  const animal = sheet?.animal ?? (!sheet ? picked.animal : undefined);
   const creature = sheet?.creature;
   const figure = !sheet ? picked.figure : undefined;
   const kit = Boolean(animal || creature || figure);
@@ -303,20 +319,46 @@ export function chosen(
       ...bible,
       characters: bible.characters.map((c) =>
         c.id === id
-          ? {
-              ...c,
-              ...(sheet ? { drawn: drawnStamp(sheet) } : {}),
-              ...(animal ? { animal } : {}),
-              ...(creature ? { creature, size: creature.size } : {}),
-              ...(figure ? { figure } : {}),
-              ...(kit && picked.look ? { look: picked.look } : {}),
-            }
+          ? kindOf(
+              {
+                ...c,
+                ...(sheet ? { drawn: drawnStamp(sheet) } : {}),
+                ...(animal ? { animal } : {}),
+                ...(creature ? { creature, size: creature.size } : {}),
+                ...(figure ? { figure } : {}),
+                ...(kit && picked.look ? { look: picked.look } : {}),
+              },
+              !sheet && picked.animal
+                ? 'animal'
+                : !sheet && picked.figure
+                  ? 'person'
+                  : null,
+            )
           : c,
       ),
     },
     cast: sheet ? { ...cast, [id]: sheet } : cast,
     work: withoutCandidate(work, id),
   };
+}
+
+/**
+ * A character made one of another kind by a kit's option chosen (a show's
+ * host picked as an owl, or back as a person): what the old kind's kit
+ * drew them from let go of. Null, as they were.
+ */
+function kindOf(
+  c: StudioCharacter,
+  kind: 'person' | 'animal' | null,
+): StudioCharacter {
+  if (!kind) return c;
+  const out: StudioCharacter = { ...c, kind };
+  delete out.creature;
+  if (kind === 'person') {
+    delete out.animal;
+    return { ...out, size: null };
+  }
+  return { ...out, figure: null, size: c.animal?.size ?? 'small' };
 }
 
 /** Ordinal words, as the maker may say which drawing: "the second one", "number 3". */

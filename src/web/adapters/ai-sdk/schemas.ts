@@ -613,6 +613,11 @@ export const sceneScriptSchema = z.object({
       speaker: z.string().nullable(),
       music: z.enum(SCENE_MUSIC).nullable(),
       energy: z.enum(['low', 'high']).nullable(),
+      // A question's answers for the viewer to pick (scene-checkpoint): 2-3, one right.
+      choices: z
+        .array(z.object({ text: z.string(), right: z.boolean() }))
+        .nullable()
+        .catch(null),
     }),
   ),
   cast: z.array(

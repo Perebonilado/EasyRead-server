@@ -53,7 +53,9 @@ export const optionPreview = (option: DrawingOption, id: string): string =>
     ? preview(option.sheet, id)
     : option.figure
       ? figurePreview(option.figure, id)
-      : '';
+      : option.animal
+        ? animalPreview(option.animal, id)
+        : '';
 
 /** New drawings waiting for a character, as their card shows them. */
 export interface WaitingView {

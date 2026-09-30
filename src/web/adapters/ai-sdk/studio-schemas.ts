@@ -108,6 +108,7 @@ export const STUDIO_ACTIONS = [
   'scene',
   'make',
   'episode',
+  'repace',
 ] as const;
 
 /**

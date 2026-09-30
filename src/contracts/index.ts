@@ -1978,6 +1978,8 @@ export interface SceneDto {
    */
   walk?: { stageMs: number; minMs: number; maxMs: number };
   timing: SceneTiming;
+  /** A lesson's: the maker's pace its voice was made at (1 is natural), so a later change is a stretch of the difference; absent on a story's or an older scene. */
+  voicePace?: number;
   /** Whom the document is taught for, read from it; absent when it could not be told, or on an older page. */
   stage?: 'early' | 'middle' | 'higher' | 'professional';
   /**

@@ -69,6 +69,8 @@ export function jobSays(
         : { says: `Writing ${scene} again`, short: 'Rewriting' };
     case 'prepare':
       return { says: 'Drawing the cast for the film' };
+    case 'repace':
+      return { says: 'Changing the pace of the voice', short: 'Pacing' };
     default:
       return null;
   }

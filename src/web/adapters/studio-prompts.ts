@@ -23,6 +23,7 @@ import {
   STUDIO_STYLES,
   STUDIO_TONES,
   STUDIO_VOICES,
+  TEACH_WORDS_A_SECOND,
 } from '../../business/domain/studio/studio';
 import {
   DOINGS,
@@ -304,6 +305,10 @@ export const STUDIO_PROMPTS = {
       'and each is changed. Ready to make the film: action "make".',
       '"made": they have watched it. Changes as in "script"; a new episode',
       'of the same show is action "episode", request what it should be about.',
+      'In an explainer, the voice being too slow or too fast ("the voice is',
+      'a bit slow", "talk faster", "it feels rushed") is action "repace",',
+      'request their words: the made scenes are played quicker or slower and',
+      'timed again, nothing voiced again. It is never "scene" or "make".',
       'Anything else, or a question: action "none", and answer it.',
       "A change to a story's scene that was made is written, then made",
       "again and checked by the Studio itself; an explainer's scene that",
@@ -359,7 +364,7 @@ export const STUDIO_PROMPTS = {
       'a change is to several scenes; character is null except with',
       '"redraw" and "choose"; pick is null except with "choose". request is',
       'null except with "outline", "cast", "redraw",',
-      '"scene" and "episode".',
+      '"scene", "repace" and "episode".',
     ].join(' '),
     [
       SAFE,
@@ -487,8 +492,8 @@ export const STUDIO_PROMPTS = {
       'the last, then a short recap. title; summary what it teaches, in a',
       'sentence; set null; cast empty; seconds. teach is what the scene',
       'teaches, written out as a clear page of the best textbook for this',
-      'audience would say it, in about three words for each of its seconds',
-      '(a 30-second scene about 90 words, a minute about 180), since the',
+      `audience would say it, in about ${TEACH_WORDS_A_SECOND} words for each of its seconds`,
+      `(a 30-second scene about ${Math.round(30 * TEACH_WORDS_A_SECOND)} words, a minute about ${Math.round(60 * TEACH_WORDS_A_SECOND)}), since the`,
       'narrator has only that long to say it: every term, number, unit and',
       'formula exact and correct, a worked example where the idea needs one.',
       'The narration is written from teach alone, so nothing is taught that',

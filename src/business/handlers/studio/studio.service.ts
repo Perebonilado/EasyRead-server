@@ -1,3 +1,8 @@
+import {
+  paceAsked,
+  nudged,
+  studioMakerRate,
+} from '../../domain/studio/studio-pace';
 import { scoreOf } from '../../domain/studio/studio-score';
 import {
   isStoryChange,
@@ -388,7 +393,74 @@ export class StudioService {
         delete brief[key];
     if (brief.narrator !== 'character') delete brief.narratorCharacter;
     await this.studio.updateShow(show.id, { brief, format: brief.format });
+    // An explainer's Pace chip changed: its made scenes are played at the
+    // new pace, stretched, never voiced again.
+    if (brief.format === 'explainer' && brief.pace !== show.brief.pace)
+      await this.repaceMade({ ...show, brief });
     return this.showDto({ ...show, brief, format: brief.format });
+  }
+
+  /**
+   * The made scenes of an explainer's latest episode with any, played at
+   * the brief's pace now (StudioProcessor.repace). Whether any were.
+   */
+  private async repaceMade(
+    show: StudioShowRecord,
+    episode?: StudioEpisodeRecord,
+  ): Promise<boolean> {
+    const episodes = episode
+      ? [episode]
+      : await this.studio.listEpisodes(show.id);
+    for (const one of [...episodes].reverse()) {
+      const scenes = await this.studio.listScenes(one.id);
+      if (!scenes.some((s) => s.sceneKey && s.sheet?.kind === 'explainer'))
+        continue;
+      await this.enqueue(show, one, {
+        kind: 'repace',
+        pace: studioMakerRate(show.brief),
+      });
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * "The voice is a bit slow": an explainer's voice made a little quicker
+   * or slower (studio-pace), its made scenes played at it and timed again,
+   * nothing voiced again. What to say, in code's own words.
+   */
+  private async repaceAsked(
+    show: StudioShowRecord,
+    episode: StudioEpisodeRecord,
+    request: string,
+    said: string,
+  ): Promise<{ note: string | null; tried: string | null }> {
+    if (show.brief.format !== 'explainer')
+      return {
+        note: "A story's lines keep the pace their characters say them at. Tell me which scene feels slow, and I can tighten it.",
+        tried: null,
+      };
+    const change = paceAsked(request) ?? paceAsked(said);
+    if (change === null)
+      return { note: 'Should the voice be quicker or slower?', tried: null };
+    const before = show.brief.voicePace ?? 1;
+    const after = nudged(before, change);
+    if (after === before)
+      return {
+        note: `The voice is as ${change > 0 ? 'quick' : 'slow'} as it goes without sounding stretched. The Pace chips on the brief can change it too.`,
+        tried: null,
+      };
+    const brief = briefOf({ voicePace: after }, show.brief);
+    await this.studio.updateShow(show.id, { brief });
+    show.brief = brief;
+    const made = await this.repaceMade(show, episode);
+    const way = change > 0 ? 'quicker' : 'slower';
+    return {
+      note: null,
+      tried: made
+        ? `Making the voice a little ${way}: the scenes made are timed again to it, nothing voiced again.`
+        : `The voice will be a little ${way} when the film is made.`,
+    };
   }
 
   /**
@@ -621,6 +693,17 @@ export class StudioService {
     let note: string | null = null;
     /** What was set going on scenes, said in code's own words. */
     let tried: string | null = null;
+    // "The voice is a bit slow", of an explainer made: its pace, read by
+    // code first, whatever the producer made of it.
+    if (
+      !draft.refuse &&
+      draft.action === 'none' &&
+      show.brief.format === 'explainer' &&
+      !pasted &&
+      paceAsked(said) !== null &&
+      scenes.some((s) => s.sceneKey)
+    )
+      draft = { ...draft, action: 'repace', request: said };
     try {
       if (!draft.refuse)
         switch (draft.action) {
@@ -766,6 +849,14 @@ export class StudioService {
             break;
           case 'episode':
             episode = await this.newEpisode(show, draft.request ?? said);
+            break;
+          case 'repace':
+            ({ note, tried } = await this.repaceAsked(
+              show,
+              episode,
+              draft.request ?? said,
+              said,
+            ));
             break;
           default:
             break;

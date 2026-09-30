@@ -36,6 +36,28 @@ export class OpenAiSpeechAdapter implements SpeechPort {
     };
   }
 
+  /** One request to OpenAI's speech endpoint: the mp3 it answers with. */
+  protected async generate(request: {
+    model: string;
+    text: string;
+    voice: string;
+    instructions?: string;
+    speed?: number;
+  }): Promise<Buffer> {
+    const { experimental_generateSpeech } = await import('ai');
+    const { createOpenAI } = await import('@ai-sdk/openai');
+    const openai = createOpenAI({
+      apiKey: this.config.getOrThrow<string>('OPENAI_API_KEY'),
+    });
+    const { model, ...rest } = request;
+    const result = await experimental_generateSpeech({
+      model: openai.speech(model),
+      outputFormat: 'mp3',
+      ...rest,
+    });
+    return Buffer.from(result.audio.uint8Array);
+  }
+
   async synthesize({
     text,
     voice,
@@ -47,7 +69,12 @@ export class OpenAiSpeechAdapter implements SpeechPort {
     voice?: string;
     instructions?: string;
     speed?: number;
-    pieces?: { text: string; speed: number; pauseAfter: number }[];
+    pieces?: {
+      text: string;
+      speed: number;
+      pauseAfter: number;
+      style?: string;
+    }[];
   }): Promise<{
     audio: Buffer;
     mimeType: string;
@@ -55,39 +82,41 @@ export class OpenAiSpeechAdapter implements SpeechPort {
     durationMs?: number;
     pieceStartsMs?: number[];
   }> {
-    const { experimental_generateSpeech } = await import('ai');
-    const { createOpenAI } = await import('@ai-sdk/openai');
-
     const model = this.config.get<string>('AI_TTS_MODEL', 'gpt-4o-mini-tts');
     const chosenVoice =
       voice ?? this.config.get<string>('AI_TTS_VOICE', 'alloy');
-    const openai = createOpenAI({
-      apiKey: this.config.getOrThrow<string>('OPENAI_API_KEY'),
-    });
 
     // The instruction-steered models take delivery in words; the older
     // ones take a rate, and reject instructions. Each gets only its own.
     const steerable = model.startsWith('gpt-');
-    const delivery = {
-      ...(steerable && instructions ? { instructions } : {}),
-      ...(!steerable && speed && speed !== 1 ? { speed } : {}),
-    };
+    const deliveryOf = (how: { instructions?: string; speed?: number }) => ({
+      ...(steerable && how.instructions
+        ? { instructions: how.instructions }
+        : {}),
+      ...(!steerable && how.speed && how.speed !== 1
+        ? { speed: how.speed }
+        : {}),
+    });
 
     // One part spoken. The instruction-steered voice sometimes stops a
     // few sentences in and returns the fragment as if it were the whole.
     // A part far shorter than its words is asked for again, and given up
     // on with a clear error rather than saved as a page with six seconds
     // of audio.
-    const speak = async (part: string): Promise<Buffer> => {
+    const speak = async (
+      part: string,
+      delivery: ReturnType<typeof deliveryOf> = deliveryOf({
+        instructions,
+        speed,
+      }),
+    ): Promise<Buffer> => {
       for (let attempt = 1; attempt <= SHORT_SPEECH_ATTEMPTS; attempt += 1) {
-        const result = await experimental_generateSpeech({
-          model: openai.speech(model),
+        const bytes = await this.generate({
+          model,
           text: part,
           voice: chosenVoice,
-          outputFormat: 'mp3',
           ...delivery,
         });
-        const bytes = Buffer.from(result.audio.uint8Array);
         if (!speechTooShort(bytes.length, part.length)) return bytes;
         this.logger.warn(
           `Speech came back short: ${Math.round(mp3DurationMs(bytes.length) / 1000)}s for ${part.length} chars (attempt ${attempt} of ${SHORT_SPEECH_ATTEMPTS})`,
@@ -102,13 +131,24 @@ export class OpenAiSpeechAdapter implements SpeechPort {
     // silence between them, so the pauses a scene asks for exist and the
     // start of every piece is known to the frame.
     if (pieces?.length) {
-      const spoken: Buffer[] = new Array(pieces.length);
+      const spoken = new Array<Buffer>(pieces.length);
       let next = 0;
       const worker = async () => {
         while (next < pieces.length) {
           const index = next;
           next += 1;
-          spoken[index] = await speak(pieces[index].text);
+          // Each piece as it is to be said: in words for a voice that
+          // takes direction, at its pace for one that takes a rate.
+          spoken[index] = await speak(
+            pieces[index].text,
+            deliveryOf({
+              instructions: pieceInstructions(
+                pieces[index].style,
+                instructions,
+              ),
+              speed: pieces[index].speed,
+            }),
+          );
         }
       };
       await Promise.all(
@@ -144,6 +184,22 @@ export class OpenAiSpeechAdapter implements SpeechPort {
     );
     return { audio: Buffer.concat(buffers), mimeType: 'audio/mpeg', model };
   }
+}
+
+/** A scene's pace, said to a voice that takes direction: natural, a touch slower on what is new. */
+export const SCENE_PACE_INSTRUCTIONS =
+  'Speak at a natural, clear pace, as a good teacher explains; slightly slower on new terms and numbers.';
+
+/**
+ * A piece's direction for a voice that takes it: the page's own, else the
+ * scene's pace, with how this sentence goes (its style) after it.
+ */
+export function pieceInstructions(
+  style: string | undefined,
+  page: string | undefined,
+): string {
+  const base = page?.trim() || SCENE_PACE_INSTRUCTIONS;
+  return style?.trim() ? `${base} This sentence: ${style.trim()}.` : base;
 }
 
 /** How many pieces of a page are spoken at once. */

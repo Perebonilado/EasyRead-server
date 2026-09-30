@@ -160,13 +160,38 @@ export const DELIVERY_STYLE: Record<SceneDelivery, string> = {
 };
 
 /**
+ * A lesson's mood and delivery with no pace in them: the pace is said
+ * once, by the word its measured rate chose (scene-pace paceWordFor), not
+ * leaned on by "unhurried" in every note, which slowed Gemini to 120–135
+ * words a minute.
+ */
+export const LESSON_MOOD_STYLE: Record<SceneMood, string> = {
+  calm: 'calm and warm',
+  bright: 'bright and upbeat',
+  curious: 'curious, with a sense of wonder',
+  serious: 'gentle and sober',
+  playful: 'playful, with a smile in the voice',
+};
+
+export const LESSON_DELIVERY_STYLE: Record<SceneDelivery, string> = {
+  hook: 'inviting',
+  explain: 'clear',
+  key: 'landing the point',
+  aside: 'light',
+  question: 'asking, then leaving room',
+  recap: 'warm, steady',
+};
+
+/**
  * One sentence's direction: the page's mood, the sentence's delivery,
- * and the new term it says first, stressed.
+ * and the new term it says first, stressed. With a pace word (a lesson's,
+ * chosen by its measured rate), the pace is that word alone.
  */
 export function voiceStyle(
   mood: SceneMood,
   delivery: SceneDelivery,
   terms: readonly string[] = [],
+  pace?: string,
 ): string {
   const stress = terms.length
     ? `; stressing ${terms
@@ -174,6 +199,8 @@ export function voiceStyle(
         .map((term) => `"${term}"`)
         .join(' and ')}`
     : '';
+  if (pace)
+    return `${LESSON_MOOD_STYLE[mood] ?? LESSON_MOOD_STYLE.curious}; ${LESSON_DELIVERY_STYLE[delivery] ?? LESSON_DELIVERY_STYLE.explain}; ${pace} pace${stress}`;
   return `${MOOD_STYLE[mood] ?? MOOD_STYLE.curious}; ${DELIVERY_STYLE[delivery] ?? DELIVERY_STYLE.explain}${stress}`;
 }
 

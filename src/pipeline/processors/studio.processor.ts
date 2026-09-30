@@ -8,7 +8,8 @@ import {
   explainerSheetOf,
   outlineOf,
   secondsOf,
-  WORDS_A_SECOND,
+  FULLEST,
+  TEACH_WORDS_A_SECOND,
   type ExplainerSheet,
   type StorySheet,
   type StudioBible,
@@ -46,6 +47,7 @@ import {
   type StudioStory,
 } from '../../business/domain/studio/studio-story';
 import { developStory } from '../../business/handlers/studio/studio-develop';
+import { studioPaceBrief } from '../../business/domain/studio/studio-pace';
 import {
   worse,
   writeStorySheet,
@@ -374,6 +376,8 @@ export function studioMakeOf(
     script,
     kept: new Map(),
     ...(recheck ? { recheck } : {}),
+    // An explainer's voice at its audience's rate and the maker's pace.
+    ...(story ? {} : { pace: studioPaceBrief(show.brief) }),
   };
 }
 
@@ -576,6 +580,8 @@ export class StudioProcessor {
           job.request ?? '',
           key,
         );
+      else if (job.kind === 'repace' && job.pace)
+        await this.repace(show, episode, job.pace, key);
     } catch (error) {
       const message = (error as Error).message;
       this.logger.warn(`${who}: ${message}`);
@@ -603,6 +609,11 @@ export class StudioProcessor {
             failed,
           );
         }
+        return;
+      }
+      // A pace that could not be changed leaves the film as it was.
+      if (job.kind === 'repace') {
+        if (!last) throw error;
         return;
       }
       if (job.kind === 'make' && job.sceneId) {
@@ -1994,7 +2005,8 @@ export class StudioProcessor {
     // A page fuller than the seconds can say: the writer keeps to its main
     // ideas, and does not run long to say them all.
     const fuller =
-      teach.split(/\s+/).length > (scene?.seconds ?? 30) * WORDS_A_SECOND * 1.4;
+      teach.split(/\s+/).length >
+      (scene?.seconds ?? 30) * TEACH_WORDS_A_SECOND * FULLEST;
     const around = [
       outline.scenes[k - 1]
         ? `The scene before taught: ${outline.scenes[k - 1].summary}`
@@ -2035,7 +2047,8 @@ export class StudioProcessor {
           }
         : {}),
     });
-    await this.record(episode.id, first.usage);
+    // The lesson writer's own task, as a book's page records it: its model is scene_write's.
+    await this.record(episode.id, first.usage, 'scene_write');
     const options = {
       teach,
       source: show.brief.source,
@@ -2062,7 +2075,7 @@ export class StudioProcessor {
         previous: first.value,
         problems: reasons.map((p) => p.message),
       });
-      await this.record(episode.id, again.usage);
+      await this.record(episode.id, again.usage, 'scene_write');
       const second = sheetFrom(again.value);
       const left = checkExplainer(second, options).problems;
       if (worse(left, problems) <= 0) [sheet, problems] = [second, left];
@@ -2082,6 +2095,76 @@ export class StudioProcessor {
       error: null,
     });
     return sheet;
+  }
+
+  // ── Pace ────────────────────────────────────────────────────────────────
+
+  /**
+   * An explainer's made scenes played at the maker's new pace: each one's
+   * voice stretched from the pace it was made at to `pace`, and the scene
+   * timed again on it (SceneProcessor.repace). Nothing voiced, nothing
+   * drawn, nothing spent: a scene still to be made is voiced at the new
+   * pace when it is.
+   */
+  private async repace(
+    show: StudioShowRecord,
+    episode: StudioEpisodeRecord,
+    pace: number,
+    key?: string,
+  ): Promise<void> {
+    const rows = await this.studio.listScenes(episode.id);
+    let changed = 0;
+    let faster: boolean | null = null;
+    for (const row of rows) {
+      if (
+        row.sheet?.kind !== 'explainer' ||
+        row.status !== 'made' ||
+        !row.sceneKey ||
+        !row.audioKey
+      )
+        continue;
+      const scene = await this.storedScene(row.sceneKey);
+      if (!scene) continue;
+      const tempo = pace / (scene.voicePace ?? 1);
+      if (Math.abs(tempo - 1) < 0.01) continue;
+      const who = `studio ${episode.id} s${row.position + 1}`;
+      const done = await this.scenes
+        .repace({
+          scene,
+          audio: await this.storage.get(row.audioKey),
+          tempo,
+          base: `studio/${show.id}/${episode.id}/${row.id}-${(row.madeHash ?? 'paced').slice(0, 8)}-${Date.now().toString(36)}`,
+          who,
+        })
+        .catch((error: Error) => {
+          this.logger.warn(`${who}: not paced again: ${error.message}`);
+          return null;
+        });
+      if (!done) continue;
+      // Made as it was: its fingerprint is the same, only its timing moved.
+      await this.studio.updateScene(row.id, {
+        sceneKey: done.sceneKey,
+        audioKey: done.audioKey,
+        durationMs: done.durationMs,
+      });
+      for (const old of [row.sceneKey, row.audioKey])
+        if (![done.sceneKey, done.audioKey].includes(old))
+          await this.storage.delete(old).catch(() => undefined);
+      changed += 1;
+      faster = tempo > 1;
+    }
+    if (!changed) return;
+    await this.settle(show, episode, true);
+    await this.log(
+      show,
+      episode,
+      {
+        what: 'edited',
+        step: 'made',
+        line: `The voice is ${faster ? 'quicker' : 'slower'} now: ${changed === 1 ? 'one scene' : `${changed} scenes`} timed again to it.`,
+      },
+      key,
+    );
   }
 
   // ── Making a scene ──────────────────────────────────────────────────────

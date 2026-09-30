@@ -9,7 +9,7 @@ import { describeCreature } from '../scene-creature';
 import { describeFigure } from '../scene-figure';
 import { DRAWN } from '../scene-own';
 import { STAGE_NAMES, STAGE_RECIPES, type LearningStage } from '../scene-stage';
-import { WORDS_A_SECOND } from './studio';
+import { FULLEST, WORDS_A_SECOND } from './studio';
 import { narratorWords } from './studio-narrator';
 import { describePersona } from './studio-story';
 import { controlWords, safetyWords } from './studio-style';
@@ -247,7 +247,7 @@ export function describeScene(
   seconds: number,
 ): string {
   const words = Math.max(20, Math.round(seconds * WORDS_A_SECOND));
-  const budget = `This scene is spoken in about ${seconds} seconds: about ${words} spoken words in all, and never more than ${Math.round(words * 1.25)}. Say only what this scene teaches, in that many words; the scenes around it say the rest.`;
+  const budget = `This scene is spoken in about ${seconds} seconds: about ${words} spoken words in all, and never more than ${Math.round(words * FULLEST)}. Say only what this scene teaches, in that many words; the scenes around it say the rest.`;
   if (!stage) return budget;
   const r = STAGE_RECIPES[stage];
   return [

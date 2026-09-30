@@ -7,6 +7,10 @@ import {
   isVoiceRole,
   type VoiceCast,
 } from '../../business/domain/scene-voice';
+import {
+  voiceRatesOf,
+  type VoiceRates,
+} from '../../business/domain/scene-pace';
 import type {
   AppSettingsRecord,
   AppSettingsRepository,
@@ -62,6 +66,27 @@ export function castAfter(
   return Object.keys(merged).length ? JSON.stringify(merged) : null;
 }
 
+/** Rates as kept, read back sound; empty for none or for what cannot be read. */
+export function ratesKept(kept: string | null): VoiceRates {
+  if (!kept) return {};
+  try {
+    return voiceRatesOf(JSON.parse(kept));
+  } catch {
+    return {};
+  }
+}
+
+/** Rates measured laid over those kept, voice by voice; null when none is left. */
+export function ratesAfter(
+  kept: string | null,
+  patch: VoiceRates,
+): string | null {
+  const merged = ratesKept(kept);
+  for (const [engine, voices] of Object.entries(voiceRatesOf(patch)))
+    merged[engine] = { ...merged[engine], ...voices };
+  return Object.keys(merged).length ? JSON.stringify(merged) : null;
+}
+
 @Injectable()
 export class SequelizeAppSettingsRepository implements AppSettingsRepository {
   constructor(
@@ -74,6 +99,7 @@ export class SequelizeAppSettingsRepository implements AppSettingsRepository {
       // A value no engine answers to now is no choice.
       sceneVoice: isSceneVoiceEngine(row.sceneVoice) ? row.sceneVoice : null,
       voiceCast: voiceCast(row.voiceCast),
+      voiceRates: ratesKept(row.voiceRates ?? null),
       worker: workerVoices(row.workerVoices),
       changedBy: row.changedBy,
       changedAt: row.changedAt,
@@ -89,6 +115,7 @@ export class SequelizeAppSettingsRepository implements AppSettingsRepository {
       id: newId(),
       sceneVoice: null,
       voiceCast: null,
+      voiceRates: null,
       workerVoices: null,
       changedBy: null,
       changedAt: null,
@@ -108,6 +135,7 @@ export class SequelizeAppSettingsRepository implements AppSettingsRepository {
     patch: {
       sceneVoice?: AppSettingsRecord['sceneVoice'];
       voiceCast?: AppSettingsRecord['voiceCast'];
+      voiceRates?: VoiceRates;
     },
     changedBy: string,
     now: Date,
@@ -120,8 +148,13 @@ export class SequelizeAppSettingsRepository implements AppSettingsRepository {
       ...(patch.voiceCast
         ? { voiceCast: castAfter(row.voiceCast, patch.voiceCast) }
         : {}),
-      changedBy,
-      changedAt: now,
+      ...(patch.voiceRates
+        ? { voiceRates: ratesAfter(row.voiceRates ?? null, patch.voiceRates) }
+        : {}),
+      // Who last switched a voice: a rate measured is no one's switch.
+      ...('sceneVoice' in patch || patch.voiceCast
+        ? { changedBy, changedAt: now }
+        : {}),
     });
     return this.toRecord(row);
   }

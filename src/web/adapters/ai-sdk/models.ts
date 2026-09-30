@@ -271,7 +271,26 @@ export class ModelRegistry {
       useChat && provider.chat
         ? provider.chat(ref.modelId)
         : provider.languageModel(ref.modelId);
-    return { model: model as LanguageModel, ref };
+    if (ref.provider !== 'openai')
+      return { model: model as LanguageModel, ref };
+
+    // OpenAI's strict structured outputs demand every key be required, so a
+    // schema with a tolerant field (zod `.catch`/`.optional`) is refused before
+    // the model even runs. The schema is still sent and still checked here by
+    // zod; only OpenAI's own up-front refusal is turned off.
+    const { wrapLanguageModel, defaultSettingsMiddleware } =
+      await this.modules();
+    return {
+      model: wrapLanguageModel({
+        model: model as Parameters<typeof wrapLanguageModel>[0]['model'],
+        middleware: defaultSettingsMiddleware({
+          settings: {
+            providerOptions: { openai: { strictJsonSchema: false } },
+          },
+        }),
+      }),
+      ref,
+    };
   }
 
   async embeddingModel(): Promise<{ model: EmbeddingModel; ref: ModelRef }> {

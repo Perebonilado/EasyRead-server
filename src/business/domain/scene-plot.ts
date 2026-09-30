@@ -11,6 +11,7 @@
 import type { Callout } from './scene-callouts';
 import { compileExpression } from './scene-math';
 import { groupId } from './scene-ids';
+import { PAPER } from './scene-themes';
 
 export interface PlotSpec {
   /** In x, as mathjs reads it: "x^2 - 4", "2*sin(x)". */
@@ -26,11 +27,13 @@ export interface PlotSpec {
 const W = 960;
 const H = 600;
 const AREA = { x0: 110, x1: 920, y0: 40, y1: 500 };
-const INK = '#1F2A37';
-const MUTED = '#5B6675';
-const GRID = '#E9E1D1';
-const CURVE = '#E0663A';
-const POINT = '#3D8FD1';
+// Drawn in the paper theme's tokens: the player recolours them for any other theme (scene-themes).
+const INK = PAPER.ink;
+const MUTED = PAPER.muted;
+const GRID = PAPER.grid;
+const CURVE = PAPER.accent;
+const POINT = PAPER.accent2;
+const HALO = PAPER.card;
 
 /** Round ticks across a range: steps of 1, 2, 2.5 or 5 times a power of ten. */
 export function ticks(min: number, max: number, about = 6): number[] {
@@ -191,7 +194,7 @@ export function renderPlot(spec: PlotSpec): {
     const id = `point-${groupId(point.name) || 'p'}`;
     parts[point.name] = id;
     out.push(
-      `<g id="${id}"><circle cx="${r(px(point.x))}" cy="${r(py(y))}" r="11" fill="${POINT}" stroke="#FFFFFF" stroke-width="3"/></g>`,
+      `<g id="${id}"><circle cx="${r(px(point.x))}" cy="${r(py(y))}" r="11" fill="${POINT}" stroke="${HALO}" stroke-width="3"/></g>`,
     );
     callouts.push({
       part: point.name,

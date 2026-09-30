@@ -1,6 +1,7 @@
 import { isStoryChange, keptPersonas } from '../../domain/studio/studio-story';
 import { narratorRuleOf } from '../../domain/studio/studio-narrator';
 import { heardBrief } from '../../domain/studio/studio-heard';
+import { lookHeard, showTheme } from '../../domain/studio/studio-look';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { randomBytes, randomUUID } from 'node:crypto';
 import type {
@@ -165,6 +166,12 @@ const STILL_TO_SAY: Partial<Record<keyof StudioBrief, string>> = {
   tone: 'how it should feel',
 };
 
+/** The look an explainer plays in, for its show and its player; nothing for a story. */
+const themeOfShow = (show: StudioShowRecord) => {
+  const theme = showTheme(show.brief, show.bible);
+  return theme ? { theme } : {};
+};
+
 @Injectable()
 export class StudioService {
   private readonly logger = new Logger(StudioService.name);
@@ -288,6 +295,7 @@ export class StudioService {
       brief: briefDto(show.brief),
       briefMissing: briefMissing(show.brief),
       bible,
+      ...themeOfShow(show),
       episodes: episodes.map((e) => ({
         id: e.id,
         number: e.number,
@@ -606,6 +614,15 @@ export class StudioService {
       brief,
     );
     if (pasted) brief = { ...brief, source: text.slice(0, SOURCE_CHARS) };
+    // An explainer's look asked for in words, at any phase: "make it
+    // dark" is the dark one of the look it has now.
+    const look = pasted
+      ? null
+      : lookHeard(
+          said,
+          showTheme({ ...brief, look: show.brief.look }, show.bible) ?? 'paper',
+        );
+    if (look && brief.format === 'explainer') brief = { ...brief, look };
     const briefChanged = JSON.stringify(brief) !== JSON.stringify(show.brief);
     if (briefChanged) {
       await this.studio.updateShow(show.id, { brief, format: brief.format });
@@ -1802,6 +1819,7 @@ export class StudioService {
       number: episode.number,
       watermark,
       madeWith: MADE_WITH,
+      ...themeOfShow(show),
       scenes: scenes
         .filter((s) => s.sceneKey && s.audioKey && s.durationMs)
         .map((s, i, made) => ({

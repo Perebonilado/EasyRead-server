@@ -102,6 +102,7 @@ import {
   type StoryWorld,
 } from '../scene-story';
 import { genreNamed, toneNamed } from './studio-heard';
+import { THEME_IDS, type ThemeId } from '../scene-themes';
 
 // ── The brief ─────────────────────────────────────────────────────────────
 
@@ -223,6 +224,8 @@ export interface StudioBrief {
   ending?: StudioEnding;
   pace?: StudioPace;
   style?: StudioStyle;
+  /** An explainer's look (scene-themes); absent, chosen by code (studio-look's themeFor). */
+  look?: ThemeId;
 }
 
 /** The maker's controls of a brief, each present only when chosen. */
@@ -233,6 +236,7 @@ export const BRIEF_CONTROLS = [
   'ending',
   'pace',
   'style',
+  'look',
 ] as const;
 
 export const EMPTY_BRIEF: StudioBrief = {
@@ -336,6 +340,9 @@ export function briefOf(
   const style = has('style')
     ? (oneOf(STUDIO_STYLES)(said.style) ?? base.style)
     : base.style;
+  const look = has('look')
+    ? (oneOf(THEME_IDS)(said.look) ?? base.look)
+    : base.look;
   return {
     ...out,
     ...(narrator ? { narrator } : {}),
@@ -344,6 +351,7 @@ export function briefOf(
     ...(ending ? { ending } : {}),
     ...(pace ? { pace } : {}),
     ...(style ? { style } : {}),
+    ...(look ? { look } : {}),
   };
 }
 

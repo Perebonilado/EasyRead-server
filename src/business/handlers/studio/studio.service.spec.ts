@@ -1414,3 +1414,66 @@ describe('the producer gathers the brief, held to the maker’s own words', () =
     );
   });
 });
+
+describe("an explainer's look", () => {
+  /** The show made an explainer about medicine for adults, its scenes made. */
+  const explainerShow = () => {
+    const studio = studioInMemory();
+    const show = studio.shows.get('s1')!;
+    studio.shows.set('s1', {
+      ...show,
+      format: 'explainer',
+      brief: briefOf({
+        format: 'explainer',
+        idea: 'How blood carries oxygen',
+        audience: 'adults',
+        minutes: 1,
+        tone: 'calm',
+      }),
+      bible: { ...show.bible!, subject: 'medicine: blood', maths: false },
+    });
+    return studio;
+  };
+
+  it('is chosen by code, and said to the show and to the player', async () => {
+    const studio = explainerShow();
+    expect((await studio.service.show('u1', 's1')).theme).toBe('cleanlab');
+    expect((await studio.service.play('u1', 'e0')).theme).toBe('cleanlab');
+  });
+
+  it('is none for a story: its sets are its look', async () => {
+    const studio = studioInMemory();
+    expect(await studio.service.show('u1', 's1')).not.toHaveProperty('theme');
+    expect(await studio.service.play('u1', 'e0')).not.toHaveProperty('theme');
+  });
+
+  it('turns dark when the maker says so, at any phase, with nothing made again', async () => {
+    const studio = explainerShow();
+    await studio.service.turn(
+      'u1',
+      's1',
+      { episodeId: 'e0', message: 'can you make it dark?' },
+      () => undefined,
+    );
+    expect(studio.shows.get('s1')!.brief.look).toBe('blueprint');
+    expect((await studio.service.play('u1', 'e0')).theme).toBe('blueprint');
+    expect(studio.jobs).toEqual([]);
+  });
+
+  it('is the one they name, by hand or in words, and theirs until they let it go', async () => {
+    const studio = explainerShow();
+    await studio.service.turn(
+      'u1',
+      's1',
+      { episodeId: 'e0', message: 'use a chalkboard look' },
+      () => undefined,
+    );
+    expect(studio.shows.get('s1')!.brief.look).toBe('chalkboard');
+    await studio.service.updateBrief('u1', 's1', { look: 'sunny' });
+    expect((await studio.service.show('u1', 's1')).brief.look).toBe('sunny');
+    await studio.service.updateBrief('u1', 's1', { look: null });
+    const shown = await studio.service.show('u1', 's1');
+    expect(shown.brief).not.toHaveProperty('look');
+    expect(shown.theme).toBe('cleanlab');
+  });
+});

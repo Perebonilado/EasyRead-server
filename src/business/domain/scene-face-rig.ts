@@ -1000,6 +1000,33 @@ export function keyFace(key: FaceKey): FaceChannels {
   return felt && felt !== said ? saidAndFelt(s, recipeFace(felt, strength)) : s;
 }
 
+/**
+ * The face someone rests at (SceneActingDto.rest): from when, a recipe,
+ * how strongly. Their mood in a scene, which the faces acted over it ease
+ * back to; changing only at a turn of the scene, slowly.
+ */
+export type RestKey = [atMs: number, recipe: string, strength: number];
+
+/** How long a rest takes to become the next, ms: a mood changes slowly. */
+export const REST_EASE_MS = 700;
+
+/** The face a rest has at `t`: its recipe at its strength, eased from the one before as it changes. Null with none. */
+export function restAt(
+  rest: readonly RestKey[] | undefined,
+  t: number,
+): FaceChannels | null {
+  if (!rest?.length) return null;
+  let k = 0;
+  for (let i = 0; i < rest.length; i += 1)
+    if (rest[i][0] <= t) k = i;
+    else break;
+  const now = recipeFace(rest[k][1], rest[k][2]);
+  const u = (t - rest[k][0]) / REST_EASE_MS;
+  if (k === 0 || u >= 1 || u < 0) return now;
+  const was = recipeFace(rest[k - 1][1], rest[k - 1][2]);
+  return blendFaces(was, now, easeInOut(u));
+}
+
 /** The face a track has on at `t` over `base`, each part on its own lag, and the key on then. */
 export function trackAt(
   track: readonly FaceKey[] | undefined,

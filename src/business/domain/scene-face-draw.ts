@@ -16,6 +16,7 @@ import {
   faceParts,
   geoOfAttr,
   recipeFace,
+  restAt,
   type FaceChannels,
 } from './scene-face-rig';
 
@@ -117,29 +118,34 @@ export function shapeAt(
 
 /**
  * Someone's face at `t` in a scene, as the player has it: the face they
- * wear then (the one shown last of the kit's faces), what is acted over
- * it, their blinks and the shapes of what they say.
+ * rest at then (the scene's rest for them; in a scene made before rests,
+ * the one shown last of the kit's faces), what is acted over it, their
+ * blinks and the shapes of what they say.
  */
 export function faceInScene(
   scene: SceneDto,
   id: string,
   t: number,
 ): FaceChannels {
+  const acting = scene.acting?.[id];
+  const rested = restAt(acting?.rest, t);
   let worn = 'neutral';
   const cues: number[] = [];
-  for (const e of [...scene.effects].sort((a, b) => a.atMs - b.atMs)) {
-    if (e.target !== id || !e.part || !RECIPE_OF_FACE[e.part]) continue;
-    if (e.atMs > t) break;
-    if (e.do === 'show') {
-      if (worn !== e.part) cues.push(e.atMs);
-      worn = e.part;
+  if (rested)
+    for (const [at] of acting?.rest?.slice(1) ?? []) if (at <= t) cues.push(at);
+  if (!rested)
+    for (const e of [...scene.effects].sort((a, b) => a.atMs - b.atMs)) {
+      if (e.target !== id || !e.part || !RECIPE_OF_FACE[e.part]) continue;
+      if (e.atMs > t) break;
+      if (e.do === 'show') {
+        if (worn !== e.part) cues.push(e.atMs);
+        worn = e.part;
+      }
     }
-  }
-  const acting = scene.acting?.[id];
   return faceAt({
     seed: id,
     t,
-    base: recipeFace(RECIPE_OF_FACE[worn] ?? 'neutral'),
+    base: rested ?? recipeFace(RECIPE_OF_FACE[worn] ?? 'neutral'),
     track: acting?.face,
     cues,
     shape: shapeAt(acting?.mouth, t),

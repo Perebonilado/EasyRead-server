@@ -1952,6 +1952,14 @@ export interface SceneActingDto {
     'ease' | 'take' | 'slow' | 'flash',
     number,
   ][];
+  /**
+   * The face they rest at (studio-faces-plan): from when, a recipe, and
+   * how strongly (0 to 1). The scene's mood for them, changing only at a
+   * turn of it; the faces acted (`face`) are over it and ease back to it.
+   * With it, a rigged face rests here, not at the kit's faces the effects
+   * show (those still dress a drawing with no rigged face).
+   */
+  rest?: [number, string, number][];
 }
 
 /** A view of someone drawn from every side, as the camera sees them. */

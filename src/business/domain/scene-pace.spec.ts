@@ -350,7 +350,17 @@ describe('bands', () => {
 
 describe('words of average length', () => {
   it('counts syllables near enough to time speech by', () => {
-    const counts = ['make', 'makes', 'table', 'jumped', 'wanted', 'free', 'people', 'evaporation', 'the'].map(syllablesOf);
+    const counts = [
+      'make',
+      'makes',
+      'table',
+      'jumped',
+      'wanted',
+      'free',
+      'people',
+      'evaporation',
+      'the',
+    ].map(syllablesOf);
     expect(counts).toEqual([1, 1, 2, 2 - 1, 2, 1, 2, 5, 1]);
     expect(syllablesOf('1918')).toBe(2);
   });

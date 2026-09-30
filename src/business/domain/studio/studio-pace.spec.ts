@@ -13,9 +13,14 @@ import {
 
 describe("an explainer's voice pace from its brief", () => {
   it('shares its bands with the audience profile, both ways', () => {
-    const one: PaceBand = 'secondary-upper' as AudienceBand;
-    const other: AudienceBand = one as PaceBand;
-    expect(other).toBe('secondary-upper');
+    // A type check: each band union is assignable to the other.
+    type Same = [PaceBand] extends [AudienceBand]
+      ? [AudienceBand] extends [PaceBand]
+        ? true
+        : false
+      : false;
+    const same: Same = true;
+    expect(same).toBe(true);
   });
 
   it('reads whom it is for from the audience profile, its rate from its recipe', () => {

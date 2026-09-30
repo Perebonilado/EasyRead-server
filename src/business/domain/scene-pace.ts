@@ -531,8 +531,7 @@ export function syllablesOf(word: string): number {
   if (w.length <= 3) return 1;
   let n = (w.match(/[aeiouy]+/g) ?? []).length;
   // A silent final e ("make"), but not a sounded "-le" ("table").
-  if (/e$/.test(w) && !/[^aeiouy]le$/.test(w) && !/[aeiouy]e$/.test(w))
-    n -= 1;
+  if (/e$/.test(w) && !/[^aeiouy]le$/.test(w) && !/[aeiouy]e$/.test(w)) n -= 1;
   // A quiet -ed ("jumped") or -es ("makes"); not "-ted", "-ded", "-ches".
   else if (/[^tdaeiouy]ed$/.test(w) || /[^sxzhaeiouy]es$/.test(w)) n -= 1;
   return Math.max(1, n);

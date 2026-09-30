@@ -14,6 +14,7 @@ import type {
   SceneThingDto,
 } from '../../contracts';
 import { HELD_IN_MS, HELD_MOVES, actionDoing, doingOf } from './scene-doings';
+import { SET_FRAMES, STAGES, setFrameFor, walkReach } from './scene-shape';
 
 /** The player's timings, in milliseconds. */
 const MOVE_MS = 700;
@@ -46,14 +47,24 @@ const WALK_PACE: WalkPace = {
   maxMs: WALK_MAX_MS,
 };
 
-const walkMs = (dx: number, W: number, pace: WalkPace = WALK_PACE) =>
-  Math.min(pace.maxMs, Math.max(pace.minMs, (Math.abs(dx) / W) * pace.stageMs));
+/**
+ * How long a walk of `dx` stage units takes (studio-vertical-plan §2.2):
+ * by the length of the world it covers, not the share of the frame. `R`
+ * is the stage's walk reach (walkReach: its long side, 1600 units of the
+ * world, about 14 m at the kit's size, wide or tall), which `pace.stageMs`
+ * is the time to walk; so a walk across a room takes as long in either
+ * shape, and a wide stage's walks are timed exactly as they always were.
+ */
+const walkMs = (dx: number, R: number, pace: WalkPace = WALK_PACE) =>
+  Math.min(pace.maxMs, Math.max(pace.minMs, (Math.abs(dx) / R) * pace.stageMs));
 
 /**
- * How far into the floor a change of size is, in widths of the stage per
- * size's worth of change (studio-scenery-plan §4.3): the camera's lens
- * about as long as the stage is wide, so walking from the floor's back to
- * its front is about half a crossing. The client's WALK_DEPTH.
+ * How far into the floor a change of size is, in walk reaches of the
+ * stage per size's worth of change (studio-scenery-plan §4.3): the
+ * camera's lens about as long as the stage's long side, the same in
+ * either shape (the size change per unit walked is the world's, not the
+ * frame's), so walking from the floor's back to its front is about half
+ * a crossing. The client's WALK_DEPTH.
  */
 export const WALK_DEPTH = 1;
 
@@ -66,13 +77,14 @@ export const WALK_DEPTH = 1;
 export function walkLength(
   from: Pick<ScenePlaceDto, 'x' | 'w' | 'h'>,
   to: Pick<ScenePlaceDto, 'x' | 'w' | 'h'>,
-  W: number,
+  /** The stage's walk reach (walkReach): its long side. */
+  R: number,
 ): number {
   const across = to.x + to.w / 2 - (from.x + from.w / 2);
   const mean = (from.h + to.h) / 2;
   const into =
     mean > 0 && Math.abs(to.h - from.h) > mean * 0.005
-      ? (W * WALK_DEPTH * Math.abs(to.h - from.h)) / mean
+      ? (R * WALK_DEPTH * Math.abs(to.h - from.h)) / mean
       : 0;
   return into ? Math.hypot(across, into) : Math.abs(to.x - from.x);
 }
@@ -85,20 +97,22 @@ export function walkLength(
 export const walkBetween = (
   from: Pick<ScenePlaceDto, 'x' | 'w' | 'h'>,
   to: Pick<ScenePlaceDto, 'x' | 'w' | 'h' | 'via'>,
-  W: number,
+  /** The stage's walk reach (walkReach): its long side. */
+  R: number,
   pace: WalkPace = WALK_PACE,
-) => walkMs(pathLength(from, to, W), W, pace);
+) => walkMs(pathLength(from, to, R), R, pace);
 
 /** How far a walk goes on the floor: straight, or leg by leg through its via. */
 export function pathLength(
   from: Pick<ScenePlaceDto, 'x' | 'w' | 'h'>,
   to: Pick<ScenePlaceDto, 'x' | 'w' | 'h' | 'via'>,
-  W: number,
+  /** The stage's walk reach (walkReach): its long side. */
+  R: number,
 ): number {
   const points = [from, ...(to.via ?? []), to];
   let out = 0;
   for (let i = 1; i < points.length; i += 1)
-    out += walkLength(points[i - 1], points[i], W);
+    out += walkLength(points[i - 1], points[i], R);
   return out;
 }
 
@@ -113,7 +127,8 @@ export function pathPlace(
   from: ScenePlaceDto,
   to: ScenePlaceDto,
   p: number,
-  W = FRAME_W,
+  /** The stage's walk reach (walkReach): its long side. */
+  R: number = STAGES.wide.w,
 ): ScenePlaceDto {
   const u = walkEase(Math.min(1, Math.max(0, p)));
   const { via, ...end } = to;
@@ -135,7 +150,7 @@ export function pathPlace(
   const points = [from, ...via, end];
   const legs = points
     .slice(1)
-    .map((point, i) => walkLength(points[i], point, W));
+    .map((point, i) => walkLength(points[i], point, R));
   const whole = legs.reduce((n, leg) => n + leg, 0);
   let gone = u * whole;
   for (let i = 0; i < legs.length; i += 1) {
@@ -208,6 +223,8 @@ export function settledOf(
 ): number {
   const { steps, stagings } = scene;
   const { w: W, places } = stagings.wide;
+  /** The length walks are timed against: the stage's long side, the same world in either shape. */
+  const R = walkReach(stagings.wide);
   const beats = scene.beats;
   let at = beats.length ? beats[beats.length - 1].endMs : scene.durationMs;
   const walks = (id: string) => scene.acting?.[id]?.walks === true;
@@ -263,7 +280,7 @@ export function settledOf(
                   }
                 : { ...place, x: from },
               place,
-              W,
+              R,
             ) /
               pace(step, id),
         );
@@ -286,11 +303,11 @@ export function settledOf(
                     w: place.w * by.way.k,
                     h: place.h * by.way.k,
                   },
-                  W,
+                  R,
                 ) /
                   pace(step, id) +
                 VANISH_MS
-              : walkMs(offside(place, exit?.side) - place.x, W) /
+              : walkMs(offside(place, exit?.side) - place.x, R) /
                 pace(step, id)),
         );
       else at = Math.max(at, step.atMs + EXIT_MS);
@@ -304,8 +321,8 @@ export function settledOf(
         at = Math.max(
           at,
           step.atMs +
-            (walks(id) && walkLength(from, to, W) > W * 0.02
-              ? walkBetween(from, to, W) / pace(step, id)
+            (walks(id) && walkLength(from, to, R) > W * 0.02
+              ? walkBetween(from, to, R) / pace(step, id)
               : MOVE_MS),
         );
       }
@@ -386,6 +403,7 @@ export function walksOf(
 ): StageWalk[] {
   const { steps } = scene;
   const { w: W, places } = scene.stagings.wide;
+  const R = walkReach(scene.stagings.wide);
   const walks = (id: string) => scene.acting?.[id]?.walks === true;
   const feature = (id: string | undefined) =>
     id ? scene.setting?.features?.find((f) => f.id === id) : undefined;
@@ -418,7 +436,7 @@ export function walksOf(
     out.push({
       id,
       from,
-      to: from + walkBetween(start, end, W) / pace,
+      to: from + walkBetween(start, end, R) / pace,
       start,
       end,
     });
@@ -434,7 +452,7 @@ export function walksOf(
       if (!at || !walks(id) || carriedBy(id, step.atMs)) continue;
       if (prev?.show.includes(id)) {
         const was = places[k - 1]?.[id];
-        if (was && walkLength(was, at, W) > W * 0.02)
+        if (was && walkLength(was, at, R) > W * 0.02)
           walk(id, step.atMs, was, at, paceAt(step, id));
       } else if (k && step.enter[id]?.how !== 'fade') {
         const entry = step.enter[id];
@@ -492,6 +510,7 @@ export function hurried(
 ): SceneStepDto[] {
   const { steps } = scene;
   const { w: W, places } = scene.stagings.wide;
+  const R = walkReach(scene.stagings.wide);
   const walks = (id: string) => scene.acting?.[id]?.walks === true;
   /** When each one begins each thing they do (a hand going to a thing, a move), and when it is done. */
   const doings = new Map<string, [number, number][]>();
@@ -543,7 +562,7 @@ export function hurried(
   const moved = (id: string, k: number) => {
     const from = places[k - 1]?.[id];
     const to = places[k]?.[id];
-    return Boolean(from && to && walkLength(from, to, W) > W * 0.02);
+    return Boolean(from && to && walkLength(from, to, R) > W * 0.02);
   };
   /** When each one who walked arrives, as the steps are timed so far. */
   const arrives = new Map<string, number>();
@@ -573,7 +592,7 @@ export function hurried(
           !steps[j].show.includes(id) ||
           !there ||
           !to ||
-          walkLength(to, there, W) > W * 0.02
+          walkLength(to, there, R) > W * 0.02
         ) {
           next = steps[j].atMs;
           break;
@@ -584,7 +603,7 @@ export function hurried(
       return next;
     };
     const walkOf = (id: string) =>
-      walkBetween(places[k - 1][id], places[k][id], W);
+      walkBetween(places[k - 1][id], places[k][id], R);
     // Set off sooner, into the end of the line before: when those who
     // walk are all that changes at the step, and none of them is speaking,
     // doing anything else, or still on their way from before.
@@ -673,9 +692,9 @@ export interface SetRoom {
   focal: number | null;
 }
 export const NO_ROOM: SetRoom = { span: [0, 0], focal: null };
-/** The frame a set is laid out in, in its units: its middle, on a wider one. */
-export const FRAME_W = 1600;
-export const FRAME_H = 900;
+/** The wide frame a set is laid out in, in its units: its middle, on a wider one (scene-shape SET_FRAMES; a tall stage's is setFrameFor's). */
+export const FRAME_W = SET_FRAMES.wide.w;
+export const FRAME_H = SET_FRAMES.wide.h;
 
 /** The room a set of `setWidth` (its focal a share of the frame) gives a camera on a stage W × H, the set covering the stage. */
 export function roomOf(
@@ -683,13 +702,15 @@ export function roomOf(
   W: number,
   H: number,
 ): SetRoom {
-  const k = Math.max(W / FRAME_W, H / FRAME_H);
-  const left = (W - FRAME_W * k) / 2;
+  // The set's frame for this stage: a tall stage shows a tall frame.
+  const frame = setFrameFor(W, H);
+  const k = Math.max(W / frame.w, H / frame.h);
+  const left = (W - frame.w * k) / 2;
   const focal =
-    set?.focal !== undefined ? left + set.focal * FRAME_W * k : null;
-  if (!set?.setWidth || set.setWidth <= FRAME_W + 1)
+    set?.focal !== undefined ? left + set.focal * frame.w * k : null;
+  if (!set?.setWidth || set.setWidth <= frame.w + 1)
     return { span: [0, 0], focal };
-  const side = ((set.setWidth - FRAME_W) / 2) * k - left;
+  const side = ((set.setWidth - frame.w) / 2) * k - left;
   return { span: [side, side], focal };
 }
 

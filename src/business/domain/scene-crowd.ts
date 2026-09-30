@@ -36,6 +36,7 @@ import {
 } from './scene-figure';
 import { GROUND_COLS, behindAt, topAt, type SetGround } from './scene-ground';
 import type { PlaceKind, StoryWorld } from './scene-story';
+import { SET_FRAMES, worldHeightOf } from './scene-shape';
 
 /** A share of the depth from the horizon to the story's people's feet past which no one in a crowd stands: they are never more than this share of their size. */
 export const MOST_DEPTH = 0.45;
@@ -47,7 +48,7 @@ export const DETAIL_PX = { face: 150, dots: 90 } as const;
 const BODY = 96;
 /** A grown-up's height in the kit's units. */
 const ADULT = -rigOf('adult').top;
-/** Where the story's people stand, and their scale, on a stage with none standing: the layout's own. */
+/** Where the story's people stand, and their scale, on a stage with none standing: the layout's own, as shares of a wide frame's height (a tall frame's feet are its own; its scale the same world's, scene-shape). */
 const USUAL = { feet: 820 / 900, unit: 2.357 / 900 };
 /** How much nearer than their row someone may stand, to stand in front of what is on the ground. */
 const PUSH = 0.1;
@@ -189,7 +190,7 @@ const median = (values: number[]) => {
 export function cameraOf(
   input: Pick<CrowdInput, 'seen' | 'frame' | 'ground' | 'kind'>,
 ): CrowdCamera {
-  const [, vy, , vh] = input.frame;
+  const [, vy, vw, vh] = input.frame;
   // The kit's people's feet are exactly where they stand; anyone else's
   // are the foot of their drawing, taken only when there is no one else.
   // A close shot shows them larger than they stand: never measured from.
@@ -204,10 +205,11 @@ export function cameraOf(
   const standing = kit.length ? kit : all;
   const feet = standing.length
     ? median(standing.map((s) => s.feet))
-    : vy + USUAL.feet * vh;
+    : vy +
+      (vh > vw ? SET_FRAMES.tall.feet / SET_FRAMES.tall.h : USUAL.feet) * vh;
   const unit = standing.length
     ? median(standing.map((s) => s.unit))
-    : USUAL.unit * vh;
+    : USUAL.unit * worldHeightOf(vw, vh);
   const leads = standing.filter((s) => s.c.lead && s.c.rig);
   const child = leads.length > 0 && leads.every((s) => s.c.child);
   const eye = feet + rigOf(child ? 'child' : 'adult').eyes.y * unit;

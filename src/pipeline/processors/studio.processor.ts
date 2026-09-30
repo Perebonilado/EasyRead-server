@@ -232,6 +232,13 @@ import type { DrawingThing } from '../../business/domain/scene-script';
 import type { GatedDrawing } from '../../business/domain/scene-svg';
 import { isPermanentFailure, type JobContext } from './base.processor';
 import { SceneProcessor } from './scene.processor';
+import { ValidationError } from '../../business/domain/errors/errors';
+import {
+  episodeShape,
+  partsKeyOf,
+  shapeWord,
+  twinOf,
+} from '../../business/handlers/studio/studio-twins';
 
 /** How wide a still the picture check looks at is: enough to tell a bus from an ark, at about 0.4 cents a look. */
 const STILL_PX = 960;
@@ -674,7 +681,9 @@ export class StudioProcessor {
       {
         episodeId: job.episodeId,
         sceneId:
-          job.kind === 'scene' || job.kind === 'make' ? job.sceneId : null,
+          job.kind === 'scene' || job.kind === 'make' || job.kind === 'twin'
+            ? job.sceneId
+            : null,
         kind: job.kind,
         picture: Boolean(job.ask?.picture),
         attempt: context.attemptsMade,
@@ -744,6 +753,8 @@ export class StudioProcessor {
         );
       else if (job.kind === 'repace' && job.pace)
         await this.repace(show, episode, job.pace, key);
+      else if (job.kind === 'twin' && job.sceneId)
+        await this.makeTwinScene(show, episode, job.sceneId);
     } catch (error) {
       const message = (error as Error).message;
       this.logger.warn(`${who}: ${message}`);
@@ -778,6 +789,18 @@ export class StudioProcessor {
         if (!last) throw error;
         return;
       }
+      // A twin's scene that could not be composed: said on it, and the
+      // twin settled; its lead's film stands.
+      if (job.kind === 'twin' && job.sceneId) {
+        if (!last) throw error;
+        await this.studio.updateScene(job.sceneId, {
+          status: 'failed',
+          step: null,
+          error: `This scene could not be made ${shapeWord(episodeShape(episode))}. Try making it again.`,
+        });
+        await this.settleTwin(show, episode);
+        return;
+      }
       if (job.kind === 'make' && job.sceneId) {
         if (!last) throw error;
         await this.studio.updateScene(job.sceneId, {
@@ -785,6 +808,8 @@ export class StudioProcessor {
           step: null,
           error: 'This scene could not be made. Try making it again.',
         });
+        // Its twin's scene, being made with it, is not made either.
+        await this.twinFailed(show, episode, job.sceneId);
         const row = await this.studio.findScene(job.sceneId);
         await this.log(
           show,
@@ -868,7 +893,7 @@ export class StudioProcessor {
         await this.settle(show, episode, true);
         return;
       }
-      if (job.kind !== 'make') {
+      if (job.kind !== 'make' && job.kind !== 'twin') {
         const row = job.sceneId
           ? await this.studio.findScene(job.sceneId)
           : null;
@@ -2884,6 +2909,14 @@ export class StudioProcessor {
       await this.gesturing(show.id),
     );
     const base = `studio/${show.id}/${episode.id}/${row.id}-${fingerprint.slice(0, 8)}-${Date.now().toString(36)}`;
+    // Its shape, and the same scene in the other shape where the episode
+    // has a twin (studio-vertical-plan §1.4): composed with it, from the
+    // same drawings and voice.
+    const shape = episodeShape(episode);
+    const twinned = await this.twinScene(show, episode, row);
+    const twinBase = twinned
+      ? `studio/${show.id}/${twinned.twin.id}/${twinned.row.id}-${fingerprint.slice(0, 8)}-${Date.now().toString(36)}`
+      : null;
     // A continuous build's drawings its scenes share, as drawn once for
     // them: this scene draws none of them again (studio-build).
     const shared =
@@ -2922,8 +2955,9 @@ export class StudioProcessor {
               who,
               keepAs: `studio-${row.id}`,
               ...(of.recheck ? { recheck: of.recheck } : {}),
+              ...(shape !== 'wide' ? { shape } : {}),
             })
-            .then((again) => ({
+            .then(async (again) => ({
               fit: 'good' as const,
               scene: again.scene,
               sceneKey: again.sceneKey,
@@ -2932,12 +2966,39 @@ export class StudioProcessor {
                 audioKey: row.audioKey!,
                 durationMs: voiced.durationMs,
               },
+              // Its twin, on the same voice.
+              twin:
+                twinned && twinBase
+                  ? await this.scenes
+                      .recompose({
+                        script: onVoice,
+                        kept: new Map(),
+                        beats: voiced.beats,
+                        durationMs: voiced.durationMs,
+                        timing: voiced.timing,
+                        profile: of.profile,
+                        story: of.story!,
+                        base: twinBase,
+                        who: `${who} (${twinned.twin.shape})`,
+                        keepAs: `studio-${row.id}-${twinned.twin.shape}`,
+                        ...(of.recheck ? { recheck: of.recheck } : {}),
+                        shape: episodeShape(twinned.twin),
+                      })
+                      .catch(() => null)
+                  : undefined,
             }))
         : await this.scenes.make({
             ...of,
             base,
             who,
             keepAs: `studio-${row.id}`,
+            // Its shape; its parts kept for a twin made later; and its twin
+            // now, where it has one.
+            ...(shape !== 'wide' ? { shape } : {}),
+            parts: true,
+            ...(twinned && twinBase
+              ? { twin: { shape: episodeShape(twinned.twin), base: twinBase } }
+              : {}),
             step: (step) => this.studio.updateScene(row.id, { step }),
             // An explainer's look, for its still: the player shows the
             // show's look now, whatever it was when this was made.
@@ -2977,11 +3038,28 @@ export class StudioProcessor {
       madeHash: fingerprint,
       durationMs: voice.durationMs,
     });
+    // Its twin's scene: made on the same voice, at the same fingerprint.
+    if (twinned)
+      await this.twinMade(
+        show,
+        twinned,
+        'twin' in made ? (made.twin ?? null) : null,
+        { audioKey: voice.audioKey, durationMs: voice.durationMs, fingerprint },
+        who,
+      );
     // A clip's still is its last frame: the card the next lesson opens on.
     if (row.sheet.kind === 'story' && show.brief.format === 'explainer')
       await this.clipStill(scene, thumbKey, who);
     // The files it was made from before are no one's now.
-    for (const key of [row.sceneKey, row.audioKey, row.thumbKey])
+    for (const key of [
+      row.sceneKey,
+      row.audioKey,
+      row.thumbKey,
+      // And the parts it was made from, kept for its twin.
+      row.sceneKey && row.sceneKey !== sceneKey
+        ? partsKeyOf(row.sceneKey)
+        : null,
+    ])
       if (key && ![sceneKey, voice.audioKey, thumbKey].includes(key))
         await this.storage.delete(key).catch(() => undefined);
     // The Studio's own try again is never the maker's to pay for.
@@ -3326,6 +3404,264 @@ export class StudioProcessor {
    * only when something in it was made anew: saying how many of its scenes
    * it has when some could not be made.
    */
+  // ── The other shape (studio-vertical-plan §1.4) ─────────────────────────
+
+  /** A lead episode's twin in the other shape, if it has one; never for a twin itself. */
+  private async twinOfLead(
+    show: StudioShowRecord,
+    episode: StudioEpisodeRecord,
+  ): Promise<StudioEpisodeRecord | null> {
+    // A store that keeps no twins (an older one, or a test's) has none.
+    if (
+      episode.twinOf ||
+      typeof this.studio.listEpisodes !== 'function' ||
+      typeof this.studio.syncTwinScenes !== 'function'
+    )
+      return null;
+    return twinOf(episode, await this.studio.listEpisodes(show.id));
+  }
+
+  /**
+   * The twin's scene of a lead's scene being made, where the episode has a
+   * twin in the other shape: its scenes kept in step with the lead's, and
+   * this one's marked as being made with it. Null for an episode with no
+   * twin, and for a twin itself (its lead's scenes are made, not its own).
+   */
+  private async twinScene(
+    show: StudioShowRecord,
+    episode: StudioEpisodeRecord,
+    row: StudioSceneRecord,
+  ): Promise<{ twin: StudioEpisodeRecord; row: StudioSceneRecord } | null> {
+    const twin = await this.twinOfLead(show, episode);
+    if (!twin) return null;
+    const rows = await this.studio.syncTwinScenes(
+      twin.id,
+      await this.studio.listScenes(episode.id),
+    );
+    const mine = rows.find((one) => one.twinOf === row.id);
+    if (!mine) return null;
+    await this.studio.updateScene(mine.id, {
+      status: 'making',
+      step: 'composing',
+      error: null,
+    });
+    return { twin, row: mine };
+  }
+
+  /**
+   * A twin's scene as its lead's was made: its film, on the lead's voice at
+   * the lead's fingerprint; or failed, where it could not be composed. Its
+   * files before are no one's now. The twin settles once none is making.
+   */
+  private async twinMade(
+    show: StudioShowRecord,
+    twinned: { twin: StudioEpisodeRecord; row: StudioSceneRecord },
+    made: { sceneKey: string; thumbKey: string } | null,
+    voice: { audioKey: string; durationMs: number; fingerprint: string },
+    who: string,
+  ): Promise<void> {
+    const { twin, row } = twinned;
+    if (made) {
+      await this.studio.updateScene(row.id, {
+        status: 'made',
+        step: null,
+        error: null,
+        sceneKey: made.sceneKey,
+        thumbKey: made.thumbKey,
+        audioKey: voice.audioKey,
+        madeHash: voice.fingerprint,
+        durationMs: voice.durationMs,
+      });
+      for (const key of [row.sceneKey, row.thumbKey])
+        if (key && ![made.sceneKey, made.thumbKey].includes(key))
+          await this.storage.delete(key).catch(() => undefined);
+      this.logger.log(
+        `${who}: made ${episodeShape(twin)} too, on the same voice`,
+      );
+    } else
+      await this.studio.updateScene(row.id, {
+        status: 'failed',
+        step: null,
+        error: `This scene could not be made ${shapeWord(episodeShape(twin))}. Try making it again.`,
+      });
+    await this.settleTwin(show, twin);
+  }
+
+  /**
+   * One scene of a twin made from its lead's scene as made (a 'twin' job):
+   * composed again for the twin's frame from the lead's parts, on its
+   * voice, with nothing drawn, voiced or written, and not spent again.
+   * A lead's scene made before parts were kept is staged again from its
+   * sheet on its own voice where it is a story's (the Studio's own try
+   * again does the same); a lesson's cannot be, and says so.
+   */
+  private async makeTwinScene(
+    show: StudioShowRecord,
+    twin: StudioEpisodeRecord,
+    sceneId: string,
+  ): Promise<void> {
+    const row = await this.studio.findScene(sceneId);
+    const lead = twin.twinOf
+      ? await this.studio.findEpisode(twin.twinOf)
+      : null;
+    const leadRow = row?.twinOf
+      ? await this.studio.findScene(row.twinOf)
+      : null;
+    if (!row || !lead || !leadRow?.sheet) return;
+    const who = `studio ${twin.id} s${leadRow.position + 1} (${episodeShape(twin)})`;
+    if (!leadRow.sceneKey || !leadRow.audioKey || leadRow.status !== 'made')
+      throw new ValidationError(
+        `${who}: its ${shapeWord(episodeShape(lead))} scene is not made`,
+      );
+    await this.studio.updateScene(row.id, { step: 'composing' });
+    const bible = show.bible ?? (await this.writeBible(show, lead));
+    const rows = await this.studio.listScenes(lead.id);
+    const of = studioMakeOf(
+      show,
+      lead,
+      leadRow,
+      rows,
+      bible,
+      await this.paintedSets(show.id),
+      await this.gesturing(show.id),
+    );
+    const fingerprint = leadRow.madeHash ?? '';
+    const shape = episodeShape(twin);
+    const base = `studio/${show.id}/${twin.id}/${row.id}-${fingerprint.slice(0, 8)}-${Date.now().toString(36)}`;
+    const explainer = leadRow.sheet.kind === 'explainer';
+    const finishing = {
+      ...(of.recheck ? { recheck: of.recheck } : {}),
+      ...(of.finish ? { finish: of.finish } : {}),
+      ...(explainer
+        ? {
+            theme: showTheme(show.brief, bible) ?? undefined,
+            reading: studioReading(show.brief),
+          }
+        : {}),
+    };
+    const parts = await this.scenes.partsOf(leadRow.sceneKey);
+    let made: { sceneKey: string; thumbKey: string };
+    if (parts)
+      made = await this.scenes.reshape({
+        parts,
+        profile: of.profile,
+        story: of.story ?? null,
+        shape,
+        base,
+        who,
+        keepAs: `studio-${row.id}`,
+        ...finishing,
+      });
+    else {
+      // Made before its parts were kept: a story's staged again on its
+      // own voice, from its sheet, as the Studio's own try again does.
+      const voiced = await this.storedScene(leadRow.sceneKey);
+      const onVoice =
+        voiced && of.script && of.story ? onItsVoice(of.script, voiced) : null;
+      if (!voiced || !onVoice || !of.story)
+        throw new ValidationError(
+          `${who}: made before it could be made in another shape; make the scene again first`,
+        );
+      made = await this.scenes.recompose({
+        script: onVoice,
+        kept: new Map(),
+        beats: voiced.beats,
+        durationMs: voiced.durationMs,
+        timing: voiced.timing,
+        profile: of.profile,
+        story: of.story,
+        base,
+        who,
+        keepAs: `studio-${row.id}`,
+        ...(of.recheck ? { recheck: of.recheck } : {}),
+        shape,
+      });
+    }
+    // A clip's still is its last frame, as its lead's is.
+    const scene =
+      leadRow.sheet.kind === 'story'
+        ? await this.storedScene(made.sceneKey)
+        : null;
+    if (scene && show.brief.format === 'explainer')
+      await this.clipStill(scene, made.thumbKey, who);
+    // Its pictures looked at in its own frame (the judge as a story's
+    // scene has it), for the log: what shows wrong is never written again
+    // from here, so nothing is written, drawn or voiced for a twin.
+    if (scene)
+      await this.lookAtPictures(twin, row, scene, bible, undefined, who).catch(
+        (error: Error) =>
+          this.logger.log(`${who}: picture: not looked at (${error.message})`),
+      );
+    await this.twinMade(
+      show,
+      { twin, row },
+      made,
+      {
+        audioKey: leadRow.audioKey,
+        durationMs: leadRow.durationMs ?? 0,
+        fingerprint,
+      },
+      who,
+    );
+  }
+
+  /** A lead's scene that could not be made: its twin's scene, being made with it, is not either. */
+  private async twinFailed(
+    show: StudioShowRecord,
+    episode: StudioEpisodeRecord,
+    sceneId: string,
+  ): Promise<void> {
+    const twin = await this.twinOfLead(show, episode);
+    if (!twin) return;
+    const row = (await this.studio.listScenes(twin.id)).find(
+      (one) => one.twinOf === sceneId && one.status === 'making',
+    );
+    if (!row) return;
+    await this.studio.updateScene(row.id, {
+      status: 'failed',
+      step: null,
+      error: 'This scene could not be made. Try making it again.',
+    });
+    await this.settleTwin(show, twin);
+  }
+
+  /**
+   * A twin settled once none of its scenes is making: made, its length and
+   * its still its made scenes', said once in the thread for its files.
+   */
+  private async settleTwin(
+    show: StudioShowRecord,
+    twin: StudioEpisodeRecord,
+  ): Promise<void> {
+    const rows = await this.studio.listScenes(twin.id);
+    if (rows.some((r) => r.status === 'making')) return;
+    const made = rows.filter((r) => r.status === 'made' && r.sceneKey);
+    const settled = settledEpisode(rows);
+    const lead = twin.twinOf
+      ? await this.studio.findEpisode(twin.twinOf)
+      : null;
+    if (made.length && lead)
+      await this.log(
+        show,
+        lead,
+        {
+          what: 'made',
+          step: 'made',
+          line: EVENT_LINES.shapeMade(
+            episodeShape(twin),
+            lead.outline?.title ?? lead.title,
+            { made: made.length, of: rows.length },
+          ),
+        },
+        `made:${rows.flatMap((r) => (r.sceneKey ? [r.sceneKey] : [])).join(',')}`,
+      );
+    await this.studio.updateEpisode(twin.id, {
+      busy: null,
+      ...settled,
+      ...(lead ? { title: lead.title } : {}),
+    });
+  }
+
   private async settle(
     show: StudioShowRecord,
     episode: StudioEpisodeRecord,

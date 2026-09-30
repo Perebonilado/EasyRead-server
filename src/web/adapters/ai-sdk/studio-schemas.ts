@@ -11,6 +11,7 @@ import {
   STUDIO_ENDINGS,
   STUDIO_GENRES,
   STUDIO_PACES,
+  STUDIO_SHAPES,
   STUDIO_STYLES,
   SHEET_DEPTHS,
   SHOTS,
@@ -153,6 +154,9 @@ export const studioTurnSchema = z.object({
       pace: z.enum(STUDIO_PACES).nullable().catch(null),
       style: z.enum(STUDIO_STYLES).nullable().catch(null),
       look: z.enum(THEME_IDS).nullable().catch(null),
+      // The film's shape, only when the maker named one (code hears their
+      // words first: studio-heard shapeNamed).
+      shape: z.enum(STUDIO_SHAPES).nullable().catch(null),
     })
     .catch({
       format: null,
@@ -170,6 +174,7 @@ export const studioTurnSchema = z.object({
       pace: null,
       style: null,
       look: null,
+      shape: null,
     }),
   action: z.enum(STUDIO_ACTIONS).catch('none'),
   scene: z.union([z.number(), z.string()]).nullable().catch(null),

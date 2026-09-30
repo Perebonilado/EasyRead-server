@@ -414,6 +414,15 @@ export class StudioController {
     return this.studio.make(userId, id);
   }
 
+  /** The film in the other shape: "Make a vertical version" / "Make a wide version" (studio-vertical-plan §1.4). */
+  @Post('episodes/:id/other-shape')
+  otherShape(
+    @CurrentUser('id') userId: string,
+    @Param('id') id: string,
+  ): Promise<StudioEpisodeDto> {
+    return this.studio.otherShape(userId, id);
+  }
+
   @Post('episodes/:id/scenes')
   addScene(
     @CurrentUser('id') userId: string,

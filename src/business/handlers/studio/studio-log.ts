@@ -153,6 +153,15 @@ export const EVENT_LINES = {
     `${step === 'outline' ? 'Outline' : 'Cast'} approved: ${next === 'cast' ? 'meet the cast' : 'writing the scenes'}`,
   make: (count: number, seconds: number) =>
     `Making the film: ${scenesOf(count)}, about ${clockOf(seconds)}`,
+  /** The film in the other shape (studio-vertical-plan §1.4): begun, and made. */
+  shapeMaking: (shape: 'wide' | 'tall', count: number) =>
+    `Making the ${shape === 'tall' ? 'vertical' : 'wide'} version: ${scenesOf(count)}, from the same script and voice`,
+  shapeMade: (
+    shape: 'wide' | 'tall',
+    title: string,
+    scenes?: { made: number; of: number },
+  ) =>
+    `${shape === 'tall' ? 'Vertical' : 'Wide'} version made${scenes && scenes.made < scenes.of ? ` with ${scenes.made} of ${scenesOf(scenes.of)}` : ''}: “${title}”`,
   shared: (on: boolean) =>
     on ? 'Link on: anyone with it can watch' : 'Link off: only you can watch',
   /** Making a scene again after changing it as asked, to check it. */

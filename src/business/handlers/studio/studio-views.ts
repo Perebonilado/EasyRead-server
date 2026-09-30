@@ -15,6 +15,7 @@ import type {
   StudioOutlineDto,
   StudioSceneDto,
   StudioSheetDto,
+  StudioTwinDto,
 } from '../../../contracts';
 import {
   BRIEF_CONTROLS,
@@ -121,6 +122,7 @@ export function briefDto(brief: StudioBrief): StudioBriefDto {
     ...Object.fromEntries(
       BRIEF_CONTROLS.flatMap((key) => (brief[key] ? [[key, brief[key]]] : [])),
     ),
+    ...(brief.shape && brief.shape !== 'wide' ? { shape: brief.shape } : {}),
   };
 }
 
@@ -371,6 +373,8 @@ export function episodeDto(
   scenes: StudioSceneRecord[],
   bible: StudioBible | null,
   brief: StudioBrief,
+  /** The same film in the other shape, where it has one (studio-twins twinDto). */
+  twin: StudioTwinDto | null = null,
 ): StudioEpisodeDto {
   const carried = carriedWears(scenes, bible);
   const dtos = scenes.map((s) =>
@@ -407,6 +411,9 @@ export function episodeDto(
           },
         }
       : {}),
+    shape: episode.shape === 'tall' ? 'tall' : 'wide',
+    twin,
+    ...(episode.twinOf ? { twinOf: episode.twinOf } : {}),
   };
 }
 

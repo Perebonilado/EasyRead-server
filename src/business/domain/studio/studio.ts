@@ -184,6 +184,14 @@ export type StudioEnding = (typeof STUDIO_ENDINGS)[number];
 export const STUDIO_PACES = ['gentle', 'lively', 'snappy'] as const;
 export type StudioPace = (typeof STUDIO_PACES)[number];
 
+/**
+ * The shape its films are made in (studio-vertical-plan §1): wide (16:9),
+ * tall (9:16, vertical, for phones), or both, each episode made in each
+ * as twins on one script and one voice. Absent is wide.
+ */
+export const STUDIO_SHAPES = ['wide', 'tall', 'both'] as const;
+export type StudioShape = (typeof STUDIO_SHAPES)[number];
+
 /** How it looks and moves: the animation style presets (§2.1, studio-style.ts). */
 export const STUDIO_STYLES = [
   'picture-book',
@@ -260,6 +268,8 @@ export interface StudioBrief {
    * absent, on for children and off for grown-ups.
    */
   host?: boolean;
+  /** The shape its films are made in, as the maker chose (the brief's Shape row, or their words); absent, wide. */
+  shape?: StudioShape;
 }
 
 /** The maker's controls of a brief, each present only when chosen. */
@@ -396,6 +406,9 @@ export function briefOf(
     : base.look;
   const host =
     has('host') && typeof said.host === 'boolean' ? said.host : base.host;
+  const shape = has('shape')
+    ? (oneOf(STUDIO_SHAPES)(said.shape) ?? base.shape)
+    : base.shape;
   return {
     ...out,
     ...(document ? { document } : {}),
@@ -409,6 +422,8 @@ export function briefOf(
     ...(voicePace && voicePace !== 1 ? { voicePace } : {}),
     ...(look ? { look } : {}),
     ...(typeof host === 'boolean' ? { host } : {}),
+    // Wide is every film's unless the maker chose otherwise: not said.
+    ...(shape && shape !== 'wide' ? { shape } : {}),
   };
 }
 

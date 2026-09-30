@@ -71,6 +71,8 @@ export function jobSays(
       return { says: 'Drawing the cast for the film' };
     case 'repace':
       return { says: 'Changing the pace of the voice', short: 'Pacing' };
+    case 'twin':
+      return { says: `Making ${scene} in its new shape`, short: 'Making' };
     default:
       return null;
   }

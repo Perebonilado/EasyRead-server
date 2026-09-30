@@ -58,6 +58,13 @@ import {
   shade,
 } from './scene-ink';
 import { FLOOR_BACK_K, FLOOR_FRONT_K, STATION_SHARES } from './scene-layout';
+import {
+  SET_FRAMES,
+  setWidthFor,
+  shapeOfStage,
+  worldHeightOf,
+  type SetFrame,
+} from './scene-shape';
 import type { PlaceKind, StoryPlace, StoryWorld } from './scene-story';
 import { drawBuilding } from './scene-set-buildings';
 import { isKitKind } from './scene-set-kit';
@@ -1171,8 +1178,17 @@ export function layoutBrief(
 
 // ── The camera: where each row stands, and how big ────────────────────────
 
-export const SET_W = 1600;
-export const SET_H = 900;
+/** The wide set's frame, in its units (scene-shape SET_FRAMES.wide): every set built before shapes, and every wide film's. */
+export const SET_W = SET_FRAMES.wide.w;
+export const SET_H = SET_FRAMES.wide.h;
+/**
+ * The frame of the set being built (studio-vertical-plan §2.2): the wide
+ * one, but while buildSet builds a tall film's set (900 × 1600), which
+ * puts it back. The world stays the same size in either: a metre, a kit
+ * unit and the ink are as many set units (scene-shape worldHeightOf).
+ */
+let frameW: number = SET_W;
+let frameH: number = SET_H;
 /**
  * How wide what spans the whole set (its sky, what stands behind the
  * ground, the ground, a room's walls) is drawn while a set is built: the
@@ -1194,30 +1210,55 @@ let sideNow: 'front' | 'reverse' = 'front';
 /** What a thing's group is called on the side being built. */
 const sideId = (id: string) => (sideNow === 'reverse' ? `rv-${id}` : id);
 /** The set's own outline: the kit's line where its people stand. */
-const INK_W = setLine(SET_H);
+let INK_W = 0;
 /** Where the story's people stand, and how many of the set's units a kit unit is there (scene-crowd's own). */
-const FEET = (820 / 900) * SET_H;
-const UNIT = SET_UNIT_SHARE * SET_H;
-/** Where the open ground meets what stands behind it, by the kind of place (the painter's brief's own). */
-export const FLOOR_LINE: Record<PlaceKind, number> = {
-  outdoor: 0.64 * SET_H,
-  indoor: 0.7 * SET_H,
-  vessel: 0.72 * SET_H,
-};
+let FEET = 0;
+let UNIT = 0;
+/** Where the open ground meets what stands behind it, by the kind of place (the painter's brief's own), on the frame being built. */
+let floorLine: Record<PlaceKind, number> = { outdoor: 0, indoor: 0, vessel: 0 };
 /** The camera's eye line: out of doors the horizon; inside, a grown-up's eyes (scene-crowd). */
-const EYE: Record<PlaceKind, number> = {
-  // A little above the horizon, as a child's eye sees a picture book:
-  // what stands at the far edge of the ground is not lost in the distance.
-  outdoor: FLOOR_LINE.outdoor - 80,
-  indoor: FEET - 200 * UNIT - 0.05 * SET_H,
-  vessel: FEET - 200 * UNIT - 0.05 * SET_H,
+let EYE: Record<PlaceKind, number> = { outdoor: 0, indoor: 0, vessel: 0 };
+
+/**
+ * The set being built drawn in a frame: its size, where its people's
+ * feet are, its floor lines and its eye line. The world's own sizes (a
+ * kit unit, the ink, a grown-up's eyes above their feet) are measured in
+ * the wide frame's height whatever the frame.
+ * TODO(V3, studio-vertical-plan §3.1–3.2): the tall frame's raised eye
+ * (frame.eyeLift), and the sky and floor it adds dressed.
+ */
+function useFrame(frame: SetFrame): void {
+  frameW = frame.w;
+  frameH = frame.h;
+  const world = worldHeightOf(frame.w, frame.h);
+  INK_W = setLine(world);
+  FEET = frame.feet;
+  UNIT = SET_UNIT_SHARE * world;
+  floorLine = {
+    outdoor: frame.floorLine.outdoor * frame.h,
+    indoor: frame.floorLine.indoor * frame.h,
+    vessel: frame.floorLine.vessel * frame.h,
+  };
+  EYE = {
+    // A little above the horizon, as a child's eye sees a picture book:
+    // what stands at the far edge of the ground is not lost in the distance.
+    outdoor: floorLine.outdoor - 80,
+    indoor: FEET - 200 * UNIT - 0.05 * world,
+    vessel: FEET - 200 * UNIT - 0.05 * world,
+  };
+}
+useFrame(SET_FRAMES.wide);
+
+/** Where the open ground meets what stands behind it, by the kind of place (the painter's brief's own), on the wide frame. */
+export const FLOOR_LINE: Readonly<Record<PlaceKind, number>> = {
+  ...floorLine,
 };
 
 /** Where a row's feet stand, down the set: far off on the horizon; before the camera, under the frame's foot. */
 export function rowFeet(kind: PlaceKind, row: SetRow): number {
-  const floor = FLOOR_LINE[kind];
+  const floor = floorLine[kind];
   if (row === 'far') return floor + 3;
-  if (row === 'foreground') return SET_H + 60;
+  if (row === 'foreground') return frameH + 60;
   const k =
     kind === 'outdoor'
       ? { back: 0.32, middle: 0.62, front: 1 }
@@ -1755,14 +1796,14 @@ function drawGround(
       ? GROUND.snow
       : GROUND[layout.ground]);
   let out = shape(
-    `M-20,${r1(top)} L${drawW + 20},${r1(top)} L${drawW + 20},${SET_H + 20} L-20,${SET_H + 20} Z`,
+    `M-20,${r1(top)} L${drawW + 20},${r1(top)} L${drawW + 20},${frameH + 20} L-20,${frameH + 20} Z`,
     colour,
   );
   const darker = shade(colour, 0.9);
   const marks = (n: number, draw: (x: number, y: number) => string) =>
     Array.from({ length: n }, () => {
       const x = random() * drawW;
-      const y = top + 20 + random() * (SET_H - top - 30);
+      const y = top + 20 + random() * (frameH - top - 30);
       return draw(x, y);
     }).join('');
   /** A tuft of grass, which bends as someone brushes by it (studio-world-plan §5.1). */
@@ -1777,7 +1818,7 @@ function drawGround(
       const mid = drawW * (0.42 + random() * 0.16);
       const far = top + 2;
       out += flatShape(
-        `M${r1(mid - 24)},${r1(far)} Q${r1(mid - 120)},${r1(top + (SET_H - top) * 0.45)} ${r1(mid - 420)},${SET_H + 20} L${r1(mid + 420)},${SET_H + 20} Q${r1(mid + 120)},${r1(top + (SET_H - top) * 0.45)} ${r1(mid + 24)},${r1(far)} Z`,
+        `M${r1(mid - 24)},${r1(far)} Q${r1(mid - 120)},${r1(top + (frameH - top) * 0.45)} ${r1(mid - 420)},${frameH + 20} L${r1(mid + 420)},${frameH + 20} Q${r1(mid + 120)},${r1(top + (frameH - top) * 0.45)} ${r1(mid + 24)},${r1(far)} Z`,
         SET_COLOURS.earth,
       );
       out += marks(16, tuft);
@@ -1798,9 +1839,9 @@ function drawGround(
       break;
     case 'road': {
       // The road across the back, the pavement people stand on before it.
-      const kerb = top + (SET_H - top) * 0.36;
+      const kerb = top + (frameH - top) * 0.36;
       out +=
-        flatRect(-10, kerb, drawW + 20, SET_H - kerb + 10, GROUND.paving) +
+        flatRect(-10, kerb, drawW + 20, frameH - kerb + 10, GROUND.paving) +
         flatRect(-10, kerb - 8, drawW + 20, 12, '#c2b397') +
         Array.from({ length: 9 }, (_, k) =>
           flatRect(
@@ -1819,7 +1860,7 @@ function drawGround(
       out += Array.from({ length: 5 }, (_, r) =>
         flatRect(
           -10,
-          top + 40 + r * ((SET_H - top) / 5),
+          top + 40 + r * ((frameH - top) / 5),
           drawW + 20,
           5,
           darker,
@@ -1854,9 +1895,9 @@ function drawGroundL3(
         ? GROUND.snow
         : GROUND[layout.ground],
     );
-  const D = SET_H - top;
+  const D = frameH - top;
   let out = shape(
-    `M-20,${r1(top)} L${drawW + 20},${r1(top)} L${drawW + 20},${SET_H + 20} L-20,${SET_H + 20} Z`,
+    `M-20,${r1(top)} L${drawW + 20},${r1(top)} L${drawW + 20},${frameH + 20} L-20,${frameH + 20} Z`,
     colour,
   );
   // Nearer to farther, the colour shifts toward the haze.
@@ -1887,7 +1928,7 @@ function drawGroundL3(
   /** Lines running from the front to the far edge, toward the eye's point, and across at depths as far apart as the ground is deep. */
   const toDistance = (across: number, deep: number, tone: string) => {
     const eye = EYE.outdoor;
-    const bottom = SET_H + 20;
+    const bottom = frameH + 20;
     const t = (bottom - top) / (bottom - eye);
     const runs: string[] = [];
     for (let x0 = -drawW; x0 <= drawW * 2; x0 += across) {
@@ -1911,7 +1952,7 @@ function drawGroundL3(
       // A way worn across it, wide near and narrow far, and a few stones.
       const mid = drawW * (0.4 + random() * 0.2);
       out += flatShape(
-        `M${r1(mid - 20)},${r1(top + 2)} Q${r1(mid - 110)},${r1(top + D * 0.45)} ${r1(mid - 380)},${SET_H + 20} L${r1(mid + 380)},${SET_H + 20} Q${r1(mid + 110)},${r1(top + D * 0.45)} ${r1(mid + 20)},${r1(top + 2)} Z`,
+        `M${r1(mid - 20)},${r1(top + 2)} Q${r1(mid - 110)},${r1(top + D * 0.45)} ${r1(mid - 380)},${frameH + 20} L${r1(mid + 380)},${frameH + 20} Q${r1(mid + 110)},${r1(top + D * 0.45)} ${r1(mid + 20)},${r1(top + 2)} Z`,
         layout.ground === 'path' ? SET_COLOURS.earth : shade(colour, 1.12),
       );
       out +=
@@ -1942,7 +1983,7 @@ function drawGroundL3(
           -10,
           kerb,
           drawW + 20,
-          SET_H - kerb + 10,
+          frameH - kerb + 10,
           packColour(pack, GROUND.paving),
         ) +
         flatRect(-10, kerb - 8, drawW + 20, 12, '#c2b397') +
@@ -1993,7 +2034,7 @@ function drawFloor(
   drop: number,
 ): string {
   const colour = layout.groundColour ?? GROUND[layout.ground];
-  const d = `M${side},${r1(top)} L${drawW - side},${r1(top)} L${drawW + 20},${r1(top + drop)} L${drawW + 20},${SET_H + 20} L-20,${SET_H + 20} L-20,${r1(top + drop)} Z`;
+  const d = `M${side},${r1(top)} L${drawW - side},${r1(top)} L${drawW + 20},${r1(top + drop)} L${drawW + 20},${frameH + 20} L-20,${frameH + 20} L-20,${r1(top + drop)} Z`;
   let out = shape(d, colour);
   const darker = shade(colour, 0.9);
   // Where the floor starts across at a depth: it runs under the side walls' feet.
@@ -2004,12 +2045,12 @@ function drawFloor(
     out += Array.from({ length: 6 }, (_, k) => {
       const y = top + 26 + k * k * 7 + k * 26;
       const x = from(y + 4);
-      return y < SET_H
+      return y < frameH
         ? flatRect(x, y, drawW - x * 2, 4 + k * 0.6, darker)
         : '';
     }).join('');
   else if (layout.ground === 'tiles') {
-    const band = (SET_H - top) / 4;
+    const band = (frameH - top) / 4;
     out += Array.from({ length: 4 }, (_, r) =>
       Array.from({ length: 10 }, (_, c) => {
         if (!((r + c) % 2)) return '';
@@ -2090,7 +2131,7 @@ function worldAttributes(
   return (
     (reacts ? ` data-react="${reacts.as}"` : '') +
     (kind ? ` data-kind="${kind}"` : '') +
-    ` data-x="${Math.round((x / SET_W) * 1000) / 1000}" data-row="${row}"` +
+    ` data-x="${Math.round((x / frameW) * 1000) / 1000}" data-row="${row}"` +
     (reacts ? ` data-len="${reacts.len}"` : '') +
     (pivot ? ` data-pivot="${r1(pivot[0])} ${r1(pivot[1])}"` : '') +
     (roosts?.length
@@ -2228,15 +2269,15 @@ function drawOutside(
   bottom: number,
   random: () => number,
 ): string {
-  const sky = flatRect(-10, -10, SET_W + 20, bottom + 20, SET_COLOURS.sky);
+  const sky = flatRect(-10, -10, frameW + 20, bottom + 20, SET_COLOURS.sky);
   const clouds = [0.15, 0.5, 0.82]
-    .map((x) => cloud(x * SET_W, 150 + random() * 40, 0.55))
+    .map((x) => cloud(x * frameW, 150 + random() * 40, 0.55))
     .join('');
   if (vessel === 'plane')
     return (
       sky +
       [0.1, 0.35, 0.62, 0.9]
-        .map((x) => cloud(x * SET_W, 330 + random() * 60, 0.9))
+        .map((x) => cloud(x * frameW, 330 + random() * 60, 0.9))
         .join('') +
       clouds
     );
@@ -2246,7 +2287,13 @@ function drawOutside(
       sky +
       clouds +
       rolling(shore, 70, 4, random, SET_COLOURS.hills) +
-      flatRect(-10, shore, SET_W + 20, bottom - shore + 10, SET_COLOURS.water) +
+      flatRect(
+        -10,
+        shore,
+        frameW + 20,
+        bottom - shore + 10,
+        SET_COLOURS.water,
+      ) +
       Array.from({ length: 8 }, (_, k) =>
         flatRect(
           k * 200 + 40 + random() * 60,
@@ -2265,9 +2312,9 @@ function drawOutside(
     sky +
     clouds +
     rolling(road - 40, 90, 5, random, SET_COLOURS.hills) +
-    flatRect(-10, road - 50, SET_W + 20, 60, SET_COLOURS.grass);
+    flatRect(-10, road - 50, frameW + 20, 60, SET_COLOURS.grass);
   for (let k = 0; k < 7; k += 1) {
-    const cx = (k + 0.5) * (SET_W / 7) + (random() - 0.5) * 60;
+    const cx = (k + 0.5) * (frameW / 7) + (random() - 0.5) * 60;
     if (k % 2) {
       const w = 90 + random() * 30;
       const h = 70 + random() * 30;
@@ -2290,7 +2337,7 @@ function drawOutside(
         circle(cx, road - 110, 38, SET_COLOURS.leaves);
   }
   out +=
-    flatRect(-10, road - 10, SET_W + 20, bottom - road + 20, '#a4a2a8') +
+    flatRect(-10, road - 10, frameW + 20, bottom - road + 20, '#a4a2a8') +
     Array.from({ length: 8 }, (_, k) =>
       flatRect(k * 200 + 50, road + 30, 90, 8, '#f3f1ec', 3),
     ).join('');
@@ -2315,12 +2362,12 @@ function drawVesselSide(
     const rail = floor - 110;
     return (
       shape(
-        `M-20,${r1(rail)} L${SET_W + 20},${r1(rail)} L${SET_W + 20},${r1(floor)} L-20,${r1(floor)} Z`,
+        `M-20,${r1(rail)} L${frameW + 20},${r1(rail)} L${frameW + 20},${r1(floor)} L-20,${r1(floor)} Z`,
         colour,
       ) +
-      rect(-20, rail - 16, SET_W + 40, 18, shade(colour, 0.82), 4) +
+      rect(-20, rail - 16, frameW + 40, 18, shade(colour, 0.82), 4) +
       Array.from({ length: 12 }, (_, k) =>
-        flatRect(-10, rail + 10 + k * 8, SET_W + 20, 2, shade(colour, 0.9)),
+        flatRect(-10, rail + 10 + k * 8, frameW + 20, 2, shade(colour, 0.9)),
       )
         .slice(0, 10)
         .join('') +
@@ -2332,20 +2379,20 @@ function drawVesselSide(
   const sill = floor - (vessel === 'plane' ? 250 : 210);
   const glassTop = ceiling + 40;
   // The windows, and the door at the right with its glass.
-  const doorX = vessel === 'plane' || other ? null : SET_W - 250;
+  const doorX = vessel === 'plane' || other ? null : frameW - 250;
   const holes: string[] = [];
   const frames: string[] = [];
   if (vessel === 'plane') {
     const n = 6;
     for (let k = 0; k < n; k += 1) {
-      const cx = ((k + 0.5) / n) * SET_W;
+      const cx = ((k + 0.5) / n) * frameW;
       const cy = (glassTop + sill) / 2 - 10;
       holes.push(
         `M${r1(cx - 44)},${r1(cy)} a44,64 0 1,0 88,0 a44,64 0 1,0 -88,0 Z`,
       );
     }
   } else {
-    const right = (doorX ?? SET_W) - 40;
+    const right = (doorX ?? frameW) - 40;
     const n = (vessel === 'train' ? 3 : 4) + (doorX === null ? 1 : 0);
     const gap = 44;
     const w = (right - 40 - gap * (n - 1)) / n;
@@ -2363,8 +2410,8 @@ function drawVesselSide(
         `M${doorX + 26},${glassTop} L${doorX + 204},${glassTop} L${doorX + 204},${r1(floor - 40)} L${doorX + 26},${r1(floor - 40)} Z`,
       );
   }
-  const wall = `<path d="M-20,${ceiling} L${SET_W + 20},${ceiling} L${SET_W + 20},${r1(floor)} L-20,${r1(floor)} Z ${holes.join(' ')}" fill-rule="evenodd" ${fill(colour)}/>`;
-  const panel = `<path d="M-20,${r1(sill + 18)} L${doorX !== null ? doorX : SET_W + 20},${r1(sill + 18)} L${doorX !== null ? doorX : SET_W + 20},${r1(floor)} L-20,${r1(floor)} Z" ${fill(walls)}/>`;
+  const wall = `<path d="M-20,${ceiling} L${frameW + 20},${ceiling} L${frameW + 20},${r1(floor)} L-20,${r1(floor)} Z ${holes.join(' ')}" fill-rule="evenodd" ${fill(colour)}/>`;
+  const panel = `<path d="M-20,${r1(sill + 18)} L${doorX !== null ? doorX : frameW + 20},${r1(sill + 18)} L${doorX !== null ? doorX : frameW + 20},${r1(floor)} L-20,${r1(floor)} Z" ${fill(walls)}/>`;
   const door =
     doorX !== null
       ? rect(
@@ -2378,17 +2425,17 @@ function drawVesselSide(
         `<path d="M${doorX + 32},${glassTop + 6} L${doorX + 110},${glassTop + 6} L${doorX + 110},${r1(floor - 48)} L${doorX + 32},${r1(floor - 48)} Z M${doorX + 120},${glassTop + 6} L${doorX + 198},${glassTop + 6} L${doorX + 198},${r1(floor - 48)} L${doorX + 120},${r1(floor - 48)} Z" fill-rule="evenodd" ${fill(GLASS)}/>`
       : '';
   const top =
-    rect(-20, -20, SET_W + 40, ceiling + 20, walls) +
+    rect(-20, -20, frameW + 40, ceiling + 20, walls) +
     [0.18, 0.5, 0.82]
       .map(
         (x) =>
-          `<ellipse cx="${r1(x * SET_W)}" cy="${r1(ceiling * 0.4)}" rx="70" ry="14" ${fill('#fff6d8')}/>`,
+          `<ellipse cx="${r1(x * frameW)}" cy="${r1(ceiling * 0.4)}" rx="70" ry="14" ${fill('#fff6d8')}/>`,
       )
       .join('');
   const rail =
     vessel === 'plane'
-      ? rect(-20, ceiling - 20, SET_W + 40, 40, shade(walls, 0.94), 6)
-      : rect(-20, ceiling + 6, SET_W + 40, 12, STEEL, 6);
+      ? rect(-20, ceiling - 20, frameW + 40, 40, shade(walls, 0.94), 6)
+      : rect(-20, ceiling + 6, frameW + 40, 12, STEEL, 6);
   const straps =
     vessel === 'bus'
       ? Array.from({ length: 7 }, (_, k) => {
@@ -2399,14 +2446,14 @@ function drawVesselSide(
           );
         }).join('')
       : vessel === 'train'
-        ? rect(40, ceiling + 30, (doorX ?? SET_W) - 80, 16, STEEL, 4)
+        ? rect(40, ceiling + 30, (doorX ?? frameW) - 80, 16, STEEL, 4)
         : '';
   const poles =
     vessel === 'bus'
       ? [0.3, 0.62]
           .map((x) =>
             rect(
-              x * SET_W - 9,
+              x * frameW - 9,
               ceiling + 10,
               18,
               floor - ceiling - 6,
@@ -2421,30 +2468,30 @@ function drawVesselSide(
 
 /** What stands before the people's legs where they are in it: the boat's side, a table, a counter, a wall. */
 function drawFront(words: string, colour: string | null): string {
-  const top = SET_H - SET_H * 0.2;
+  const top = frameH - frameH * 0.2;
   if (/\b(?:boat|canoe|ship|ark|raft|ferry|hull|side)\b/iu.test(words)) {
     const c = colour ?? SET_COLOURS.wood;
     return (
       shape(
-        `M-20,${r1(top)} Q${SET_W / 2},${r1(top + 26)} ${SET_W + 20},${r1(top)} L${SET_W + 20},${SET_H + 20} L-20,${SET_H + 20} Z`,
+        `M-20,${r1(top)} Q${frameW / 2},${r1(top + 26)} ${frameW + 20},${r1(top)} L${frameW + 20},${frameH + 20} L-20,${frameH + 20} Z`,
         c,
       ) +
-      rect(-20, top - 12, SET_W + 40, 20, shade(c, 0.8), 8) +
-      flatRect(-10, top + 60, SET_W + 20, 5, shade(c, 0.88)) +
-      flatRect(-10, top + 110, SET_W + 20, 5, shade(c, 0.88))
+      rect(-20, top - 12, frameW + 40, 20, shade(c, 0.8), 8) +
+      flatRect(-10, top + 60, frameW + 20, 5, shade(c, 0.88)) +
+      flatRect(-10, top + 110, frameW + 20, 5, shade(c, 0.88))
     );
   }
   if (/\b(?:table|desk|counter|bar|bench|altar)\b/iu.test(words)) {
     const c = colour ?? SET_COLOURS.wood;
     return (
-      rect(-20, top, SET_W + 40, SET_H - top + 20, shade(c, 0.9)) +
-      rect(-20, top - 18, SET_W + 40, 26, c, 6)
+      rect(-20, top, frameW + 40, frameH - top + 20, shade(c, 0.9)) +
+      rect(-20, top - 18, frameW + 40, 26, c, 6)
     );
   }
   const c = colour ?? '#d8cbb3';
   return (
-    rect(-20, top, SET_W + 40, SET_H - top + 20, c) +
-    rect(-20, top - 14, SET_W + 40, 18, shade(c, 0.85), 3)
+    rect(-20, top, frameW + 40, frameH - top + 20, c) +
+    rect(-20, top - 14, frameW + 40, 18, shade(c, 0.85), 3)
   );
 }
 
@@ -2486,7 +2533,7 @@ const reachOf = (one: Placing): [number, number] => {
 function covered(placings: Placing[]): number {
   const spans = placings
     .map(reachOf)
-    .map(([a, b]): [number, number] => [Math.max(0, a), Math.min(SET_W, b)])
+    .map(([a, b]): [number, number] => [Math.max(0, a), Math.min(frameW, b)])
     .filter(([a, b]) => b > a)
     .sort((x, y) => x[0] - y[0]);
   let total = 0;
@@ -2496,7 +2543,7 @@ function covered(placings: Placing[]): number {
     total += b - Math.max(a, end);
     end = b;
   }
-  return total / SET_W;
+  return total / frameW;
 }
 
 /**
@@ -2522,10 +2569,10 @@ function keepForeToEdges(placings: Placing[]): void {
   for (const one of placings) {
     if (one.band !== 'foreground') continue;
     const [a, b] = reachOf(one);
-    const left = (a + b) / 2 < SET_W / 2;
-    if (left && b > FORE_EDGE * SET_W) one.x -= b - FORE_EDGE * SET_W;
-    else if (!left && a < (1 - FORE_EDGE) * SET_W)
-      one.x += (1 - FORE_EDGE) * SET_W - a;
+    const left = (a + b) / 2 < frameW / 2;
+    if (left && b > FORE_EDGE * frameW) one.x -= b - FORE_EDGE * frameW;
+    else if (!left && a < (1 - FORE_EDGE) * frameW)
+      one.x += (1 - FORE_EDGE) * frameW - a;
   }
 }
 
@@ -2541,7 +2588,7 @@ function spreadOut(placings: Placing[], margin = 0): void {
     const [a, b] = reachOf(one);
     const w = b - a;
     if (a < -margin - w * 0.35) one.x += -margin - w * 0.35 - a;
-    if (b > SET_W + margin + w * 0.35) one.x -= b - SET_W - margin - w * 0.35;
+    if (b > frameW + margin + w * 0.35) one.x -= b - frameW - margin - w * 0.35;
   };
   for (const list of bands.values()) {
     for (const one of list) if (!one.fixed) within(one);
@@ -2698,14 +2745,14 @@ export function floorOf(kind: PlaceKind): SetFloor {
   const at = (k: number) => Math.round((eye + k * (FEET - eye)) * 10) / 10;
   return {
     back: at(FLOOR_BACK_K),
-    front: Math.min(SET_H - 8, at(FLOOR_FRONT_K)),
+    front: Math.min(frameH - 8, at(FLOOR_FRONT_K)),
     eye: Math.round(eye * 10) / 10,
   };
 }
 
 /** A layer's own drawing, in the set's frame and the kit's line. */
 const layerSvg = (inner: string, world = '') =>
-  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${SET_W} ${SET_H}"${world}>` +
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${frameW} ${frameH}"${world}>` +
   `<g stroke="${FIGURE_INK}" stroke-width="${INK_W}" stroke-linejoin="round" stroke-linecap="round">${inner}</g></svg>`;
 
 /**
@@ -2737,9 +2784,15 @@ export function buildSet(
   world: StoryWorld | null = null,
   /** A Studio show's animation style: its tint and its ink. Absent, the house look. */
   look: SetLook | null = null,
+  /**
+   * The frame it is built for (scene-shape SET_FRAMES): a tall film's set
+   * is the same place, from the same layout, seen through a 900 × 1600
+   * window (studio-vertical-plan §3.1). Absent, the wide frame.
+   */
+  frame: SetFrame = SET_FRAMES.wide,
 ): BuiltSet {
-  const front = buildSide(layout, place, own, world, look, 'front');
-  const reverse = reverseSet(layout, place, own, world, look);
+  const front = buildSide(layout, place, own, world, look, 'front', frame);
+  const reverse = reverseSet(layout, place, own, world, look, frame);
   return reverse
     ? {
         ...front,
@@ -2763,6 +2816,7 @@ export function reverseSet(
   own: Record<string, SetPiece> = {},
   world: StoryWorld | null = null,
   look: SetLook | null = null,
+  frame: SetFrame = SET_FRAMES.wide,
 ): { layered: Omit<SetLayering, 'reverse'>; notes: string[] } | null {
   try {
     const turned = reverseLayoutOf(renamedIn(layout), place);
@@ -2773,6 +2827,7 @@ export function reverseSet(
       world,
       look,
       'reverse',
+      frame,
     );
     return { layered: built.layered, notes: built.notes };
   } catch {
@@ -2788,13 +2843,18 @@ function buildSide(
   world: StoryWorld | null,
   look: SetLook | null,
   side: 'front' | 'reverse',
+  frame: SetFrame,
 ): BuiltSet {
+  useFrame(frame);
   // As wide as its layout says (a vessel one frame, whatever it says): what
-  // spans the whole set drawn that wide, and the frame its middle.
+  // spans the whole set drawn that wide, and the frame its middle. A tall
+  // frame's set is wider than its frame, so the camera can pan (SET_WIDTHS).
   const across =
     (place.kind ?? 'outdoor') === 'vessel'
-      ? SET_W
-      : Math.round(SET_W * (layout.width ?? 1));
+      ? frameW
+      : Math.round(
+          frameW * setWidthFor(shapeOfStage(frame), layout.width ?? 1),
+        );
   drawW = across;
   inkK = look?.ink ?? 1;
   sideNow = side;
@@ -2803,11 +2863,12 @@ function buildSide(
       renamedIn(layout),
       place,
       own,
-      (across - SET_W) / 2,
+      (across - frameW) / 2,
       world,
       look,
     );
   } finally {
+    useFrame(SET_FRAMES.wide);
     drawW = SET_W;
     inkK = 1;
     sideNow = 'front';
@@ -2844,7 +2905,7 @@ function buildSetAt(
   const whole = (inner: string) =>
     margin ? `<g transform="translate(${-margin} 0)">${inner}</g>` : inner;
   const random = seeded(`${place.id}:${place.name}`);
-  const floor = FLOOR_LINE[kind];
+  const floor = floorLine[kind];
   const studio = place.features !== undefined;
   const { staged, drawn } = featuresOf(place);
   const pack = layout.style
@@ -2881,8 +2942,8 @@ function buildSetAt(
   const underlay = flatRect(
     -20 - margin,
     floor - 2,
-    SET_W + 40 + margin * 2,
-    SET_H - floor + 22,
+    frameW + 40 + margin * 2,
+    frameH - floor + 22,
     groundColour,
   );
 
@@ -2940,7 +3001,7 @@ function buildSetAt(
     const tall = Math.max(1, -piece.viewBox[1]);
     return {
       y,
-      s: Math.min(scaleAtFeet(kind, y) * FAR_K * k, (FAR_MOST * SET_H) / tall),
+      s: Math.min(scaleAtFeet(kind, y) * FAR_K * k, (FAR_MOST * frameH) / tall),
     };
   };
   let n = 0;
@@ -2995,7 +3056,7 @@ function buildSetAt(
       placings.push({
         piece,
         kind: item.kind,
-        x: item.x * SET_W,
+        x: item.x * frameW,
         y: top - high * s,
         s,
         band: 'wall',
@@ -3028,7 +3089,7 @@ function buildSetAt(
       placings.push({
         piece,
         kind: item.kind,
-        x: item.x * SET_W,
+        x: item.x * frameW,
         y,
         s,
         band: 'far',
@@ -3045,7 +3106,7 @@ function buildSetAt(
       placings.push({
         piece,
         kind: item.kind,
-        x: item.x * SET_W,
+        x: item.x * frameW,
         y: atEdge,
         s: scaleAtFeet(kind, atEdge) * HORIZON_K * item.scale * real,
         band: 'horizon',
@@ -3060,8 +3121,8 @@ function buildSetAt(
     }
     let x = item.x;
     const s0 = scaleAtFeet(kind, rowFeet(kind, row)) * item.scale * real;
-    const half = (vw * s0) / 2 / SET_W;
-    const tall = (-vy * s0) / SET_H;
+    const half = (vw * s0) / 2 / frameW;
+    const tall = (-vy * s0) / frameH;
     // The front row frames the picture: only something tall, one at each
     // side at its very edge; anything else stands farther back.
     if (!isFlat && row === 'front' && !item.edge) {
@@ -3108,7 +3169,7 @@ function buildSetAt(
     // frames a shot with something near (keepForeToEdges, after the rest
     // are spread out).
     if (row === 'foreground' && x > 0.12 && x < 0.88) {
-      const low = SET_H * 0.7;
+      const low = frameH * 0.7;
       const fits = (y - low) / Math.max(1, -vy);
       if (y + vy * s < low) {
         if (fits >= s * 0.6) s = fits;
@@ -3119,7 +3180,7 @@ function buildSetAt(
     placings.push({
       piece,
       kind: item.kind,
-      x: x * SET_W,
+      x: x * frameW,
       y,
       s,
       band: isFlat ? 'flat' : row,
@@ -3149,7 +3210,7 @@ function buildSetAt(
       const { y, s } = farOff(piece, 1);
       placings.push({
         piece,
-        x: item.x * SET_W,
+        x: item.x * frameW,
         y,
         s,
         band: 'far',
@@ -3166,12 +3227,12 @@ function buildSetAt(
     const y = rowFeet(kind, row);
     const s = scaleAtFeet(kind, y);
     let x = item.x;
-    const half = (piece.viewBox[2] * s) / 2 / SET_W;
+    const half = (piece.viewBox[2] * s) / 2 / frameW;
     if (row === 'middle' && x > 0.3 - half && x < 0.7 + half)
       x = x < 0.5 ? 0.16 : 0.84;
     placings.push({
       piece,
-      x: x * SET_W,
+      x: x * frameW,
       y,
       s,
       band: row,
@@ -3192,7 +3253,7 @@ function buildSetAt(
     );
     const y = rowFeet(kind, 'back');
     const s = scaleAtFeet(kind, y);
-    const right = layout.vessel === 'plane' ? SET_W : SET_W - 290;
+    const right = layout.vessel === 'plane' ? frameW : frameW - 290;
     const n = layout.vessel === 'plane' ? 5 : 4;
     for (let k = 0; k < n; k += 1)
       placings.push({
@@ -3222,7 +3283,7 @@ function buildSetAt(
         vessel: kind === 'vessel',
       }),
       kind: feature.kind,
-      x: (SPOT_AT[feature.spot] ?? 0.5) * SET_W,
+      x: (SPOT_AT[feature.spot] ?? 0.5) * frameW,
       y,
       s: scaleAtFeet(kind, y),
       band: row,
@@ -3254,13 +3315,14 @@ function buildSetAt(
     // side, and on past whatever it would then stand on; left out when
     // that is off the set.
     const focal = layout.focal?.x ?? 0.5;
-    const lo = (focal - FOCAL_HALF) * SET_W;
-    const hi = (focal + FOCAL_HALF) * SET_W;
+    const lo = (focal - FOCAL_HALF) * frameW;
+    const hi = (focal + FOCAL_HALF) * frameW;
     const settled = placings.filter((p) => !p.clutter);
     const scatter = placings
       .filter((p) => p.clutter)
       .sort(
-        (a, b) => Math.abs(a.x - focal * SET_W) - Math.abs(b.x - focal * SET_W),
+        (a, b) =>
+          Math.abs(a.x - focal * frameW) - Math.abs(b.x - focal * frameW),
       );
     const dropped = new Set<Placing>();
     for (const one of scatter) {
@@ -3277,7 +3339,7 @@ function buildSetAt(
       }
       // Past what it would overlap in its own band, the same way; else the
       // other way, while that keeps it out of where the action is.
-      way ||= one.x < focal * SET_W ? -1 : 1;
+      way ||= one.x < focal * frameW ? -1 : 1;
       const from = one.x;
       const clearWay = (dir: number): boolean => {
         one.x = from;
@@ -3298,7 +3360,7 @@ function buildSetAt(
                     Math.min(b - a, d - c) * 0.45
                   );
                 });
-          if (!hit) return one.x >= 0 && one.x <= SET_W;
+          if (!hit) return one.x >= 0 && one.x <= frameW;
           const [c, d] = reachOf(hit);
           one.x += dir < 0 ? c - b : d - a;
         }
@@ -3325,7 +3387,7 @@ function buildSetAt(
       const one = placings[index];
       one.s = perMetre * (one.real ?? 1);
       notes.push(
-        `size: the ${one.kind ?? 'thing'} at ${Math.round((one.x / SET_W) * 100)}% made no larger, metre for metre, than what stands before it`,
+        `size: the ${one.kind ?? 'thing'} at ${Math.round((one.x / frameW) * 100)}% made no larger, metre for metre, than what stands before it`,
       );
     }
   }
@@ -3403,7 +3465,7 @@ function buildSetAt(
     // Each tuft of grass answers the world on the one layer it is seen on.
     layers.back.push(`<g>${tuftsWhere(ground, (y) => y < seam)}</g>`);
     layers.ground.push(
-      `<defs><clipPath id="near-ground"><rect x="${-20 - margin}" y="${r1(seam)}" width="${SET_W + 40 + margin * 2}" height="${r1(SET_H - seam + 40)}"/></clipPath></defs>` +
+      `<defs><clipPath id="near-ground"><rect x="${-20 - margin}" y="${r1(seam)}" width="${frameW + 40 + margin * 2}" height="${r1(frameH - seam + 40)}"/></clipPath></defs>` +
         `<g clip-path="url(#near-ground)"><g id="ground">${tuftsWhere(ground, (y) => y >= seam)}${flats}</g></g>`,
     );
   }
@@ -3492,8 +3554,8 @@ function buildSetAt(
       children: /\b(?:class ?rooms?|school|lessons?|pupils|children)\b/iu.test(
         words,
       ),
-      W: SET_W,
-      H: SET_H,
+      W: frameW,
+      H: frameH,
       feet: rows,
       unit: [scaleAtFeet(kind, rows[0]), scaleAtFeet(kind, rows[1])],
       // Clear of what stands on the floor (a desk, a bench), so none of
@@ -3515,8 +3577,8 @@ function buildSetAt(
       children: /\b(?:class ?rooms?|school|lessons?|pupils|children)\b/iu.test(
         words,
       ),
-      W: SET_W,
-      H: SET_H,
+      W: frameW,
+      H: frameH,
     });
     // On its layer only: the flat picture's ground is read by what stands
     // on it (measureGround), and rows of heads across its foot are none of it.
@@ -3537,7 +3599,7 @@ function buildSetAt(
       : '') +
     (layout.livery ? ` data-livery="${layout.livery}"` : '');
   const svg =
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${SET_W} ${SET_H}"${world}>` +
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${frameW} ${frameH}"${world}>` +
     `<g stroke="${FIGURE_INK}" stroke-width="${INK_W}" stroke-linejoin="round" stroke-linecap="round">${out.join('')}</g></svg>`;
   // Nearer, the larger its things are drawn.
   const nearness = fore.length
@@ -3600,7 +3662,7 @@ function buildSetAt(
     parts,
     layered: {
       layers: layerList,
-      width: SET_W + margin * 2,
+      width: frameW + margin * 2,
       // Where the wide shot centres: only a set wider than the frame pans to it.
       ...(layout.focal && margin ? { focal: layout.focal.x } : {}),
       floor: floorOf(kind),
@@ -3680,19 +3742,19 @@ function landmarkPlacing(
         ? floor + 2
         : rowFeet(kind, row);
   const [, vy, vw, vh] = piece.viewBox;
-  let s = spec.span === 'w' ? (size * SET_W) / vw : (size * SET_H) / vh;
+  let s = spec.span === 'w' ? (size * frameW) / vw : (size * frameH) / vh;
   if (row === 'far') s *= 0.6;
   // Never much above the frame's top: what would not fit is made smaller.
-  const room = y - SET_H * 0.04;
+  const room = y - frameH * 0.04;
   if (-vy * s > room) s = room / -vy;
   let x = item.x;
-  const half = (vw * s) / 2 / SET_W;
+  const half = (vw * s) / 2 / frameW;
   if (row === 'middle' && x > 0.3 - half && x < 0.7 + half)
     x = x < 0.5 ? Math.max(half, 0.16) : Math.min(1 - half, 0.84);
   return {
     piece,
     kind: build.kind,
-    x: x * SET_W,
+    x: x * frameW,
     y,
     s,
     band: row === 'far' ? 'far' : onEdge ? 'horizon' : row,
@@ -3924,7 +3986,7 @@ function marginItems(
   margin: number,
 ): Scattered[] {
   const random = seeded(`${place.id}:${place.name}:beyond`);
-  const side = margin / SET_W;
+  const side = margin / frameW;
   const outdoor = (place.kind ?? 'outdoor') === 'outdoor';
   const painted = layout.items
     .filter(

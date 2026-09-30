@@ -11,6 +11,7 @@ import {
 } from '../../business/domain/studio/studio';
 import type { SheetProblem } from '../../business/domain/studio/studio-check';
 import { pickOf } from '../../business/domain/studio/studio-document';
+import { filmShapeOf } from '../../business/domain/scene-shape';
 import {
   EPISODE_PHASES,
   type EpisodeBusy,
@@ -102,6 +103,8 @@ export class SequelizeStudioRepository implements StudioRepository {
       thumbKey: row.thumbKey,
       activity: activityOf(row.activity),
       pages: pickOf(parsed(row.pages)),
+      shape: filmShapeOf(row.shape),
+      twinOf: row.twinOf ?? null,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };
@@ -128,6 +131,7 @@ export class SequelizeStudioRepository implements StudioRepository {
       madeHash: row.madeHash,
       durationMs: row.durationMs,
       activity: activityOf(row.activity),
+      ...(row.twinOf ? { twinOf: row.twinOf } : {}),
       updatedAt: row.updatedAt,
     };
   }
@@ -209,6 +213,8 @@ export class SequelizeStudioRepository implements StudioRepository {
     title: string;
     phase: EpisodePhase;
     pages?: StudioEpisodeRecord['pages'];
+    shape?: StudioEpisodeRecord['shape'];
+    twinOf?: string | null;
   }): Promise<StudioEpisodeRecord> {
     const row = await this.episodes.create({
       id: newId(),
@@ -225,6 +231,8 @@ export class SequelizeStudioRepository implements StudioRepository {
       durationMs: null,
       thumbKey: null,
       pages: json(input.pages ?? null),
+      shape: filmShapeOf(input.shape),
+      twinOf: input.twinOf ?? null,
     } as never);
     return this.episode(row);
   }
@@ -370,6 +378,48 @@ export class SequelizeStudioRepository implements StudioRepository {
         where: { id: of.episodeId },
         silent: true,
       });
+  }
+
+  async syncTwinScenes(
+    twinEpisodeId: string,
+    lead: readonly Pick<StudioSceneRecord, 'id' | 'position' | 'sheet'>[],
+  ): Promise<StudioSceneRecord[]> {
+    const kept = await this.scenes.findAll({
+      where: { episodeId: twinEpisodeId },
+    });
+    const byLead = new Map(kept.map((row) => [row.twinOf, row]));
+    const leads = new Set(lead.map((one) => one.id));
+    // One whose scene is gone, or kept before twins were linked: out.
+    for (const row of kept)
+      if (!row.twinOf || !leads.has(row.twinOf)) await row.destroy();
+    for (const one of lead) {
+      const row = byLead.get(one.id);
+      const sheet = json(one.sheet);
+      if (row) {
+        if (row.position !== one.position || row.sheet !== sheet)
+          await row.update({ position: one.position, sheet });
+        continue;
+      }
+      await this.scenes.create({
+        id: newId(),
+        episodeId: twinEpisodeId,
+        position: one.position,
+        sheet,
+        sheetHash: null,
+        problems: null,
+        previousSheet: null,
+        status: 'ready',
+        step: null,
+        error: null,
+        sceneKey: null,
+        audioKey: null,
+        thumbKey: null,
+        madeHash: null,
+        durationMs: null,
+        twinOf: one.id,
+      } as never);
+    }
+    return this.listScenes(twinEpisodeId);
   }
 
   async insertScene(

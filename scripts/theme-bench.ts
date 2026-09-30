@@ -31,10 +31,8 @@ import {
   type ThemeId,
 } from '../src/business/domain/scene-themes';
 import { allThemeProblems } from '../src/business/domain/theme-check';
-import {
-  bandOfAudience,
-  themeFor,
-} from '../src/business/domain/studio/studio-look';
+import { themeFor } from '../src/business/domain/studio/studio-look';
+import { AUDIENCE_BAND } from '../src/business/domain/studio/studio-audience';
 import type { StudioAudience } from '../src/business/domain/studio/studio';
 
 /** How wide each still is, in pixels. */
@@ -182,7 +180,7 @@ async function main(): Promise<void> {
     const name = basename(dirname(fixture.path));
     const chosen = themeFor({
       subject: fixture.subject || scene.title,
-      band: bandOfAudience(fixture.audience),
+      band: AUDIENCE_BAND[fixture.audience],
       maths: fixture.maths ?? false,
     });
     const cells: Cell[] = [];

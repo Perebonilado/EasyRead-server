@@ -6,6 +6,7 @@
  * made is said in plain words.
  */
 import type {
+  StudioActivityDto,
   StudioBibleDto,
   StudioBriefDto,
   StudioEpisodeDto,
@@ -29,6 +30,7 @@ import {
 import { carriedWears, checkExplainer } from '../../domain/studio/studio-check';
 import type { SceneThing } from '../../domain/scene-script';
 import type {
+  StudioActivity,
   StudioEpisodeRecord,
   StudioMessageRecord,
   StudioSceneRecord,
@@ -51,6 +53,8 @@ export function sceneFingerprint(
       subject: bible?.subject ?? '',
       maths: bible?.maths ?? false,
       audience: brief.audience,
+      // Whom it teaches, where the maker said more than the four words.
+      ...(brief.who ? { who: brief.who } : {}),
     });
   const who = new Set([
     ...sheet.onStage.map((p) => p.who),
@@ -102,6 +106,7 @@ export function briefDto(brief: StudioBrief): StudioBriefDto {
     characters: brief.characters,
     include: brief.include,
     sourceChars: brief.source?.length ?? 0,
+    ...(brief.who ? { who: { ...brief.who } } : {}),
     ...Object.fromEntries(
       BRIEF_CONTROLS.flatMap((key) => (brief[key] ? [[key, brief[key]]] : [])),
     ),
@@ -220,6 +225,57 @@ export function sheetDto(
   return sheet.kind === 'explainer' ? explainerCard(sheet, teach) : sheet;
 }
 
+/** How long something said holds with nothing said since: a job's word, not a record. */
+const ACTIVITY_HOLDS_MS = 30 * 60_000;
+
+/**
+ * What is being done now, as the maker's page shows it: only while there
+ * is work in hand, not left over from a job that died, and, about a
+ * scene, only while its sheet is the one it was said of.
+ */
+export function activityDto(
+  activity: StudioActivity | null | undefined,
+  working: boolean,
+  now: Date = new Date(),
+  sheetHash?: string | null,
+): StudioActivityDto | null {
+  if (!activity || !working) return null;
+  const at = Date.parse(activity.at);
+  if (!Number.isFinite(at) || now.getTime() - at > ACTIVITY_HOLDS_MS)
+    return null;
+  if (
+    sheetHash !== undefined &&
+    activity.sheetHash !== undefined &&
+    activity.sheetHash !== sheetHash
+  )
+    return null;
+  if (!activity.says && !activity.retry) return null;
+  const retry = activity.retry;
+  return {
+    says: activity.says || null,
+    short: activity.short ?? null,
+    retry: retry
+      ? {
+          says: retry.says,
+          reason: retry.reason,
+          attempt: retry.attempt ?? null,
+          of: retry.of ?? null,
+          waitSeconds: retry.waitSeconds ?? null,
+          final: retry.final === true,
+        }
+      : null,
+    at: activity.at,
+  };
+}
+
+/** Whether an episode has work in hand: its own, or a scene's being written or made. */
+const workingOn = (
+  episode: StudioEpisodeRecord,
+  scenes: readonly StudioSceneRecord[],
+) =>
+  Boolean(episode.busy) ||
+  scenes.some((s) => s.status === 'writing' || s.status === 'making');
+
 export function sceneDto(
   scene: StudioSceneRecord,
   episode: StudioEpisodeRecord,
@@ -249,6 +305,14 @@ export function sceneDto(
         : (planned?.seconds ?? 0),
     durationMs: scene.durationMs,
     canUndo: Boolean(scene.previousSheet),
+    activity: activityDto(
+      scene.activity,
+      Boolean(episode.busy) ||
+        scene.status === 'writing' ||
+        scene.status === 'making',
+      new Date(),
+      scene.sheetHash,
+    ),
   };
 }
 
@@ -318,6 +382,7 @@ export function episodeDto(
       .reduce((n, s) => n + (s.sheet ? secondsOf(s.sheet) : 0), 0),
     blockers: blockersOf(episode, scenes, bible, brief),
     hasThumb: Boolean(episode.thumbKey),
+    activity: activityDto(episode.activity, workingOn(episode, scenes)),
   };
 }
 
@@ -342,6 +407,7 @@ export function messageDto(message: StudioMessageRecord): StudioMessageDto {
       : null,
     content: message.content,
     choices: message.meta?.choices ?? [],
+    ...(message.meta?.also?.length ? { also: message.meta.also } : {}),
     refused: Boolean(message.meta?.refused),
     createdAt: message.createdAt.toISOString(),
   };

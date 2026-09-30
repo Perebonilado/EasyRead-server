@@ -7,6 +7,8 @@
  * keeps the sheet, and grows the show with what its words named.
  */
 import type { LlmGatewayPort, LlmUsage } from '../../ports/llm.port';
+import { progressNow } from '../../domain/work-progress';
+import { sendBackSays } from './studio-progress';
 import {
   storySheetOf,
   type StorySheet,
@@ -258,6 +260,9 @@ export async function writeStorySheet(
     log(
       `goes back: ${[...reasons.map((p) => p.message), ...failing].join(' ')}`,
     );
+    progressNow(
+      sendBackSays(k, [...reasons.map((p) => p.message), ...failing]),
+    );
     const again = await llm.studioScene({
       ...ask,
       previous: first.value,
@@ -277,6 +282,7 @@ export async function writeStorySheet(
       ...(request ? { request } : {}),
     });
     await record(again.usage);
+    progressNow({ scene: k, done: true });
     const second = judged(again.value);
     // What the stage can play first; then the lines that do more.
     const staged = worse(second.problems, best.problems);

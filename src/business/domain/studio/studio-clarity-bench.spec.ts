@@ -35,6 +35,15 @@ import {
   unclear,
 } from './studio-script';
 import { premiseOf, type StudioStory } from './studio-story';
+import {
+  audienceIn,
+  checksAt,
+  describeAudience,
+  heardWho,
+  recipeFor,
+} from './studio-audience';
+import { measurePlain, plainExplainer } from './studio-plain';
+import { explainerSheetOf } from './studio';
 
 interface Fixture {
   id: string;
@@ -380,4 +389,127 @@ describe('"Due by Midnight", rebuilt from the worker log', () => {
       /Maya says "The rent is on the table\." to no one, alone/,
     );
   });
+});
+
+/**
+ * Four explainer briefs of the plan (Ask 8): a grade 5 class on the water
+ * cycle, teens on equations, a first-year nursing student new to blood
+ * pressure, and an adult learning English on budgets. Each is its maker's
+ * words, its outline's scenes, and narration as a writer for that
+ * audience would give it. Scored by code alone: whom the words say it is
+ * for, where the checks for understanding fall, and whether each scene's
+ * words are plain enough for them. No model is called.
+ */
+interface ExplainerFixture {
+  id: string;
+  said: string;
+  expect: Record<string, string>;
+  pictures: string[];
+  scenes: {
+    seconds: number;
+    teach: string;
+    says: string[];
+    question?: number;
+  }[];
+}
+
+const explainerDir = join(__dirname, '__fixtures__', 'explainer-bench');
+const explainers: ExplainerFixture[] = readdirSync(explainerDir)
+  .filter((f) => f.endsWith('.json'))
+  .map(
+    (f) =>
+      JSON.parse(
+        readFileSync(join(explainerDir, f), 'utf8'),
+      ) as ExplainerFixture,
+  );
+
+describe('the explainer bench, by code (Ask 8)', () => {
+  it('has the four briefs of the plan', () => {
+    expect(explainers.map((fx) => fx.id).sort()).toEqual([
+      'adult-english-budgets',
+      'grade5-water-cycle',
+      'nursing-blood-pressure',
+      'teen-algebra',
+    ]);
+  });
+
+  describe.each(explainers.map((fx) => [fx.id, fx] as const))(
+    '%s',
+    (_id, fx) => {
+      const who = heardWho(audienceIn(fx.said), undefined)!;
+      const recipe = recipeFor(who);
+      const checks = checksAt(fx.scenes, recipe, who);
+
+      it('hears whom it is for from the maker’s words', () => {
+        expect(who).toMatchObject(fx.expect);
+        expect(describeAudience(who)).toContain(recipe.reader);
+      });
+
+      it('asks the viewer a question where the recipe spaces the checks, and nowhere else', () => {
+        expect(checks).toEqual(fx.scenes.map((s) => s.question !== undefined));
+      });
+
+      it('keeps every scene’s words plain enough for them, with nothing for code to fix', () => {
+        fx.scenes.forEach((scene, k) => {
+          const sheet = explainerSheetOf({
+            kind: 'explainer',
+            draft: {
+              fit: 'good',
+              fitReason: null,
+              title: `Scene ${k + 1}`,
+              mood: 'curious',
+              beats: scene.says.map((say, b) => ({
+                say,
+                pause: 'short',
+                delivery: b === scene.question ? 'question' : 'explain',
+              })),
+              cast: [],
+              steps: [],
+            },
+          });
+          const out = plainExplainer(sheet, {
+            recipe,
+            material: scene.teach,
+            terms: fx.pictures,
+            check: checks[k],
+          });
+          expect([k, out.fixes, out.problems]).toEqual([k, [], []]);
+          expect(out.measure.longest).toBeLessThanOrEqual(recipe.sentence[1]);
+        });
+        const film = measurePlain(fx.scenes.flatMap((s) => s.says).join(' '), {
+          terms: fx.pictures,
+          material: fx.scenes.map((s) => s.teach).join(' '),
+        });
+        expect(film.grade).toBeLessThanOrEqual(recipe.grade + 1);
+      });
+
+      it('would send a university page given to them back, alongside the rest, if it is above them', () => {
+        const hard = explainerSheetOf({
+          kind: 'explainer',
+          draft: {
+            fit: 'good',
+            fitReason: null,
+            title: 'Hard',
+            mood: 'curious',
+            beats: [
+              {
+                say: 'The hydrological cycle constitutes a continuous circulation of water, driven primarily by solar radiation and gravitational forces, whereby evaporation transports substantial quantities of moisture into the atmosphere.',
+                pause: 'short',
+                delivery: 'explain',
+              },
+            ],
+            cast: [],
+            steps: [],
+          },
+        });
+        const out = plainExplainer(hard, { recipe });
+        expect(out.problems.length).toBeGreaterThan(0);
+        expect(
+          out.problems.every(
+            (p) => p.rule === 'plain' && p.level === 'warning',
+          ),
+        ).toBe(true);
+      });
+    },
+  );
 });

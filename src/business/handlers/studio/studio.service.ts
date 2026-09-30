@@ -1,7 +1,13 @@
-import { isStoryChange, keptPersonas } from '../../domain/studio/studio-story';
+import { scoreOf } from '../../domain/studio/studio-score';
+import {
+  isStoryChange,
+  keptPersonas,
+  storyOf,
+} from '../../domain/studio/studio-story';
 import { narratorRuleOf } from '../../domain/studio/studio-narrator';
 import { heardBrief } from '../../domain/studio/studio-heard';
 import { lookHeard, showTheme } from '../../domain/studio/studio-look';
+import { audienceChips, whoHeard } from '../../domain/studio/studio-audience';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { randomBytes, randomUUID } from 'node:crypto';
 import type {
@@ -390,6 +396,8 @@ export class StudioService {
       if (key in patch && (patch[key] === null || patch[key] === ''))
         delete brief[key];
     if (brief.narrator !== 'character') delete brief.narratorCharacter;
+    // Whom it is for, taken back: the four words stay.
+    if ('who' in patch && patch.who === null) delete brief.who;
     await this.studio.updateShow(show.id, { brief, format: brief.format });
     return this.showDto({ ...show, brief, format: brief.format });
   }
@@ -544,11 +552,10 @@ export class StudioService {
       : text.slice(0, MESSAGE_CHARS);
     // What the buttons did is in it too, a line each from the Studio; the
     // message now is its own, even if work finished just after it came.
-    const history = historyOf(
-      (await this.studio.listMessages(show.id, 17)).filter(
-        (m) => m.id !== mine.id,
-      ),
+    const before = (await this.studio.listMessages(show.id, 17)).filter(
+      (m) => m.id !== mine.id,
     );
+    const history = historyOf(before);
     const scenes = await this.studio.listScenes(episode.id);
     const carried = carriedWears(scenes, show.bible);
     const state = describeForProducer({
@@ -614,6 +621,27 @@ export class StudioService {
       brief,
     );
     if (pasted) brief = { ...brief, source: text.slice(0, SOURCE_CHARS) };
+    // Whom it is for, heard by code from the maker's own words (a grade, a
+    // year, an age, a course, a job; what they know, their English), as
+    // the brief is gathered or when the producer took them as a new
+    // audience; never from a name or a place.
+    // Their own text is not their words: only the level it names counts.
+    const makerSaid = [
+      ...before
+        .filter(
+          (m) =>
+            m.role === 'user' &&
+            m.episodeId === episode.id &&
+            m.content.length < SOURCE_AT,
+        )
+        .map((m) => m.content),
+      pasted ? '' : said,
+    ].join('\n');
+    if (episode.phase === 'brief' || brief.audience !== show.brief.audience)
+      brief = briefOf(
+        { who: whoHeard(brief, pasted ? '' : said, makerSaid) },
+        brief,
+      );
     // An explainer's look asked for in words, at any phase: "make it
     // dark" is the dark one of the look it has now.
     const look = pasted
@@ -803,9 +831,17 @@ export class StudioService {
           scenes.some((s) => s.sceneKey),
         ),
       meta: {
-        choices: note
-          ? []
-          : draft.choices.slice(0, 5).map((c) => c.slice(0, 40)),
+        // An explainer's audience is asked with its own chips: one row,
+        // and what they know as a second only when nothing said it yet.
+        ...(note || draft.refuse || draft.action !== 'none'
+          ? {
+              choices: note
+                ? []
+                : draft.choices.slice(0, 5).map((c) => c.slice(0, 40)),
+            }
+          : (audienceChips(brief, makerSaid) ?? {
+              choices: draft.choices.slice(0, 5).map((c) => c.slice(0, 40)),
+            })),
         action: draft.action,
         refused: draft.refuse,
       },
@@ -1084,6 +1120,16 @@ export class StudioService {
       if (!(await this.studio.claimEpisode(episode.id, 'script')))
         return 'One moment: I am still working on it.';
       await this.studio.updateEpisode(episode.id, { phase: 'script' });
+      await this.enqueue(show, episode, { kind: 'script' });
+      return null;
+    }
+    // The script's job gave up with scenes left unwritten: asked again
+    // (the thread's "Try again"), it is written again.
+    if (episode.phase === 'script') {
+      const scenes = await this.studio.listScenes(episode.id);
+      if (!scenes.some((s) => s.status === 'failed' && !s.sheet)) return null;
+      if (!(await this.studio.claimEpisode(episode.id, 'script')))
+        return 'One moment: I am still working on it.';
       await this.enqueue(show, episode, { kind: 'script' });
       return null;
     }
@@ -1812,6 +1858,20 @@ export class StudioService {
     scenes: StudioSceneRecord[],
     watermark: boolean,
   ): StudioPlayDto {
+    const made = scenes.filter((s) => s.sceneKey && s.audioKey && s.durationMs);
+    // The film's music is scored from its story: a story's, never an explainer's.
+    const story =
+      show.brief.format !== 'explainer'
+        ? storyOf(episode.outline?.story)
+        : null;
+    const score = story
+      ? scoreOf({
+          brief: show.brief,
+          story,
+          cast: show.bible?.characters ?? [],
+          scenes: made,
+        })
+      : undefined;
     return {
       episodeId: episode.id,
       title: episode.title,
@@ -1820,16 +1880,15 @@ export class StudioService {
       watermark,
       madeWith: MADE_WITH,
       ...themeOfShow(show),
-      scenes: scenes
-        .filter((s) => s.sceneKey && s.audioKey && s.durationMs)
-        .map((s, i, made) => ({
-          id: s.id,
-          title: s.sheet?.title ?? `Scene ${s.position + 1}`,
-          durationMs: s.durationMs!,
-          transition: s.sheet?.transition ?? 'cut',
-          // From the scene the film shows before it; the first comes up from black.
-          join: i ? joinOf(made[i - 1].sheet, s.sheet) : 'dip',
-        })),
+      ...(score ? { score } : {}),
+      scenes: made.map((s, i) => ({
+        id: s.id,
+        title: s.sheet?.title ?? `Scene ${s.position + 1}`,
+        durationMs: s.durationMs!,
+        transition: s.sheet?.transition ?? 'cut',
+        // From the scene the film shows before it; the first comes up from black.
+        join: i ? joinOf(made[i - 1].sheet, s.sheet) : 'dip',
+      })),
     };
   }
 

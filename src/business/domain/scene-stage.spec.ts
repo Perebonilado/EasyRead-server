@@ -24,6 +24,31 @@ describe('the level a document names', () => {
       expect([text, levelIn(text)?.stage]).toEqual([text, stage]);
   });
 
+  it('reads the rest of the world’s names too, so no region is the default', () => {
+    const cases: [string, string][] = [
+      ['Fractions for 5th graders', 'early'],
+      ['A fourth-grade reading unit', 'early'],
+      ['Eighth grade science: forces', 'middle'],
+      ['AP Biology unit 3: cellular energetics', 'middle'],
+      ['IB Diploma Chemistry, Topic 5', 'middle'],
+      ['MYP Year 3 sciences', 'middle'],
+      ['PYP unit of inquiry: how we organise ourselves', 'early'],
+      ['Sixth form physics: circular motion', 'middle'],
+      ['Junior high earth science', 'middle'],
+      ["Bachelor's degree module: microeconomics", 'higher'],
+      ['For first-year university students: calculus', 'higher'],
+      ['Continuing medical education: sepsis bundles', 'professional'],
+      ['Year 4 maths, for primary school', 'early'],
+      ['CBSE Class 10 science: light', 'middle'],
+      ['Freshman seminar, fall semester', 'higher'],
+    ];
+    for (const [text, stage] of cases)
+      expect([text, levelIn(text)?.stage]).toEqual([text, stage]);
+    // One loose sign is still not enough.
+    expect(levelIn('Year 4 of the project')).toBeNull();
+    expect(levelIn('SAT')).toBeNull();
+  });
+
   it('needs two signs where one could mean something else', () => {
     // A tumour has grades, a study has years.
     expect(levelIn('A grade 4 glioma in year 10 of the study')).toBeNull();

@@ -5,6 +5,10 @@ import { pcmMs, readPcm16 } from '../../business/domain/wav';
 import { CARTESIA_NARRATOR } from '../../business/domain/scene-voice';
 import { encodeMp3 } from './audio/mp3';
 import {
+  noticeRecovered,
+  noticeRetry,
+} from '../../business/domain/work-progress';
+import {
   withSilences,
   type SpokenLine,
 } from './elevenlabs-scene-speech.adapter';
@@ -645,6 +649,7 @@ export class CartesiaSceneSpeechAdapter implements SpeechPort {
             : 200
           : response.status;
         if (status === 200) {
+          noticeRecovered('voice');
           const events = sseEvents(said);
           const audio = Buffer.concat(
             events
@@ -691,6 +696,14 @@ export class CartesiaSceneSpeechAdapter implements SpeechPort {
         this.logger.warn(
           `attempt ${attempt} of ${ATTEMPTS} failed: ${lastError.message}`,
         );
+        if (attempt < ATTEMPTS)
+          noticeRetry({
+            service: 'voice',
+            attempt: attempt + 1,
+            of: ATTEMPTS,
+            waitMs: wait,
+            error: lastError,
+          });
       } finally {
         leave();
       }

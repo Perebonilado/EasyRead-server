@@ -5,6 +5,10 @@ import { pcmMs, readPcm16, readWav } from '../../business/domain/wav';
 import { readFileSync } from 'fs';
 import { JWT } from 'google-auth-library';
 import { encodeMp3 } from './audio/mp3';
+import {
+  noticeRecovered,
+  noticeRetry,
+} from '../../business/domain/work-progress';
 
 /** The Gemini API's home. */
 const BASE = 'https://generativelanguage.googleapis.com/v1beta';
@@ -41,9 +45,10 @@ async function paced(perMinute: number): Promise<void> {
       sentAt.push(now);
       return;
     }
-    await new Promise((resolve) =>
-      setTimeout(resolve, 60_000 - (now - sentAt[0]) + 250),
-    );
+    const wait = 60_000 - (now - sentAt[0]) + 250;
+    // Waiting its turn is said, so a scene held here is not taken for stuck.
+    noticeRetry({ service: 'voice', status: 429, waiting: true, waitMs: wait });
+    await new Promise((resolve) => setTimeout(resolve, wait));
   }
 }
 
@@ -780,7 +785,10 @@ export class GeminiSpeechAdapter implements SpeechPort {
           body: JSON.stringify(body),
           signal: AbortSignal.timeout(GeminiSpeechAdapter.REQUEST_MS),
         });
-        if (response.ok) return (await response.json()) as unknown;
+        if (response.ok) {
+          noticeRecovered('voice');
+          return (await response.json()) as unknown;
+        }
         const reason = reasonIn(await response.text());
         if (response.status === 401 || response.status === 403)
           throw refused(
@@ -819,8 +827,16 @@ export class GeminiSpeechAdapter implements SpeechPort {
         this.logger.warn(
           `attempt ${attempt} of ${GeminiSpeechAdapter.ATTEMPTS} failed: ${lastError.message}`,
         );
-        if (attempt < GeminiSpeechAdapter.ATTEMPTS)
+        if (attempt < GeminiSpeechAdapter.ATTEMPTS) {
+          noticeRetry({
+            service: 'voice',
+            attempt: attempt + 1,
+            of: GeminiSpeechAdapter.ATTEMPTS,
+            waitMs: wait,
+            error: lastError,
+          });
           await new Promise((resolve) => setTimeout(resolve, wait));
+        }
       }
     }
     throw lastError ?? new Error('The Gemini voice did not answer');

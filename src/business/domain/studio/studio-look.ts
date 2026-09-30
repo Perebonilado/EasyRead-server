@@ -8,38 +8,8 @@
  * so a new look plays at once.
  */
 import { THEMES, THEME_IDS, themeOf, type ThemeId } from '../scene-themes';
-import type { StudioAudience, StudioBrief, StudioTone } from './studio';
-
-/**
- * Whom an explainer is for, finer than the brief's audience (the audience
- * profile's bands, studio-explainer-plan Ask 8). Until the profile is in
- * the brief, a band is read from the audience (bandOfAudience).
- */
-export type AudienceBand =
-  | 'early-years'
-  | 'primary-lower'
-  | 'primary-upper'
-  | 'secondary-lower'
-  | 'secondary-upper'
-  | 'university'
-  | 'professional'
-  | 'general-adult';
-
-/** The band a brief's audience stands for: its middle. */
-export function bandOfAudience(
-  audience: StudioAudience | null | undefined,
-): AudienceBand {
-  switch (audience) {
-    case 'young children':
-      return 'early-years';
-    case 'children':
-      return 'primary-upper';
-    case 'teens':
-      return 'secondary-lower';
-    default:
-      return 'general-adult';
-  }
-}
+import type { StudioBrief, StudioTone } from './studio';
+import { bandOf, type AudienceBand } from './studio-audience';
 
 const CHILDREN: readonly AudienceBand[] = [
   'early-years',
@@ -102,7 +72,8 @@ export function showTheme(
   if (brief.look) return brief.look;
   return themeFor({
     subject: bible?.subject || brief.idea,
-    band: bandOfAudience(brief.audience),
+    // Whom it is for (the audience profile); a grown-up until that is said.
+    band: bandOf(brief) ?? 'general-adult',
     maths: bible?.maths ?? false,
     tone: brief.tone,
   });

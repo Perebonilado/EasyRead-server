@@ -1,0 +1,39 @@
+{
+  "id": "teen-algebra",
+  "said": "Solving equations for teens, they already know the basics",
+  "expect": { "band": "secondary-lower", "prior": "some" },
+  "pictures": ["balance scale"],
+  "scenes": [
+    {
+      "seconds": 40,
+      "teach": "An equation says two things are equal, like a balance scale that is level. To solve it, we find the value of the unknown, x, that keeps both sides equal.",
+      "says": [
+        "Think of an equation as a balance scale that stays level.",
+        "Both sides always weigh the same.",
+        "Our job is to find the number hiding behind x.",
+        "Whatever we do to one side, we must do to the other."
+      ]
+    },
+    {
+      "seconds": 40,
+      "teach": "Take x + 5 = 12. Subtract 5 from both sides to leave x on its own: x = 7. Check it: 7 + 5 = 12.",
+      "says": [
+        "Take x plus five equals twelve.",
+        "Subtract five from both sides.",
+        "Now x is on its own, and x equals seven.",
+        "Check it: seven plus five really is twelve."
+      ]
+    },
+    {
+      "seconds": 40,
+      "teach": "With 3x = 21, divide both sides by 3 to get x = 7. Undo each step with its opposite: adding undoes subtracting, and dividing undoes multiplying.",
+      "says": [
+        "Now try three x equals twenty-one.",
+        "What should we do to both sides to get x alone?",
+        "We divide both sides by three, so x equals seven.",
+        "Each step is undone by its opposite."
+      ],
+      "question": 1
+    }
+  ]
+}

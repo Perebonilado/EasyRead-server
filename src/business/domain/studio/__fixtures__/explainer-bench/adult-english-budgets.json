@@ -1,0 +1,36 @@
+{
+  "id": "adult-english-budgets",
+  "said": "Budgets for an adult learning English",
+  "expect": { "band": "general-adult", "language": "learning" },
+  "pictures": ["budget"],
+  "scenes": [
+    {
+      "seconds": 30,
+      "teach": "A budget is a plan for your money. You write down the money that comes in, your income, and the money that goes out, your spending.",
+      "says": [
+        "A budget is a plan for your money.",
+        "First, write down the money you get.",
+        "This is your income.",
+        "Next, write down the money you spend."
+      ]
+    },
+    {
+      "seconds": 30,
+      "teach": "Group your spending: needs, like rent and food, and wants, like new clothes or meals out. Pay for needs first.",
+      "says": [
+        "Some things you need, like rent and food.",
+        "Some things you want, like new clothes.",
+        "Pay for the things you need first."
+      ]
+    },
+    {
+      "seconds": 30,
+      "teach": "If you spend less than your income, you can save the rest. Check your budget every month and change it when your life changes.",
+      "says": [
+        "Try to spend less than your income.",
+        "Then you can save the rest.",
+        "Look at your budget every month."
+      ]
+    }
+  ]
+}

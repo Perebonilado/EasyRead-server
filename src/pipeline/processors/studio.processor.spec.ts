@@ -1331,3 +1331,148 @@ describe('the cast drawn by the artist, at the cast step and again as asked', ()
     ]);
   });
 });
+
+describe("an explainer's scene written for whom it teaches (Ask 8)", () => {
+  const usage = { model: 'm', tokensIn: 1, tokensOut: 1, latencyMs: 1 };
+  const HARD =
+    'The hydrological cycle constitutes a continuous circulation of water, which is driven primarily by solar radiation; evaporation from oceanic surfaces transports substantial quantities of moisture into the atmosphere.';
+  const card = (id: string, name: string) => ({
+    id,
+    kind: 'words',
+    name,
+    style: 'keyword',
+  });
+  const draft = (say: string, steps: boolean) => ({
+    fit: 'good',
+    fitReason: null,
+    title: 'The cycle',
+    mood: 'curious',
+    beats: [{ say, pause: 'short', delivery: 'explain' }],
+    cast: [card('cycle', 'water cycle'), card('sea', 'evaporation')],
+    steps: steps
+      ? [
+          {
+            beat: 0,
+            phrase: 'hydrological cycle',
+            layout: 'one',
+            show: ['cycle'],
+            arrows: null,
+            effects: null,
+          },
+          {
+            beat: 0,
+            phrase: 'evaporation from',
+            layout: 'one',
+            show: ['sea'],
+            arrows: null,
+            effects: null,
+          },
+        ]
+      : [],
+  });
+
+  /** The writer, mocked: each call answers with the next draft. No model is called. */
+  function writing(drafts: unknown[]) {
+    const asked: { profile: string; problems?: string[] }[] = [];
+    const saved: Partial<StudioSceneRecord>[] = [];
+    const processor = new StudioProcessor(
+      {
+        updateScene: (_id: string, patch: Partial<StudioSceneRecord>) => {
+          saved.push(patch);
+          return Promise.resolve();
+        },
+      } as unknown as StudioRepository,
+      {
+        sceneScript: (input: { profile: string; problems?: string[] }) => {
+          asked.push(input);
+          return Promise.resolve({
+            value: drafts[Math.min(asked.length, drafts.length) - 1],
+            usage,
+          });
+        },
+      } as unknown as LlmGatewayPort,
+      { record: () => Promise.resolve() },
+      {} as never,
+      {} as SceneProcessor,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+    const show = {
+      id: 's1',
+      userId: 'u1',
+      title: 'Water',
+      format: 'explainer',
+      brief: briefOf({
+        format: 'explainer',
+        idea: 'The water cycle',
+        who: { band: 'primary-upper', said: 'Grade 5' },
+        minutes: 1.5,
+        tone: 'calm',
+      }),
+      bible: null,
+      createdAt: at,
+      updatedAt: at,
+    } as StudioShowRecord;
+    const water = outlineOf({
+      title: 'Water',
+      logline: 'Where rain comes from.',
+      scenes: [30, 30, 30].map((seconds, k) => ({
+        title: `Scene ${k + 1}`,
+        summary: 'The water cycle.',
+        seconds,
+        teach: 'The sun warms water and it rises as water vapour.',
+        points: [],
+      })),
+    });
+    const write = (k: number) =>
+      (
+        processor as unknown as {
+          writeExplainerScene: (...args: unknown[]) => Promise<unknown>;
+        }
+      ).writeExplainerScene(
+        show,
+        { id: 'e1', number: 1 },
+        water,
+        bibleOf({ subject: 'The water cycle' }),
+        { id: `c${k}`, position: k, sheet: null },
+        k,
+      );
+    return { asked, saved, write };
+  }
+
+  it('tells the writer the recipe, and splits a too-long sentence by code without sending it back for words alone', async () => {
+    const { asked, saved, write } = writing([draft(HARD, true)]);
+    await write(0);
+    expect(asked).toHaveLength(1);
+    expect(asked[0].profile).toMatch(
+      /eight to eleven[^\n]*The maker said "Grade 5"/,
+    );
+    expect(asked[0].profile).toMatch(/no question for the viewer/);
+    const sheet = saved[0].sheet as { draft: { beats: { say: string }[] } };
+    expect(sheet.draft.beats.length).toBeGreaterThan(1);
+    expect(sheet.draft.beats[0].say).toBe(
+      'The hydrological cycle constitutes a continuous circulation of water.',
+    );
+    // What is still too hard is never shown to the maker.
+    expect(saved[0].problems?.some((p) => p.rule === 'plain')).toBe(false);
+  });
+
+  it('lets what is too hard ride along when the scene goes back anyway', async () => {
+    const { asked, write } = writing([
+      draft(HARD, false),
+      draft('The sun warms the sea.', true),
+    ]);
+    await write(2);
+    expect(asked).toHaveLength(2);
+    // The last scene of a grade 5 film asks them a question.
+    expect(asked[0].profile).toMatch(/this scene asks the viewer one question/);
+    expect(asked[1].problems).toEqual(
+      expect.arrayContaining([
+        'Nothing is ever shown on the stage.',
+        expect.stringMatching(/reads at about grade \d+; for these learners/),
+        expect.stringMatching(/Ask the viewer one question/),
+      ]),
+    );
+  });
+});

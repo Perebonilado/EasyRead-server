@@ -4,13 +4,8 @@
  * (studio-explainer-plan, Ask 2 §4).
  */
 import { EMPTY_BRIEF, briefOf, type StudioBrief } from './studio';
-import {
-  bandOfAudience,
-  lookHeard,
-  showTheme,
-  themeFor,
-  type AudienceBand,
-} from './studio-look';
+import { lookHeard, showTheme, themeFor } from './studio-look';
+import type { AudienceBand } from './studio-audience';
 import { briefDto } from '../../handlers/studio/studio-views';
 import { STUDIO_PROMPTS } from '../../../web/adapters/studio-prompts';
 import { studioTurnSchema } from '../../../web/adapters/ai-sdk/studio-schemas';
@@ -51,12 +46,26 @@ describe('the look code chooses', () => {
       expect(themeFor({ subject: 'computing: networks', band })).toBe('sunny');
   });
 
-  it('reads a band from the brief’s audience until the audience profile says one', () => {
-    expect(bandOfAudience('young children')).toBe('early-years');
-    expect(bandOfAudience('children')).toBe('primary-upper');
-    expect(bandOfAudience('teens')).toBe('secondary-lower');
-    expect(bandOfAudience('adults')).toBe('general-adult');
-    expect(bandOfAudience(null)).toBe('general-adult');
+  it('reads the band from the audience profile, else from the brief’s audience', () => {
+    const bible = { subject: 'maths: solving equations', maths: true };
+    // "Year 11" is secondary: its maths is on a chalkboard.
+    expect(
+      showTheme(
+        explainer({ audience: 'teens', who: { band: 'secondary-upper' } }),
+        bible,
+      ),
+    ).toBe('chalkboard');
+    // A university student's maths is not.
+    expect(
+      showTheme(
+        explainer({ audience: 'adults', who: { band: 'university' } }),
+        bible,
+      ),
+    ).toBe('paper');
+    expect(showTheme(explainer({ audience: 'teens' }), bible)).toBe(
+      'chalkboard',
+    );
+    expect(showTheme(explainer({ audience: null }), bible)).toBe('paper');
   });
 
   it('plays the maker’s look when they chose one, and none for a story', () => {

@@ -10,6 +10,13 @@ import { describeFigure } from '../scene-figure';
 import { DRAWN } from '../scene-own';
 import { STAGE_NAMES, STAGE_RECIPES, type LearningStage } from '../scene-stage';
 import { WORDS_A_SECOND } from './studio';
+import {
+  BAND_STAGE,
+  describeAudience,
+  describeRecipe,
+  whoLine,
+  type AudienceRecipe,
+} from './studio-audience';
 import { narratorWords } from './studio-narrator';
 import { describePersona } from './studio-story';
 import { controlWords, safetyWords } from './studio-style';
@@ -30,13 +37,22 @@ export function describeBrief(brief: StudioBrief): string {
   const lines = [
     `Format: ${brief.format ?? 'not decided'}`,
     `Idea: ${brief.idea || 'not said yet'}`,
-    `Audience: ${brief.audience ? `${brief.audience} (${STAGE_NAMES[AUDIENCE_STAGE[brief.audience]]})` : 'not said yet'}`,
+    `Audience: ${
+      brief.who
+        ? `${brief.audience ?? 'as said'} (${STAGE_NAMES[BAND_STAGE[brief.who.band]]}): ${whoLine(brief.who)}`
+        : brief.audience
+          ? `${brief.audience} (${STAGE_NAMES[AUDIENCE_STAGE[brief.audience]]})`
+          : 'not said yet'
+    }`,
     `Length of an episode: ${brief.minutes ? `${brief.minutes} minute${brief.minutes === 1 ? '' : 's'}` : 'not said yet'}`,
     `Tone: ${brief.tone ?? 'not said yet'}`,
   ];
   if (brief.setting) lines.push(`Setting: ${brief.setting}`);
   if (brief.characters) lines.push(`Characters: ${brief.characters}`);
   if (brief.include) lines.push(`To include: ${brief.include}`);
+  // Whom an explainer teaches, and how, as its recipe has it.
+  if (brief.format === 'explainer' && brief.who)
+    lines.push(`Teaching them:\n${describeAudience(brief.who)}`);
   // The maker's own controls, where they chose them; and what is safe for
   // this audience and genre.
   if (brief.format !== 'explainer') {
@@ -245,9 +261,24 @@ export function describeEarlier(
 export function describeScene(
   stage: LearningStage | null,
   seconds: number,
+  /** Whom it teaches, as the audience's recipe has it, and whether this scene asks them a question. */
+  audience: {
+    recipe: AudienceRecipe;
+    check: boolean;
+    said?: string;
+  } | null = null,
 ): string {
   const words = Math.max(20, Math.round(seconds * WORDS_A_SECOND));
   const budget = `This scene is spoken in about ${seconds} seconds: about ${words} spoken words in all, and never more than ${Math.round(words * 1.25)}. Say only what this scene teaches, in that many words; the scenes around it say the rest.`;
+  if (audience)
+    return [
+      describeRecipe(audience.recipe, {
+        seconds,
+        check: audience.check,
+        ...(audience.said ? { said: audience.said } : {}),
+      }),
+      budget,
+    ].join('\n');
   if (!stage) return budget;
   const r = STAGE_RECIPES[stage];
   return [

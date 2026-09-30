@@ -2860,6 +2860,8 @@ export interface StudioBriefDto {
   format: StudioFormatName | null;
   idea: string;
   audience: 'young children' | 'children' | 'teens' | 'adults' | null;
+  /** Whom it is for, as the maker said it (an explainer's): absent until said; `audience` is derived from it. */
+  who?: StudioAudienceDto;
   minutes: number | null;
   tone: 'funny' | 'gentle' | 'exciting' | 'serious' | 'calm' | null;
   setting: string | null;
@@ -2877,6 +2879,28 @@ export interface StudioBriefDto {
   style?: 'picture-book' | 'bold-cartoon' | 'sitcom' | 'adventure' | 'cosy';
   /** An explainer's look, as the maker chose it; absent, chosen by code from the subject and the audience. */
   look?: SceneThemeName;
+}
+
+/** The age bands of an audience, youngest first, then the grown-ups. */
+export type StudioAudienceBand =
+  | 'early-years'
+  | 'primary-lower'
+  | 'primary-upper'
+  | 'secondary-lower'
+  | 'secondary-upper'
+  | 'university'
+  | 'professional'
+  | 'general-adult';
+
+/** Whom an explainer is for: each field but the band absent until said. */
+export interface StudioAudienceDto {
+  band: StudioAudienceBand;
+  /** Their words: "Grade 5", "Year 9", "first-year nursing". */
+  said?: string;
+  prior?: 'new' | 'some' | 'revising';
+  goal?: 'understand' | 'exam' | 'apply' | 'curious';
+  language?: 'fluent' | 'learning';
+  support?: 'normal' | 'extra';
 }
 
 export type StudioGenreName =
@@ -3207,6 +3231,30 @@ export interface StudioExplainerSheetDto {
 
 export type StudioSheetDto = StudioStorySheetDto | StudioExplainerSheetDto;
 
+/**
+ * What is happening to an episode or a scene now, while it is: the step
+ * in plain words, and a call being tried again (or given up on), with why.
+ */
+export interface StudioActivityDto {
+  /** "Reading the whole script", "Making scene 3 shorter"; null while only a retry is to say. */
+  says: string | null;
+  /** A word for a scene's row: "Rewriting", "Shortening", "Fixing", "Checking". */
+  short: string | null;
+  retry: {
+    /** "The writer is busy, trying again (2 of 3)". */
+    says: string;
+    /** "The writer is busy". */
+    reason: string;
+    attempt: number | null;
+    of: number | null;
+    waitSeconds: number | null;
+    /** Given up on: said until the work moves on. */
+    final: boolean;
+  } | null;
+  /** When it was said, ISO. */
+  at: string;
+}
+
 export interface StudioSceneDto {
   id: string;
   position: number;
@@ -3226,6 +3274,8 @@ export interface StudioSceneDto {
   durationMs: number | null;
   /** A change to undo. */
   canUndo: boolean;
+  /** What is being done to it now, while it is; null otherwise. */
+  activity: StudioActivityDto | null;
 }
 
 export interface StudioEpisodeDto {
@@ -3248,6 +3298,8 @@ export interface StudioEpisodeDto {
   /** Why it cannot be made now, in plain words; empty when it can. */
   blockers: string[];
   hasThumb: boolean;
+  /** What the work in hand is doing now, while there is some; null otherwise. */
+  activity: StudioActivityDto | null;
 }
 
 /**
@@ -3297,6 +3349,8 @@ export interface StudioMessageDto {
   event: StudioEventDto | null;
   content: string;
   choices: string[];
+  /** A second, optional row of choices, picked with one of the first: tapped, it is said with it. */
+  also?: string[];
   refused: boolean;
   createdAt: string;
 }
@@ -3373,6 +3427,27 @@ export interface StudioPlayDto {
     transition: 'cut' | 'fade';
     /** How the film joins this scene to the one before: a cut (the same place, time running on), a dissolve (a new place) or a dip to black (time has passed). The first comes up from black. */
     join: 'cut' | 'dissolve' | 'dip';
+  }[];
+  /** What the film's music is scored from (studio-score.ts); absent on an explainer, or from an older server. */
+  score?: StudioScoreDto;
+}
+
+/** A story film's score, as its story gives it (S10): its colour, its curve, its themes and the lines that land. */
+export interface StudioScoreDto {
+  genre: StudioGenreName | null;
+  tone: 'funny' | 'gentle' | 'exciting' | 'serious' | 'calm' | null;
+  /** Made for children: brighter, never dark. */
+  young: boolean;
+  /** Whose story it is (a character's id): their motif returns at the story's key beats. */
+  hero: string | null;
+  /** Who stands against them, when anyone does: a contrasting motif. */
+  foil: string | null;
+  /** Each of the film's scenes, in order. */
+  scenes: {
+    /** The story beats it serves, in order: each one's role and planned tension, 0 to 10. */
+    beats: { role: string; intensity: number }[];
+    /** Its lines that land a moment: a joke, a tease, a reveal, a threat, an accusation, a confession. */
+    lines: { say: string; who: string | null; aim: string }[];
   }[];
 }
 

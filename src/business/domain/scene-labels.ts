@@ -12,6 +12,7 @@
  */
 import { measureText } from './scene-font';
 import type { Place, Rect } from './scene-layout';
+import { textNow } from './scene-lesson-shape';
 
 export type Point = [number, number];
 export type Segment = [Point, Point];
@@ -81,9 +82,19 @@ export const ARROW_GAP = { tail: 16, head: 26 } as const;
 const clamp = (n: number, low: number, high: number) =>
   Math.min(high, Math.max(low, n));
 
-/** The size labels are set at in a room: in proportion, within the bounds. */
+/**
+ * The size labels are set at in a room: in proportion, within the bounds;
+ * in a tall film by the room's width, larger (scene-lesson-shape TEXT).
+ */
 export function labelSize(room: Rect): number {
-  return Math.round(clamp(room.h * LABEL.share, LABEL.min, LABEL.max));
+  const sizes = textNow().label;
+  return Math.round(
+    clamp(
+      (sizes.by === 'w' ? room.w : room.h) * sizes.share,
+      sizes.min,
+      sizes.max,
+    ),
+  );
 }
 
 /** A label broken into at most two lines inside a width, smaller if it must be. */
@@ -93,7 +104,7 @@ export function labelLines(
   size: number,
 ): { lines: string[]; size: number } {
   const words = text.trim().split(/\s+/).filter(Boolean);
-  for (let s = size; s >= LABEL.min; s -= 2) {
+  for (let s = size; s >= textNow().label.min; s -= 2) {
     const lines: string[] = [];
     let current = '';
     for (const word of words) {
@@ -111,7 +122,7 @@ export function labelLines(
       return { lines, size: s };
   }
   // Still too long: two lines at the smallest, each cut short to fit.
-  const s = LABEL.min;
+  const s = textNow().label.min;
   const cut = (text: string, ellipsis: boolean) => {
     if (measureText(text, s, 600) <= width && !ellipsis) return text;
     let kept = text;
@@ -428,11 +439,20 @@ export function placePill(input: {
   path: Point[];
   avoid: { boxes: Rect[]; segments: Segment[] };
   stage: { w: number; h: number };
-  /** `inset`: how far in from the stage's edges it stays, within its margin. */
-  strict?: { pad: number; inset?: number };
+  /** `inset`: how far in from the stage's edges it stays, within its margin; `within`: the area it stays in instead (a tall board's text area). */
+  strict?: {
+    pad: number;
+    inset?: number;
+    within?: { x: number; y: number; w: number; h: number };
+  };
 }): PillPlace | null {
-  const w = Math.max(60, measureText(input.label, PILL.size, 600) + PILL.padX);
-  const h = PILL.size * PILL.heightEm;
+  // A tall film's larger (scene-lesson-shape TEXT), its room round its words in proportion.
+  const size = textNow().pill;
+  const w = Math.max(
+    60,
+    measureText(input.label, size, 600) + (PILL.padX * size) / PILL.size,
+  );
+  const h = size * PILL.heightEm;
   const pad = input.strict?.pad ?? 0;
   const tries: { t: number; lift: number }[] = input.strict
     ? PILL_LIFTS.map((lift) => ({ t: 0.5, lift }))
@@ -445,7 +465,7 @@ export function placePill(input: {
         side,
         w,
         h,
-        size: PILL.size,
+        size,
         ...(lift ? { lift } : {}),
       };
       const set = pillBox(input.path, pill);
@@ -466,11 +486,17 @@ export function placePill(input: {
           if (crosses(tie, other, pad)) cost += w * h * 0.5;
       }
       const inset = input.strict?.inset ?? 0;
+      const within = input.strict?.within ?? {
+        x: inset,
+        y: inset,
+        w: input.stage.w - inset * 2,
+        h: input.stage.h - inset * 2,
+      };
       const off =
-        Math.max(0, inset - box.x) +
-        Math.max(0, inset - box.y) +
-        Math.max(0, box.x + box.w - (input.stage.w - inset)) +
-        Math.max(0, box.y + box.h - (input.stage.h - inset));
+        Math.max(0, within.x - box.x) +
+        Math.max(0, within.y - box.y) +
+        Math.max(0, box.x + box.w - (within.x + within.w)) +
+        Math.max(0, box.y + box.h - (within.y + within.h));
       cost += off * h * 4;
       // Nearer the middle is better, all else equal.
       cost += Math.abs(t - 0.5) * 2;

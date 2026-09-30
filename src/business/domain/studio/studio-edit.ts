@@ -10,6 +10,7 @@
  *  - A dip: time has passed. Down to black, a breath of it, and up again:
  *    where the writer says so ("fade"), or the light has changed.
  */
+import type { FilmShape } from '../scene-shape';
 import type { StudioJoinName, StudioJoinWithDto } from '../../../contracts';
 import { groupId } from '../scene-ids';
 import type {
@@ -222,13 +223,17 @@ function namesPartOf(side: JoinSide, parts: readonly string[]): string | null {
  *    the next (its place, and a chart's or graph's numbers, change);
  *  - match: what the last ended on and the next opens on are one of the
  *    show's pictures, or the same shape (a chart and a chart);
- *  - push: two steps of one list ("Step 2", "Step 3");
+ *  - push: two steps of one list ("Step 2", "Step 3"); in a tall film a
+ *    push-up, the next coming up from below as a phone's feed scrolls
+ *    (studio-vertical-plan §4.6);
  *  - a story's scenes as joinOf has them.
  */
 export function joinFor(
   before: JoinSide | null,
   after: JoinSide,
   pictures: readonly StudioPicture[] = [],
+  /** The film's shape: absent, wide. */
+  shape: FilmShape = 'wide',
 ): JoinPlan {
   if (after.build === 'continue') return { join: 'continue' };
   const a = before?.sheet ?? null;
@@ -297,6 +302,6 @@ export function joinFor(
   const one = placeInList(before?.scene?.title ?? a.title);
   const two = placeInList(after.scene?.title ?? b.title);
   if (one && two && one.list === two.list && two.n === one.n + 1)
-    return { join: 'push' };
+    return { join: shape === 'tall' ? 'push-up' : 'push' };
   return { join: 'dissolve' };
 }

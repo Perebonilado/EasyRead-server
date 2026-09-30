@@ -28,6 +28,7 @@ import {
 } from './scene-spacing';
 import type { SceneLayout } from './scene-script';
 import { BOX_STAGE, STAGES, stageOf, type FilmShape } from './scene-shape';
+import { TALL_AREA, tallSlots, textNow } from './scene-lesson-shape';
 
 /** A wide scene's stagings: the reader's pane and the full screen (scene-shape's; a tall scene's are stagingsOf('tall')). */
 export const STAGINGS = {
@@ -36,9 +37,9 @@ export const STAGINGS = {
 } as const;
 export type StagingName = keyof typeof STAGINGS;
 
-/** The room between slots: an arrow runs through it. */
+/** The room between slots: an arrow runs through it (a wide stage's; a tall one's is scene-lesson-shape TEXT's). */
 export const SLOT_GAP = 72;
-/** The caption under a drawing, at its largest and smallest. */
+/** The caption under a drawing, at its largest and smallest, on a wide stage (a tall one's: scene-lesson-shape TEXT). */
 export const CAPTION_SIZE = { max: 38, min: 26 } as const;
 const LINE = 1.2;
 
@@ -177,13 +178,14 @@ export function slotsFor(
   /** How much of a row's width each thing wants, by its proportions. */
   weights?: number[],
   /**
-   * The film's shape. TODO(V2, studio-vertical-plan §4.1): a tall branch
-   * (a row as a column, compare top over bottom, focus big on top, a
-   * taller cycle) in the tall text area (scene-shape textAreaOf). Until
-   * then a tall stage lays out as the box does, on its own size.
+   * The film's shape: a tall one's layouts reflowed into its text area
+   * (studio-vertical-plan §4.1, scene-lesson-shape tallSlots): a row as a
+   * column, compare top over bottom, focus big on top, a taller cycle.
+   * `weights` are then each one's share of a column's height.
    */
   shape: FilmShape = 'wide',
 ): Rect[] {
+  if (shape === 'tall') return tallSlots(layout, count, weights);
   const area = content(staging, shape);
   const wide = staging === 'wide' && shape === 'wide';
   const n = Math.max(1, count);
@@ -275,7 +277,7 @@ export function captionLines(
   width: number,
   size: number,
   /** The smallest it may be set: a caption's least unless said. */
-  least: number = CAPTION_SIZE.min,
+  least: number = textNow().caption.min,
 ): { lines: string[]; size: number } {
   const words = text.trim().split(/\s+/).filter(Boolean);
   for (let s = size; s >= least; s -= 2) {
@@ -367,7 +369,7 @@ export function captionWhole(
 ): { lines: string[]; size: number } {
   const set = captionLines(text, width, size);
   if (!set.lines.some((line) => line.endsWith('…'))) return set;
-  for (let s = CAPTION_SIZE.min; s >= CARD_LEAST; s -= 2) {
+  for (let s = textNow().caption.min; s >= textNow().least; s -= 2) {
     const lines = brokenLines(text, width, s, 3);
     if (lines) return { lines, size: s };
   }
@@ -386,9 +388,9 @@ export function wholeWords(
   width: number,
   size: number,
 ): { lines: string[]; size: number } {
-  const fitted = captionLines(text, width, size, CARD_LEAST);
+  const fitted = captionLines(text, width, size, textNow().least);
   if (!fitted.lines.some((line) => line.endsWith('…'))) return fitted;
-  for (let s = size; s >= CARD_LEAST; s -= 2) {
+  for (let s = size; s >= textNow().least; s -= 2) {
     const lines = brokenLines(text, width, s, 2);
     if (lines) return { lines, size: s };
   }
@@ -444,7 +446,9 @@ function passageNotes(
   const fits = (right: number, below: number) =>
     Math.min(art.w - right, (art.h - below) * aspect);
   const sized = (w: number) =>
-    Math.round(Math.min(most, Math.max(LABEL.min, words(w) * NOTE_SHARE)));
+    Math.round(
+      Math.min(most, Math.max(textNow().label.min, words(w) * NOTE_SHARE)),
+    );
   // In the margin: sized to the passage the room's own label size leaves,
   // then only as wide a margin as that size needs.
   const size = sized(fits(gutters(callouts, viewBox, room, most).right, 0));
@@ -472,10 +476,8 @@ export function fitInSlot(
 ): Place {
   const round = (n: number) => Math.round(n * 10) / 10;
   if (thing.kind === 'drawing') {
-    const base = Math.max(
-      CAPTION_SIZE.min,
-      Math.min(CAPTION_SIZE.max, slot.h * 0.11),
-    );
+    const sizes = textNow().caption;
+    const base = Math.max(sizes.min, Math.min(sizes.max, slot.h * 0.11));
     const caption = thing.caption
       ? captionWhole(thing.caption, slot.w * 0.96, base)
       : null;
@@ -494,6 +496,8 @@ export function fitInSlot(
     let side = { left: 0, right: 0 };
     let below = 0;
     let labelSize_: number | undefined;
+    /** The height given up to a band of labels (a tall stage's). */
+    let banded = 0;
     if (thing.callouts?.length && thing.viewBox && thing.words) {
       ({
         mode,
@@ -516,14 +520,19 @@ export function fitInSlot(
       );
       if (band && free >= band.h + LABEL.leaderRoom + 12)
         mode = captionOnTop ? 'below' : 'above';
-      else {
+      else if (band && textNow().label.by === 'w') {
+        // A tall stage is short of width, not height: the band's room is
+        // taken from the drawing's height, and the labels read across it.
+        mode = captionOnTop ? 'below' : 'above';
+        banded = band.h + LABEL.leaderRoom + 12 - Math.max(0, free);
+      } else {
         mode = 'sides';
         side = gutters(thing.callouts, thing.viewBox, slot);
       }
     }
     const w = Math.min(
       art.w - side.left - side.right,
-      (art.h - below) * aspect,
+      (art.h - below - banded) * aspect,
     );
     const h = w / aspect;
     // Sat on its caption, so captions in a row line up and each hugs its
@@ -553,14 +562,15 @@ export function fitInSlot(
     return place;
   }
   if (thing.kind === 'stat') {
+    const text = textNow();
     const size = Math.min(
-      sizeToFit(thing.value, slot.w * 0.9, 220),
+      sizeToFit(thing.value, slot.w * 0.9, text.stat),
       slot.h * 0.45,
     );
     const caption = captionLines(
       thing.caption,
       slot.w * 0.96,
-      Math.min(CAPTION_SIZE.max + 4, slot.h * 0.12),
+      Math.min(text.caption.max + 4, slot.h * 0.12),
     );
     const band = caption.lines.length * caption.size * LINE;
     const block = size * 1.1 + 18 + band;
@@ -593,10 +603,15 @@ export function fitInSlot(
   const share = thing.style === 'keyword' ? 0.8 : 0.86;
   const padding = thing.style === 'title' ? 0 : 0.6;
   // The largest size that fits across in two lines, then down if it is too tall.
+  const most = textNow().words;
   let lines = captionLines(
     thing.text,
     slot.w * share,
-    thing.style === 'title' ? 120 : thing.style === 'card' ? 64 : 52,
+    thing.style === 'title'
+      ? most.title
+      : thing.style === 'card'
+        ? most.card
+        : most.keyword,
   );
   for (let tries = 0; tries < 3; tries += 1) {
     const tall =
@@ -665,10 +680,14 @@ export function slotsOf(
     show.length,
     staging,
     // A column shares its height: a wide thing needs less of it, and a
-    // number or a card never less than its words need.
+    // number or a card never less than its words need. A tall stage's
+    // row of three or fewer is a column.
     show.map((id) => {
       const thing = things.get(id);
-      if (layout !== 'stack') return weightOf(thing);
+      const inColumn =
+        layout === 'stack' ||
+        (shape === 'tall' && layout === 'row' && show.length <= 3);
+      if (!inColumn) return weightOf(thing);
       if (thing?.kind === 'drawing')
         return Math.min(1.5, Math.max(0.5, 1 / (thing.aspect || 1)));
       return thing?.kind === 'stat' ? 0.9 : 0.7;
@@ -717,7 +736,9 @@ export function standTogether(
   grounded: boolean,
   shape: FilmShape = 'wide',
 ): void {
-  const area = content(staging, shape);
+  // A tall lesson's people stand in its text area, their faces clear of
+  // the platforms' own buttons and captions (studio-vertical-plan §5.1).
+  const area = shape === 'tall' ? TALL_AREA : content(staging, shape);
   const cap = (area.h * TALLEST_ADULT) / figureFrame('adult')[3];
   const units = (id: string) => {
     const thing = things.get(id);

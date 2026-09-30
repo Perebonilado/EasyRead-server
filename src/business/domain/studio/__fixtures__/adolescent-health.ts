@@ -171,7 +171,11 @@ export async function composeAdolescentFilm(
     const words: Record<string, WordsCleared[]> = {};
     for (const thing of script.cast) {
       if (isCodeThing(thing))
-        drawings.set(thing.id, await drawByCode(thing).catch(() => null));
+        drawings.set(
+          thing.id,
+          // A tall film's charts and graphs drawn for its frame.
+          await drawByCode(thing, shape).catch(() => null),
+        );
       else if (thing.kind === 'person')
         drawings.set(
           thing.id,

@@ -36,6 +36,8 @@ export interface WordsBox {
   what: 'caption' | 'card' | 'label' | 'pill' | 'stat';
   text: string;
   box: Box;
+  /** The size its words are set at, in stage units. */
+  size: number;
 }
 
 /** Two things on the stage at once where they should not be. */
@@ -95,6 +97,7 @@ export function wordsAt(
               ? 'stat'
               : 'caption',
         text: c.lines.join(' '),
+        size: c.size,
         box: linesBox(
           c.lines,
           c.size,
@@ -109,6 +112,7 @@ export function wordsAt(
         owner: id,
         what: 'label',
         text: label.lines.join(' '),
+        size: label.size,
         box: { x: label.x, y: label.y, w: label.w, h: label.h },
       });
   }
@@ -122,6 +126,7 @@ export function wordsAt(
       owner: arrow.id,
       what: 'pill',
       text: arrow.label,
+      size: pill.size,
       box: pillBox(arrowPath(a, b, step.layout === 'cycle', stage), pill),
     });
   }

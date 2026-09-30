@@ -108,6 +108,7 @@ import {
   boardOverlaps,
   cellBox,
   frameBox,
+  pullOutReadable,
   slices,
   type BoardItem,
   type BoardStage,
@@ -207,6 +208,8 @@ import {
   walkReach,
   type FilmShape,
 } from './scene-shape';
+import { TALL_AREA, withTextOf } from './scene-lesson-shape';
+import { pagedForTall } from './scene-lesson-pages';
 import { describeSpace, spaceFaults } from './scene-space';
 import { anchorMs, quietGaps, spaced, type TimedBeat } from './scene-timing';
 import { numberWords } from './spoken';
@@ -1453,9 +1456,24 @@ function unlabelled(
 /**
  * The scene the player plays. Steps are timed on their phrases and kept
  * apart; effects follow their step; a stretch longer than the quiet limit
- * gets a pulse on the thing in focus; every step is placed twice.
+ * gets a pulse on the thing in focus; every step is placed twice. Its
+ * words set at its shape's sizes (scene-lesson-shape), a tall lesson's
+ * steps of more than a phone's screen holds paged by code.
  */
-export function composeScene(input: ComposeInput): {
+export function composeScene(
+  input: ComposeInput,
+): ReturnType<typeof composeShaped> {
+  const shape = input.shape ?? 'wide';
+  return withTextOf(shape, () =>
+    composeShaped(
+      shape === 'tall'
+        ? { ...input, script: pagedForTall(input.script) }
+        : input,
+    ),
+  );
+}
+
+function composeShaped(input: ComposeInput): {
   scene: SceneDto;
   filled: number;
   /** What the frame audit found wrong, per staging, per step. */
@@ -1859,7 +1877,8 @@ export function composeScene(input: ComposeInput): {
         enter,
         focus,
         ...(board?.faded.length ? { faded: [...board.faded] } : {}),
-        ...(board?.page ? { page: true as const } : {}),
+        // A build's board paged, or a tall lesson's page (scene-lesson-pages).
+        ...(board?.page || step.stage.page ? { page: true as const } : {}),
         ...(backdrop ? { backdrop } : {}),
         ...(cut ? { cut: true as const } : {}),
         ...(Object.keys(exit).length ? { exit } : {}),
@@ -3291,7 +3310,7 @@ export function composeScene(input: ComposeInput): {
           const thing = lookup.get(id);
           const cell = cells[id];
           if (!thing || !cell) continue;
-          const room = cellBox(cell, w, h, margin, script.board?.rows);
+          const room = cellBox(cell, w, h, margin, script.board?.rows, shape);
           out[id] = { ...fitInSlot(thing, room), room };
         }
         return out;
@@ -4092,7 +4111,14 @@ export function composeScene(input: ComposeInput): {
           stage,
           // On a board: at its arrow's middle, well clear of captions and things, or none.
           ...(script.board
-            ? { strict: { pad: BOARD_CLEAR, inset: stage.margin } }
+            ? {
+                strict: {
+                  pad: BOARD_CLEAR,
+                  inset: stage.margin,
+                  // A tall board's, inside its text area (scene-board §4.4).
+                  ...(shape === 'tall' ? { within: TALL_AREA } : {}),
+                },
+              }
             : {}),
         });
         stepPills[arrow.id] = pill;
@@ -4278,6 +4304,17 @@ export function composeScene(input: ComposeInput): {
   };
   const box = place('box');
   const wide = place('wide');
+  /** The sizes of the words at a step: captions, labels and arrows' labels. */
+  const sizesOn = (
+    places: Record<string, ScenePlaceDto>,
+    pills: Record<string, ScenePillDto | null> = {},
+  ): number[] => [
+    ...Object.values(places).flatMap((at) => [
+      ...(at.caption ? [at.caption.size] : []),
+      ...(at.labels ?? []).map((label) => label.size),
+    ]),
+    ...Object.values(pills).flatMap((pill) => (pill ? [pill.size] : [])),
+  ];
   /** Where a build's camera looks at each step, on a staging (scene-board frameBox): never cutting through a thing, which the audit checks. */
   const boardViews = (
     staging: StagingName,
@@ -4302,13 +4339,24 @@ export function composeScene(input: ComposeInput): {
       const labels = [...withLabels]
         .filter(([id]) => id.startsWith('pill:'))
         .map(([, box]) => box);
+      // A tall board's pull-out only where its words are large enough to
+      // read seen whole (scene-board pullOutReadable); else the camera
+      // stays on what it framed last.
+      const pulled =
+        shape === 'tall' &&
+        frame === 'whole' &&
+        k > 0 &&
+        !pullOutReadable(sizesOn(placed.places[k] ?? {}, placed.pills[k]))
+          ? (boardsAt.get(steps[k - 1])?.frame ?? 'whole')
+          : frame;
       const view = frameBox(
-        frame,
-        frame === 'whole' ? withLabels : extents,
+        pulled,
+        pulled === 'whole' ? withLabels : extents,
         w,
         h,
         margin,
         labels,
+        shape,
       );
       const seen = { x: view[0], y: view[1], w: view[2], h: view[3] };
       for (const [id, extent] of extents)
@@ -4453,7 +4501,7 @@ export function composeScene(input: ComposeInput): {
   }
   const setting = story ? settingOf() : null;
 
-  const composed: ReturnType<typeof composeScene> = {
+  const composed: ReturnType<typeof composeShaped> = {
     scene: {
       version: 4,
       generator: input.generator,

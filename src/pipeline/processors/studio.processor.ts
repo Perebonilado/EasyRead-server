@@ -191,6 +191,7 @@ import {
 } from '../../business/domain/scene-picture-check';
 import { rasterise } from '../../business/domain/scene-raster';
 import { renderStill } from '../../business/domain/scene-still';
+import { TALL_WRITER_LINE } from '../../business/domain/scene-lesson-shape';
 import {
   CLIP_CARD,
   clipBible,
@@ -527,7 +528,12 @@ export function studioMakeOf(
           },
         }
       : {}),
-    ...(clipBefore ? { drawn: new Map([[CLIP_CARD, clipCardDrawing()]]) } : {}),
+    // A frame of the film's own shape (studio-vertical-plan §4.7).
+    ...(clipBefore
+      ? {
+          drawn: new Map([[CLIP_CARD, clipCardDrawing(episodeShape(episode))]]),
+        }
+      : {}),
     // A lesson's ideas marked where each starts (scene-ideas), for the
     // scrubber's ticks and "back one idea"; after a clip, its card told
     // which scene it is a still of.
@@ -2480,6 +2486,8 @@ export class StudioProcessor {
             : null,
         ),
         `Subject: ${bible.subject || show.brief.idea}. Tone: ${show.brief.tone ?? 'calm'}.`,
+        // A vertical film's one line: a phone's screen (studio-vertical-plan §4.3).
+        episodeShape(episode) === 'tall' ? TALL_WRITER_LINE : '',
       ]
         .filter(Boolean)
         .join('\n'),

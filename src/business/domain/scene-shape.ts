@@ -202,7 +202,8 @@ export const SUBTITLE_BAND: Readonly<
 /**
  * The text area of a stage (§5.1), in its units: where words and faces
  * may be set. The tall one sits a little left of centre, clear of the
- * platforms' button column. TODO(V2, §4.1): the tall layouts reflow into it.
+ * platforms' button column; a tall lesson's layouts reflow into it
+ * (scene-lesson-shape, §4.1): x 54–792, y 176–1088.
  */
 export function textAreaOf(shape: FilmShape = 'wide'): {
   x: number;

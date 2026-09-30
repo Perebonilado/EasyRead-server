@@ -154,6 +154,8 @@ describe('how an explainer joins its scenes (Ask 4 D), by code', () => {
     const one = sheet('Step 1: Rinse', [thing('a', 'A tap')], [['a']]);
     const two = sheet('Step 2: Soap', [thing('b', 'A bar of soap')], [['b']]);
     expect(joinFor(side(one), side(two)).join).toBe('push');
+    // A tall film's comes up from below, as a phone's feed scrolls (studio-vertical-plan §4.6).
+    expect(joinFor(side(one), side(two), [], 'tall').join).toBe('push-up');
     expect(placeInList('Part three: the end')).toEqual({ list: 'part', n: 3 });
     expect(placeInList('2. Soap')).toEqual({ list: '#', n: 2 });
     expect(placeInList('Second, the soap')).toEqual({ list: 'ordinal', n: 2 });

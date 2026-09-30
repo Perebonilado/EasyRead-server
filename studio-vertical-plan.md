@@ -866,3 +866,4 @@ The plan takes the **intersection** of the guides, so it is conservative. The nu
 2. **Re-stage as a twin episode** (its own link and thumbnail, no minutes charged), as recommended, or replace the film in place?
 3. **Subtitles burnt in by default** for the TikTok and Shorts downloads (recommended, since phone viewers often watch muted), with a switch to turn them off.
 4. **Export's place in the order:** after the first milestone and V2–V5 (recommended), or the spike right after the milestone, to know render speed early?
+- **Vertical films have no far-off shots** (Richard, 2026-09-30): medium, medium-close, close and over-the-shoulder only; no long, wide or establishing shots, since sets are often not detailed enough to hold them and far figures read poorly on a phone. The key speaker stays at least medium-shot size; an opening starts on a medium of the first speaker.

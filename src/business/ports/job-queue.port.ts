@@ -125,7 +125,10 @@ export interface StudioJob {
     | 'prepare'
     | 'make'
     | 'draw'
-    | 'redraw';
+    | 'redraw'
+    | 'repace';
+  /** For 'repace': the maker's pace (scene-pace makerRate) every made lesson scene's voice is played at now, stretched to it from its own. */
+  pace?: number;
   /** For 'draw': the characters the artist draws at the cast step; for 'redraw', the one drawn again as the maker asks. */
   characterIds?: string[];
   characterId?: string;

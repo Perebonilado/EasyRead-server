@@ -118,7 +118,9 @@ export interface StudioTurnDraft {
     | 'choose'
     | 'scene'
     | 'make'
-    | 'episode';
+    | 'episode'
+    /** An explainer's voice played quicker or slower, nothing voiced again. */
+    | 'repace';
   /** For "redraw": the one character whose look is to change, by name or id; for "choose", whose new drawing is chosen. */
   character?: string | null;
   /** For "choose": which of the new drawings waiting, from 1; 0 to keep the one they have. */

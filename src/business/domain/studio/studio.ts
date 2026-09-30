@@ -236,6 +236,12 @@ export interface StudioBrief {
   ending?: StudioEnding;
   pace?: StudioPace;
   style?: StudioStyle;
+  /**
+   * The maker's "a bit faster" or "slower" for an explainer's voice in the
+   * chat, as a multiplier on its pace (studio-pace): set by code, absent
+   * at 1.
+   */
+  voicePace?: number;
   /** An explainer's look (scene-themes); absent, chosen by code (studio-look's themeFor). */
   look?: ThemeId;
 }
@@ -358,6 +364,14 @@ export function briefOf(
   const style = has('style')
     ? (oneOf(STUDIO_STYLES)(said.style) ?? base.style)
     : base.style;
+  const nudge = has('voicePace') ? Number(said.voicePace) : base.voicePace;
+  const voicePace =
+    nudge !== undefined &&
+    Number.isFinite(nudge) &&
+    nudge >= 0.8 &&
+    nudge <= 1.2
+      ? Math.round(nudge * 1000) / 1000
+      : base.voicePace;
   const look = has('look')
     ? (oneOf(THEME_IDS)(said.look) ?? base.look)
     : base.look;
@@ -370,6 +384,7 @@ export function briefOf(
     ...(ending ? { ending } : {}),
     ...(pace ? { pace } : {}),
     ...(style ? { style } : {}),
+    ...(voicePace && voicePace !== 1 ? { voicePace } : {}),
     ...(look ? { look } : {}),
   };
 }
@@ -404,6 +419,22 @@ export const TONE_MOOD: Record<StudioTone, SceneMood> = {
 
 /** Spoken words a second, for reckoning how long a scene runs before it is voiced. */
 export const WORDS_A_SECOND = 2.4;
+
+/**
+ * An explainer outline's `teach`, words a second of its scene: a little
+ * fuller than the narration (the writer keeps to its main ideas), and
+ * the one figure the outline's prompt, its check and the writer's
+ * "fuller" note all use.
+ */
+export const TEACH_WORDS_A_SECOND = 2.6;
+
+/**
+ * The most a scene's words may run over what its seconds hold before it
+ * is fuller than it can say: the writer's cap on its narration, the
+ * outline check's on its teach, and the writer's note to keep to the
+ * main ideas.
+ */
+export const FULLEST = 1.3;
 
 // ── The bible ─────────────────────────────────────────────────────────────
 

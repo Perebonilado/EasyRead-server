@@ -16,6 +16,11 @@ import {
   type VoiceCast,
   type VoiceRole,
 } from '../../domain/scene-voice';
+import {
+  voiceRate,
+  type VoiceRate,
+  type VoiceRates,
+} from '../../domain/scene-pace';
 import { ValidationError } from '../../domain/errors/errors';
 import type { ClockPort } from '../../ports/clock.port';
 import { CLOCK, SCENE_VOICES } from '../../ports/tokens';
@@ -111,6 +116,8 @@ export class SceneVoiceService {
     voice: string;
     /** The admin's voices for the narrator and each kind of character, on this engine. */
     cast: VoiceCast;
+    /** Every voice's measured rate (voice:calibrate), for the pace step. */
+    rates: VoiceRates;
   }> {
     const ready = this.ready();
     const named = this.config.get<string>('SCENE_VOICE_ENGINE');
@@ -128,7 +135,29 @@ export class SceneVoiceService {
         (own && this.config.get<string>('SCENE_VOICE')?.trim()) ||
         speech.label().voice,
       cast,
+      rates: record.voiceRates ?? {},
     };
+  }
+
+  /** A voice's own rate: as measured for it, else its engine's guess. */
+  async rateOf(engine: string, voice: string): Promise<VoiceRate> {
+    return voiceRate((await this.record()).voiceRates, engine, voice);
+  }
+
+  /** A voice's rate as voice:calibrate measured it, kept beside the rest. */
+  async saveRate(
+    engine: string,
+    voice: string,
+    rate: VoiceRate,
+  ): Promise<VoiceRates> {
+    const record = await this.settings.set(
+      { voiceRates: { [engine]: { [voice]: rate } } },
+      // A rate measured is no one's switch: the repository keeps who last switched.
+      'voice:calibrate',
+      this.clock.now(),
+    );
+    this.cached = { record, at: this.clock.now().getTime() };
+    return record.voiceRates ?? {};
   }
 
   /** What this process can speak with: said by the worker as it starts. */

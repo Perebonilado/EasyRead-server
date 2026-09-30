@@ -1,6 +1,6 @@
 import type { SetLook } from '../../business/domain/scene-set-layout';
 import { ConfigService } from '@nestjs/config';
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import type { SceneDto, SceneTiming } from '../../contracts';
 import { wordTimesFromAligned } from '../../business/domain/board';
 import {
@@ -212,12 +212,38 @@ import {
   voicedPieces,
 } from '../../business/domain/scene-voice';
 import { mp3DurationMs } from '../../business/domain/speech';
+import {
+  bandOfStage,
+  lessonPace,
+  makerRate,
+  paceReport,
+  paceWordFor,
+  voiceRate,
+  type PaceBrief,
+  type PaceReport,
+} from '../../business/domain/scene-pace';
+import {
+  applyPaceEdits,
+  paceWanted,
+  planPaceEdits,
+  retimeBeats,
+  retimeScene,
+  timeMapOf,
+  type PaceNotes,
+} from '../../business/domain/scene-pace-audio';
+import type { Pcm } from '../../business/domain/wav';
+import type { AudioCodecPort } from '../../business/ports/audio-codec.port';
 import { spokenForm, type Pronunciations } from '../../business/domain/spoken';
 import { startMathsSpeech } from '../../business/domain/maths-speech';
 import type { AlignerPort } from '../../business/ports/aligner.port';
 import type { LlmGatewayPort, LlmUsage } from '../../business/ports/llm.port';
 import type { StoragePort } from '../../business/ports/storage.port';
-import { ALIGNER, LLM_GATEWAY, STORAGE } from '../../business/ports/tokens';
+import {
+  ALIGNER,
+  AUDIO_CODEC,
+  LLM_GATEWAY,
+  STORAGE,
+} from '../../business/ports/tokens';
 import type { AiCallLogRepository } from '../../business/repositories/ai-call-log.repository';
 import type {
   DocumentPageRepository,
@@ -431,6 +457,10 @@ export class SceneProcessor {
     private readonly config: ConfigService,
     @Inject(STORAGE) private readonly storage: StoragePort,
     @Inject(ALIGNER) private readonly aligner: AlignerPort,
+    /** Audio to samples and back, for the pace step; without it, the voice is kept as it came. */
+    @Optional()
+    @Inject(AUDIO_CODEC)
+    private readonly codec?: AudioCodecPort,
   ) {
     this.artist = new SceneArtist(
       this.llm,
@@ -712,6 +742,8 @@ export class SceneProcessor {
       notes: string[];
       script: SceneScript | null;
     };
+    /** A lesson's audience and the maker's pace, for its voice; the stage's when absent. */
+    pace?: PaceBrief | null;
     /** The look it is made in (a Studio explainer's): its still is shown in it. Absent, paper. */
     theme?: ThemeId;
     /**
@@ -823,6 +855,7 @@ export class SceneProcessor {
         ),
         input.profile.stage ?? null,
         input.lesson?.here.newHere ?? [],
+        input.pace ?? null,
       )
         .catch((error: unknown) => {
           stop.abort();
@@ -874,8 +907,13 @@ export class SceneProcessor {
       composed = compose(script);
     }
     const { filled, audit } = composed;
-    // Every line said on the stage moves its speaker's mouth.
-    const { scene, mended: mouths } = withMouths(composed.scene);
+    // Every line said on the stage moves its speaker's mouth; a lesson
+    // keeps the pace its voice was made at, for a later change to it.
+    const { scene: mouthed, mended: mouths } = withMouths(composed.scene);
+    const scene: SceneDto =
+      voice.voicePace !== undefined
+        ? { ...mouthed, voicePace: voice.voicePace }
+        : mouthed;
     for (const note of mouths) this.logger.log(`${who}: ${note}`);
     await this.keepParts(input.keepAs ?? 'page', who, {
       script,
@@ -1028,6 +1066,73 @@ export class SceneProcessor {
     for (const note of mouths) this.logger.log(`${who}: ${note}`);
     const { sceneKey, thumbKey } = await this.store(input.base, scene, who);
     return { scene, sceneKey, thumbKey, script };
+  }
+
+  /**
+   * A made lesson scene's voice played quicker or slower by `tempo` (the
+   * maker changed its pace), its silences kept as they were, and the scene
+   * timed again on it: nothing voiced, nothing drawn, CPU only
+   * (studio-explainer-plan, Ask 1 §6 "repace"). Stored beside the scene it
+   * was, its still kept. Null for a scene it cannot be done to: a story's,
+   * or with no codec here.
+   */
+  async repace(input: {
+    scene: SceneDto;
+    audio: Buffer;
+    tempo: number;
+    base: string;
+    who: string;
+  }): Promise<{
+    scene: SceneDto;
+    sceneKey: string;
+    audioKey: string;
+    durationMs: number;
+  } | null> {
+    const { scene, who } = input;
+    if (!this.codec || Math.abs(input.tempo - 1) < 0.005) return null;
+    if (scene.acting || scene.props?.length || scene.setting?.full) return null;
+    const pcm = await this.codec.decode(input.audio, 'audio/mpeg');
+    const { edits } = planPaceEdits({
+      pcm,
+      beats: scene.beats,
+      targets: scene.beats.map(() => null),
+      pauses: scene.beats.map(() => null),
+      trimInside: false,
+      tempo: input.tempo,
+    });
+    if (!edits.length) return null;
+    const edited = applyPaceEdits(pcm, edits);
+    const durationMs = Math.round(
+      (edited.samples.length / edited.sampleRate) * 1000,
+    );
+    const timed = retimeScene(
+      scene,
+      timeMapOf(edits, pcm.sampleRate),
+      durationMs,
+    );
+    if (!timed) return null;
+    const again: SceneDto = {
+      ...timed,
+      voicePace: Math.round((scene.voicePace ?? 1) * input.tempo * 1000) / 1000,
+    };
+    const audioKey = `${input.base}-voice.mp3`;
+    await this.storage.put({
+      key: audioKey,
+      body: await this.codec.encode(edited),
+      mimeType: 'audio/mpeg',
+    });
+    const sceneKey = `${input.base}-scene.json`;
+    await this.storage.put({
+      key: sceneKey,
+      body: Buffer.from(JSON.stringify(again)),
+      mimeType: 'application/json',
+    });
+    const before = paceReport(scene.beats);
+    const after = paceReport(again.beats);
+    this.logger.log(
+      `${who}: paced again ×${input.tempo.toFixed(3)}: ${before.wpm}→${after.wpm} wpm, ${Math.round(scene.durationMs / 1000)}s→${Math.round(durationMs / 1000)}s, nothing voiced`,
+    );
+    return { scene: again, sceneKey, audioKey, durationMs };
   }
 
   /**
@@ -1841,11 +1946,17 @@ export class SceneProcessor {
     stage: LearningStage | null = null,
     /** The terms the page teaches first: given weight, and room after, where first said. */
     terms: readonly string[] = [],
+    /** Whom a lesson is for, finer than its stage, and the maker's pace: its target rates (scene-pace). */
+    pace: PaceBrief | null = null,
   ): Promise<{
     beats: TimedBeat[];
     durationMs: number;
     audioKey: string;
     timing: SceneTiming;
+    /** How the voice came out once put right: a lesson's. */
+    report?: PaceReport;
+    /** The maker's pace the voice was made at (scene-pace makerRate): a lesson's. */
+    voicePace?: number;
   }> {
     // Maths said as a teacher says it, not as its signs.
     await startMathsSpeech();
@@ -1854,23 +1965,61 @@ export class SceneProcessor {
     // A new term lands: a little weight where it is first said, and a
     // moment after the sentence for it to sink in.
     const first = firstSaid(script.beats, terms);
-    const delivered = deliveryPieces(
-      script.beats,
-      stage ? STAGE_RECIPES[stage] : undefined,
-    ).map((piece, k) =>
-      first.has(k)
-        ? { ...piece, pauseAfter: Math.max(piece.pauseAfter, TERM_LANDS_S) }
-        : piece,
-    );
-    const pausesS = delivered.map((piece) => piece.pauseAfter);
-    const spoken = sceneSpoken(forms);
     // Whichever engine the admin has Visualize speak in now.
     const {
       speech,
       voice,
       engine: speaking,
       cast,
+      rates,
     } = await this.voices.current();
+    // A lesson (every sentence the narrator's own) is said at a target
+    // rate a sentence, for whom it is for and what it holds, its pauses
+    // shaped within a budget; the voice is asked for it by its own
+    // measured rate, and put right after voicing. A story keeps its
+    // delivery: its actors' lines go at their own pace.
+    const lesson = !story && script.beats.every((beat) => !beat.kind);
+    const brief: PaceBrief | null = lesson
+      ? (pace ?? { band: bandOfStage(stage) })
+      : null;
+    const rate = voiceRate(rates, speaking, voice);
+    const paced = brief
+      ? lessonPace(script.beats, brief, {
+          terms: first,
+          naturalWpm: rate.wpm,
+          holdLimitS: HOLD_LIMIT_S,
+        })
+      : null;
+    const delivered = paced
+      ? paced.map(({ speed, pauseAfter }) => ({ speed, pauseAfter }))
+      : deliveryPieces(
+          script.beats,
+          stage ? STAGE_RECIPES[stage] : undefined,
+        ).map((piece, k) =>
+          first.has(k)
+            ? {
+                ...piece,
+                pauseAfter: Math.max(piece.pauseAfter, TERM_LANDS_S),
+              }
+            : piece,
+        );
+    const pausesS = delivered.map((piece) => piece.pauseAfter);
+    // A voice that takes its pace in words (Gemini) is asked in the one
+    // whose measured rate is nearest the lesson's.
+    const paceWord = paced
+      ? paceWordFor(
+          rate,
+          paced.reduce(
+            (n, p, k) => n + p.targetWpm * wordsOf(script.beats[k].say).length,
+            0,
+          ) /
+            Math.max(
+              1,
+              script.beats.reduce((n, b) => n + wordsOf(b.say).length, 0),
+            ),
+        )
+      : undefined;
+    const spoken = sceneSpoken(forms);
     const { model } = speech.label();
     // A story's characters say their own lines, in voices of their own.
     const engine =
@@ -1939,7 +2088,7 @@ export class SceneProcessor {
       delivered,
       // For a voice that takes direction; Kokoro goes by pace and silence.
       styles: script.beats.map((beat, k) =>
-        voiceStyle(script.mood, beat.delivery, first.get(k) ?? []),
+        voiceStyle(script.mood, beat.delivery, first.get(k) ?? [], paceWord),
       ),
       lines,
     });
@@ -1978,11 +2127,6 @@ export class SceneProcessor {
       script.beats.length,
     );
     const audioKey = `${base}-${voiceSlug(voice)}-${model}.mp3`;
-    await this.storage.put({
-      key: audioKey,
-      body: result.audio,
-      mimeType: result.mimeType,
-    });
     const durationMs = result.durationMs ?? mp3DurationMs(result.audio.length);
     await this.calls.record({
       documentId,
@@ -2099,12 +2243,128 @@ export class SceneProcessor {
     // speaks again: a line's bubble opens as its voice does.
     if (timing !== 'voice' && result.silencesMs?.length)
       words = outOfSilence(words, result.silencesMs, spoken.starts);
-    return {
-      beats: timeBeats(script.beats, forms, words),
+    // Put right, never voiced again: each lesson sentence at its target,
+    // a long hesitation cut to a breath, every silence as planned.
+    const timed = timeBeats(script.beats, forms, words);
+    const settled = await this.paceVoice({
+      beats: timed,
       durationMs,
+      audio: result.audio,
+      mimeType: result.mimeType,
+      pcm: result.pcm ?? null,
+      timing,
+      targets: paced?.map((p) => p.targetWpm) ?? timed.map(() => null),
+      said: forms.map((form) => form.text),
+      pauses: pausesS,
+      lesson,
+      leadMs: leadS * 1000,
+      who,
+      label: brief
+        ? `${brief.band}${paceWord ? `, "${paceWord}"` : ''}, ${speaking} ${rate.wpm} wpm at speed 1`
+        : null,
+    });
+    await this.storage.put({
+      key: audioKey,
+      body: settled.audio,
+      mimeType: settled.mimeType,
+    });
+    return {
+      beats: settled.beats,
+      durationMs: settled.durationMs,
       audioKey,
       timing,
+      ...(settled.report ? { report: settled.report } : {}),
+      ...(brief ? { voicePace: makerRate(brief) } : {}),
     };
+  }
+
+  /**
+   * A voiced scene put right (scene-pace-audio): a lesson's sentences
+   * stretched to their targets, its hesitations trimmed and its silences
+   * made as planned; a story's silences only made up where the voice gave
+   * less than asked (an older Kokoro holds three seconds at most). Its
+   * audio decoded only when its times say something is off, and kept as
+   * it came when anything fails. Logged: the rate, the silence and the
+   * longest pause, before and after.
+   */
+  private async paceVoice(input: {
+    beats: TimedBeat[];
+    durationMs: number;
+    audio: Buffer;
+    mimeType: string;
+    pcm: Pcm | null;
+    timing: SceneTiming;
+    targets: (number | null)[];
+    /** What each sentence said: its rate is measured on it. */
+    said: string[];
+    pauses: number[];
+    lesson: boolean;
+    leadMs: number;
+    who: string;
+    /** For the log: whom it is for and how the voice was asked. */
+    label: string | null;
+  }): Promise<{
+    beats: TimedBeat[];
+    durationMs: number;
+    audio: Buffer;
+    mimeType: string;
+    report?: PaceReport;
+  }> {
+    const kept = {
+      beats: input.beats,
+      durationMs: input.durationMs,
+      audio: input.audio,
+      mimeType: input.mimeType,
+    };
+    const before = input.lesson ? paceReport(input.beats, input.said) : null;
+    const plan = {
+      beats: input.beats,
+      said: input.said,
+      targets: input.targets,
+      pauses: input.pauses,
+      trimInside: input.lesson,
+      shorten: input.lesson,
+      leadMs: input.leadMs,
+    };
+    let notes: PaceNotes | null = null;
+    let out = kept;
+    // An estimate's times are guesses: nothing is measured on them.
+    if (
+      input.timing !== 'estimated' &&
+      this.codec &&
+      paceWanted({ ...plan, durationMs: input.durationMs })
+    )
+      try {
+        const pcm =
+          input.pcm ?? (await this.codec.decode(input.audio, input.mimeType));
+        const planned = planPaceEdits({ pcm, ...plan });
+        if (planned.edits.length) {
+          const edited = applyPaceEdits(pcm, planned.edits);
+          const map = timeMapOf(planned.edits, pcm.sampleRate);
+          out = {
+            beats: retimeBeats(input.beats, map),
+            durationMs: Math.round(
+              (edited.samples.length / edited.sampleRate) * 1000,
+            ),
+            audio: await this.codec.encode(edited),
+            mimeType: 'audio/mpeg',
+          };
+          notes = planned.notes;
+        }
+      } catch (error) {
+        this.logger.warn(
+          `${input.who}: pace: the voice is kept as it came (${(error as Error).message})`,
+        );
+        out = kept;
+      }
+    if (!before) return out;
+    const after = paceReport(out.beats, input.said);
+    const targets = input.targets.filter((t): t is number => Boolean(t));
+    const pct = (n: number) => `${Math.round(n * 100)}%`;
+    this.logger.log(
+      `${input.who}: pace ${before.wpm}→${after.wpm} wpm (target about ${targets.length ? Math.round(targets.reduce((a, b) => a + b, 0) / targets.length) : '?'}), silence ${pct(before.silenceShare)}→${pct(after.silenceShare)}, longest pause ${(before.longestPauseMs / 1000).toFixed(1)}s→${(after.longestPauseMs / 1000).toFixed(1)}s${notes ? `; ${notes.stretched} of ${input.beats.length} sentences stretched${notes.beyond ? ` (${notes.beyond} further than the stretch goes)` : ''}, ${notes.trimmed} hesitations trimmed, ${notes.added} pauses made up, ${notes.shortened} cut back` : '; as it came'}${input.label ? ` [${input.label}]` : ''}`,
+    );
+    return { ...out, report: after };
   }
 
   /**

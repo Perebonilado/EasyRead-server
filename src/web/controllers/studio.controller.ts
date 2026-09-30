@@ -37,7 +37,6 @@ import type {
   StudioSceneDto,
   StudioShowCardDto,
   StudioShowDto,
-  StudioTeachBackDto,
   StudioTurnLine,
 } from '../../contracts';
 import { StudioService } from '../../business/handlers/studio/studio.service';
@@ -55,13 +54,6 @@ class FocusDto {
   @IsString()
   @Length(1, 64)
   sceneId?: string;
-}
-
-/** A viewer's own explanation of a film ("Now you explain it"). */
-class TeachBackDto {
-  @IsString()
-  @Length(1, 800)
-  answer!: string;
 }
 
 class TurnDto {
@@ -448,18 +440,6 @@ export class StudioController {
     return this.studio.play(userId, id);
   }
 
-  /** "Now you explain it": the viewer's own words, checked against what the film taught. */
-  @Post('episodes/:id/teach-back')
-  @HttpCode(200)
-  @Throttle({ default: { limit: 10, ttl: 60_000 } })
-  teachBack(
-    @CurrentUser('id') userId: string,
-    @Param('id') id: string,
-    @Body() body: TeachBackDto,
-  ): Promise<StudioTeachBackDto> {
-    return this.studio.teachBack(userId, id, body.answer);
-  }
-
   @Get('episodes/:id/thumb')
   async thumb(
     @CurrentUser('id') userId: string,
@@ -551,18 +531,6 @@ export class StudioController {
   @Throttle({ default: { limit: 60, ttl: 60_000 } })
   shared(@Param('token') token: string): Promise<StudioPlayDto> {
     return this.studio.playShared(token);
-  }
-
-  /** "Now you explain it" on a film shared by its link: fewer a minute, as anyone may ask. */
-  @Public()
-  @Post('shared/:token/teach-back')
-  @HttpCode(200)
-  @Throttle({ default: { limit: 5, ttl: 60_000 } })
-  sharedTeachBack(
-    @Param('token') token: string,
-    @Body() body: TeachBackDto,
-  ): Promise<StudioTeachBackDto> {
-    return this.studio.teachBackShared(token, body.answer);
   }
 
   @Public()

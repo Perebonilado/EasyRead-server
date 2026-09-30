@@ -2082,12 +2082,6 @@ export interface SceneStillDto {
   atMs: number | null;
 }
 
-/** One answer to a question put to the viewer: a chip at a checkpoint. */
-export interface SceneChoiceDto {
-  text: string;
-  right: boolean;
-}
-
 /** Where one of a scene's small ideas starts: its sentence (an index into `beats`), and the idea in a few words. */
 export interface SceneIdeaDto {
   beat: number;
@@ -2142,12 +2136,6 @@ export interface SceneDto {
     delivery?: 'hook' | 'key' | 'aside' | 'question' | 'recap';
     /** On a story's page, a line a character says: who says it, for the caption. */
     who?: string;
-    /**
-     * A question's answers (studio-explainer-plan, Ask 9): two or three
-     * short ones, one right, said by the sentence after. The Studio's
-     * player may pause here and show them as chips. Absent on any other.
-     */
-    choices?: SceneChoiceDto[];
   }[];
   /**
    * Where each of the scene's small ideas starts (a lesson's points), in
@@ -3163,7 +3151,7 @@ export interface StudioCharacterDto {
   carries: string | null;
   /** Who they are, once a story is developed with them: want, need, flaw, fear, traits, voice, habits, relationships, arc. */
   persona?: StudioPersonaDto;
-  /** An explainer's host (studio-host): opens its films and asks their questions. */
+  /** An explainer's host (studio-host): opens its films. */
   host?: true;
   /** How they are drawn: an SVG, for a person now; for anyone else once they have been drawn. */
   drawing: string | null;
@@ -3703,45 +3691,17 @@ export interface StudioPlayDto {
   }[];
   /** What the film's music is scored from (studio-score.ts); absent on an explainer, or from an older server. */
   score?: StudioScoreDto;
-  /**
-   * Pause-and-think (studio-explainer-plan, Ask 9): whether the player
-   * pauses on a question with answers unless the viewer says otherwise;
-   * on for children, off for grown-ups. Absent, off.
-   */
-  pauses?: boolean;
   /** The show's host, in the player's corner: absent when it has none. */
   host?: StudioHostDto;
-  /** An explainer's end card: up to three recap cards, built by code. */
-  recap?: StudioRecapCardDto[];
-  /** An explainer's "What next?" questions, each a next episode. */
+  /** An explainer's "What next?" questions, each a next episode, on its end card. */
   next?: string[];
-  /** Whether the end card offers "Now you explain it". */
-  teachBack?: boolean;
 }
 
 /** The host as the player shows them: their name, and each face as the kit draws it. */
 export interface StudioHostDto {
   name: string;
   kind: 'person' | 'animal';
-  faces: Record<'neutral' | 'happy' | 'thinking' | 'surprised', string>;
-}
-
-/** One card of an explainer's recap: the term or idea, and what to remember of it. */
-export interface StudioRecapCardDto {
-  title: string;
-  text: string;
-}
-
-/** A viewer's own explanation, sent to be checked. */
-export interface StudioTeachBackRequest {
-  answer: string;
-}
-
-/** What the check says of it: the points they got, those missing, and a kind reply. */
-export interface StudioTeachBackDto {
-  reply: string;
-  got: string[];
-  missing: string[];
+  faces: Record<'neutral' | 'happy', string>;
 }
 
 /** A story film's score, as its story gives it (S10): its colour, its curve, its themes and the lines that land. */

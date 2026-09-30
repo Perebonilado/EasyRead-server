@@ -3,9 +3,8 @@
  * explainer, drawn by the kits and so free. A person the figure kit draws,
  * or an animal the animal kit does; the maker picks from three on the
  * thread's choosing card (the first in use until they do). The host opens
- * the film, asks its checkpoint questions from a corner and reacts to the
- * answer, and, being one of the show's characters, may act in its story
- * clips (studio-clip).
+ * the film from a corner and, being one of the show's characters, may act
+ * in its story clips (studio-clip).
  *
  * On by default for children (the audience recipe's `mascot`), off for
  * grown-ups; the brief's `host` says otherwise when the maker does.
@@ -158,18 +157,16 @@ export function withHost(
   };
 }
 
-/** How the host looks in the corner: at rest, pleased, thinking, surprised. */
+/** How the host looks in the corner: at rest, and pleased as they say hello. */
 export const HOST_FACES = [
   'neutral',
   'happy',
-  'thinking',
-  'surprised',
 ] as const satisfies readonly FigureFace[];
 export type HostFace = (typeof HOST_FACES)[number];
 
 /** How the host is described to the outline's writer, so a clip may cast them. */
 export const hostWords = (host: StudioCharacter) =>
-  `${host.name} (id "${host.id}") is the show's host, who opens each film and asks its questions; they may act in a story clip too.`;
+  `${host.name} (id "${host.id}") is the show's host, who opens each film; they may act in a story clip too.`;
 
 /**
  * The host as the player shows them in its corner: each face drawn by the

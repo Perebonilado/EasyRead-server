@@ -101,8 +101,6 @@ const TASK_VAR: Record<LlmTask, string> = {
   studio_write: 'AI_MODEL_STUDIO_WRITE',
   // Whether a scene made again as asked shows it: a small read, a make.
   studio_check: 'AI_MODEL_STUDIO_CHECK',
-  // "Now you explain it": a viewer's words against an explainer's points.
-  studio_teach_back: 'AI_MODEL_STUDIO_TEACH_BACK',
   topic_quiz: 'AI_MODEL_QUIZ',
   // Guided reading: the preview is one call per chapter ever (cached), the
   // graders run once per checkpoint — all three default to the cheap model
@@ -157,9 +155,6 @@ const TASK_DEFAULT: Partial<Record<LlmTask, string>> = {
   // The check of a scene made again as asked: a few thousand tokens in, a
   // verdict out, thinking off (STUDIO_CHECK_THINKING).
   studio_check: 'deepseek:deepseek-flash',
-  // "Now you explain it" at an explainer's end: a few hundred tokens each
-  // way, thinking off, about a tenth of a cent a use (never gpt-4.1).
-  studio_teach_back: 'deepseek:deepseek-flash',
   // A drawing judged from its picture: DeepSeek cannot see. Gemini 3.8
   // Flash, Richard's choice (2026-09-27; never gpt-4.1): it named every
   // flaw he found in Clover, Dot and Eggbert (a blanket drawn as a scarf, a
@@ -276,7 +271,26 @@ export class ModelRegistry {
       useChat && provider.chat
         ? provider.chat(ref.modelId)
         : provider.languageModel(ref.modelId);
-    return { model: model as LanguageModel, ref };
+    if (ref.provider !== 'openai')
+      return { model: model as LanguageModel, ref };
+
+    // OpenAI's strict structured outputs demand every key be required, so a
+    // schema with a tolerant field (zod `.catch`/`.optional`) is refused before
+    // the model even runs. The schema is still sent and still checked here by
+    // zod; only OpenAI's own up-front refusal is turned off.
+    const { wrapLanguageModel, defaultSettingsMiddleware } =
+      await this.modules();
+    return {
+      model: wrapLanguageModel({
+        model: model as Parameters<typeof wrapLanguageModel>[0]['model'],
+        middleware: defaultSettingsMiddleware({
+          settings: {
+            providerOptions: { openai: { strictJsonSchema: false } },
+          },
+        }),
+      }),
+      ref,
+    };
   }
 
   async embeddingModel(): Promise<{ model: EmbeddingModel; ref: ModelRef }> {

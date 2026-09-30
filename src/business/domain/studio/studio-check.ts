@@ -144,9 +144,7 @@ export interface SheetProblem {
     | 'plain'
     /** A drawing whose picture is not what its label says (scene-picture-label): set in type by code; rides along on a send-back, never one alone. */
     | 'picture'
-    /** A check scene's question without its answers to pick (studio-checkpoint): rides along, never one alone. */
-    | 'checkpoint'
-    /** A first scene that does not open on a question, a surprise or a situation (studio-checkpoint): rides along. */
+    /** A first scene that does not open on a question, a surprise or a situation (studio-cold-open): rides along. */
     | 'cold-open';
   /** In plain words, for the writer. */
   message: string;

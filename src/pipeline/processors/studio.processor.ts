@@ -206,17 +206,14 @@ import {
   withPresets,
   withStill,
 } from '../../business/domain/studio/studio-clip';
-import {
-  coldOpen,
-  keepCheckpoint,
-} from '../../business/domain/studio/studio-checkpoint';
+import { coldOpen } from '../../business/domain/studio/studio-cold-open';
 import {
   hostIn,
   hostLooks,
   hostOn,
   withHost,
 } from '../../business/domain/studio/studio-host';
-import { ideaStarts } from '../../business/domain/scene-checkpoint';
+import { ideaStarts } from '../../business/domain/scene-ideas';
 import { writeClipSheet } from '../../business/handlers/studio/studio-clip-writer';
 import { showTheme } from '../../business/domain/studio/studio-look';
 import { studioReading } from '../../business/domain/studio/studio-motion';
@@ -524,7 +521,7 @@ export function studioMakeOf(
         }
       : {}),
     ...(clipBefore ? { drawn: new Map([[CLIP_CARD, clipCardDrawing()]]) } : {}),
-    // A lesson's ideas marked where each starts (scene-checkpoint), for the
+    // A lesson's ideas marked where each starts (scene-ideas), for the
     // scrubber's ticks and "back one idea"; after a clip, its card told
     // which scene it is a still of.
     ...(!story
@@ -1061,7 +1058,7 @@ export class StudioProcessor {
           what: 'cast',
           step: 'cast',
           characterId: host.id,
-          line: `${host.name} will host the show: they open each film and ask its questions. Pick how they look.`,
+          line: `${host.name} will host the show: they open each film. Pick how they look.`,
         },
         key && `${key}:host`,
       );
@@ -2494,9 +2491,8 @@ export class StudioProcessor {
     // Its words held to its audience by code: too-long sentences split and
     // stiff words made plain; what is still too hard rides along on the
     // one send-back, if there is one, and is otherwise only logged.
-    // Its checkpoint (studio-checkpoint): answers kept on a check scene's
-    // one question and on no other; and the first scene's cold open. What
-    // is missing of either rides along on the one send-back, if any.
+    // The first scene's cold open (studio-cold-open): one that does not
+    // open on a hook rides along on the one send-back, if any.
     const plainOf = (draft: unknown) => {
       const written = explainerSheetOf({
         kind: 'explainer',
@@ -2504,25 +2500,17 @@ export class StudioProcessor {
         transition: 'cut',
         draft,
       });
-      const asked = keepCheckpoint(written, check);
       const plain = recipe
-        ? plainExplainer(asked.sheet, {
+        ? plainExplainer(written, {
             recipe,
             material: teach,
             terms: bible.pictures.map((p) => p.name),
             check,
           })
-        : { sheet: asked.sheet, fixes: [], problems: [], measure: null };
+        : { sheet: written, fixes: [], problems: [], measure: null };
       const cold =
         k === 0 ? coldOpen(plain.sheet.draft.beats, recipe?.wpm ?? 150) : null;
-      return {
-        ...plain,
-        problems: [
-          ...plain.problems,
-          ...(asked.problem ? [asked.problem] : []),
-          ...(cold ? [cold] : []),
-        ],
-      };
+      return cold ? { ...plain, problems: [...plain.problems, cold] } : plain;
     };
     let plain = plainOf(first.value);
     let sheet = plain.sheet;

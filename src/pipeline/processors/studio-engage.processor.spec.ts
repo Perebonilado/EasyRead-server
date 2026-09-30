@@ -1,10 +1,7 @@
 import { briefOf } from '../../business/domain/studio/studio';
 import { HOST_ID } from '../../business/domain/studio/studio-host';
-import { coldOpen } from '../../business/domain/studio/studio-checkpoint';
-import {
-  explainerPlay,
-  teachBack,
-} from '../../business/handlers/studio/studio-engage';
+import { coldOpen } from '../../business/domain/studio/studio-cold-open';
+import { explainerPlay } from '../../business/handlers/studio/studio-engage';
 import {
   NO_WORK,
   type CastWork,
@@ -25,11 +22,10 @@ import { StudioProcessor, studioMakeOf } from './studio.processor';
 /**
  * The E9 set on the worker with the fake writer (studio-explainer-plan,
  * Ask 9): a young children's explainer gets its host (three looks offered
- * on the choosing card), its outline's "What next?", a question with
- * answers in the one scene its audience's checks ask it in and in no
- * other, its ideas marked when made, and a player given its checkpoints'
- * default, host, recap and teach-back. A grown-up's gets none of the host
- * or the pauses. Nothing is called but the fake writer.
+ * on the choosing card), its outline's "What next?", a spoken question in
+ * the one scene its audience's checks ask it in, with no answers to pick,
+ * its ideas marked when made, and a player given its host and "What
+ * next?". A grown-up's gets no host. Nothing is called but the fake writer.
  */
 const at = new Date('2026-09-30T10:00:00Z');
 
@@ -194,7 +190,7 @@ function worker(audience: 'young children' | 'adults') {
   };
 }
 
-describe("a children's explainer's checkpoints, host, ideas and end, made on the worker with the fake writer", () => {
+describe("a children's explainer's host, ideas and end, made on the worker with the fake writer", () => {
   it('gives the show a host and offers their three looks on the choosing card', async () => {
     const w = worker('young children');
     await w.run({ kind: 'outline' });
@@ -213,7 +209,7 @@ describe("a children's explainer's checkpoints, host, ideas and end, made on the
     expect(w.recorded.filter((t) => t === 'studio_write')).toHaveLength(2);
   });
 
-  it('asks a question with answers only in the scene its checks space, and marks each scene’s ideas as it is made', async () => {
+  it('asks a plain spoken question in the scene its checks space, with no answers to pick, and marks each scene’s ideas as it is made', async () => {
     const w = worker('young children');
     await w.run({ kind: 'outline' });
     await w.run({ kind: 'script' });
@@ -223,10 +219,14 @@ describe("a children's explainer's checkpoints, host, ideas and end, made on the
     const rows = [...w.scenes.values()];
     const asked = rows.map((r) =>
       r.sheet?.kind === 'explainer'
-        ? r.sheet.draft.beats.filter((b) => b.choices?.length).length
+        ? r.sheet.draft.beats.filter((b) => b.delivery === 'question').length
         : -1,
     );
     expect(asked).toEqual([0, 1]);
+    for (const r of rows)
+      if (r.sheet?.kind === 'explainer')
+        for (const b of r.sheet.draft.beats)
+          expect(b).not.toHaveProperty('choices');
     // The first scene opens on a definition, not a hook: its cold open only
     // rides along on a send-back, never one alone, so each scene is written once.
     expect(
@@ -244,8 +244,11 @@ describe("a children's explainer's checkpoints, host, ideas and end, made on the
 
     const episode = w.episodes.get('e1')!;
     const made = studioMakeOf(w.show, episode, rows[1], rows, w.show.bible!);
-    const question = made.script!.beats.findIndex((b) => b.choices);
+    const question = made.script!.beats.findIndex(
+      (b) => b.delivery === 'question',
+    );
     expect(question).toBeGreaterThan(0);
+    expect(made.script!.beats[question]).not.toHaveProperty('choices');
     const scene = made.finish!({
       beats: made.script!.beats.map((b, k) => ({
         text: b.say,
@@ -257,56 +260,23 @@ describe("a children's explainer's checkpoints, host, ideas and end, made on the
     } as never);
     expect(scene.ideas?.[0]).toMatchObject({ beat: 0 });
 
-    // The player's extras: pauses on for children, the host's faces, the recap, "What next?", teach-back.
-    const extras = explainerPlay(
-      w.show,
-      episode.outline,
-      rows.map((r) => r.sheet),
-    );
-    expect(extras.pauses).toBe(true);
+    // The player's extras: the host's faces and "What next?", and nothing more.
+    const extras = explainerPlay(w.show, episode.outline);
+    expect(Object.keys(extras).sort()).toEqual(['host', 'next']);
     expect(extras.host?.faces.neutral).toMatch(/^<svg/);
-    expect(extras.recap?.length).toBeGreaterThan(0);
     expect(extras.next).toHaveLength(3);
-    expect(extras.teachBack).toBe(true);
   });
 
-  it('checks a viewer’s explanation in one call, recorded under its own task, and refuses a word or two without a call', async () => {
-    const w = worker('young children');
-    await w.run({ kind: 'outline' });
-    const tasks: string[] = [];
-    const record = () => {
-      tasks.push('studio_teach_back');
-      return Promise.resolve();
-    };
-    const outline = w.episodes.get('e1')!.outline!;
-    expect(await teachBack(w.llm, record, w.show, outline, 'leaf')).toBeNull();
-    expect(tasks).toHaveLength(0);
-    const checked = await teachBack(
-      w.llm,
-      record,
-      w.show,
-      outline,
-      'A leaf in the sun makes sugar for the plant.',
-    );
-    expect(checked?.got).toEqual(['a leaf in the sun']);
-    expect(checked?.reply).toBeTruthy();
-    expect(tasks).toEqual(['studio_teach_back']);
-  });
-
-  it("gives a grown-up's explainer no host and no pauses by default, but its recap and teach-back still", async () => {
+  it('gives a grown-up\'s explainer no host, but its "What next?" still', async () => {
     const w = worker('adults');
     await w.run({ kind: 'outline' });
     await w.run({ kind: 'script' });
     expect(w.show.bible?.characters.some((c) => c.host)).toBe(false);
     expect(w.work().candidates[HOST_ID]).toBeUndefined();
     const rows = [...w.scenes.values()];
-    const extras = explainerPlay(
-      w.show,
-      w.episodes.get('e1')!.outline,
-      rows.map((r) => r.sheet),
-    );
-    expect(extras.pauses).toBe(false);
+    expect(rows.length).toBeGreaterThan(0);
+    const extras = explainerPlay(w.show, w.episodes.get('e1')!.outline);
     expect(extras.host).toBeUndefined();
-    expect(extras.teachBack).toBe(true);
+    expect(extras.next).toHaveLength(3);
   });
 });

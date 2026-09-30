@@ -2,6 +2,7 @@ import { Logger } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
 import type { EmbeddingModel, LanguageModel } from 'ai';
 import type { LlmTask } from '../../../business/ports/llm.port';
+import { noticingFetch } from './noticing-fetch';
 
 export const PROVIDERS = ['openai', 'anthropic', 'google', 'deepseek'] as const;
 export type ProviderName = (typeof PROVIDERS)[number];
@@ -100,6 +101,8 @@ const TASK_VAR: Record<LlmTask, string> = {
   studio_write: 'AI_MODEL_STUDIO_WRITE',
   // Whether a scene made again as asked shows it: a small read, a make.
   studio_check: 'AI_MODEL_STUDIO_CHECK',
+  // "Now you explain it": a viewer's words against an explainer's points.
+  studio_teach_back: 'AI_MODEL_STUDIO_TEACH_BACK',
   topic_quiz: 'AI_MODEL_QUIZ',
   // Guided reading: the preview is one call per chapter ever (cached), the
   // graders run once per checkpoint — all three default to the cheap model
@@ -154,6 +157,9 @@ const TASK_DEFAULT: Partial<Record<LlmTask, string>> = {
   // The check of a scene made again as asked: a few thousand tokens in, a
   // verdict out, thinking off (STUDIO_CHECK_THINKING).
   studio_check: 'deepseek:deepseek-flash',
+  // "Now you explain it" at an explainer's end: a few hundred tokens each
+  // way, thinking off, about a tenth of a cent a use (never gpt-4.1).
+  studio_teach_back: 'deepseek:deepseek-flash',
   // A drawing judged from its picture: DeepSeek cannot see. Gemini 3.8
   // Flash, Richard's choice (2026-09-27; never gpt-4.1): it named every
   // flaw he found in Clover, Dot and Eggbert (a blanket drawn as a scarf, a
@@ -362,22 +368,28 @@ export class ModelRegistry {
   }
 
   private async create(name: ProviderName, apiKey: string, baseURL?: string) {
+    // Each try the SDK makes, and each it gives up on, told to whoever
+    // follows the work (a Studio job's page): AI_MAX_RETRIES as the adapter reads it.
+    const tries =
+      Number(this.config.get<string>('AI_MAX_RETRIES', '2') ?? 2) + 1;
+    // Google's text model only judges pictures here; the rest write (and draw).
+    const fetch = noticingFetch(name === 'google' ? 'judge' : 'writer', tries);
     switch (name) {
       case 'openai': {
         const { createOpenAI } = await import('@ai-sdk/openai');
-        return createOpenAI({ apiKey, baseURL });
+        return createOpenAI({ apiKey, baseURL, fetch });
       }
       case 'anthropic': {
         const { createAnthropic } = await import('@ai-sdk/anthropic');
-        return createAnthropic({ apiKey, baseURL });
+        return createAnthropic({ apiKey, baseURL, fetch });
       }
       case 'google': {
         const { createGoogle } = await import('@ai-sdk/google');
-        return createGoogle({ apiKey, baseURL });
+        return createGoogle({ apiKey, baseURL, fetch });
       }
       case 'deepseek': {
         const { createDeepSeek } = await import('@ai-sdk/deepseek');
-        return createDeepSeek({ apiKey, baseURL });
+        return createDeepSeek({ apiKey, baseURL, fetch });
       }
     }
   }

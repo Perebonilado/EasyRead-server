@@ -17,6 +17,14 @@ export class AppSettingsModel extends BaseModel {
   @Column({ type: DataType.TEXT, allowNull: true })
   declare voiceCast: string | null;
 
+  /**
+   * Each voice's measured rate, by engine and voice, as JSON
+   * ({"kokoro":{"am_puck":{"wpm":168}},"gemini":{"Sulafat":{"wpm":150,
+   * "words":{"natural":152}}}}); null keeps each engine's own guess.
+   */
+  @Column({ type: DataType.TEXT, allowNull: true })
+  declare voiceRates: string | null;
+
   /** What the worker can speak with, as JSON, as it said at its last start. */
   @Column({ type: DataType.TEXT, allowNull: true })
   declare workerVoices: string | null;

@@ -1,5 +1,5 @@
 /**
- * The set bench (studio-scenery-plan L3): twelve places across every
+ * The set bench (studio-scenery-plan L3): thirteen places across every
  * style pack, each laid out by hand as a painter would, with no model
  * asked, and the story's world each would be in. Built by code
  * (buildSet), they are what the style packs, the buildings, the clutter,
@@ -428,6 +428,31 @@ export const SET_BENCH: readonly BenchPlace[] = [
       own: [],
       focal: { x: 0.47, words: 'on the path' },
       clutter: ['woodpile'],
+    },
+  },
+  {
+    // A town of no one country: a story with no world, whose place says
+    // nothing of where it is, drawn in the plain modern town (the
+    // global-product fix), never one region's streets.
+    id: 'town-park',
+    brief:
+      'a small park in a present-day town, of no one country: trees, a bench, a path, a lamp, houses and shops beyond',
+    place: where('park', 'the park', 'a small park in town with a bench'),
+    world: null,
+    layout: {
+      ground: 'grass',
+      backdrop: 'city',
+      items: [
+        { kind: 'tree', x: 0.1, row: 'back', scale: 1, colour: null },
+        { kind: 'house', x: 0.3, row: 'back', scale: 1, colour: null },
+        { kind: 'shop', x: 0.72, row: 'back', scale: 1, colour: null },
+        { kind: 'streetlamp', x: 0.86, row: 'middle', scale: 1, colour: null },
+        { kind: 'bush', x: 0.95, row: 'front', scale: 1, colour: null },
+        { kind: 'flowers', x: 0.2, row: 'middle', scale: 1, colour: 'pink' },
+      ],
+      own: [],
+      focal: { x: 0.5, words: 'on the path' },
+      clutter: ['bin', 'bicycle', 'okada', 'water drum', 'generator'],
     },
   },
   {

@@ -52,6 +52,12 @@ export interface Dangle {
   limit: number;
   /** How much the wind moves it, 0 (not at all) to 1 (a ribbon's). */
   wind: number;
+  /**
+   * On a person drawn from every side (rig 3), where its root is and which
+   * way it hangs in each view it is seen in, by the view's name ("front",
+   * "3q", "profile", "back3q", "back"): the same springs swing it in each.
+   */
+  views?: Record<string, { root: [number, number]; dir: [number, number] }>;
 }
 
 /** How a dangle swings, by what it is. */

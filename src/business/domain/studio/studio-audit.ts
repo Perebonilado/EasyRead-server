@@ -33,6 +33,7 @@ import {
   type StageMove,
 } from '../scene-doings';
 import { DRAWN } from '../scene-own';
+import { interactFaults } from '../scene-interact';
 import { genderOf } from '../scene-script';
 import { namesOf, type StorySheet, type StudioBible } from './studio';
 
@@ -73,6 +74,14 @@ const NEEDS_FEATURE = new Set<DoingId>([
   'hide',
   'open',
   'close',
+  'go-through',
+  'climb-stairs',
+  'lean-on',
+  'knock',
+  'ring-bell',
+  'switch-on',
+  'switch-off',
+  'turn-on-tap',
 ]);
 
 /** What a handling looks like, said. */
@@ -228,6 +237,11 @@ export function auditScene(
         within(e.atMs),
     );
     for (const face of faces) seen.push(`shows ${face.part ?? 'a pulse'}`);
+    // What they do with a thing of the set: through the door, up the stairs.
+    const interacts = (scene.acting?.[who]?.interact ?? []).filter((one) =>
+      within(one.at),
+    );
+    for (const one of interacts) seen.push(`${one.does} the ${one.feature}`);
     // A gate or a door opened or shut in the time: by this beat only when
     // it opens, shuts or goes through something.
     const swung = (scene.setting?.featureStates ?? []).filter(([t]) =>
@@ -281,6 +295,17 @@ export function auditScene(
         seen.push(`the ${id} ${state === 'open' ? 'opens' : 'shuts'}`);
     const missing: string[] = [];
     const shown = (doing: Doing, thing: string | null): boolean => {
+      // Played as its interaction with the thing of the set.
+      const asked = 'interact' in doing.plays ? doing.plays.interact : null;
+      if (
+        asked &&
+        interacts.some(
+          (one) =>
+            one.does === asked ||
+            (asked === 'climb-stairs' && one.does === 'climb-ladder'),
+        )
+      )
+        return true;
       if (doing.id === 'open' || doing.id === 'close')
         return swung.some(
           ([, , state]) => state === (doing.id === 'open' ? 'open' : 'shut'),
@@ -472,7 +497,15 @@ export interface MoveFault {
    * goes through someone else at their depth, or a punch so close it would
    * touch; `too-many`: more big moves than a scene should have.
    */
-  id: 'squeezed' | 'not-landed' | 'passes-through' | 'too-many';
+  id:
+    | 'squeezed'
+    | 'not-landed'
+    | 'passes-through'
+    | 'too-many'
+    // What someone does with a thing of the set (scene-interact):
+    | 'off-handle'
+    | 'through-shut'
+    | 'off-steps';
   who: string | null;
   move: string | null;
   atMs: number | null;
@@ -658,6 +691,17 @@ export function auditMoves(scene: SceneDto): MoveFault[] {
       move: null,
       atMs: null,
       why: `${big} big moves; one or two a scene, unless it is all action`,
+    });
+  // What people do with the set's things: each step its least, the hand on
+  // the handle as the door swings, no one through a shut door, the feet on
+  // the treads (studio-interactions-plan §2.6).
+  for (const fault of interactFaults(scene))
+    out.push({
+      id: fault.id,
+      who: fault.who,
+      move: fault.does,
+      atMs: fault.atMs,
+      why: fault.why,
     });
   return out;
 }

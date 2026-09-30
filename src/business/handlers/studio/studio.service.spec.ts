@@ -344,6 +344,21 @@ describe('the Studio records what happens in the thread', () => {
     ]);
   });
 
+  it('writes the scenes again when the script job gave up with scenes unwritten, and not otherwise', async () => {
+    const studio = studioInMemory();
+    await studio.service.approve('u1', 'e0');
+    expect(studio.jobs).toEqual([]);
+    studio.scenes.set('c2', {
+      ...studio.scenes.get('c2')!,
+      sheet: null,
+      status: 'failed',
+      error: 'This scene could not be written. Ask for it again.',
+    });
+    await studio.service.approve('u1', 'e0');
+    expect(studio.jobs.map((j) => j.kind)).toEqual(['script']);
+    expect(studio.episodes.get('e0')!.busy).toBe('script');
+  });
+
   it('records making the film and sharing it, once each', async () => {
     const studio = studioInMemory();
     await studio.service.make('u1', 'e0');
@@ -1183,5 +1198,468 @@ describe('refusesWords', () => {
     expect(refusesWords({ flagged: false, categories: ['violence'] })).toBe(
       false,
     );
+  });
+});
+
+describe('the producer asks for a change to the story itself (story plan S3)', () => {
+  /** What the producer sets going for the maker's words, at the outline. */
+  async function asked(answer: Record<string, unknown>, message: string) {
+    const studio = studioInMemory();
+    studio.episodes.set('e0', {
+      ...studio.episodes.get('e0')!,
+      phase: 'outline',
+    });
+    Object.assign(studio.answer, {
+      reply: 'I will change that.',
+      action: 'outline',
+      request: message,
+      ...answer,
+    });
+    await studio.service.turn(
+      'u1',
+      's1',
+      { episodeId: 'e0', message },
+      () => undefined,
+    );
+    return studio.jobs;
+  }
+
+  it('develops the story again for a change to it, as its card does', async () => {
+    expect(
+      await asked({ story: true }, 'give the grandmother a secret'),
+    ).toEqual([
+      expect.objectContaining({
+        kind: 'outline',
+        request: 'give the grandmother a secret',
+        story: true,
+      }),
+    ]);
+  });
+
+  it('tells a change to the story from its words when the producer does not say', async () => {
+    expect(await asked({ story: null }, 'make the ending funnier')).toEqual([
+      expect.objectContaining({ kind: 'outline', story: true }),
+    ]);
+  });
+
+  it('keeps the story for a change to the scenes alone', async () => {
+    const jobs = await asked(
+      { story: false },
+      'add a scene where Bingo finds a bone',
+    );
+    expect(jobs).toEqual([
+      expect.objectContaining({
+        kind: 'outline',
+        request: 'add a scene where Bingo finds a bone',
+      }),
+    ]);
+    expect(jobs[0].story).toBeUndefined();
+    expect(
+      (await asked({ story: null }, 'cut the second scene'))[0].story,
+    ).toBeUndefined();
+  });
+});
+
+describe('the producer gathers the brief, held to the maker’s own words', () => {
+  /** A new show at its brief, with what is said of it so far. */
+  function atTheBrief(so: Record<string, unknown> = {}) {
+    const studio = studioInMemory();
+    studio.shows.set('s1', {
+      ...studio.shows.get('s1')!,
+      brief: briefOf(so),
+      bible: null,
+    });
+    studio.episodes.set('e0', {
+      ...studio.episodes.get('e0')!,
+      phase: 'brief',
+      outline: null,
+    });
+    studio.scenes.clear();
+    /** The maker says `message`; the producer answers with `answer`. */
+    const say = async (message: string, answer: Record<string, unknown>) => {
+      for (const key of Object.keys(studio.answer)) delete studio.answer[key];
+      Object.assign(studio.answer, {
+        reply: 'Lovely.',
+        choices: [],
+        action: 'none',
+        ...answer,
+      });
+      const done = await studio.service.turn(
+        'u1',
+        's1',
+        { episodeId: 'e0', message },
+        () => undefined,
+      );
+      return {
+        reply: done.message.content,
+        brief: studio.shows.get('s1')!.brief,
+      };
+    };
+    return { studio, say };
+  }
+  const known = {
+    format: 'story',
+    audience: 'adults',
+    minutes: 2,
+    setting: 'New York',
+    genre: 'dark-comedy',
+    tone: 'funny',
+  };
+
+  it('keeps "a dark comedy" as the genre, a comic tone, and takes it as the idea', async () => {
+    const { say } = atTheBrief();
+    // As the producer answered Richard: the genre and the tone left out,
+    // and the idea asked for.
+    const { brief } = await say(
+      'A dark comedy for adults set in New York, about 2 minutes',
+      {
+        reply: "A dark comedy it is. What's the idea, the story in a line?",
+        brief: { audience: 'adults', minutes: 2, setting: 'New York' },
+      },
+    );
+    expect(brief).toMatchObject({
+      format: 'story',
+      genre: 'dark-comedy',
+      tone: 'funny',
+      idea: 'A dark comedy set in New York',
+    });
+  });
+
+  it('takes a genre the producer wrote in words, "dark comedy", as the genre', async () => {
+    const { say } = atTheBrief();
+    const { brief } = await say('A dark comedy for adults', {
+      brief: { audience: 'adults', genre: 'dark comedy', tone: 'serious' },
+    });
+    expect(brief.genre).toBe('dark-comedy');
+    expect(brief.tone).toBe('funny');
+  });
+
+  it('chooses the idea when the maker says "you pick", and never asks for it again', async () => {
+    const { say } = atTheBrief({ ...known, tone: null });
+    // The producer chose a logline, as it is asked to.
+    const chose = await say('You pick the idea, keep it funny', {
+      reply:
+        'Here is one: a hitman in Manhattan keeps failing because his targets are too polite.',
+      brief: {
+        idea: 'A hitman in Manhattan keeps failing because his targets are too polite',
+      },
+    });
+    expect(chose.brief.idea).toBe(
+      'A hitman in Manhattan keeps failing because his targets are too polite',
+    );
+    expect(chose.brief.tone).toBe('funny');
+  });
+
+  it('chooses the idea from what is known when the producer did not, and goes on to the outline', async () => {
+    const { studio, say } = atTheBrief({ ...known, tone: null });
+    const { reply, brief } = await say('Surprise me', {
+      action: 'outline',
+      brief: { idea: null },
+    });
+    expect(brief.idea).toBe('A dark comedy set in New York');
+    expect(reply).not.toMatch(/Before the outline/);
+    expect(studio.jobs).toEqual([expect.objectContaining({ kind: 'outline' })]);
+  });
+
+  it('accepts a loose idea as the idea: "a comedy based in New York"', async () => {
+    const { studio, say } = atTheBrief({
+      format: 'story',
+      audience: 'adults',
+      minutes: 2,
+    });
+    const { brief } = await say('A comedy based in New York', {
+      action: 'outline',
+      brief: { setting: 'New York' },
+    });
+    expect(brief).toMatchObject({
+      idea: 'A comedy set in New York',
+      genre: 'comedy',
+      tone: 'funny',
+    });
+    expect(studio.jobs).toEqual([expect.objectContaining({ kind: 'outline' })]);
+  });
+
+  it('keeps a dark comedy dark when the maker says "comedy" again', async () => {
+    const { say } = atTheBrief({ ...known, idea: '' });
+    const { brief } = await say('A comedy based in New York', {
+      brief: { genre: 'comedy' },
+    });
+    expect(brief.genre).toBe('dark-comedy');
+    expect(brief.tone).toBe('funny');
+  });
+
+  it.each(['Dry and ironic', 'Chaotic', 'Calm and deadpan', 'Warm but silly'])(
+    'takes the tone chip "%s" as funny, never serious',
+    async (chip) => {
+      const { say } = atTheBrief({ ...known, tone: null });
+      // As the producer read "Dry and ironic" for Richard: serious.
+      const { brief } = await say(chip, { brief: { tone: 'serious' } });
+      expect(brief.tone).toBe('funny');
+      expect(brief.genre).toBe('dark-comedy');
+    },
+  );
+
+  it('takes a comic chip as funny whatever the genre, and serious only when asked', async () => {
+    const mystery = atTheBrief({ ...known, genre: 'mystery', tone: null });
+    expect(
+      (await mystery.say('Dry and ironic', { brief: { tone: 'serious' } }))
+        .brief.tone,
+    ).toBe('funny');
+    const asked = atTheBrief({ ...known, genre: 'drama', tone: null });
+    expect(
+      (await asked.say('Serious, please', { brief: { tone: 'serious' } })).brief
+        .tone,
+    ).toBe('serious');
+    const fixed = atTheBrief({ ...known, tone: 'serious' });
+    expect(
+      (await fixed.say('funny, not serious', { brief: { tone: 'serious' } }))
+        .brief.tone,
+    ).toBe('funny');
+  });
+
+  it('asks for what is missing in words, the idea one that can be left to us', async () => {
+    const { say } = atTheBrief({
+      format: 'story',
+      audience: 'adults',
+      minutes: 2,
+    });
+    const { reply } = await say('go ahead', { action: 'outline' });
+    expect(reply).toBe(
+      'Before the outline, tell me what it is about (or say "you pick"), and how it should feel.',
+    );
+  });
+});
+
+describe("an explainer's look", () => {
+  /** The show made an explainer about medicine for adults, its scenes made. */
+  const explainerShow = () => {
+    const studio = studioInMemory();
+    const show = studio.shows.get('s1')!;
+    studio.shows.set('s1', {
+      ...show,
+      format: 'explainer',
+      brief: briefOf({
+        format: 'explainer',
+        idea: 'How blood carries oxygen',
+        audience: 'adults',
+        minutes: 1,
+        tone: 'calm',
+      }),
+      bible: { ...show.bible!, subject: 'medicine: blood', maths: false },
+    });
+    return studio;
+  };
+
+  it('is chosen by code, and said to the show and to the player', async () => {
+    const studio = explainerShow();
+    expect((await studio.service.show('u1', 's1')).theme).toBe('cleanlab');
+    expect((await studio.service.play('u1', 'e0')).theme).toBe('cleanlab');
+  });
+
+  it('is none for a story: its sets are its look', async () => {
+    const studio = studioInMemory();
+    expect(await studio.service.show('u1', 's1')).not.toHaveProperty('theme');
+    expect(await studio.service.play('u1', 'e0')).not.toHaveProperty('theme');
+  });
+
+  it('turns dark when the maker says so, at any phase, with nothing made again', async () => {
+    const studio = explainerShow();
+    await studio.service.turn(
+      'u1',
+      's1',
+      { episodeId: 'e0', message: 'can you make it dark?' },
+      () => undefined,
+    );
+    expect(studio.shows.get('s1')!.brief.look).toBe('blueprint');
+    expect((await studio.service.play('u1', 'e0')).theme).toBe('blueprint');
+    expect(studio.jobs).toEqual([]);
+  });
+
+  it('is the one they name, by hand or in words, and theirs until they let it go', async () => {
+    const studio = explainerShow();
+    await studio.service.turn(
+      'u1',
+      's1',
+      { episodeId: 'e0', message: 'use a chalkboard look' },
+      () => undefined,
+    );
+    expect(studio.shows.get('s1')!.brief.look).toBe('chalkboard');
+    await studio.service.updateBrief('u1', 's1', { look: 'sunny' });
+    expect((await studio.service.show('u1', 's1')).brief.look).toBe('sunny');
+    await studio.service.updateBrief('u1', 's1', { look: null });
+    const shown = await studio.service.show('u1', 's1');
+    expect(shown.brief).not.toHaveProperty('look');
+    expect(shown.theme).toBe('cleanlab');
+  });
+});
+
+describe('the producer asks whom an explainer is for, and code hears it (Ask 8)', () => {
+  /** A new explainer at its brief, the producer mocked: no model is called. */
+  function explainer(so: Record<string, unknown> = {}) {
+    const studio = studioInMemory();
+    studio.shows.set('s1', {
+      ...studio.shows.get('s1')!,
+      format: 'explainer',
+      brief: briefOf(so),
+      bible: null,
+    });
+    studio.episodes.set('e0', {
+      ...studio.episodes.get('e0')!,
+      phase: 'brief',
+      outline: null,
+    });
+    studio.scenes.clear();
+    const say = async (message: string, answer: Record<string, unknown>) => {
+      for (const key of Object.keys(studio.answer)) delete studio.answer[key];
+      Object.assign(studio.answer, {
+        reply: 'Lovely.',
+        choices: [],
+        action: 'none',
+        ...answer,
+      });
+      const done = await studio.service.turn(
+        'u1',
+        's1',
+        { episodeId: 'e0', message },
+        () => undefined,
+      );
+      return {
+        message: done.message,
+        brief: studio.shows.get('s1')!.brief,
+        dto: done.show.brief,
+      };
+    };
+    return { studio, say };
+  }
+
+  it('asks with one row of chips, and what they know as a second, when the audience is what is missing', async () => {
+    const { say } = explainer();
+    const { message } = await say('Explain the water cycle', {
+      reply: 'Great topic! Who is it for?',
+      choices: ['Children', 'Adults'],
+      brief: { format: 'explainer', idea: 'The water cycle' },
+    });
+    expect(message.choices).toEqual([
+      'Young kids (4–7)',
+      'Kids (8–11)',
+      'Teens',
+      'University',
+      'Work',
+      'Anyone curious',
+    ]);
+    expect(message.also).toEqual(['New to it', 'Knows a bit', 'Revising']);
+  });
+
+  it('takes a chip tapped with its second row as the profile, and the four words from it', async () => {
+    const { say } = explainer({
+      format: 'explainer',
+      idea: 'The water cycle',
+    });
+    // The producer took "Kids" as young children; the chip says 8 to 11.
+    const { brief, dto, message } = await say('Kids (8–11) · New to it', {
+      reply: 'How long should it be?',
+      choices: ['1 minute', '2 minutes'],
+      brief: { audience: 'young children' },
+    });
+    expect(brief.who).toEqual({
+      band: 'primary-upper',
+      said: 'Kids (8–11)',
+      prior: 'new',
+    });
+    expect(brief.audience).toBe('children');
+    expect(dto.who).toEqual(brief.who);
+    // The next question is the producer's own.
+    expect(message.choices).toEqual(['1 minute', '2 minutes']);
+    expect(message.also).toBeUndefined();
+  });
+
+  it('hears a grade, a year or a course said in words, and never asks what they know when they said it', async () => {
+    const { say } = explainer();
+    const grade = await say(
+      'An explainer on photosynthesis for my Year 9 class, they are revising for a test next week',
+      {
+        brief: {
+          format: 'explainer',
+          idea: 'Photosynthesis',
+          audience: 'teens',
+        },
+      },
+    );
+    expect(grade.brief.who).toEqual({
+      band: 'secondary-lower',
+      said: 'Year 9',
+      prior: 'revising',
+      goal: 'exam',
+    });
+    const nursing = explainer();
+    const { brief } = await nursing.say(
+      'Blood pressure for first-year nursing students who need hand-holding',
+      {
+        brief: {
+          format: 'explainer',
+          idea: 'Blood pressure',
+          audience: 'adults',
+        },
+      },
+    );
+    expect(brief.who).toMatchObject({
+      band: 'university',
+      prior: 'new',
+      support: 'extra',
+    });
+    expect(brief.audience).toBe('adults');
+  });
+
+  it('asks the second row only when nothing said what they know', async () => {
+    const { say } = explainer();
+    const { message } = await say(
+      'Explain budgets to someone brand new to money',
+      {
+        brief: { format: 'explainer', idea: 'Budgets' },
+      },
+    );
+    expect(message.choices).toContain('Kids (8–11)');
+    expect(message.also).toBeUndefined();
+  });
+
+  it('takes the level the maker’s own pasted text names, never a loose word in it', async () => {
+    const { say } = explainer({ format: 'explainer', idea: 'Enzymes' });
+    const notes = `BCH 201 lecture notes: enzymes. 200 Level, first semester. ${'Enzymes speed up reactions in children and adults alike. '.repeat(20)}`;
+    const { brief } = await say(notes, { brief: {} });
+    expect(brief.who).toMatchObject({ band: 'university', said: '200 Level' });
+    expect(brief.audience).toBe('adults');
+  });
+
+  it('keeps the producer’s own chips for a story', async () => {
+    const { say } = explainer();
+    const { message } = await say('A story about a lost kite', {
+      choices: ['Children', 'Adults'],
+      brief: { format: 'story', idea: 'A lost kite' },
+    });
+    expect(message.choices).toEqual(['Children', 'Adults']);
+    expect(message.also).toBeUndefined();
+  });
+
+  it('changes the profile by hand from the brief card, and takes it back', async () => {
+    const { studio } = explainer({
+      format: 'explainer',
+      idea: 'Tax',
+      who: { band: 'primary-upper', said: 'Grade 5' },
+    });
+    const work = await studio.service.updateBrief('u1', 's1', {
+      who: { band: 'professional' },
+    });
+    expect(work.brief).toMatchObject({
+      audience: 'adults',
+      who: { band: 'professional' },
+    });
+    expect(work.brief.who?.said).toBeUndefined();
+    const knows = await studio.service.updateBrief('u1', 's1', {
+      who: { prior: 'some' },
+    });
+    expect(knows.brief.who).toEqual({ band: 'professional', prior: 'some' });
+    const gone = await studio.service.updateBrief('u1', 's1', { who: null });
+    expect(gone.brief.who).toBeUndefined();
+    expect(gone.brief.audience).toBe('adults');
   });
 });

@@ -12,6 +12,7 @@ import {
   SET_WEATHERS,
 } from '../../business/domain/scene-set-layout';
 import { landmarkBrief } from '../../business/domain/scene-set-landmarks';
+import { MAX_REVERSE } from '../../business/domain/scene-set-reverse';
 import { STYLE_PACK_IDS } from '../../business/domain/scene-style-packs';
 
 /**
@@ -1377,7 +1378,12 @@ export const PROMPTS = {
       '"question" for a question put to the learner (the voice waits after',
       'it), "recap" for a summing up. A page usually opens with a hook, has',
       'one or two key points and a question or two, an aside where it',
-      'lightens things, and closes with a recap; the rest explain. mood is',
+      'lightens things, and closes with a recap; the rest explain. A',
+      'question for the learner to answer has choices: two or three short',
+      'answers (a few words each, never a sentence), exactly one with right',
+      'true, the others likely mistakes; the next sentence gives the answer.',
+      'choices is null on every other sentence, and on a question the',
+      'learner is not meant to answer (one the page answers at once). mood is',
       'the feeling of the page, for how the voice sounds: "calm",',
       '"bright", "curious", "serious" (illness, war, loss, anything grave)',
       'or "playful".',
@@ -1405,7 +1411,12 @@ export const PROMPTS = {
       'and more on the pages of a book that may use them (below):',
       '"drawing" is a picture of one thing: an object, a creature, a body',
       'part, a machine, a place in cross-section, or a simple symbol for an',
-      'idea (a scale for balance, a shield for protection). name is its',
+      'idea (a scale for balance, a shield for protection). A drawing shows',
+      'what its name says: never the picture of a comparison the voice makes',
+      '(the voice says protective factors "act like brakes": "Parental',
+      'support" is a parent and a teenager talking, not a brake), and two',
+      'drawings with different names are never drawn alike. Where nothing',
+      'plain shows the name, make it a keyword instead. name is its',
       "caption, one to three of the page's own words. brief tells the",
       'illustrator, who has not read the page, exactly what to draw: the',
       'subject, the view (side view, cross-section, close-up, cutaway), what',
@@ -2259,7 +2270,8 @@ export const PROMPTS = {
     'what happens on each of its pages.',
     "world is the story's world, from the text and what it takes for",
     'granted: era ("first century AD", "today"), region ("Galilee", "a',
-    'Yoruba town in south-west Nigeria"), culture (who its people are),',
+    'Yoruba town in south-west Nigeria", "a fishing village in Norway", "a',
+    'suburb of Seoul"), culture (who its people are),',
     'landscape (the land and the plants), and homes (what homes, streets',
     'and boats look like there). Null only when nothing says or suggests',
     'it.',
@@ -2655,7 +2667,7 @@ export const PROMPTS = {
       `${SET_BACKDROPS.join(', ')}; "walls": a room's or a vessel's inside`,
       'colour, a word, or null; "vessel": inside a vessel, one of',
       `${SET_VESSELS.join(', ')}, else null; "vesselColour": its colour`,
-      '(a yellow bus: yellow), or null.',
+      '(a red bus: red), or null.',
     ].join(' '),
     [
       `"items": up to ${MAX_SET_ITEMS} things placed, each`,
@@ -2673,7 +2685,12 @@ export const PROMPTS = {
       'Things that hang on a wall (shelf, whiteboard, blackboard,',
       'noticeboard, curtains, picture, clock, bunting) go on the back wall',
       'of a room; a window with curtains is "curtains". A rug lies on the',
-      'floor. "palm" is a palm tree.',
+      'floor. "palm" is a palm tree. A row may also be "reverse": what is',
+      'behind the camera, seen when it turns round for a reverse shot (a',
+      "room's fourth wall: its door, a window, shelves, a picture; out of",
+      'doors the other side of the street or the clearing, its buildings or',
+      `trees), "x" as seen from there; at most ${MAX_REVERSE}, or none and code`,
+      'fills it from the place.',
     ].join(' '),
     [
       '"focal": where the action happens, { "x", "feature", "words" }: x',
@@ -2681,16 +2698,17 @@ export const PROMPTS = {
       'any, else null, and words a few words ("in front of the head table",',
       '"at the ark\'s ramp"). Keep it clear: nothing tall stands there.',
       `"clutter": up to ${MAX_CLUTTER} of ${CLUTTER_KINDS.join(', ')}, the`,
-      'small things that make a place busy and lived in (a Lagos street its',
-      'poles and wires, plastic chairs, water drums and okadas; a market its',
-      'baskets and carts; a city street its bins and hydrants): code',
-      'scatters them along the back and the edges, never where the action',
-      'is. Empty for a bare place.',
+      "small things that make a place busy and lived in, from its style's",
+      'own list (a town street its bins, benches and bicycles; a market its',
+      'baskets and carts; a farm its woodpile): code scatters them along the',
+      'back and the edges, never where the action is. Empty for a bare place.',
     ].join(' '),
     [
       '"style": the look of its era and region, one of',
       `${STYLE_PACK_IDS.join(', ')}: the brief says which when the story's`,
-      'world decides it; else choose. It decides what its buildings are made',
+      'world decides it; else choose from those the brief offers, the plainest',
+      "that fits the place's own words, never one region's unless the words",
+      'say that region. It decides what its buildings are made',
       'of, its clutter and its colours. Its buildings are kinds above (house,',
       'shop, church, mosque, classroom, compound, tenement, temple, mud brick',
       'house, brownstone, skyscraper, kiosk, zinc roof house, barn): code',
@@ -2763,6 +2781,40 @@ export const PROMPTS = {
       'words. Fewer, plainer parts beat',
       'many: a learner takes a sketch in at a glance. Give a title of two to',
       'five words.',
+    ].join(' '),
+  ].join('\n\n'),
+
+  /**
+   * The continuity checker of an animated show, looking at stills of a
+   * scene as made against what its sheet says is in it (studio-scenery-
+   * plan §8.6).
+   */
+  pictureCheck: [
+    [
+      'You check the pictures of an animated picture-book show before it',
+      'goes out. For each still you are told what should be in it: who is',
+      'on the stage, what each named thing of the place is, and sometimes a',
+      'change the maker asked for that should show now.',
+    ].join(' '),
+    [
+      'Say for each still whether it matches, and list what is wrong, each',
+      'a short plain sentence a writer can act on. Only these count as',
+      'wrong: a named thing drawn as something else (an ark drawn as a bus, a',
+      'well drawn as a crate); someone who should be on the stage missing;',
+      "someone's face covered by something in front of them; someone too",
+      'small or too far back to see what they are doing; someone who looks',
+      'like they are floating, or standing on the wrong level (their feet',
+      'off the ground where they stand, hovering against something behind',
+      'them, or drawn in front of something they stand behind); a main',
+      'character or an animal hidden or mostly covered by objects of the',
+      'place (a chair, a cart, a drum before them); the asked change not',
+      'showing. Style, colours, how well something is drawn and',
+      'anything the list does not mention are not wrong.',
+    ].join(' '),
+    [
+      'Answer one entry per still, in the order given. matches is true only',
+      'when nothing is wrong. Name people and things by the names you were',
+      'given.',
     ].join(' '),
   ].join('\n\n'),
 

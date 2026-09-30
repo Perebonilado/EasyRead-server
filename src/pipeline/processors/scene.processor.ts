@@ -1,5 +1,6 @@
+import type { SetLook } from '../../business/domain/scene-set-layout';
 import { ConfigService } from '@nestjs/config';
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import type { SceneDto, SceneTiming } from '../../contracts';
 import { wordTimesFromAligned } from '../../business/domain/board';
 import {
@@ -61,6 +62,16 @@ import {
   withoutStandIns,
 } from '../../business/domain/scene-compose';
 import {
+  flickersOf,
+  holdMsOf,
+  readingOf,
+  readingRhythm,
+  textPacing,
+  trimCards,
+  type SceneReading,
+} from '../../business/domain/scene-reading';
+import { textOverlaps } from '../../business/domain/scene-text-check';
+import {
   conventionGround,
   measureGround,
 } from '../../business/domain/scene-ground';
@@ -69,6 +80,13 @@ import {
   type ScreenplayDraft,
 } from '../../business/domain/scene-screenplay';
 import { rasterise } from '../../business/domain/scene-raster';
+import { pictureMoments } from '../../business/domain/scene-picture-check';
+import { renderStill } from '../../business/domain/scene-still';
+import {
+  themeOf,
+  themedSvg,
+  type ThemeId,
+} from '../../business/domain/scene-themes';
 import {
   SCENE_GENERATOR_VERSION,
   isCodeThing,
@@ -90,6 +108,7 @@ import {
 } from '../../business/domain/scene-script';
 import {
   PLAIN_FIGURE,
+  figureFor,
   describeFigure,
   figureOf,
   signsOver,
@@ -119,6 +138,7 @@ import {
   optionsKey,
   ownFeatureScale,
   ownThingScale,
+  missingByCode,
   notDrawnYet,
   ownSheetsOf,
   setsOf,
@@ -130,10 +150,11 @@ import {
   type Sets,
 } from '../../business/domain/scene-sheet';
 import { DANGLE_RIG } from '../../business/domain/scene-dangles';
+import { VIEW_RIG } from '../../business/domain/scene-figure-views';
 import { DRAWN } from '../../business/domain/scene-own';
 import type { OwnPropDrawing } from '../../business/domain/scene-props';
 import type { SetPiece } from '../../business/domain/scene-set-pieces';
-import { buildSet } from '../../business/domain/scene-set-layout';
+import { buildSet, reverseSet } from '../../business/domain/scene-set-layout';
 import { RIG_VERSION, rigSheet } from '../../business/domain/scene-sheet-rig';
 import { withMouths } from '../../business/domain/studio/studio-audit';
 import { withFace } from '../../business/domain/scene-sheet-face';
@@ -186,6 +207,7 @@ import {
 import {
   HOLD_LIMIT_S,
   characterVoice,
+  narratingSpeaker,
   deliveryPieces,
   sentenceStarts,
   voiceSlug,
@@ -193,12 +215,39 @@ import {
   voicedPieces,
 } from '../../business/domain/scene-voice';
 import { mp3DurationMs } from '../../business/domain/speech';
+import {
+  bandOfStage,
+  lessonPace,
+  makerRate,
+  paceReport,
+  paceWordFor,
+  voiceRate,
+  type PaceBrief,
+  type PaceReport,
+} from '../../business/domain/scene-pace';
+import {
+  applyPaceEdits,
+  paceWanted,
+  planPaceEdits,
+  retimeBeats,
+  retimeScene,
+  timeMapOf,
+  type PaceNotes,
+} from '../../business/domain/scene-pace-audio';
+import type { Pcm } from '../../business/domain/wav';
+import type { AudioCodecPort } from '../../business/ports/audio-codec.port';
+import { normaliseLoudness } from '../../business/domain/voice-loudness';
 import { spokenForm, type Pronunciations } from '../../business/domain/spoken';
 import { startMathsSpeech } from '../../business/domain/maths-speech';
 import type { AlignerPort } from '../../business/ports/aligner.port';
 import type { LlmGatewayPort, LlmUsage } from '../../business/ports/llm.port';
 import type { StoragePort } from '../../business/ports/storage.port';
-import { ALIGNER, LLM_GATEWAY, STORAGE } from '../../business/ports/tokens';
+import {
+  ALIGNER,
+  AUDIO_CODEC,
+  LLM_GATEWAY,
+  STORAGE,
+} from '../../business/ports/tokens';
 import type { AiCallLogRepository } from '../../business/repositories/ai-call-log.repository';
 import type {
   DocumentPageRepository,
@@ -285,6 +334,8 @@ export interface PageStory {
    * artist, are kept (a kite, a signpost). A book's pages have none.
    */
   ownKey?: string;
+  /** A Studio show's animation style on its sets: a tint over their palette, and their ink (studio-style.ts). */
+  look?: SetLook;
 }
 
 /** An explainer page's part of its chapter's teacher's notes, and how the page before it ended. */
@@ -316,19 +367,18 @@ async function inBatches<T, R>(
   return out;
 }
 
-/** A person no model could describe: plainly dressed, as old as their voice. */
-function figureByVoice(voice: StoryCharacter['voice']): FigureSpec {
+/** A person no model could describe: plainly dressed, as old as their voice, their skin and hair chosen by who they are. */
+function figureByVoice(
+  voice: StoryCharacter['voice'],
+  seed: string,
+): FigureSpec {
   const age =
     voice === 'girl' || voice === 'boy'
       ? 'child'
       : voice === 'old woman' || voice === 'old man'
         ? 'elder'
         : 'adult';
-  return {
-    ...PLAIN_FIGURE,
-    age,
-    hairColour: age === 'elder' ? 'grey' : PLAIN_FIGURE.hairColour,
-  };
+  return figureFor(seed, { age, top: PLAIN_FIGURE.top });
 }
 
 /**
@@ -356,13 +406,24 @@ type WriteAsk = Omit<
  * A set built by code before it was kept as layers, as layers too: built
  * again from its own layout, with nothing asked of a model, when nothing
  * in it was drawn apart by the artist (whose drawings are not kept with
- * it). Its flat picture stays as it was kept.
+ * it). Its flat picture stays as it was kept. And one kept as layers
+ * before it had another side is given one from its layout, likewise
+ * (studio-views-plan §4.2), what the artist drew for it left out; a set
+ * painted whole has no layout, and no other side.
  */
 function withLayers(
   set: SetSheet | undefined,
   place: StoryPlace,
 ): SetSheet | undefined {
-  if (!set || set.layered || !set.layout || set.layout.own.length) return set;
+  if (!set || !set.layout) return set;
+  if (set.layered) {
+    if (set.layered.reverse) return set;
+    const reverse = reverseSet(set.layout, place);
+    return reverse
+      ? { ...set, layered: { ...set.layered, reverse: reverse.layered } }
+      : set;
+  }
+  if (set.layout.own.length) return set;
   try {
     return { ...set, layered: buildSet(set.layout, place).layered };
   } catch {
@@ -400,6 +461,10 @@ export class SceneProcessor {
     private readonly config: ConfigService,
     @Inject(STORAGE) private readonly storage: StoragePort,
     @Inject(ALIGNER) private readonly aligner: AlignerPort,
+    /** Audio to samples and back, for the pace step; without it, the voice is kept as it came. */
+    @Optional()
+    @Inject(AUDIO_CODEC)
+    private readonly codec?: AudioCodecPort,
   ) {
     this.artist = new SceneArtist(
       this.llm,
@@ -612,11 +677,12 @@ export class SceneProcessor {
         );
       const drawn = [...drawings.values()].filter(Boolean).length;
       const rhythm = rhythmOf(scene);
+      const read = readingRhythm(scene);
       const held = lesson
         ? notesProblems(script, lesson.notes, pageNumber, material)
         : null;
       this.logger.log(
-        `${who}: made in ${Math.round((Date.now() - started) / 1000)}s: ${script.beats.length} sentences, ${Math.round(voice.durationMs / 1000)}s of audio timed by ${voice.timing}, ${wordsPerMinute(scene.beats)} words a minute, ${scene.steps.length} stage changes, ${scene.effects.length} effects (${filled} filled), ${drawn} of ${drawings.size} drawings; still at most ${Math.round(rhythm.stillMs / 1000)}s, ${rhythm.perMinute} changes a minute, ${rhythm.stagesPerMinute} of the stage${lesson && held ? `; a ${lesson.here.relation} page, ${held.shown} of ${held.points} planned ideas shown` : ''}`,
+        `${who}: made in ${Math.round((Date.now() - started) / 1000)}s: ${script.beats.length} sentences, ${Math.round(voice.durationMs / 1000)}s of audio timed by ${voice.timing}, ${wordsPerMinute(scene.beats)} words a minute, ${scene.steps.length} stage changes, ${scene.effects.length} effects (${filled} filled), ${drawn} of ${drawings.size} drawings; still at most ${Math.round(rhythm.stillMs / 1000)}s, ${rhythm.perMinute} changes a minute, ${rhythm.stagesPerMinute} of the stage; text left at least ${read.readLeftMs ?? '-'}ms after it is read, ${read.accentsPerMinute} accents a minute, the camera held at most ${Math.round(read.heldMs / 100) / 10}s for reading, no accent for at most ${Math.round(read.quietMs / 1000)}s${read.quietMs > 12_000 ? ' (still)' : ''}${lesson && held ? `; a ${lesson.here.relation} page, ${held.shown} of ${held.points} planned ideas shown` : ''}`,
       );
     } catch (error) {
       const message = (error as Error).message;
@@ -680,6 +746,25 @@ export class SceneProcessor {
       notes: string[];
       script: SceneScript | null;
     };
+    /** A lesson's audience and the maker's pace, for its voice; the stage's when absent. */
+    pace?: PaceBrief | null;
+    /** The look it is made in (a Studio explainer's): its still is shown in it. Absent, paper. */
+    theme?: ThemeId;
+    /**
+     * How its text is read and its picture moves, for whom it is made (a
+     * Studio explainer's audience, studio-motion): stored on the scene for
+     * the player, and its text paced by code to it (scene-reading). Absent,
+     * its stage's, and not stored: the player finds the same from the stage.
+     */
+    reading?: SceneReading | null;
+    /**
+     * Drawings made before, by the thing's id: used as they are, never
+     * drawn again. A continuous build's, drawn once for its section so its
+     * scenes all show them alike (studio-build sharedDrawings).
+     */
+    drawn?: ReadonlyMap<string, GatedDrawing>;
+    /** The scene as composed, finished before it is stored (a Studio clip's freeze, a lesson's card told its still). */
+    finish?: (scene: SceneDto) => SceneDto;
   }): Promise<
     | { fit: 'poor'; reason: string }
     | {
@@ -756,7 +841,7 @@ export class SceneProcessor {
           who,
           stop.signal,
           story,
-          carried.reuse,
+          new Map([...carried.reuse, ...(input.drawn ?? new Map())]),
         ),
         this.drawOwn(script, story, documentId, who, stop.signal),
       ]).then(async ([made, own]) => {
@@ -782,6 +867,7 @@ export class SceneProcessor {
         ),
         input.profile.stage ?? null,
         input.lesson?.here.newHere ?? [],
+        input.pace ?? null,
       )
         .catch((error: unknown) => {
           stop.abort();
@@ -797,9 +883,14 @@ export class SceneProcessor {
     const voice = spoken.value;
 
     await input.step?.('composing');
-    const compose = (from: SceneScript) =>
-      composeScene({
-        script: from,
+    // Its text paced to be read (Ask 3 B), by code: keyword cards cut to
+    // what its viewers read at a glance before it is laid out, and what
+    // comes too fast put right once it is timed.
+    const reading =
+      input.reading ?? readingOf({ stage: input.profile.stage ?? undefined });
+    const compose = (from: SceneScript) => {
+      const made = composeScene({
+        script: trimCards(from, reading.cardWords),
         drawings,
         beats: voice.beats,
         durationMs: voice.durationMs,
@@ -809,6 +900,11 @@ export class SceneProcessor {
         // The book's or the show's own: each place keeps its regulars.
         key: story?.setsKey ?? null,
       });
+      if (input.reading)
+        made.scene.reading = { wpm: reading.wpm, motion: reading.motion };
+      const paced = textPacing(made.scene, reading);
+      return { ...made, staging: [...made.staging, ...paced] };
+    };
     let composed = compose(script);
     // Looked at as made: anything it asks to play again is composed again
     // on the same drawings and voice, its words and quiet unchanged.
@@ -823,8 +919,13 @@ export class SceneProcessor {
       composed = compose(script);
     }
     const { filled, audit } = composed;
-    // Every line said on the stage moves its speaker's mouth.
-    const { scene, mended: mouths } = withMouths(composed.scene);
+    // Every line said on the stage moves its speaker's mouth; a lesson
+    // keeps the pace its voice was made at, for a later change to it.
+    const { scene: mouthed, mended: mouths } = withMouths(composed.scene);
+    const scene: SceneDto =
+      voice.voicePace !== undefined
+        ? { ...mouthed, voicePace: voice.voicePace }
+        : mouthed;
     for (const note of mouths) this.logger.log(`${who}: ${note}`);
     await this.keepParts(input.keepAs ?? 'page', who, {
       script,
@@ -837,10 +938,49 @@ export class SceneProcessor {
     });
     this.logAudit(who, audit);
     for (const note of composed.staging) this.logger.log(`${who}: ${note}`);
-    const { sceneKey, thumbKey } = await this.store(base, scene, who);
+    // How a Studio explainer reads (a book's page says so with its rhythm).
+    if (input.reading) {
+      const read = readingRhythm(scene, reading);
+      this.logger.log(
+        `${who}: read at ${reading.wpm} words a minute, motion ${reading.motion}: text left at least ${read.readLeftMs ?? '-'}ms after it is read, ${read.accentsPerMinute} accents a minute, the camera held at most ${Math.round(read.heldMs / 100) / 10}s for reading, no accent for at most ${Math.round(read.quietMs / 1000)}s${read.quietMs > 12_000 ? ' (still)' : ''}`,
+      );
+    }
+    // The flicker check (the rhythm log's): what is left changing quicker
+    // than the eye, which a lesson's pacing has put right already.
+    const flickers = flickersOf(scene, holdMsOf(reading));
+    this.logger.log(
+      `${who}: flicker check: ${
+        flickers.length
+          ? flickers
+              .map(
+                (f) => `${f.kind} ${f.what} at ${f.atMs}ms held ${f.heldMs}ms`,
+              )
+              .slice(0, 6)
+              .join('; ')
+          : 'every stage held'
+      }`,
+    );
+    // The text check: words on words or on things, standing or in passing.
+    const overlaps = textOverlaps(scene, reading);
+    this.logger.log(
+      `${who}: text check: ${
+        overlaps.length
+          ? overlaps
+              .map(
+                (o) => `${o.staging} step ${o.step} ${o.kind} ${o.a} / ${o.b}`,
+              )
+              .slice(0, 6)
+              .join('; ')
+          : 'no words on words or things'
+      }`,
+    );
+    // Paper is every scene's look unless it says otherwise.
+    if (input.theme && input.theme !== 'paper') scene.theme = input.theme;
+    const finished = input.finish ? input.finish(scene) : scene;
+    const { sceneKey, thumbKey } = await this.store(base, finished, who);
     return {
       fit: 'good',
-      scene,
+      scene: finished,
       sceneKey,
       thumbKey,
       voice,
@@ -881,11 +1021,27 @@ export class SceneProcessor {
     script: SceneScript;
   }> {
     const { story, who } = input;
-    const [cast, sets, own] = await Promise.all([
+    const [kept, sets, own] = await Promise.all([
       this.castAt(story.castKey),
       this.setsAt(story.setsKey),
       story.ownKey ? this.ownAt(story.ownKey) : null,
     ]);
+    // Whoever code can draw and the cast has not kept (an animal of the
+    // kit's, drawn before kit drawings were kept) is drawn and kept now,
+    // rather than the scene failing for them.
+    const heal = missingByCode(
+      input.script,
+      story.bible,
+      kept,
+      this.bookAnimals,
+    );
+    if (heal.length)
+      await Promise.all(
+        heal.map((c) =>
+          this.sheetFor(story.castKey, c, story.bookTitle, null, who),
+        ),
+      );
+    const cast = heal.length ? await this.castAt(story.castKey) : kept;
     let script = input.script;
     const reuse = new Map(
       [...input.kept].flatMap(([id, drawing]): [string, GatedDrawing][] =>
@@ -952,6 +1108,73 @@ export class SceneProcessor {
     for (const note of mouths) this.logger.log(`${who}: ${note}`);
     const { sceneKey, thumbKey } = await this.store(input.base, scene, who);
     return { scene, sceneKey, thumbKey, script };
+  }
+
+  /**
+   * A made lesson scene's voice played quicker or slower by `tempo` (the
+   * maker changed its pace), its silences kept as they were, and the scene
+   * timed again on it: nothing voiced, nothing drawn, CPU only
+   * (studio-explainer-plan, Ask 1 §6 "repace"). Stored beside the scene it
+   * was, its still kept. Null for a scene it cannot be done to: a story's,
+   * or with no codec here.
+   */
+  async repace(input: {
+    scene: SceneDto;
+    audio: Buffer;
+    tempo: number;
+    base: string;
+    who: string;
+  }): Promise<{
+    scene: SceneDto;
+    sceneKey: string;
+    audioKey: string;
+    durationMs: number;
+  } | null> {
+    const { scene, who } = input;
+    if (!this.codec || Math.abs(input.tempo - 1) < 0.005) return null;
+    if (scene.acting || scene.props?.length || scene.setting?.full) return null;
+    const pcm = await this.codec.decode(input.audio, 'audio/mpeg');
+    const { edits } = planPaceEdits({
+      pcm,
+      beats: scene.beats,
+      targets: scene.beats.map(() => null),
+      pauses: scene.beats.map(() => null),
+      trimInside: false,
+      tempo: input.tempo,
+    });
+    if (!edits.length) return null;
+    const edited = applyPaceEdits(pcm, edits);
+    const durationMs = Math.round(
+      (edited.samples.length / edited.sampleRate) * 1000,
+    );
+    const timed = retimeScene(
+      scene,
+      timeMapOf(edits, pcm.sampleRate),
+      durationMs,
+    );
+    if (!timed) return null;
+    const again: SceneDto = {
+      ...timed,
+      voicePace: Math.round((scene.voicePace ?? 1) * input.tempo * 1000) / 1000,
+    };
+    const audioKey = `${input.base}-voice.mp3`;
+    await this.storage.put({
+      key: audioKey,
+      body: await this.codec.encode(edited),
+      mimeType: 'audio/mpeg',
+    });
+    const sceneKey = `${input.base}-scene.json`;
+    await this.storage.put({
+      key: sceneKey,
+      body: Buffer.from(JSON.stringify(again)),
+      mimeType: 'application/json',
+    });
+    const before = paceReport(scene.beats);
+    const after = paceReport(again.beats);
+    this.logger.log(
+      `${who}: paced again ×${input.tempo.toFixed(3)}: ${before.wpm}→${after.wpm} wpm, ${Math.round(scene.durationMs / 1000)}s→${Math.round(durationMs / 1000)}s, nothing voiced`,
+    );
+    return { scene: again, sceneKey, audioKey, durationMs };
   }
 
   /**
@@ -1482,8 +1705,10 @@ export class SceneProcessor {
           signs: signsShown(script, thing.id),
           faces: facesShown(script, thing.id),
           old: oldWorld(story?.bible.world?.era),
-          // Drawn new for the page, with what swings: rig 2.
-          rig: DANGLE_RIG,
+          // Drawn new for the page, with what swings and from every side: rig 3.
+          rig: VIEW_RIG,
+          // And a face of moving parts (scene-face-rig).
+          faceRig: true,
         }).catch((error: unknown) => {
           this.logger.warn(
             `${who}: "${thing.id}" (a person) is set as a card: ${(error as Error).message}`,
@@ -1543,9 +1768,10 @@ export class SceneProcessor {
             faces,
             old: oldWorld(story?.bible.world?.era),
             ...(thing.dress?.length ? { dress: thing.dress } : {}),
-            // Drawn new for the page, with what swings: rig 2. A sheet
-            // the book keeps is as it was drawn.
-            rig: DANGLE_RIG,
+            // Drawn new for the page, with what swings and from every
+            // side: rig 3. A sheet the book keeps is as it was drawn.
+            rig: VIEW_RIG,
+            faceRig: true,
           })
         : kitAnimal
           ? await animalDrawing(kitAnimal, thing.ref, {
@@ -1647,6 +1873,7 @@ export class SceneProcessor {
               documentId,
               who,
               story.bible.world ?? null,
+              story.look ?? null,
             )
           : null;
       out.set(
@@ -1688,6 +1915,38 @@ export class SceneProcessor {
         );
       }),
     ]);
+    return out;
+  }
+
+  /**
+   * Drawings made on their own, before the scenes that show them (a
+   * continuous build's, shared by its scenes): each asked for, gated and
+   * kept as a scene's would be. One that does not come through is null.
+   */
+  async drawThings(
+    things: readonly DrawingThing[],
+    topic: string,
+    documentId: string | null,
+    who: string,
+  ): Promise<Map<string, GatedDrawing | null>> {
+    const out = new Map<string, GatedDrawing | null>();
+    const signal = new AbortController().signal;
+    await inBatches([...things], 4, async (thing) => {
+      out.set(
+        thing.id,
+        await this.drawOne(
+          thing,
+          topic,
+          things
+            .filter((one) => one.id !== thing.id)
+            .map((one) => one.name)
+            .slice(0, 5),
+          documentId,
+          who,
+          signal,
+        ),
+      );
+    });
     return out;
   }
 
@@ -1761,11 +2020,17 @@ export class SceneProcessor {
     stage: LearningStage | null = null,
     /** The terms the page teaches first: given weight, and room after, where first said. */
     terms: readonly string[] = [],
+    /** Whom a lesson is for, finer than its stage, and the maker's pace: its target rates (scene-pace). */
+    pace: PaceBrief | null = null,
   ): Promise<{
     beats: TimedBeat[];
     durationMs: number;
     audioKey: string;
     timing: SceneTiming;
+    /** How the voice came out once put right: a lesson's. */
+    report?: PaceReport;
+    /** The maker's pace the voice was made at (scene-pace makerRate): a lesson's. */
+    voicePace?: number;
   }> {
     // Maths said as a teacher says it, not as its signs.
     await startMathsSpeech();
@@ -1774,23 +2039,61 @@ export class SceneProcessor {
     // A new term lands: a little weight where it is first said, and a
     // moment after the sentence for it to sink in.
     const first = firstSaid(script.beats, terms);
-    const delivered = deliveryPieces(
-      script.beats,
-      stage ? STAGE_RECIPES[stage] : undefined,
-    ).map((piece, k) =>
-      first.has(k)
-        ? { ...piece, pauseAfter: Math.max(piece.pauseAfter, TERM_LANDS_S) }
-        : piece,
-    );
-    const pausesS = delivered.map((piece) => piece.pauseAfter);
-    const spoken = sceneSpoken(forms);
     // Whichever engine the admin has Visualize speak in now.
     const {
       speech,
       voice,
       engine: speaking,
       cast,
+      rates,
     } = await this.voices.current();
+    // A lesson (every sentence the narrator's own) is said at a target
+    // rate a sentence, for whom it is for and what it holds, its pauses
+    // shaped within a budget; the voice is asked for it by its own
+    // measured rate, and put right after voicing. A story keeps its
+    // delivery: its actors' lines go at their own pace.
+    const lesson = !story && script.beats.every((beat) => !beat.kind);
+    const brief: PaceBrief | null = lesson
+      ? (pace ?? { band: bandOfStage(stage) })
+      : null;
+    const rate = voiceRate(rates, speaking, voice);
+    const paced = brief
+      ? lessonPace(script.beats, brief, {
+          terms: first,
+          naturalWpm: rate.wpm,
+          holdLimitS: HOLD_LIMIT_S,
+        })
+      : null;
+    const delivered = paced
+      ? paced.map(({ speed, pauseAfter }) => ({ speed, pauseAfter }))
+      : deliveryPieces(
+          script.beats,
+          stage ? STAGE_RECIPES[stage] : undefined,
+        ).map((piece, k) =>
+          first.has(k)
+            ? {
+                ...piece,
+                pauseAfter: Math.max(piece.pauseAfter, TERM_LANDS_S),
+              }
+            : piece,
+        );
+    const pausesS = delivered.map((piece) => piece.pauseAfter);
+    // A voice that takes its pace in words (Gemini) is asked in the one
+    // whose measured rate is nearest the lesson's.
+    const paceWord = paced
+      ? paceWordFor(
+          rate,
+          paced.reduce(
+            (n, p, k) => n + p.targetWpm * wordsOf(script.beats[k].say).length,
+            0,
+          ) /
+            Math.max(
+              1,
+              script.beats.reduce((n, b) => n + wordsOf(b.say).length, 0),
+            ),
+        )
+      : undefined;
+    const spoken = sceneSpoken(forms);
     const { model } = speech.label();
     // A story's characters say their own lines, in voices of their own.
     const engine =
@@ -1814,7 +2117,19 @@ export class SceneProcessor {
         ? characterVoice(story.bible, character, engine, voice, cast)
         : null;
     };
+    // One of the cast telling it: the narration in their voice, whole.
+    const teller =
+      story && script.narrator
+        ? narratingSpeaker(voiceOf(script.narrator))
+        : null;
     const lines = script.beats.map((beat, k) => {
+      if (teller && beat.kind === 'narration' && !beat.lines?.length)
+        return [
+          {
+            span: [0, forms[k].text.length] as [number, number],
+            speaker: teller,
+          },
+        ];
       if (!story || !beat.lines?.length) return [];
       // A screenplay's line is all theirs: the whole sentence in their voice.
       if (beat.kind === 'line') {
@@ -1847,7 +2162,7 @@ export class SceneProcessor {
       delivered,
       // For a voice that takes direction; Kokoro goes by pace and silence.
       styles: script.beats.map((beat, k) =>
-        voiceStyle(script.mood, beat.delivery, first.get(k) ?? []),
+        voiceStyle(script.mood, beat.delivery, first.get(k) ?? [], paceWord),
       ),
       lines,
     });
@@ -1886,11 +2201,6 @@ export class SceneProcessor {
       script.beats.length,
     );
     const audioKey = `${base}-${voiceSlug(voice)}-${model}.mp3`;
-    await this.storage.put({
-      key: audioKey,
-      body: result.audio,
-      mimeType: result.mimeType,
-    });
     const durationMs = result.durationMs ?? mp3DurationMs(result.audio.length);
     await this.calls.record({
       documentId,
@@ -2007,20 +2317,192 @@ export class SceneProcessor {
     // speaks again: a line's bubble opens as its voice does.
     if (timing !== 'voice' && result.silencesMs?.length)
       words = outOfSilence(words, result.silencesMs, spoken.starts);
-    return {
-      beats: timeBeats(script.beats, forms, words),
+    // Put right, never voiced again: each lesson sentence at its target,
+    // a long hesitation cut to a breath, every silence as planned.
+    const timed = timeBeats(script.beats, forms, words);
+    const settled = await this.paceVoice({
+      beats: timed,
       durationMs,
+      audio: result.audio,
+      mimeType: result.mimeType,
+      pcm: result.pcm ?? null,
+      timing,
+      targets: paced?.map((p) => p.targetWpm) ?? timed.map(() => null),
+      said: forms.map((form) => form.text),
+      pauses: pausesS,
+      lesson,
+      leadMs: leadS * 1000,
+      who,
+      label: brief
+        ? `${brief.band}${paceWord ? `, "${paceWord}"` : ''}, ${speaking} ${rate.wpm} wpm at speed 1`
+        : null,
+    });
+    await this.storage.put({
+      key: audioKey,
+      body: settled.audio,
+      mimeType: settled.mimeType,
+    });
+    return {
+      beats: settled.beats,
+      durationMs: settled.durationMs,
       audioKey,
       timing,
+      ...(settled.report ? { report: settled.report } : {}),
+      ...(brief ? { voicePace: makerRate(brief) } : {}),
     };
+  }
+
+  /**
+   * A voiced scene put right (scene-pace-audio): a lesson's sentences
+   * stretched to their targets, its hesitations trimmed and its silences
+   * made as planned; a story's silences only made up where the voice gave
+   * less than asked (an older Kokoro holds three seconds at most). Its
+   * audio decoded only when its times say something is off, and kept as
+   * it came when anything fails. Logged: the rate, the silence and the
+   * longest pause, before and after.
+   */
+  private async paceVoice(input: {
+    beats: TimedBeat[];
+    durationMs: number;
+    audio: Buffer;
+    mimeType: string;
+    pcm: Pcm | null;
+    timing: SceneTiming;
+    targets: (number | null)[];
+    /** What each sentence said: its rate is measured on it. */
+    said: string[];
+    pauses: number[];
+    lesson: boolean;
+    leadMs: number;
+    who: string;
+    /** For the log: whom it is for and how the voice was asked. */
+    label: string | null;
+  }): Promise<{
+    beats: TimedBeat[];
+    durationMs: number;
+    audio: Buffer;
+    mimeType: string;
+    report?: PaceReport;
+  }> {
+    const kept = {
+      beats: input.beats,
+      durationMs: input.durationMs,
+      audio: input.audio,
+      mimeType: input.mimeType,
+    };
+    const before = input.lesson ? paceReport(input.beats, input.said) : null;
+    const plan = {
+      beats: input.beats,
+      said: input.said,
+      targets: input.targets,
+      pauses: input.pauses,
+      trimInside: input.lesson,
+      shorten: input.lesson,
+      leadMs: input.leadMs,
+    };
+    let notes: PaceNotes | null = null;
+    let out = kept;
+    /** The voice's samples as they now stand, where they were decoded: encoded once, at the end. */
+    let heard: Pcm | null = input.pcm;
+    let changed = false;
+    // An estimate's times are guesses: nothing is measured on them.
+    if (
+      input.timing !== 'estimated' &&
+      this.codec &&
+      paceWanted({ ...plan, durationMs: input.durationMs })
+    )
+      try {
+        const pcm =
+          input.pcm ?? (await this.codec.decode(input.audio, input.mimeType));
+        heard = pcm;
+        const planned = planPaceEdits({ pcm, ...plan });
+        if (planned.edits.length) {
+          const edited = applyPaceEdits(pcm, planned.edits);
+          const map = timeMapOf(planned.edits, pcm.sampleRate);
+          out = {
+            beats: retimeBeats(input.beats, map),
+            durationMs: Math.round(
+              (edited.samples.length / edited.sampleRate) * 1000,
+            ),
+            audio: input.audio,
+            mimeType: input.mimeType,
+          };
+          heard = edited;
+          changed = true;
+          notes = planned.notes;
+        }
+      } catch (error) {
+        this.logger.warn(
+          `${input.who}: pace: the voice is kept as it came (${(error as Error).message})`,
+        );
+        out = kept;
+        heard = input.pcm;
+        changed = false;
+      }
+    // As loud as every other scene's voice (voice-loudness): about −16
+    // LUFS, once, here, so the player's music and effects sit under it
+    // where they were set. Kept as it is when anything fails.
+    if (this.codec)
+      try {
+        heard ??= await this.codec.decode(input.audio, input.mimeType);
+        const level = normaliseLoudness(heard);
+        if (level.pcm) {
+          heard = level.pcm;
+          changed = true;
+        }
+        this.logger.log(
+          `${input.who}: loudness ${level.before === null ? 'unmeasured' : `${level.before.toFixed(1)} LUFS`}${level.pcm ? ` → ${level.after?.toFixed(1)} LUFS (${level.gainDb > 0 ? '+' : ''}${level.gainDb} dB)` : ', kept'}`,
+        );
+      } catch (error) {
+        this.logger.warn(
+          `${input.who}: loudness: the voice is kept as loud as it came (${(error as Error).message})`,
+        );
+      }
+    if (changed && heard && this.codec)
+      try {
+        out = {
+          ...out,
+          audio: await this.codec.encode(heard),
+          mimeType: 'audio/mpeg',
+        };
+      } catch (error) {
+        this.logger.warn(
+          `${input.who}: the voice could not be encoded again; kept as it came (${(error as Error).message})`,
+        );
+        out = kept;
+        notes = null;
+      }
+    if (!before) return out;
+    const after = paceReport(out.beats, input.said);
+    const targets = input.targets.filter((t): t is number => Boolean(t));
+    const pct = (n: number) => `${Math.round(n * 100)}%`;
+    this.logger.log(
+      `${input.who}: pace ${before.wpm}→${after.wpm} wpm (target about ${targets.length ? Math.round(targets.reduce((a, b) => a + b, 0) / targets.length) : '?'}), silence ${pct(before.silenceShare)}→${pct(after.silenceShare)}, longest pause ${(before.longestPauseMs / 1000).toFixed(1)}s→${(after.longestPauseMs / 1000).toFixed(1)}s${notes ? `; ${notes.stretched} of ${input.beats.length} sentences stretched${notes.beyond ? ` (${notes.beyond} further than the stretch goes)` : ''}, ${notes.trimmed} hesitations trimmed, ${notes.added} pauses made up, ${notes.shortened} cut back` : '; as it came'}${input.label ? ` [${input.label}]` : ''}`,
+    );
+    return { ...out, report: after };
   }
 
   /**
    * The card's still: the fullest step of the box staging, each drawing
    * rendered alone, with what it hides until later hidden, so no two
-   * drawings' ids or styles ever share a document.
+   * drawings' ids or styles ever share a document. A film's scene is a
+   * still of its film instead (scene-still).
    */
   private async thumb(scene: Parameters<typeof thumbSvg>[0]): Promise<Buffer> {
+    // A film's scene: a still of the film at its fullest moment, its set's
+    // layers where the camera has them then and its people at their
+    // depths (studio-scenery-plan §8.6); as below where that fails.
+    if (scene.setting?.film)
+      try {
+        const fullest = pictureMoments(scene).find(
+          (moment) => moment.why === 'the fullest moment',
+        );
+        if (fullest)
+          return (await renderStill(scene, fullest.t, rasterise, THUMB_WIDTH))
+            .png;
+      } catch {
+        // The card's still as a book's page has it.
+      }
     const index = fullestStep(scene);
     const step = scene.steps[index];
     const pngs = new Map<string, Buffer>();
@@ -2079,9 +2561,11 @@ export class SceneProcessor {
       const hide = hidden.length
         ? `<style>${hidden.map((h) => `[id="${h.replace(/"/g, '')}"]`).join(',')}{display:none}</style>`
         : '';
+      // In the scene's look, as the player shows it.
+      const themed = themedSvg(thing, themeOf(scene.theme));
       const svg = hide
-        ? thing.svg.replace(/(<svg\b[^>]*>)/i, `$1${hide}`)
-        : thing.svg;
+        ? themed.replace(/(<svg\b[^>]*>)/i, `$1${hide}`)
+        : themed;
       try {
         pngs.set(
           id,
@@ -2315,13 +2799,21 @@ export class SceneProcessor {
           return figureSheet(character.figure ?? kept.figure, character.id);
         // An animal the kit drew, likewise, from its spec: the story's
         // (the look it has now) over the one kept.
+        // One the kit draws that the cast has not kept yet is kept now, as a
+        // person is, so a scene composed again from the cast finds them.
         const animal = animalFor(character, this.bookAnimals) ?? kept?.animal;
-        if (animal && (kept?.animal || !kept))
-          return animalSheet(animal, character.id);
+        if (animal && (kept?.animal || !kept)) {
+          const sheet = await animalSheet(animal, character.id);
+          if (!kept) await this.keepKitSheet(key, character, sheet, who);
+          return sheet;
+        }
         // And a creature the kit drew.
         const creature = creatureFor(character) ?? kept?.creature;
-        if (creature && (kept?.creature || !kept))
-          return creatureSheet(creature, character.id);
+        if (creature && (kept?.creature || !kept)) {
+          const sheet = await creatureSheet(creature, character.id);
+          if (!kept) await this.keepKitSheet(key, character, sheet, who);
+          return sheet;
+        }
         // Drawn before code moved what the artist draws: rigged now, with
         // no model asked, and kept so, the same drawing with its parts
         // joined and its motion code's.
@@ -2364,6 +2856,34 @@ export class SceneProcessor {
       await this.keepOthers(key, character.id, drawn.others, who);
       return sheet;
     });
+  }
+
+  /**
+   * A sheet the kit drew, kept in the cast where the cast has none for
+   * them yet (never over one kept meanwhile). What cannot be kept is only
+   * logged: the scene has its drawing either way.
+   */
+  private async keepKitSheet(
+    key: string,
+    character: StoryCharacter,
+    sheet: CharacterSheet,
+    who: string,
+  ): Promise<void> {
+    await this.inTurn(key, async () => {
+      const cast = await this.castAt(key);
+      if (cast[character.id]) return;
+      cast[character.id] = sheet;
+      await this.storage.put({
+        key,
+        body: Buffer.from(JSON.stringify(cast)),
+        mimeType: 'application/json',
+      });
+      this.logger.log(`${who}: ${character.name} drawn by the kit and kept`);
+    }).catch((error: unknown) =>
+      this.logger.warn(
+        `${who}: ${character.name} was drawn but not kept: ${(error as Error).message}`,
+      ),
+    );
   }
 
   /**
@@ -2500,7 +3020,7 @@ export class SceneProcessor {
       }
     }
     if (kind === 'person') {
-      const spec = figure ?? figureByVoice(character.voice);
+      const spec = figure ?? figureByVoice(character.voice, character.id);
       const sheet = await figureSheet(spec, character.id);
       this.logger.log(
         `${who}: ${character.name} drawn by the kit: ${describeFigure(spec)}`,
@@ -2554,6 +3074,7 @@ export class SceneProcessor {
     documentId: string | null,
     who: string,
     world: StoryWorld | null = null,
+    look: SetLook | null = null,
   ): Promise<SetSheet | null> {
     return this.once(`${key}#${place.id}`, async () => {
       const keep = (set: SetSheet, what: string) =>
@@ -2600,6 +3121,7 @@ export class SceneProcessor {
         documentId,
         who,
         world,
+        look ? { look } : {},
       );
       if (!set) return null;
       await keep(set, 'painted');
@@ -2967,6 +3489,7 @@ export class SceneProcessor {
           documentId,
           who,
           story.bible.world ?? null,
+          story.look ?? null,
         ),
       ),
       ...(story.ownKey

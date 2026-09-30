@@ -62,6 +62,8 @@ export type LlmTask =
   | 'studio_write'
   // Whether a scene made again as the maker asked now shows what they asked for.
   | 'studio_check'
+  // A viewer's own explanation at an explainer's end, checked against its points.
+  | 'studio_teach_back'
   | 'topic_quiz'
   | 'item_write'
   | 'item_verify'
@@ -118,7 +120,10 @@ export interface StudioTurnDraft {
     | 'choose'
     | 'scene'
     | 'make'
-    | 'episode';
+    | 'episode'
+    | 'pages'
+    /** An explainer's voice played quicker or slower, nothing voiced again. */
+    | 'repace';
   /** For "redraw": the one character whose look is to change, by name or id; for "choose", whose new drawing is chosen. */
   character?: string | null;
   /** For "choose": which of the new drawings waiting, from 1; 0 to keep the one they have. */
@@ -127,8 +132,15 @@ export interface StudioTurnDraft {
   scene: number | null;
   /** For a change to several scenes: each one's number, from 1, the first first. Absent, only `scene`. */
   scenes?: number[];
-  /** The change asked for, in the maker's words. */
+  /** The change asked for, in the maker's words; for "pages", which part of their document, in their words. */
   request: string | null;
+  /**
+   * For "outline": the change is to the story itself (the plot, who
+   * someone is, the ending, the stakes), so the story is developed again
+   * with it; false for a change to the scenes alone. Absent or null, code
+   * tells from the request's words (isStoryChange).
+   */
+  story?: boolean | null;
   /** Of a change to a scene, what the stage cannot show, in a few words: left out of it, and said so. */
   cannot?: string | null;
   /** Asked for what the Studio does not make. */
@@ -559,6 +571,17 @@ export interface LlmGatewayPort {
   }): Promise<LlmResult<DrawingVerdict>>;
 
   /**
+   * A made scene's stills looked at beside what its sheet says is there
+   * (studio-scenery-plan §8.6), by the drawing judge's vision model: who is
+   * on the stage, what each thing of the place is, and what a change the
+   * maker asked should show. Whether each still matches, and what is
+   * wrong where it does not.
+   */
+  pictureCheck(input: {
+    stills: { png: Buffer; claims: string }[];
+  }): Promise<LlmResult<{ stills: { matches: boolean; wrong: string[] }[] }>>;
+
+  /**
    * One page as an animated explainer: the narration, the cast of things
    * it needs drawn, and the storyboard of what stands on the stage and
    * when, written together. With `previous` and `problems`, the same page
@@ -670,7 +693,7 @@ export interface LlmGatewayPort {
    */
   sceneSize(input: {
     name: string;
-    /** The story's world, in a few words: "a village in Ghana, today". */
+    /** The story's world, in a few words: "a mountain village, today". */
     world: string | null;
   }): Promise<LlmResult<{ heightCm: number; lengthCm: number }>>;
 
@@ -816,6 +839,35 @@ export interface LlmGatewayPort {
     } & StudioRevision,
   ): Promise<LlmResult<Record<string, unknown>>>;
 
+  /**
+   * Story development (studio-story-plan §1, S2), each step with thinking:
+   * the premise; each character's personality; the beat sheet for the
+   * film's length; and the scene plan the outline is built from. Each is
+   * given the brief, the cast and places, and the steps before it.
+   */
+  studioPremise(
+    input: {
+      brief: string;
+      bible: string;
+      before?: string;
+    } & StudioRevision,
+  ): Promise<LlmResult<Record<string, unknown>>>;
+  studioCharacters(
+    input: { brief: string; bible: string; story: string } & StudioRevision,
+  ): Promise<LlmResult<Record<string, unknown>>>;
+  studioBeats(
+    input: {
+      brief: string;
+      bible: string;
+      story: string;
+      /** The structure its length takes, in words. */
+      structure: string;
+    } & StudioRevision,
+  ): Promise<LlmResult<Record<string, unknown>>>;
+  studioScenePlan(
+    input: { brief: string; bible: string; story: string } & StudioRevision,
+  ): Promise<LlmResult<Record<string, unknown>>>;
+
   /** One story scene's sheet: everything the stage will show, in order. */
   studioScene(
     input: {
@@ -826,8 +878,59 @@ export interface LlmGatewayPort {
       scene: string;
       /** How the scene before it left the stage. */
       before: string;
+      /** A story clip inside an explainer (studio-clip): written without thinking, quick and cheap. */
+      quick?: boolean;
     } & StudioRevision,
   ): Promise<LlmResult<Record<string, unknown>>>;
+
+  /**
+   * The table read (studio-story-plan §1.6, S4): a critic reads the whole
+   * script, the brief, the story and everyone's sheet, and scores it
+   * against the rubric, with notes for each scene (studio_check, thinking
+   * on). Its answer is made sound by tableReadOf.
+   */
+  studioTableRead(input: {
+    brief: string;
+    /** The cast and places, with everyone's sheet. */
+    bible: string;
+    /** The premise, the beats and the scene plan, in words. */
+    story: string;
+    /** The narrator's rule, in words. */
+    narrator: string;
+    /** Every scene as a screenplay, beats numbered. */
+    script: string;
+    /** What code found across the script, scene by scene. */
+    code: string;
+    /** What a first-time viewer made of the first scene (the cold read), in words; absent where no one watched. */
+    viewer?: string;
+  }): Promise<LlmResult<Record<string, unknown>>>;
+
+  /**
+   * The cold read (the table read's clarity item): a first-time viewer
+   * watches the film's opening as it shows it (only what is seen and
+   * heard, no plan, no logline) and says what it is about, who wants what,
+   * what is in the way, what is at stake and by when, and what confused
+   * them (studio_check, thinking off). Made sound by coldReadOf.
+   */
+  studioColdRead(input: {
+    /** Only what a viewer knows before it starts: the kind of film, and for whom. */
+    kind: string;
+    /** The opening as seen and heard (filmAsSeen). */
+    film: string;
+  }): Promise<LlmResult<Record<string, unknown>>>;
+
+  /**
+   * The retelling (the table read's T2): a first-time viewer watches the
+   * whole film as it shows it and retells it as a story spine, joining
+   * each scene to the one before with "therefore", "but" or "and then"
+   * (studio_check, thinking off). Made sound by retellOf.
+   */
+  studioRetell(input: {
+    /** Only what a viewer knows before it starts: the kind of film, and for whom. */
+    kind: string;
+    /** The whole film as seen and heard (filmAsSeen). */
+    film: string;
+  }): Promise<LlmResult<Record<string, unknown>>>;
 
   /**
    * Whether a scene made again as the maker asked now shows what they
@@ -845,6 +948,19 @@ export interface LlmGatewayPort {
     scene?: number;
     others?: number[];
   }): Promise<LlmResult<StudioCheckVerdict>>;
+
+  /**
+   * "Now you explain it" (studio-end): a viewer's own words checked
+   * against what an explainer taught, point by point (numbered from 1 as
+   * given), and a short, kind reply saying what is missing. One small
+   * call, no thinking.
+   */
+  studioTeachBack(input: {
+    topic: string;
+    points: string[];
+    answer: string;
+    who: string | null;
+  }): Promise<LlmResult<{ got: number[]; missing: number[]; reply: string }>>;
 
   /** Whether text asks for what no one should be made: flagged, with the categories. */
   moderate(input: {

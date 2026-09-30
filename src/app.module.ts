@@ -168,6 +168,9 @@ import { LectureController } from './web/controllers/lecture.controller';
 import { VisualsController } from './web/controllers/visuals.controller';
 import { StudioController } from './web/controllers/studio.controller';
 import { StudioService } from './business/handlers/studio/studio.service';
+import { StudioDocumentsController } from './web/controllers/studio-documents.controller';
+import { StudioDocumentsService } from './business/handlers/studio/studio-documents.service';
+import { StudioDocumentsQuery } from './query/studio-documents.query';
 import {
   RequestVisualsHandler,
   SaveVisualPositionHandler,
@@ -398,6 +401,7 @@ const queries = [
     LectureController,
     VisualsController,
     StudioController,
+    StudioDocumentsController,
     GuidedController,
     InstitutionsController,
     AdminInstitutionsController,
@@ -412,6 +416,8 @@ const queries = [
     ...handlers,
     ...queries,
     StudioService,
+    StudioDocumentsService,
+    StudioDocumentsQuery,
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: AuthGuard },
     { provide: APP_FILTER, useClass: DomainExceptionFilter },

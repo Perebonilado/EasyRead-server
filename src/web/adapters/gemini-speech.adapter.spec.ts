@@ -141,6 +141,35 @@ describe('the Gemini voice', () => {
     );
   });
 
+  it('trims a long hesitation inside a sentence to a breath, and keeps each sentence end', () => {
+    const rate = 1000;
+    // Said 1 s, a hesitation of 1.2 s inside the sentence, said 1 s, the
+    // sentence's end 0.3 s, then the next sentence 1 s.
+    const spans: [number, boolean][] = [
+      [1000, true],
+      [1200, false],
+      [1000, true],
+      [300, false],
+      [1000, true],
+    ];
+    const samples = new Int16Array(4500);
+    let at = 0;
+    for (const [length, loud] of spans) {
+      if (loud)
+        for (let i = 0; i < length; i += 1)
+          samples[at + i] = i % 2 ? 4000 : -4000;
+      at += length;
+    }
+    const pieces = [
+      { text: 'a'.repeat(40), pauseAfter: 0.3 },
+      { text: 'b'.repeat(10), pauseAfter: 0 },
+    ];
+    const run = pausedRun(samples, rate, pieces);
+    // The hesitation is a quarter of a second now; the end is kept.
+    expect(run.samples.length).toBe(4500 - (1200 - 250));
+    expect(run.quiet).toEqual([[2250, 2550]]);
+  });
+
   it('asks each route the way it documents, and keeps nothing on Google', () => {
     const items = [{ text: 'Hello there.', style: 'warm' }];
     const one = interactionRequest('gemini-3.8-flash-tts', 'Sulafat', items);

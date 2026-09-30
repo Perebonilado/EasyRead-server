@@ -73,6 +73,66 @@ const outline = {
     },
   ],
 };
+/** The story "Lost" is built from: a premise, Tobi's sheet, five beats and two scenes. */
+const premise = {
+  title: 'Lost',
+  logline:
+    'Tobi wants to find his dog before the market closes, but every stall he asks sends him the wrong way.',
+  theme: 'asking for help',
+  hook: 'An empty lead.',
+  genre: 'comedy',
+  ending: 'happy',
+  stakes: 'his dog, alone at closing time',
+  tools: ['ticking clock'],
+  gag: 'everyone points a different way',
+  clues: [],
+};
+const persona = {
+  id: 'tobi',
+  want: 'to find his dog',
+  need: 'to ask for help',
+  flaw: 'too proud to ask',
+  fear: 'being laughed at',
+  personality: ['counts everything', 'hums when nervous'],
+  voice: 'short sentences',
+  habits: ['tugs his cap'],
+  relationships: [],
+  arc: { from: 'alone', to: 'asking' },
+};
+const beat = (
+  role: string,
+  intensity: number,
+  plants: string[] = [],
+  pays: string[] = [],
+) => ({
+  role,
+  what: `The ${role}.`,
+  wants: 'Tobi wants his dog',
+  stops: 'the crowd',
+  changes: 'it changes',
+  intensity,
+  plants,
+  pays,
+});
+const beats = [
+  beat('setup', 2, ['whistle']),
+  beat('problem', 5),
+  beat('attempt', 6),
+  beat('twist', 8),
+  beat('payoff', 3, [], ['whistle']),
+];
+const plan = {
+  scenes: outline.scenes.map((scene, k) => ({
+    ...scene,
+    beats: k ? [3, 4] : [0, 1, 2],
+    purpose: 'moves it on',
+    conflict: 'Tobi against the crowd',
+    turn: k ? 'the dog is found' : 'the dog is gone',
+    shift: 'calm to panic',
+    moment: 'the empty lead',
+  })),
+};
+
 const sheet = storySheetOf({
   title: 'Market',
   set: 'market',
@@ -184,13 +244,20 @@ function worker() {
   };
   // What happens while the outline is being written: nothing, unless a test says.
   const meanwhile = { outline: () => undefined as void };
+  const usage = { model: 'm', tokensIn: 1, tokensOut: 1, latencyMs: 1 };
   const llm = {
     studioOutline: () => {
       meanwhile.outline();
-      return Promise.resolve({
-        value: outline,
-        usage: { model: 'm', tokensIn: 1, tokensOut: 1, latencyMs: 1 },
-      });
+      return Promise.resolve({ value: outline, usage });
+    },
+    // A story developed in steps, its outline built from the plan: "Lost".
+    studioPremise: () => Promise.resolve({ value: premise, usage }),
+    studioCharacters: () =>
+      Promise.resolve({ value: { characters: [persona] }, usage }),
+    studioBeats: () => Promise.resolve({ value: { beats }, usage }),
+    studioScenePlan: () => {
+      meanwhile.outline();
+      return Promise.resolve({ value: plan, usage });
     },
   } as unknown as LlmGatewayPort;
   const queued: StudioJobData[] = [];
@@ -351,12 +418,18 @@ describe('the Studio at work, as the thread records it', () => {
     await studio.processor.process(write, last('j9'));
     await studio.processor.process(write, last('j9'));
     expect(studio.events()).toEqual([
+      { what: 'story', sceneId: undefined, line: 'Story developed: “Lost”' },
       {
         what: 'outline',
         sceneId: undefined,
         line: 'Outline written: “Lost”, 2 scenes, about 1:00',
       },
     ]);
+    // Built from its story, which it keeps; Tobi is who he is now.
+    const written = studio.episodes.get('e1')!.outline!;
+    expect(written.story?.premise.title).toBe('Lost');
+    expect(written.story?.plan.scenes[1].turn).toBe('the dog is found');
+    expect(written.scenes.map((s) => s.title)).toEqual(['Market', 'Home']);
   });
 
   it('writes the outline again when the brief changed while it was being written', async () => {
@@ -383,9 +456,12 @@ describe('the Studio at work, as the thread records it', () => {
       }),
     ]);
     expect(studio.events().map((e) => e.line)).toEqual([
+      'Story developed: “Lost”',
       'Outline written: “Lost”, 2 scenes, about 1:00',
       'Writing the outline again with what the brief says now',
     ]);
+    // A story's is developed again with it.
+    expect(studio.queued[0]).toMatchObject({ story: true });
     // Written again with it, and nothing more changed: done.
     studio.meanwhile.outline = () => undefined;
     await studio.processor.process(
@@ -694,7 +770,11 @@ describe('the cast drawn by the artist, at the cast step and again as asked', ()
         look: 'a brown horse',
         voicePick: 1,
       },
-      { name: 'Tobi', voice: 'boy', figure: { age: 'child' } },
+      {
+        name: 'Tobi',
+        voice: 'boy',
+        figure: { age: 'child', hair: 'short', hairColour: 'brown' },
+      },
     ],
     sets: [{ name: 'The Wall', id: 'wall' }],
   });
@@ -1249,5 +1329,150 @@ describe('the cast drawn by the artist, at the cast step and again as asked', ()
     expect(studio.queued).toEqual([
       expect.objectContaining({ kind: 'draw', characterIds: ['horse'] }),
     ]);
+  });
+});
+
+describe("an explainer's scene written for whom it teaches (Ask 8)", () => {
+  const usage = { model: 'm', tokensIn: 1, tokensOut: 1, latencyMs: 1 };
+  const HARD =
+    'The hydrological cycle constitutes a continuous circulation of water, which is driven primarily by solar radiation; evaporation from oceanic surfaces transports substantial quantities of moisture into the atmosphere.';
+  const card = (id: string, name: string) => ({
+    id,
+    kind: 'words',
+    name,
+    style: 'keyword',
+  });
+  const draft = (say: string, steps: boolean) => ({
+    fit: 'good',
+    fitReason: null,
+    title: 'The cycle',
+    mood: 'curious',
+    beats: [{ say, pause: 'short', delivery: 'explain' }],
+    cast: [card('cycle', 'water cycle'), card('sea', 'evaporation')],
+    steps: steps
+      ? [
+          {
+            beat: 0,
+            phrase: 'hydrological cycle',
+            layout: 'one',
+            show: ['cycle'],
+            arrows: null,
+            effects: null,
+          },
+          {
+            beat: 0,
+            phrase: 'evaporation from',
+            layout: 'one',
+            show: ['sea'],
+            arrows: null,
+            effects: null,
+          },
+        ]
+      : [],
+  });
+
+  /** The writer, mocked: each call answers with the next draft. No model is called. */
+  function writing(drafts: unknown[]) {
+    const asked: { profile: string; problems?: string[] }[] = [];
+    const saved: Partial<StudioSceneRecord>[] = [];
+    const processor = new StudioProcessor(
+      {
+        updateScene: (_id: string, patch: Partial<StudioSceneRecord>) => {
+          saved.push(patch);
+          return Promise.resolve();
+        },
+      } as unknown as StudioRepository,
+      {
+        sceneScript: (input: { profile: string; problems?: string[] }) => {
+          asked.push(input);
+          return Promise.resolve({
+            value: drafts[Math.min(asked.length, drafts.length) - 1],
+            usage,
+          });
+        },
+      } as unknown as LlmGatewayPort,
+      { record: () => Promise.resolve() },
+      {} as never,
+      {} as SceneProcessor,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+    const show = {
+      id: 's1',
+      userId: 'u1',
+      title: 'Water',
+      format: 'explainer',
+      brief: briefOf({
+        format: 'explainer',
+        idea: 'The water cycle',
+        who: { band: 'primary-upper', said: 'Grade 5' },
+        minutes: 1.5,
+        tone: 'calm',
+      }),
+      bible: null,
+      createdAt: at,
+      updatedAt: at,
+    } as StudioShowRecord;
+    const water = outlineOf({
+      title: 'Water',
+      logline: 'Where rain comes from.',
+      scenes: [30, 30, 30].map((seconds, k) => ({
+        title: `Scene ${k + 1}`,
+        summary: 'The water cycle.',
+        seconds,
+        teach: 'The sun warms water and it rises as water vapour.',
+        points: [],
+      })),
+    });
+    const write = (k: number) =>
+      (
+        processor as unknown as {
+          writeExplainerScene: (...args: unknown[]) => Promise<unknown>;
+        }
+      ).writeExplainerScene(
+        show,
+        { id: 'e1', number: 1 },
+        water,
+        bibleOf({ subject: 'The water cycle' }),
+        { id: `c${k}`, position: k, sheet: null },
+        k,
+      );
+    return { asked, saved, write };
+  }
+
+  it('tells the writer the recipe, and splits a too-long sentence by code without sending it back for words alone', async () => {
+    const { asked, saved, write } = writing([draft(HARD, true)]);
+    await write(0);
+    expect(asked).toHaveLength(1);
+    expect(asked[0].profile).toMatch(
+      /eight to eleven[^\n]*The maker said "Grade 5"/,
+    );
+    expect(asked[0].profile).toMatch(/no question for the viewer/);
+    const sheet = saved[0].sheet as { draft: { beats: { say: string }[] } };
+    expect(sheet.draft.beats.length).toBeGreaterThan(1);
+    expect(sheet.draft.beats[0].say).toBe(
+      'The hydrological cycle constitutes a continuous circulation of water.',
+    );
+    // What is still too hard is never shown to the maker.
+    expect(saved[0].problems?.some((p) => p.rule === 'plain')).toBe(false);
+  });
+
+  it('lets what is too hard ride along when the scene goes back anyway', async () => {
+    const { asked, write } = writing([
+      draft(HARD, false),
+      draft('The sun warms the sea.', true),
+    ]);
+    await write(2);
+    expect(asked).toHaveLength(2);
+    // The last scene of a grade 5 film asks them a question.
+    expect(asked[0].profile).toMatch(/this scene asks the viewer one question/);
+    expect(asked[1].problems).toEqual(
+      expect.arrayContaining([
+        'Nothing is ever shown on the stage.',
+        expect.stringMatching(/reads at about grade \d+; for these learners/),
+        expect.stringMatching(/Ask the viewer one question/),
+      ]),
+    );
   });
 });

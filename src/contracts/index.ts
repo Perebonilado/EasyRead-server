@@ -819,6 +819,9 @@ export type RecapDto = {
 /** Uploaded by the reader, written by the model, or imported from the web. */
 export type DocumentSource = 'uploaded' | 'generated' | 'imported' | 'starter';
 
+/** Whose a document is: the reader's library, or the Studio's own (never listed in the library). */
+export type DocumentOrigin = 'reader' | 'studio';
+
 export type LearnDepth = 'primer' | 'solid' | 'deep' | 'exhaustive';
 
 /**
@@ -1009,10 +1012,21 @@ export interface VisualSetDto {
 
 export type SceneTiming = 'voice' | 'aligned' | 'estimated';
 export type SceneLayoutName =
-  'one' | 'row' | 'grid' | 'compare' | 'hub' | 'cycle' | 'focus' | 'stack';
+  | 'one'
+  | 'row'
+  | 'grid'
+  | 'compare'
+  | 'hub'
+  | 'cycle'
+  | 'focus'
+  | 'stack'
+  /** A continuous build's board (studio-explainer-plan, part C): each thing in its cell, where it stays. */
+  | 'board';
 export type SceneEffectName =
   'point' | 'show' | 'hide' | 'pulse' | 'zoom' | 'say';
-export type SceneEnterName = 'pop' | 'fade' | 'slide' | 'wipe' | 'grow';
+/** `draw`: a build's drawing drawn on, its lines stroke by stroke and then its fills (part C). */
+export type SceneEnterName =
+  'pop' | 'fade' | 'slide' | 'wipe' | 'grow' | 'draw';
 /** The page's feeling: how the voice sounds, and the music on a page made before the score. */
 export type SceneMoodName =
   'calm' | 'bright' | 'curious' | 'serious' | 'playful';
@@ -1077,6 +1091,12 @@ export interface SceneDangleDto {
   limit: number;
   /** How much the wind moves it, 0 to 1. */
   wind: number;
+  /**
+   * On a person drawn from every side (rig 3): where its root is and which
+   * way it hangs in each view it is seen in, by the view's name ("front",
+   * "3q", "profile", "back3q", "back"). The same springs swing it in each.
+   */
+  views?: Record<string, { root: [number, number]; dir: [number, number] }>;
 }
 
 /** One layer of a story's place: sky, far, back, ground, stage, floor or foreground. */
@@ -1087,6 +1107,18 @@ export interface SceneSetLayerDto {
   svg: string;
   /** On the floor with the people: where its things' feet stand, in the set's units. */
   feet?: number;
+}
+
+/**
+ * A place's other side, as the camera sees it turned round (yaw 180):
+ * its layers back to front, as a set's; how wide it is drawn; where its
+ * action is (the set's focal, mirrored); and its floor, the set's own.
+ */
+export interface SceneSetReverseDto {
+  layers: SceneSetLayerDto[];
+  setWidth?: number;
+  focal?: number;
+  floor?: [number, number];
 }
 
 /** How a kit drawing goes when it goes somewhere. */
@@ -1136,8 +1168,27 @@ export type SceneThingDto =
        * set's units). Absent, the player splits `svg` by its groups.
        */
       layers?: SceneSetLayerDto[];
-      /** How wide the set is drawn, in its units: 1600, or wider for a camera that pans. */
+      /**
+       * How wide the set is drawn, in its units: 1600, or wider for a
+       * camera that pans (1.5 or 2 times). The frame the stagings are laid
+       * out in is its middle 1600: the layers' viewBox is that frame, and
+       * what runs past it either side is drawn outside it, for a pan.
+       */
       setWidth?: number;
+      /** Where the action is on a wide set, as a share of the frame across: the wide shot centres on it, and a scene's opening pan ends there. */
+      focal?: number;
+      /** The floor people stand on, in the set's units: the y of its back and front edges. What stands on it follows the camera by its depth (0.8 at the back to 1.05 at the front). */
+      floor?: [number, number];
+      /**
+       * The place's other side (studio-views-plan §4.2), for a reverse
+       * shot: a room's fourth wall, the other side of the street or the
+       * clearing, a vessel's other side; its floor and the things on it
+       * the same, mirrored, seen from behind. Drawn at the set's width,
+       * its layers as `layers`; what stands at x across the set's frame
+       * stands at 1600 − x across its own. Absent on a set with no other
+       * side (one painted whole): no reverse shot is taken there.
+       */
+      reverse?: SceneSetReverseDto;
       /** Drawn by the figure kit: it moves its eyes, face, head, arms and mouth as it acts. */
       rig?: true;
       /** Where its head is, as shares of its box across and down: where it looks from. */
@@ -1182,11 +1233,38 @@ export type SceneThingDto =
        * is drawn as chains of segments the player turns by `--dg-<id>-<k>`
        * (degrees, 0 at rest). Absent, rig 1: an older drawing, as it was.
        */
-      rigVersion?: 2;
+      rigVersion?: 2 | 3;
+      /**
+       * On rig 3 (studio-views-plan §1.2), a person drawn from every side:
+       * the ids of the view groups, front first ("view-front", "view-3q",
+       * "view-profile", "view-back3q", "view-back"). The player shows one
+       * at a time by a class on the drawing ("vw-3q"; none, the front);
+       * each view's groups are the front's ids with "--<view>" after them,
+       * so a face or a sign is shown in all of them at once.
+       */
+      views?: string[];
+      /**
+       * On rig 3, each view's arms as drawn (shoulder, elbow and hand, as
+       * shares of its box), as `joints` is the front's: so a hand is aimed
+       * (a reach, a point, a hug, a thing handled) from where the arm is
+       * in the view that shows. Facing left, mirrored. Absent, the front's.
+       */
+      viewJoints?: Partial<
+        Record<SceneView, Record<'r' | 'l', [number, number][]>>
+      >;
       /** On rig 2, each part that swings: hair behind, a cloak or cape, a scarf's end, a ribbon, wings, a tail, ears, a mane. */
       dangles?: SceneDangleDto[];
       /** On rig 2, one who walks: how far one full stride (both feet) carries them, in the drawing's viewBox units, and how they go. */
       stride?: { length: number; gait: SceneGait };
+      /** What it offers the people who use it (a show's own feature, guessed from its kind): absent, nothing. */
+      affordances?: SceneAffordancesDto;
+      /**
+       * A card of another scene (studio-clip, Ask 5): the story clip before
+       * it, as a still of its last frame. The player lays the still over
+       * the card's drawing (its frame), and a match join shrinks the clip
+       * into it. Absent on every other drawing.
+       */
+      still?: SceneStillDto;
     }
   | { id: string; kind: 'stat'; value: string; caption: string }
   | {
@@ -1215,7 +1293,7 @@ export interface SceneStepDto {
   /**
    * How each newcomer arrives; `from` is the thing a growing one comes out
    * of. One who walks on comes from `side` of the stage, or out of the
-   * feature `via` (the gate, the danfo's door).
+   * feature `via` (the gate, the bus's door).
    */
   enter: Record<
     string,
@@ -1233,7 +1311,12 @@ export interface SceneStepDto {
    */
   exit?: Record<
     string,
-    { side: 'left' | 'right'; via?: string; how?: 'walk' | 'run' | 'squeeze' }
+    {
+      side: 'left' | 'right';
+      via?: string;
+      /** "through": gone in through the feature already, as their interaction played it (a door's go-through): no walk to it. */
+      how?: 'walk' | 'run' | 'squeeze' | 'through';
+    }
   >;
   /** Who goes at a run at this step, on, off or across: faster than a walk. */
   pace?: Record<string, 'run'>;
@@ -1252,6 +1335,14 @@ export interface SceneStepDto {
    * in, where people would otherwise walk. Absent on a change that is walked.
    */
   cut?: true;
+  /**
+   * A continuous build's stage: the things the voice has not named for a
+   * while, set back (faded and greyed) until they are named again. Absent,
+   * none.
+   */
+  faded?: string[];
+  /** A build's board paged here: the oldest columns slide out to the left, the rest with them. */
+  page?: true;
 }
 
 export interface SceneEffectDto {
@@ -1264,8 +1355,47 @@ export interface SceneEffectDto {
   filler?: boolean;
   /** A shot of the camera on a story's page: held until then, then back to the whole stage. Absent, a zoom holds until the stage next changes. */
   untilMs?: number;
-  /** How a shot of the camera comes in: by a cut, or by a move from where the camera was. Absent, as the player plays the page (a film's cut, a book's move). */
-  shot?: { enter: 'cut' | 'move' };
+  /**
+   * How a shot of the camera comes in: by a cut, or by a move from where
+   * the camera was. Absent, as the player plays the page (a film's cut, a
+   * book's move). And its grammar (studio-views-plan §3), on today's
+   * front-on sets:
+   *
+   *  - `kind`: "ots", over the shoulder of `part` (the listener, cheated
+   *    near the camera, big, at the frame's edge, seen from behind and a
+   *    little soft) onto `target` speaking, turned three-quarter to us;
+   *    "profile", the two face to face, both in profile (a two-shot);
+   *    "deep", `target` cheated near and big, partly off the frame's edge,
+   *    the others behind at their places; "crowd", over the people
+   *    watching before the camera onto `target`, who speaks to them (they
+   *    are not cheated out of it); "insert", a close shot on a thing alone
+   *    (studio-screenwriting K5): `target` is a thing of the scene's
+   *    (`props`) or a feature of its set ("f:<id>"), framed where it is
+   *    (held, where the hand holds it), so a small thing fills about two
+   *    fifths of the frame; `box` is where it is as the shot begins, on
+   *    the wide stage. Absent, a close or a two-shot.
+   *  - `angle`: "low", the camera low looking up (a hero, a big entrance);
+   *    "high", high looking down (on someone small or sad): on a flat set
+   *    a cheat, the horizon down or up and the people a little larger or
+   *    smaller.
+   *  - `reverse` (studio-views-plan §4.2): taken from the other side of
+   *    the place, turned round (yaw 180), on the set's reverse layers: x
+   *    on the stage is reflected (a place at x, w stands at W − x − w)
+   *    and the views are as a camera turned round sees them. Over the
+   *    shoulder, the two keep the sides of the frame they had from the
+   *    front (the 180° rule): the one near at the edge the other was at.
+   *    Only where the set has a reverse. Coming to or from it is a cut.
+   */
+  shot?: {
+    enter: 'cut' | 'move';
+    kind?: SceneShotKind;
+    angle?: SceneShotAngle;
+    reverse?: true;
+    /** An insert's thing where it is as the shot begins, on the wide stage: x, y, w, h. */
+    box?: [number, number, number, number];
+  };
+  /** How the camera moves in a shot (studio-scenery-plan §6.2): "push", in harder on a feeling. The player tracks walkers and pans a wide set by its own rules. */
+  pan?: 'track' | 'pan' | 'push';
   /**
    * A character speaking: their words, in a bubble at their head until
    * `untilMs`; their mouth moves until `saidUntilMs`, when the voice has
@@ -1324,19 +1454,37 @@ export interface SceneSettingDto {
     /** When they react: the moment, how, and for how long. */
     moves?: [number, 'cheer' | 'gasp', number][];
   };
-  /** A Studio set's fixed things its story acts on: a gate, a bench, a goalpost, a danfo. */
+  /** A Studio set's fixed things its story acts on: a gate, a bench, a goalpost, a bus. */
   features?: SceneFeatureDto[];
-  /** The place its people ride in is on the move (a danfo on the road): the stage rattles it gently, and what is outside it slides past. */
+  /** The place its people ride in is on the move (a bus on the road): the stage rattles it gently, and what is outside it slides past. */
   moving?: true;
   /** When a feature opens or shuts: the moment, which, and how it is left. */
   featureStates?: [number, string, 'open' | 'shut'][];
-  /** A thing before the camera faded to 40% while a face behind it speaks: from, to, and its group in the set's foreground layer. */
-  fades?: [number, number, string][];
+  /**
+   * A thing of the set faded while it would hide someone who matters:
+   * from, to, its group in the set's foreground or floor layer, and how
+   * faint (absent, 40%, as while a face behind it speaks; 0, gone for a
+   * shot's length, as a film cheats a near thing out of the frame).
+   */
+  fades?: [number, number, string, number?][];
+  /** A room's lights switched on or off: when, and how. Before the first, the other way (off before one switched on). */
+  lights?: [number, 'on' | 'off'][];
+  /**
+   * Things of the set that move through it (studio-interactions-plan
+   * §2.4): from when, which (a feature's id, or a thing's), from where
+   * to where, how long, and how it sets off and arrives. Where it is is
+   * an offset from where the stage stands it, [x, y] in its own drawing's
+   * units; played purely in t, as a walk is, and held at the last `to`.
+   */
+  moves?: [number, string, ScenePoint, ScenePoint, number, SceneEase][];
 }
+
+/** How a move sets off and arrives: evenly, easing in (setting off), easing out (arriving), or both. */
+export type SceneEase = 'linear' | 'in' | 'out' | 'in-out';
 
 /**
  * A fixed thing of a Studio set that its story acts on, stood among the
- * people: drawn by the stage (a gate that swings shut, a bench, a danfo)
+ * people: drawn by the stage (a gate that swings shut, a bench, a bus)
  * behind them, and over them while someone goes through or under it; or
  * the painter's own, only where it is. Looks, points and leans aimed at it
  * name it "f:<id>".
@@ -1380,6 +1528,185 @@ export interface SceneFeatureDto {
    * "up:<id>" station). Absent, no one stands up it: a gate, a bench.
    */
   perch?: Record<'box' | 'wide', { x: number; y: number }>;
+  /**
+   * What it offers the people who use it (studio-interactions-plan §1.1),
+   * in its drawing's own units (its svg's viewBox): its handles, the line
+   * one goes in over, its seats, what one grips, its steps and rungs, what
+   * is laid over whoever uses it (a doorway's near post, a table's front),
+   * where one leans on it, what one presses or turns, and what slides.
+   * Absent, nothing: it is only looked at, stood by or gone through.
+   */
+  affordances?: SceneAffordancesDto;
+  /** A vehicle of the kit (studio-interactions-plan I3): what it is, how it is seen, and how it rides. Absent, it is not one. */
+  vehicle?: SceneVehicleDto;
+}
+
+/** A vehicle seen from the side (its main view), three-quarter on, from the front or from behind. */
+export type SceneVehicleView = 'side' | '3q' | 'front' | 'back';
+
+/**
+ * A vehicle of the kit as the stage moves it (studio-interactions-plan
+ * I3): its drawing's wheels (groups `data-wheel="cx cy r"`, `data-spin`
+ * their sense) turn by the distance it goes; its body (the group `bob`)
+ * rises and falls on its springs, `bob` units at most once every
+ * `bobEvery` units gone; one on the water rocks as time goes instead;
+ * its headlights (the group `lights`) show at night.
+ */
+export interface SceneVehicleDto {
+  kind: string;
+  view: SceneVehicleView;
+  /** 1 facing right, as drawn; -1 mirrored. */
+  facing: 1 | -1;
+  bob: number;
+  bobEvery: number;
+  water?: true;
+}
+
+/** A point in a thing's own drawing, in its viewBox's units, y down. */
+export type ScenePoint = [number, number];
+
+/**
+ * How one sits on a seat: on a chair, at a table (the chair pulled out
+ * and tucked in), on a bench, a sofa, a bed's edge, a step; and in a
+ * vehicle (studio-interactions-plan I3): driving (hands on the wheel),
+ * astride (a bicycle, a motorbike, a horse), a passenger, rowing or
+ * paddling, standing (a chariot).
+ */
+export type SceneSeatPose =
+  | 'chair'
+  | 'table'
+  | 'bench'
+  | 'sofa'
+  | 'bed'
+  | 'step'
+  | 'drive'
+  | 'ride'
+  | 'passenger'
+  | 'row'
+  | 'stand';
+
+/**
+ * A group of a thing's drawing laid over whoever uses it: a doorway's near
+ * post as they step through it, a table's front over the legs of one sat
+ * at it, a vehicle's window they are seen through.
+ */
+export type SceneMaskId = 'body-front' | 'window' | 'frame-near';
+
+/** What a small operate point is: a light switch, a tap, a doorbell, a door's face to knock on. */
+export type SceneOperate = 'switch' | 'tap' | 'bell' | 'knock';
+
+/**
+ * What a thing offers the people who use it, in its drawing's own units:
+ * the points a hand, a hip or a foot goes to, and the groups of its
+ * drawing that move or are laid over them. Drawn by code, so exact.
+ */
+export interface SceneAffordancesDto {
+  /** A knob, a latch, a drawer's pull: on its outside, or its inside. */
+  handles?: { id: string; at: ScenePoint; side: 'in' | 'out' }[];
+  /** A doorway: the line one goes in over; behind the wall ("behind"), or on to another set. */
+  threshold?: { line: [ScenePoint, ScenePoint]; inside: 'behind' | 'next-set' };
+  /** Where one sits: the hips, the feet, the hands (a table's top), and how. */
+  seats?: {
+    id: string;
+    hip: ScenePoint;
+    feet: ScenePoint[];
+    hands?: ScenePoint[];
+    pose: SceneSeatPose;
+  }[];
+  /** What a hand holds: a chair's back, handlebars, a rail. */
+  grips?: { id: string; at: ScenePoint }[];
+  /** A bicycle's (studio-interactions-plan I3): feet follow the crank, which turns once for `gear` turns of the wheels. */
+  pedals?: { crank: ScenePoint; radius: number; gear?: number };
+  /** Turning with the distance gone (I3). */
+  wheels?: { at: ScenePoint; r: number }[];
+  /** What is laid over whoever uses it, by the group of the drawing. */
+  masks?: { id: SceneMaskId; group: string }[];
+  /** Each step's tread, where a foot lands, bottom first. */
+  steps?: ScenePoint[];
+  /** Each rung, bottom first. */
+  rungs?: ScenePoint[];
+  /** Where one gets on (I4). */
+  mount?: { side: -1 | 1; at: ScenePoint };
+  /** Where one leans on it: the hip against it and the hand on it, for each side. */
+  leans?: { hip: ScenePoint; hand: ScenePoint }[];
+  /** A switch, a tap, a bell, a door's face to knock on. */
+  operates?: { id: string; at: ScenePoint; does: SceneOperate }[];
+  /** A group that slides when used, and how far: a chair pulled out, a drawer. */
+  slides?: { group: string; by: ScenePoint }[];
+  /** A doorway's dark inside, behind its leaf: one going in is gone into it. */
+  dark?: string;
+  /** The side one who uses it stands: its handle's; -1 its left, 1 its right. */
+  side?: -1 | 1;
+}
+
+/**
+ * What someone does with a thing of the set, in its timed steps
+ * (studio-interactions-plan §1.3): through a door, knocking, sitting at a
+ * table, leaning on a counter, up the stairs, a switch, a tap, a bell.
+ */
+export type SceneInteraction =
+  | 'go-through'
+  | 'come-through'
+  | 'knock'
+  | 'open'
+  | 'close'
+  | 'sit-at'
+  | 'stand-from'
+  | 'lean-on'
+  | 'climb-stairs'
+  | 'climb-ladder'
+  | 'switch-on'
+  | 'switch-off'
+  | 'turn-on-tap'
+  | 'ring-bell';
+
+/** One step of an interaction, as the player plays it. */
+export type SceneInteractStep =
+  | 'reach'
+  | 'open'
+  | 'through'
+  | 'gone'
+  | 'close'
+  | 'out'
+  | 'walk'
+  | 'knock'
+  | 'wait'
+  | 'pull'
+  | 'let-go'
+  | 'sit'
+  | 'tuck'
+  | 'push'
+  | 'rise'
+  | 'lean'
+  | 'hold'
+  | 'off'
+  | 'climb'
+  | 'flick'
+  | 'back'
+  | 'turn'
+  | 'water'
+  | 'press';
+
+/**
+ * One interaction, timed: when it begins, what, with which feature, and
+ * its steps in turn (each begins at its own moment and takes its time).
+ * The player plays it purely in t: hands to the points the feature
+ * offers, the feature's parts moved, what is laid over them, and, where
+ * it carries them (through a door, up the stairs), their place.
+ */
+export interface SceneInteractDto {
+  at: number;
+  does: SceneInteraction;
+  feature: string;
+  steps: [SceneInteractStep, number, number][];
+  /** The hand it is done with (the frame's: 'r' the viewer's right); absent, the one nearer. */
+  hand?: 'r' | 'l';
+  /** Which side of the feature they stand: -1 its left, 1 its right. */
+  side?: -1 | 1;
+  /** A part of it that moves, by its group: the drawer pulled out, not the door. */
+  part?: string;
+  /** Going through: gone behind the wall, or on to another set (the next scene opens with them coming in). */
+  to?: 'behind' | 'next-set';
 }
 
 /**
@@ -1430,6 +1757,20 @@ export type SceneActingMove =
   | 'sob'
   | 'shrug'
   | 'lean-in'
+  // Acting a line (scene-performance): a raised palm (no, stop), hands
+  // clasped (please), a fist, a wagging finger (a warning), a hand on the
+  // chest (me, sorry); a small step in or back, held and then taken back;
+  // a listener's flinch and take; a small lean in before speaking.
+  | 'palm-out'
+  | 'plead'
+  | 'fist'
+  | 'wag-finger'
+  | 'hand-chest'
+  | 'step-in'
+  | 'step-back'
+  | 'flinch'
+  | 'take'
+  | 'ready'
   // The action moves (studio-world-plan §4.5): each a clip the player
   // plays with a wind-up, the act, a follow-through and a settle.
   | 'leap'
@@ -1544,7 +1885,46 @@ export interface SceneActingDto {
   walks?: true;
   /** How big their moves are, from what they are like: a shy one's smaller, a bold one's bigger; absent, as drawn. */
   size?: number;
+  /**
+   * One drawn from every side (rig 3): which view shows from each moment
+   * on, and whether it is mirrored (-1, facing left) or not (1). Absent,
+   * the front all along.
+   */
+  view?: [number, SceneView, 1 | -1][];
+  /** What they do with the set's things, in timed steps (studio-interactions-plan §1.3): through a door, sat at a table, up the stairs. */
+  interact?: SceneInteractDto[];
+  /**
+   * Riding along (studio-interactions-plan §1.2): from when `who` (this
+   * one) is attached to a thing (a vehicle, a ridden animal), at which of
+   * its seats; null lets go. While attached, they are where the seat is,
+   * moving with the thing.
+   */
+  attach?: [number, string, string, string | null][];
+  /**
+   * Faces acted over the one they wear (studio-story-plan §3B, the rigged
+   * face's scene-face-rig): from when, the face said (a recipe: "smug",
+   * "guilty", "sceptical"), how strongly (0 to 1), the face felt beneath
+   * it (a recipe, or null for the same), how it comes on ("ease", "take",
+   * "slow", "flash") and for how long, in ms. A drawing with no rigged
+   * face plays the faces it wears alone.
+   */
+  face?: [
+    number,
+    string,
+    number,
+    string | null,
+    'ease' | 'take' | 'slow' | 'flash',
+    number,
+  ][];
 }
+
+/** A view of someone drawn from every side, as the camera sees them. */
+export type SceneView = 'front' | '3q' | 'profile' | 'back3q' | 'back';
+
+/** A shot's grammar on a front-on set (studio-views-plan §3.1): over the shoulder, a profile two-shot, deep staging, over the crowd; and an insert on a thing alone. */
+export type SceneShotKind = 'ots' | 'profile' | 'deep' | 'crowd' | 'insert';
+/** A camera low looking up, or high looking down (studio-views-plan §4.4). */
+export type SceneShotAngle = 'low' | 'high';
 
 /** A speech bubble as the stage sets it: its box, its words, and the point its tail reaches toward. */
 export interface SceneBubbleDto {
@@ -1609,9 +1989,50 @@ export interface ScenePillDto {
   w: number;
   h: number;
   size: number;
+  /** How much farther off its arrow than usual (a build's board, where the arrow is too short to hold it beside it). */
+  lift?: number;
 }
 
 /** A page as an animated video: the voice's sentences, the things, and when each happens. */
+/**
+ * An explainer's look: paper (the warm page every scene had before), clean
+ * lab, sunny, and three dark ones (chalkboard, blueprint, night sky). Its
+ * colours are the server's scene-themes table; the player keeps a copy.
+ */
+export type SceneThemeName =
+  'paper' | 'cleanlab' | 'sunny' | 'chalkboard' | 'blueprint' | 'nightsky';
+
+/** How a scene's text is read and how fast it moves: words a minute, and motion against a grown-up's. */
+export interface SceneReadingDto {
+  wpm: number;
+  motion: number;
+}
+
+/** A clip's freeze at its idea: when, for how long, and the words set then. */
+export interface SceneFreezeDto {
+  atMs: number;
+  ms: number;
+  label: string;
+}
+
+/** A still of another scene of the film, as a thing on this one's stage: which scene, and when in it (null, its end). */
+export interface SceneStillDto {
+  sceneId: string;
+  atMs: number | null;
+}
+
+/** One answer to a question put to the viewer: a chip at a checkpoint. */
+export interface SceneChoiceDto {
+  text: string;
+  right: boolean;
+}
+
+/** Where one of a scene's small ideas starts: its sentence (an index into `beats`), and the idea in a few words. */
+export interface SceneIdeaDto {
+  beat: number;
+  label: string;
+}
+
 export interface SceneDto {
   /** 4 adds the sound; a 3 plays the same, in silence but for the voice. */
   version: 3 | 4;
@@ -1627,8 +2048,26 @@ export interface SceneDto {
    */
   walk?: { stageMs: number; minMs: number; maxMs: number };
   timing: SceneTiming;
+  /** A lesson's: the maker's pace its voice was made at (1 is natural), so a later change is a stretch of the difference; absent on a story's or an older scene. */
+  voicePace?: number;
   /** Whom the document is taught for, read from it; absent when it could not be told, or on an older page. */
   stage?: 'early' | 'middle' | 'higher' | 'professional';
+  /** The look it was made in (studio-explainer-plan, Ask 2); absent, paper, as every scene before themes. */
+  theme?: SceneThemeName;
+  /**
+   * How its text is read and how fast it moves, for whom it is made
+   * (studio-explainer-plan, Ask 3; scene-reading.ts): the words a minute
+   * its viewers read the stage's text at, and its motion against a
+   * grown-up's (1). Absent, from its `stage`, else a grown-up's.
+   */
+  reading?: SceneReadingDto;
+  /**
+   * A story clip inside an explainer (studio-clip, Ask 5): the picture
+   * holds still for `ms` at `atMs`, its idea's moment, and the idea is set
+   * on the stage in the look's type (`label`) from then on. Absent on
+   * every other scene.
+   */
+  freeze?: SceneFreezeDto;
   /**
    * One per spoken sentence; one word entry per whitespace word of `text`:
    * [charStart, charEnd, startMs, endMs]. `delivery` when it is not plain
@@ -1642,7 +2081,20 @@ export interface SceneDto {
     delivery?: 'hook' | 'key' | 'aside' | 'question' | 'recap';
     /** On a story's page, a line a character says: who says it, for the caption. */
     who?: string;
+    /**
+     * A question's answers (studio-explainer-plan, Ask 9): two or three
+     * short ones, one right, said by the sentence after. The Studio's
+     * player may pause here and show them as chips. Absent on any other.
+     */
+    choices?: SceneChoiceDto[];
   }[];
+  /**
+   * Where each of the scene's small ideas starts (a lesson's points), in
+   * order: its sentence, by index into `beats`, and the idea in a few
+   * words. The Studio's scrubber marks each and its back and forward go
+   * one idea at a time. Absent on a story's scene, or an older one.
+   */
+  ideas?: SceneIdeaDto[];
   things: SceneThingDto[];
   steps: SceneStepDto[];
   effects: SceneEffectDto[];
@@ -1682,8 +2134,20 @@ export interface SceneDto {
        * said in, or null where there is no room, and it is not shown.
        */
       bubbles?: Record<string, SceneBubbleDto | null>;
+      /**
+       * A continuous build's camera, each step: the box it frames (x, y, w,
+       * h, of the staging's shape), the newest thing and what it connects
+       * to, or the whole board at a recap and at the section's end.
+       */
+      views?: [number, number, number, number][];
     }
   >;
+  /**
+   * A scene of a continuous build (studio-explainer-plan, part C): the
+   * things carried on from the scene before, on the stage from its first
+   * moment with no entrance. Absent on any other scene.
+   */
+  board?: { carried: string[] };
 }
 
 export interface VisualSceneDto {
@@ -2487,8 +2951,11 @@ export type AnswerItemResponse = {
 // each episode's scenes, decided in full before anything is drawn.
 
 export type StudioFormatName = 'story' | 'explainer';
-export type StudioPhase = 'brief' | 'outline' | 'cast' | 'script' | 'made';
-export type StudioBusyName = 'bible' | 'outline' | 'script' | 'scene' | 'make';
+/** "story" is a step of its own the maker sees (the Story card), between the brief and the outline: events belong to it; an episode's phase is never it. */
+export type StudioPhase =
+  'brief' | 'story' | 'outline' | 'cast' | 'script' | 'made';
+export type StudioBusyName =
+  'bible' | 'story' | 'outline' | 'script' | 'scene' | 'make';
 export type StudioSceneStatusName =
   'writing' | 'ready' | 'making' | 'made' | 'failed';
 
@@ -2496,6 +2963,8 @@ export interface StudioBriefDto {
   format: StudioFormatName | null;
   idea: string;
   audience: 'young children' | 'children' | 'teens' | 'adults' | null;
+  /** Whom it is for, as the maker said it (an explainer's): absent until said; `audience` is derived from it. */
+  who?: StudioAudienceDto;
   minutes: number | null;
   tone: 'funny' | 'gentle' | 'exciting' | 'serious' | 'calm' | null;
   setting: string | null;
@@ -2503,7 +2972,116 @@ export interface StudioBriefDto {
   include: string | null;
   /** How much of their own text the maker gave, in characters; 0 for none. */
   sourceChars: number;
+  /** The maker's own controls (a story's), each absent until chosen: sensible ones follow from the idea and the audience. */
+  narrator?: 'none' | 'light' | 'storyteller' | 'character';
+  /** In "character" mode, who of the cast tells it. */
+  narratorCharacter?: string;
+  genre?: StudioGenreName;
+  ending?: 'happy' | 'bittersweet' | 'twist' | 'open' | 'moral';
+  pace?: 'gentle' | 'lively' | 'snappy';
+  style?: 'picture-book' | 'bold-cartoon' | 'sitcom' | 'adventure' | 'cosy';
+  /** An explainer's look, as the maker chose it; absent, chosen by code from the subject and the audience. */
+  look?: SceneThemeName;
+  /** The document given in the chat, and the pages last chosen of it; absent without one. */
+  document?: StudioBriefDocumentDto;
+  /** An explainer's host, on or off, as the maker said; absent, on for children and off for grown-ups. */
+  host?: boolean;
 }
+
+/** A run of pages, first and last, from 1. */
+export type StudioPageRange = [number, number];
+
+/** A document given to a show, and the pages last chosen of it (empty until chosen). */
+export interface StudioBriefDocumentDto {
+  documentId: string;
+  title: string;
+  pageCount: number;
+  ranges: StudioPageRange[];
+  topicIds: string[];
+  /** What was chosen, in words: "Chapter 4 · Cell membranes", "Pages 41–58". */
+  label: string;
+}
+
+/**
+ * A document given to the Studio, as its cards show it: how far it has
+ * been read, its chapters with their pages (from its bookmarks, its
+ * headings or a reading), and which chapters this show has used.
+ */
+export interface StudioDocumentDto {
+  id: string;
+  title: string;
+  fileName: string;
+  /** Null until it is read. */
+  pageCount: number | null;
+  /** "reading" while it is read, "ready" with its chapters (or none), "failed" with why. */
+  status: 'reading' | 'ready' | 'failed';
+  failure: string | null;
+  chapters: StudioChapterDto[];
+  /** Where the chapters came from; null with none. */
+  chaptersFrom: 'bookmarks' | 'headings' | 'reading' | null;
+  /** Chapters an episode of this show already teaches. */
+  used: string[];
+  createdAt: string;
+}
+
+export interface StudioChapterDto {
+  id: string;
+  title: string;
+  from: number;
+  to: number;
+}
+
+/** A document of the Studio's, to choose from again: newest first. */
+export interface StudioDocumentCardDto {
+  id: string;
+  title: string;
+  pageCount: number | null;
+  status: StudioDocumentDto['status'];
+  createdAt: string;
+}
+
+/** The pages chosen on the "Choose what to explain" card, as sent. */
+export interface StudioPagesRequest {
+  episodeId?: string | null;
+  documentId: string;
+  ranges: StudioPageRange[];
+  topicIds: string[];
+  /** One episode a chapter, at most twelve. */
+  series?: boolean;
+}
+
+/** The age bands of an audience, youngest first, then the grown-ups. */
+export type StudioAudienceBand =
+  | 'early-years'
+  | 'primary-lower'
+  | 'primary-upper'
+  | 'secondary-lower'
+  | 'secondary-upper'
+  | 'university'
+  | 'professional'
+  | 'general-adult';
+
+/** Whom an explainer is for: each field but the band absent until said. */
+export interface StudioAudienceDto {
+  band: StudioAudienceBand;
+  /** Their words: "Grade 5", "Year 9", "first-year nursing". */
+  said?: string;
+  prior?: 'new' | 'some' | 'revising';
+  goal?: 'understand' | 'exam' | 'apply' | 'curious';
+  language?: 'fluent' | 'learning';
+  support?: 'normal' | 'extra';
+}
+
+export type StudioGenreName =
+  | 'comedy'
+  | 'adventure'
+  | 'mystery'
+  | 'drama'
+  | 'fable'
+  | 'slice-of-life'
+  | 'romance'
+  | 'dark-comedy'
+  | 'spooky';
 
 export interface StudioCharacterDto {
   id: string;
@@ -2522,6 +3100,10 @@ export interface StudioCharacterDto {
   voicePick: number;
   traits: string[];
   carries: string | null;
+  /** Who they are, once a story is developed with them: want, need, flaw, fear, traits, voice, habits, relationships, arc. */
+  persona?: StudioPersonaDto;
+  /** An explainer's host (studio-host): opens its films and asks their questions. */
+  host?: true;
   /** How they are drawn: an SVG, for a person now; for anyone else once they have been drawn. */
   drawing: string | null;
   /** One the artist draws, being drawn now: for the first time, or again as the maker asked. */
@@ -2620,13 +3202,134 @@ export interface StudioOutlineSceneDto {
   seconds: number;
   teach: string | null;
   points: string[];
+  /** Made from a document: the pages it teaches. */
+  pages?: StudioPageRange;
 }
 
 export interface StudioOutlineDto {
   title: string;
   logline: string;
   scenes: StudioOutlineSceneDto[];
+  /** An explainer's "What next?": two or three follow-up questions, each a next episode; absent, none. */
+  next?: string[];
 }
+
+/** A character's personality (story plan §1.2). */
+export interface StudioPersonaDto {
+  want: string;
+  need: string;
+  flaw: string;
+  fear: string;
+  personality: string[];
+  /** How they talk. */
+  voice: string;
+  habits: string[];
+  relationships: { with: string; is: string; tension: string }[];
+  arc: { from: string; to: string };
+}
+
+/** An episode's story as developed (story plan §1.1–1.4): the premise, the beats, the scene plan. */
+export interface StudioStoryDto {
+  premise: {
+    title: string;
+    logline: string;
+    theme: string;
+    hook: string;
+    genre: StudioGenreName;
+    ending: 'happy' | 'bittersweet' | 'twist' | 'open' | 'moral';
+    stakes: string;
+    tools: string[];
+    gag?: string;
+    clues?: string[];
+    /** Whose story it is (a main character's id), what they want, what is in the way, and by when; absent on a story developed before them. */
+    hero?: string;
+    want?: string;
+    obstacle?: string;
+    clock?: string;
+    /** The hero's ordinary day, why the story starts today, and why we are on their side. */
+    normalDay?: string;
+    whyToday?: string;
+    whyCare?: string;
+    /** The one impossible thing in its world, and its rule; null for none. */
+    oddity?: { what: string; rule: string } | null;
+    /** The story spine: "Once upon a time", "Every day", "Until one day", "Because of that", "Until finally", "Ever since then". */
+    spine?: string[];
+  };
+  beats: {
+    template: 'short' | 'medium' | 'long';
+    beats: {
+      role: string;
+      what: string;
+      wants: string;
+      stops: string;
+      changes: string;
+      /** The planned tension, 0 to 10. */
+      intensity: number;
+      /** What is planted here, each with the id its payoff names. */
+      plants: { id: string; what: string }[];
+      /** The ids of the plants paid off here. */
+      pays: string[];
+      /** How it follows the beat before; null for the first. */
+      link?: StudioLinkName | null;
+    }[];
+  };
+  plan: {
+    scenes: {
+      title: string;
+      beats: number[];
+      purpose: string;
+      conflict: string;
+      turn: string;
+      shift: string;
+      moment: string;
+      set: string | null;
+      cast: string[];
+      seconds: number;
+      summary: string;
+      /** Scene 1: how each part of the setup reaches the viewer (a line, an action or a thing, never the narrator). */
+      setup?: {
+        part: 'want' | 'obstacle' | 'stakes' | 'clock' | 'oddity';
+        how: 'line' | 'action' | 'thing' | 'narration';
+        by: string;
+        to: string;
+        what: string;
+      }[];
+      /** What is at stake in it, flipping from + to - or back. */
+      value?: { name: string; from: '+' | '-'; to: '+' | '-' } | null;
+      /** Its first moment, already inside the trouble. */
+      start?: string;
+      /** How it follows the scene before; null for the first. */
+      link?: StudioLinkName | null;
+    }[];
+  };
+}
+
+/** How a beat or a scene follows the one before. */
+export type StudioLinkName = 'therefore' | 'but';
+
+/**
+ * What a line does to the one it is said to (studio-screenwriting W2):
+ * every line a move to change the other person. For the acting too: a
+ * threat played as one, a joke with its take.
+ */
+export type StudioLineAimName =
+  | 'asks'
+  | 'begs'
+  | 'pleads'
+  | 'orders'
+  | 'refuses'
+  | 'warns'
+  | 'threatens'
+  | 'bargains'
+  | 'teases'
+  | 'jokes'
+  | 'accuses'
+  | 'comforts'
+  | 'confesses'
+  | 'dodges'
+  | 'lies'
+  | 'reveals'
+  | 'praises';
 
 export interface StudioProblemDto {
   rule: string;
@@ -2641,6 +3344,7 @@ export interface StudioBeatDto {
   who: string | null;
   to: string | null;
   say: string;
+  /** The face shown: one of the kit's faces, or a rigged face's recipe ("smug", "worried"). */
   feeling: string | null;
   sign: string | null;
   do: string | null;
@@ -2657,6 +3361,10 @@ export interface StudioBeatDto {
   via?: string;
   /** What the writer asked for that is none of the doings, as they wrote it. */
   doSaid?: string;
+  /** A line's aim: what it does to the one it is said to. Absent on other beats and on sheets written before aims. */
+  aim?: StudioLineAimName;
+  /** What a line's speaker feels beneath the face they show, where the two part ways (a recipe's name). Absent, what they show. */
+  felt?: string;
 }
 
 export interface StudioStorySheetDto {
@@ -2684,6 +3392,8 @@ export interface StudioStorySheetDto {
     on: string | null;
     with: string | null;
   }[];
+  /** Close shots asked for, as data: a planted thing, at the beat (from 0) that handles it. Absent, none. */
+  inserts?: { beat: number; thing: string }[];
 }
 
 /** An explainer's scene as its card shows it: each sentence, and what comes on the stage with it. */
@@ -2695,6 +3405,30 @@ export interface StudioExplainerSheetDto {
 }
 
 export type StudioSheetDto = StudioStorySheetDto | StudioExplainerSheetDto;
+
+/**
+ * What is happening to an episode or a scene now, while it is: the step
+ * in plain words, and a call being tried again (or given up on), with why.
+ */
+export interface StudioActivityDto {
+  /** "Reading the whole script", "Making scene 3 shorter"; null while only a retry is to say. */
+  says: string | null;
+  /** A word for a scene's row: "Rewriting", "Shortening", "Fixing", "Checking". */
+  short: string | null;
+  retry: {
+    /** "The writer is busy, trying again (2 of 3)". */
+    says: string;
+    /** "The writer is busy". */
+    reason: string;
+    attempt: number | null;
+    of: number | null;
+    waitSeconds: number | null;
+    /** Given up on: said until the work moves on. */
+    final: boolean;
+  } | null;
+  /** When it was said, ISO. */
+  at: string;
+}
 
 export interface StudioSceneDto {
   id: string;
@@ -2715,6 +3449,8 @@ export interface StudioSceneDto {
   durationMs: number | null;
   /** A change to undo. */
   canUndo: boolean;
+  /** What is being done to it now, while it is; null otherwise. */
+  activity: StudioActivityDto | null;
 }
 
 export interface StudioEpisodeDto {
@@ -2727,6 +3463,8 @@ export interface StudioEpisodeDto {
   busy: StudioBusyName | null;
   error: string | null;
   outline: StudioOutlineDto | null;
+  /** The story the outline was built from (a story's, once developed); null before, and for an explainer. */
+  story: StudioStoryDto | null;
   scenes: StudioSceneDto[];
   durationMs: number | null;
   shareToken: string | null;
@@ -2735,6 +3473,10 @@ export interface StudioEpisodeDto {
   /** Why it cannot be made now, in plain words; empty when it can. */
   blockers: string[];
   hasThumb: boolean;
+  /** What the work in hand is doing now, while there is some; null otherwise. */
+  activity: StudioActivityDto | null;
+  /** The pages of the show's document it teaches; absent when none. */
+  pages?: { ranges: StudioPageRange[]; topicIds: string[]; label: string };
 }
 
 /**
@@ -2744,6 +3486,8 @@ export interface StudioEpisodeDto {
  * or work that did not go through.
  */
 export type StudioEventName =
+  /** The story developed (the Story card): premise, characters, beats, scene plan. */
+  | 'story'
   | 'outline'
   | 'cast'
   | 'scenes'
@@ -2757,7 +3501,11 @@ export type StudioEventName =
   | 'episode'
   | 'failed'
   /** A scene made again as the maker asked, and looked at: whether what they asked for shows. */
-  | 'checked';
+  | 'checked'
+  /** A document given in the chat: its card, then the card to choose its pages. */
+  | 'document'
+  /** Pages of it chosen for an episode, or a series of them. */
+  | 'pages';
 
 export interface StudioEventDto {
   what: StudioEventName;
@@ -2766,6 +3514,8 @@ export interface StudioEventDto {
   sceneId?: string;
   /** The character it is about: their new drawings, to choose from in the thread while they wait. */
   characterId?: string;
+  /** The document it is about (a "document" or "pages" event). */
+  documentId?: string;
   /** Which writing of it this is, from 1: the outline's, the cast's or a scene's. */
   version?: number;
   /** What happened, in a line. */
@@ -2782,6 +3532,8 @@ export interface StudioMessageDto {
   event: StudioEventDto | null;
   content: string;
   choices: string[];
+  /** A second, optional row of choices, picked with one of the first: tapped, it is said with it. */
+  also?: string[];
   refused: boolean;
   createdAt: string;
 }
@@ -2807,6 +3559,8 @@ export interface StudioShowDto {
   /** What the brief still needs before an outline can be written. */
   briefMissing: string[];
   bible: StudioBibleDto | null;
+  /** The look an explainer plays in: the maker's, or the one code chose; absent for a story. */
+  theme?: SceneThemeName;
   episodes: {
     id: string;
     number: number;
@@ -2838,6 +3592,28 @@ export interface StudioShowCardDto {
   scenes?: number | null;
 }
 
+/** How the film goes from one scene to the next (studio-explainer-plan, Ask 4 D; studio-edit.ts). */
+export type StudioJoinName =
+  | 'cut'
+  | 'dissolve'
+  | 'dip'
+  | 'match'
+  | 'morph'
+  | 'zoom-through'
+  | 'push'
+  | 'continue'
+  // Into a story clip on a Sunny or Chalkboard look: a circle opens on it (studio-clip).
+  | 'iris';
+
+/** A join's things: `from` in the scene before, `to` in this one, `part` of `from` a zoom goes into. */
+export interface StudioJoinWithDto {
+  from?: string;
+  to?: string;
+  part?: string;
+  /** A match from the whole picture of the scene before (a story clip) into `to`, its card (studio-clip). */
+  whole?: true;
+}
+
 /** An episode as a player plays it: its scenes in order, each fetched on its own. */
 export interface StudioPlayDto {
   episodeId: string;
@@ -2847,13 +3623,82 @@ export interface StudioPlayDto {
   /** Free-plan film carries the Studio's name on its end card. */
   watermark: boolean;
   madeWith: string;
+  /** The look an explainer plays in (its scenes are recoloured for it as they are shown); absent, each scene's own. */
+  theme?: SceneThemeName;
   scenes: {
     id: string;
     title: string;
     durationMs: number;
     transition: 'cut' | 'fade';
-    /** How the film joins this scene to the one before: a cut (the same place, time running on), a dissolve (a new place) or a dip to black (time has passed). The first comes up from black. */
-    join: 'cut' | 'dissolve' | 'dip';
+    /**
+     * How the film joins this scene to the one before: a cut (the same place, time running on), a dissolve (a new
+     * place) or a dip to black (time has passed); an explainer's may carry one thing across (match, morph), go into
+     * a part of it (zoom-through), slide on to the next of a list (push), or carry the stage on (continue, E5).
+     * The first comes up from black.
+     */
+    join: StudioJoinName;
+    /** What a join carries: the thing the scene before leaves on, the one this opens on, the part a zoom goes into. */
+    joinWith?: StudioJoinWithDto;
+  }[];
+  /** What the film's music is scored from (studio-score.ts); absent on an explainer, or from an older server. */
+  score?: StudioScoreDto;
+  /**
+   * Pause-and-think (studio-explainer-plan, Ask 9): whether the player
+   * pauses on a question with answers unless the viewer says otherwise;
+   * on for children, off for grown-ups. Absent, off.
+   */
+  pauses?: boolean;
+  /** The show's host, in the player's corner: absent when it has none. */
+  host?: StudioHostDto;
+  /** An explainer's end card: up to three recap cards, built by code. */
+  recap?: StudioRecapCardDto[];
+  /** An explainer's "What next?" questions, each a next episode. */
+  next?: string[];
+  /** Whether the end card offers "Now you explain it". */
+  teachBack?: boolean;
+}
+
+/** The host as the player shows them: their name, and each face as the kit draws it. */
+export interface StudioHostDto {
+  name: string;
+  kind: 'person' | 'animal';
+  faces: Record<'neutral' | 'happy' | 'thinking' | 'surprised', string>;
+}
+
+/** One card of an explainer's recap: the term or idea, and what to remember of it. */
+export interface StudioRecapCardDto {
+  title: string;
+  text: string;
+}
+
+/** A viewer's own explanation, sent to be checked. */
+export interface StudioTeachBackRequest {
+  answer: string;
+}
+
+/** What the check says of it: the points they got, those missing, and a kind reply. */
+export interface StudioTeachBackDto {
+  reply: string;
+  got: string[];
+  missing: string[];
+}
+
+/** A story film's score, as its story gives it (S10): its colour, its curve, its themes and the lines that land. */
+export interface StudioScoreDto {
+  genre: StudioGenreName | null;
+  tone: 'funny' | 'gentle' | 'exciting' | 'serious' | 'calm' | null;
+  /** Made for children: brighter, never dark. */
+  young: boolean;
+  /** Whose story it is (a character's id): their motif returns at the story's key beats. */
+  hero: string | null;
+  /** Who stands against them, when anyone does: a contrasting motif. */
+  foil: string | null;
+  /** Each of the film's scenes, in order. */
+  scenes: {
+    /** The story beats it serves, in order: each one's role and planned tension, 0 to 10. */
+    beats: { role: string; intensity: number }[];
+    /** Its lines that land a moment: a joke, a tease, a reveal, a threat, an accusation, a confession. */
+    lines: { say: string; who: string | null; aim: string }[];
   }[];
 }
 

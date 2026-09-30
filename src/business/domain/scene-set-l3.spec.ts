@@ -29,6 +29,7 @@ import { checkSizes } from './scene-set-sizes';
 import { audienceAlive } from './scene-set-audience';
 import {
   BUILDING_KINDS,
+  NEUTRAL_PACKS,
   STYLE_PACKS,
   STYLE_PACK_IDS,
   packOfWorld,
@@ -101,8 +102,17 @@ describe('style packs', () => {
         world({ region: 'a small village', landscape: 'farms and fields' }),
       ),
     ).toBe('village-farm');
+    // A town or a city of no one country is a plain modern town's.
+    expect(packOfWorld(world({ era: 'today', region: 'a town' }))).toBe(
+      'modern-town',
+    );
+    expect(packOfWorld(world({ region: 'a big city', homes: 'flats' }))).toBe(
+      'modern-town',
+    );
     // Nothing that says: code does not guess.
-    expect(packOfWorld(world({ era: 'today', region: 'a town' }))).toBeNull();
+    expect(
+      packOfWorld(world({ era: 'today', region: 'somewhere warm' })),
+    ).toBeNull();
     expect(packOfWorld(null)).toBeNull();
     expect(styleOf('west-african-town')).toBe('west-african-town');
     expect(styleOf('western city')).toBe('western-city');
@@ -110,18 +120,30 @@ describe('style packs', () => {
     expect(styleOf('spaceship')).toBeNull();
   });
 
-  it('are kept on the layout: the world’s first, then the painter’s, then the place’s own words', () => {
+  it('are kept on the layout: the world’s first, then the place’s own words, then the painter’s', () => {
     const place = SET_BENCH[0].place;
     const lagos = world({ region: 'Lagos' });
+    const warm = world({ region: 'somewhere warm' });
     expect(layoutOf({ style: 'western-city' }, place, lagos).style).toBe(
       'west-african-town',
     );
-    expect(
-      layoutOf({ style: 'western-city' }, place, world({ region: 'a town' }))
-        .style,
-    ).toBe('western-city');
-    // The market's own words say Lagos.
+    // The market's own words say Lagos, before whatever the painter says.
+    expect(layoutOf({ style: 'western-city' }, place, warm).style).toBe(
+      'west-african-town',
+    );
     expect(layoutOf({}, place, null).style).toBe('west-african-town');
+    // Words that say nowhere: the painter's, with a world to go by.
+    const square = { ...place, name: 'the square', look: 'a square' };
+    expect(layoutOf({ style: 'western-city' }, square, warm).style).toBe(
+      'western-city',
+    );
+    // With no world, never one region's by the painter's say.
+    expect(layoutOf({ style: 'west-african-town' }, square, null).style).toBe(
+      'modern-town',
+    );
+    expect(layoutOf({ style: 'village-farm' }, square, null).style).toBe(
+      'village-farm',
+    );
     expect(
       layoutOf({}, { ...place, name: 'the clearing', look: 'a clearing' }, null)
         .style,
@@ -137,8 +159,18 @@ describe('style packs', () => {
     expect(brief).toContain('among Yoruba families');
     expect(brief).toContain('"style": "west-african-town"');
     expect(brief).toContain('okada');
-    const open = layoutBrief(one.place, 'Book', world({ region: 'a town' }));
+    const square = { ...one.place, name: 'The Square', look: 'a square' };
+    const open = layoutBrief(
+      square,
+      'Book',
+      world({ region: 'somewhere warm' }),
+    );
     for (const id of STYLE_PACK_IDS) expect(open).toContain(`"${id}"`);
+    // With no world at all, only the packs of no one region.
+    const none = layoutBrief(square, 'Book', null);
+    for (const id of NEUTRAL_PACKS) expect(none).toContain(`"${id}"`);
+    expect(none).not.toContain('west-african-town');
+    expect(none).not.toContain('western-city');
   });
 
   it('keep every colour of theirs one of the house’s', () => {
@@ -344,7 +376,11 @@ describe('a set in a style pack', () => {
     const layers = Object.fromEntries(
       one.built.layered.layers.map((l) => [l.id, l.svg]),
     );
-    const brownstones = one.built.placed.filter((p) => p.kind === 'brownstone');
+    // In the frame, the two the painter placed; past its edges, more of
+    // the street for the camera to pan across (L4).
+    const brownstones = one.built.placed.filter(
+      (p) => p.kind === 'brownstone' && p.x >= 0 && p.x <= SET_W,
+    );
     expect(brownstones).toHaveLength(2);
     for (const b of brownstones) expect(b.band).toBe('horizon');
     expect(layers.back).toContain('data-kind="brownstone"');
@@ -429,14 +465,11 @@ describe('a crowd before the camera', () => {
     expect(foreground.svg).toContain('id="fg-au-1"');
     // On its layer only: the flat picture's ground is read without it.
     expect(classroom.built.svg).not.toContain('data-audience');
-    // A market's shoppers stand at its sides only; a farm has none.
-    const market = bench.find((b) => b.id === 'lagos-market')!;
-    for (const { box } of market.built.layered.fore.filter((f) =>
-      f.id.startsWith('fg-au-'),
-    )) {
-      const middle = (box[0] + box[2] / 2) / SET_W;
-      expect(middle < 0.35 || middle > 0.65).toBe(true);
-    }
+    // A market has none (its shoppers are about the story's people, not
+    // watching them), nor a farm.
+    expect(
+      bench.find((b) => b.id === 'lagos-market')!.layout.audience,
+    ).toBeUndefined();
     expect(bench.find((b) => b.id === 'farm')!.layout.audience).toBeUndefined();
   });
 

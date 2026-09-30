@@ -1,6 +1,19 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import type { PipelineStep } from '../../contracts';
-import { EVENT_BUS, LLM_GATEWAY } from '../../business/ports/tokens';
+import {
+  EVENT_BUS,
+  LLM_GATEWAY,
+  PDF_TOOLKIT,
+  STORAGE,
+} from '../../business/ports/tokens';
+import type { PdfToolkitPort } from '../../business/ports/pdf-toolkit.port';
+import type { StoragePort } from '../../business/ports/storage.port';
+import {
+  chaptersFromBookmarks,
+  chaptersFromHeadings,
+  type ChapterDraft,
+  type ChapterSource,
+} from '../../business/domain/chapters';
 import type { EventBusPort } from '../../business/ports/event-bus.port';
 import type { LlmGatewayPort, TopicDraft } from '../../business/ports/llm.port';
 import {
@@ -51,6 +64,8 @@ export class TopicsProcessor extends BasePipelineProcessor<BaseJobData> {
     @Inject(LLM_GATEWAY) private readonly llm: LlmGatewayPort,
     @Inject(EVENT_BUS) private readonly events: EventBusPort,
     private readonly pipeline: PipelineOrchestrator,
+    @Optional() @Inject(PDF_TOOLKIT) private readonly pdf?: PdfToolkitPort,
+    @Optional() @Inject(STORAGE) private readonly storage?: StoragePort,
   ) {
     super();
   }
@@ -92,11 +107,41 @@ export class TopicsProcessor extends BasePipelineProcessor<BaseJobData> {
         return;
       }
 
+      // The document's own chapters, as its bookmarks or its headings say
+      // them: no model asked. A Studio document goes without prerequisites.
+      const own = await this.ownChapters(doc, pageCount);
+      if (own) {
+        const prerequisites =
+          doc.props.origin === 'studio'
+            ? own.chapters.map(() => [])
+            : await this.prerequisitesFor(doc.id, own.chapters);
+        await this.topics.replaceAll(
+          doc.id,
+          own.chapters.map((topic, index) => ({
+            ...topic,
+            orderIndex: index,
+            prerequisites: prerequisites[index],
+          })),
+          own.source,
+        );
+        this.logger.log(
+          `${doc.id}: ${own.chapters.length} chapters from its ${own.source}`,
+        );
+        await this.succeed(job);
+        await this.events.publish(doc.id, {
+          type: 'document.topics_ready',
+          topicCount: own.chapters.length,
+        });
+        await this.pipeline.markReadyIfComplete(doc.id);
+        return;
+      }
+
       const digest = buildDigest(
         await this.pages.findRange(doc.id, 1, MAX_PAGES),
       );
       if (!digest || pageCount === 0) {
         await this.runs.skip(doc.id, this.step);
+        await this.pipeline.markReadyIfComplete(doc.id);
         return;
       }
 
@@ -115,10 +160,14 @@ export class TopicsProcessor extends BasePipelineProcessor<BaseJobData> {
 
       if (!topics.length) {
         await this.runs.skip(doc.id, this.step);
+        await this.pipeline.markReadyIfComplete(doc.id);
         return;
       }
 
-      const prerequisites = await this.prerequisitesFor(doc.id, topics);
+      const prerequisites =
+        doc.props.origin === 'studio'
+          ? topics.map(() => [])
+          : await this.prerequisitesFor(doc.id, topics);
 
       await this.topics.replaceAll(
         doc.id,
@@ -142,10 +191,42 @@ export class TopicsProcessor extends BasePipelineProcessor<BaseJobData> {
           `${doc.id}: topics unavailable — ${(error as Error).message}`,
         );
         await this.runs.skip(doc.id, this.step);
+        await this.pipeline.markReadyIfComplete(doc.id);
         return;
       }
       throw error;
     }
+  }
+
+  /**
+   * The chapters a PDF gives of itself (chapters.ts): its bookmarks first,
+   * then the chapter headings set large on its pages. Null when it gives
+   * none worth having, or cannot be read again: the model reads them then.
+   */
+  private async ownChapters(
+    doc: { id: string; props: { canonicalPdfRef: string | null } },
+    pageCount: number,
+  ): Promise<{ chapters: ChapterDraft[]; source: ChapterSource } | null> {
+    const ref = doc.props.canonicalPdfRef;
+    if (!this.pdf || !this.storage || !ref || pageCount < 2) return null;
+    try {
+      const bytes = await this.storage.get(ref);
+      const marked = chaptersFromBookmarks(
+        await this.pdf.bookmarks(bytes),
+        pageCount,
+      );
+      if (marked) return { chapters: marked, source: 'bookmarks' };
+      const headed = chaptersFromHeadings(
+        await this.pdf.headings(bytes),
+        pageCount,
+      );
+      if (headed) return { chapters: headed, source: 'headings' };
+    } catch (error) {
+      this.logger.warn(
+        `${doc.id}: its own chapters unread — ${(error as Error).message}`,
+      );
+    }
+    return null;
   }
 
   /**

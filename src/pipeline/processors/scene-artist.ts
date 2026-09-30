@@ -60,6 +60,7 @@ import {
   layoutOf,
   type SetLayering,
   type SetLayout,
+  type SetLook,
 } from '../../business/domain/scene-set-layout';
 import type { SetPiece } from '../../business/domain/scene-set-pieces';
 import { rigSheet } from '../../business/domain/scene-sheet-rig';
@@ -192,6 +193,8 @@ export interface ArtistOptions {
    * Studio set is built, a book's page painted, unless this says.
    */
   painter?: 'layout' | 'artist';
+  /** A Studio show's animation style on a set it builds: a tint over its palette, and its ink. */
+  look?: SetLook;
 }
 
 /** A character drawn, rigged, what the rig could not join, and the other takes' best. */
@@ -617,9 +620,13 @@ export class SceneArtist {
   ): Promise<SetSheet | null> {
     const thing = setThing(place, bookTitle, world);
     const brief = layoutBrief(place, bookTitle, world);
-    const takes = Math.max(1, options.takes ?? TAKES.set);
-    const see = options.see ?? true;
-    const revisions = Math.max(0, options.revisions ?? REVISIONS);
+    // A layout code has for it (a Studio clip's common place) is built
+    // from, no model asked; one to paint once is one take, unjudged.
+    const preset = place.layout ?? null;
+    const quick = Boolean(preset || place.once);
+    const takes = quick ? 1 : Math.max(1, options.takes ?? TAKES.set);
+    const see = quick ? false : (options.see ?? true);
+    const revisions = quick ? 0 : Math.max(0, options.revisions ?? REVISIONS);
     const [low, high] = HORIZON[place.kind ?? 'outdoor'];
     // Each thing the kit has no piece for, drawn once however many takes
     // and rounds ask for it.
@@ -675,7 +682,7 @@ export class SceneArtist {
         const piece = await ownPiece(item.name);
         if (piece) own[item.name] = piece;
       }
-      const built = buildSet(layout, place, own);
+      const built = buildSet(layout, place, own, world, options.look ?? null);
       for (const note of built.notes)
         this.logger.log(`${who}: ${place.name}: ${note}`);
       const gated = await gateDrawing(built.svg, thing, { backdrop: true });
@@ -711,6 +718,7 @@ export class SceneArtist {
         this.take<Built>(
           `${who}: ${place.name}${takes > 1 ? ` (take ${k + 1})` : ''}`,
           async ({ notes, previous }) => {
+            if (preset) return JSON.stringify(preset);
             const made = await this.llm.setLayout({
               brief,
               notes,

@@ -25,6 +25,11 @@
  * show's own features (ownFeatureBrief), and placed like a piece.
  */
 import {
+  drawVehicleKit,
+  vehicleLiveryOf,
+  type VehicleLivery,
+} from './scene-vehicles';
+import {
   ACTED_PIECES,
   drawPiece,
   featureGroup,
@@ -65,16 +70,25 @@ import {
   type LandmarkKind,
   type LandmarkParams,
 } from './scene-set-landmarks';
-import { audienceFor, drawAudience } from './scene-set-audience';
+import {
+  audienceFor,
+  drawAudience,
+  drawFacingAudience,
+} from './scene-set-audience';
+import { backOf } from './scene-set-backs';
+import { MAX_REVERSE, REVERSE_ROW, reverseLayoutOf } from './scene-set-reverse';
 import { FAR_K, FAR_MOST, checkSizes, realScaleOf } from './scene-set-sizes';
 import {
+  NEUTRAL_PACKS,
   STYLE_PACKS,
   STYLE_PACK_IDS,
   isBuildingKind,
   mix,
   packColour,
   packOfWorld,
+  plainPack,
   styleOf,
+  worldWords,
   type StylePack,
   type StylePackId,
 } from './scene-style-packs';
@@ -140,8 +154,9 @@ export type SetRow = (typeof LAYER_ROWS)[number];
  * to make a place busy (studio-scenery-plan §5.3): chairs, potted plants,
  * benches, baskets and carts, and what L3 adds (scene-set-kit): poles and
  * wires, bins, plastic chairs, laundry lines, generators, parked cars and
- * okadas, water drums, bicycles, street signs, hydrants, clay pots,
- * woodpiles.
+ * motorbikes, water drums, bicycles, street signs, hydrants, clay pots,
+ * woodpiles. A set in a style pack scatters only its pack's own and the
+ * few every place has (CLUTTER_EVERYWHERE).
  */
 export const CLUTTER_KINDS = [
   'chair',
@@ -155,7 +170,7 @@ export const CLUTTER_KINDS = [
   'laundry line',
   'generator',
   'parked car',
-  'okada',
+  'motorbike',
   'water drum',
   'bicycle',
   'street sign',
@@ -164,6 +179,17 @@ export const CLUTTER_KINDS = [
   'woodpile',
 ] as const;
 export type ClutterKind = (typeof CLUTTER_KINDS)[number];
+/** The clutter any place may have, whatever its pack: the rest is its pack's own. */
+export const CLUTTER_EVERYWHERE: readonly ClutterKind[] = [
+  'chair',
+  'plant',
+  'bench',
+  'basket',
+  'bin',
+  'bicycle',
+];
+/** Kinds a layout written before may name, by what they are called now. */
+const RENAMED: Readonly<Record<string, string>> = { okada: 'motorbike' };
 /** The most kinds of clutter a set scatters, and foreground things it places. */
 export const MAX_CLUTTER = 6;
 export const MAX_FOREGROUND = 4;
@@ -181,9 +207,9 @@ export interface SetFocal {
 /** What a layout may place: a piece the stage also draws, a piece of scenery, or a palm. */
 export type SetItemKind = FeatureKind | SceneryKind | 'palm';
 export const SET_ITEM_KINDS: readonly SetItemKind[] = [
-  ...FEATURE_KINDS,
-  ...SCENERY_KINDS,
-  'palm',
+  // Once each: a counter and a cupboard are both the stage's (used by the
+  // people at them) and scenery (painted as they are).
+  ...new Set<SetItemKind>([...FEATURE_KINDS, ...SCENERY_KINDS, 'palm']),
 ];
 
 export interface SetItem {
@@ -197,6 +223,8 @@ export interface SetItem {
   colour: string | null;
   /** Turned the other way. */
   flip?: boolean;
+  /** Seen from behind, on a place's other side (studio-views-plan §4.2): its back where it has one of its own (scene-set-backs). */
+  back?: true;
 }
 
 /** A thing the list has no piece for: drawn by code from a landmark's builder where it names one (`build`), else by the artist as one of the show's own. */
@@ -206,6 +234,8 @@ export interface SetOwnItem {
   row: SetRow;
   /** Its landmark's builder and its parameters, clamped (scene-set-landmarks). */
   build?: { kind: LandmarkKind; params: LandmarkParams };
+  /** Mirrored: seen from the place's other side. */
+  flip?: true;
 }
 
 export interface SetLayout {
@@ -237,6 +267,16 @@ export interface SetLayout {
   style?: StylePackId;
   /** Rows of people watching before the camera (§5.5): a class, a congregation, a stand; absent for none. */
   audience?: 1 | 2;
+  /**
+   * What is on the place's other side, seen by a camera turned round
+   * (studio-views-plan §4.2): a room's fourth wall (its door, a window,
+   * shelves, a picture), the other side of the street or the clearing.
+   * Each placed as a thing at the back, `x` across as seen from there.
+   * Absent, code fills it from the place's kind and style pack.
+   */
+  reverse?: SetItem[];
+  /** A city's look for its buses and cabs, where the story names the city (London's red buses and black cabs); absent, its pack's. */
+  livery?: VehicleLivery;
 }
 
 /** The most things a set places, and the most the artist draws for it. */
@@ -463,9 +503,12 @@ const ITEM_WORDS: Record<string, SetItemKind> = {
   car: 'parked car',
   cars: 'parked car',
   'parked cars': 'parked car',
-  motorbike: 'okada',
-  motorcycle: 'okada',
-  okadas: 'okada',
+  motorcycle: 'motorbike',
+  motorbikes: 'motorbike',
+  motorcycles: 'motorbike',
+  scooter: 'motorbike',
+  okada: 'motorbike',
+  okadas: 'motorbike',
   'water drums': 'water drum',
   bike: 'bicycle',
   bicycles: 'bicycle',
@@ -508,7 +551,10 @@ const ITEM_WORDS: Record<string, SetItemKind> = {
   'market umbrella': 'umbrella stall',
   'umbrella stand': 'umbrella stall',
   danfos: 'danfo',
-  minibus: 'danfo',
+  minibus: 'bus',
+  minibuses: 'bus',
+  buses: 'bus',
+  coach: 'bus',
   gutter: 'gutter bridge',
   drain: 'gutter bridge',
   pyramids: 'pyramid',
@@ -607,7 +653,7 @@ const BACKDROP_WORDS: Record<string, SetBackdrop> = {
   olives: 'olive hills',
   'olive trees': 'olive hills',
   'olive grove': 'olive hills',
-  roofs: 'rooftops',
+  roofs: 'city',
   'zinc roofs': 'rooftops',
   skyscrapers: 'skyline',
   towers: 'skyline',
@@ -780,15 +826,29 @@ export function layoutOf(
   const kind = place.kind ?? 'outdoor';
   const items: SetItem[] = [];
   const own: SetOwnItem[] = [];
+  const reverse: SetItem[] = [];
   for (const one of Array.isArray(said.items) ? said.items : []) {
     if (!one || typeof one !== 'object') continue;
     const item = one as Record<string, unknown>;
     const kindOf = itemKindOf(item.kind) ?? itemKindOf(item.name);
     const x = share(item.x);
-    const row = rowOf(item.row);
     // A kind the kit has no piece for is left out: only what the painter
     // asks to be drawn apart ("own") is drawn by the artist.
     if (!kindOf) continue;
+    // What is on the place's other side (§4.2 of the views plan): its own
+    // row, a few things at its back.
+    if (typeof item.row === 'string' && REVERSE_ROW.test(item.row)) {
+      if (reverse.length < MAX_REVERSE)
+        reverse.push({
+          kind: kindOf,
+          x,
+          row: 'back',
+          scale: 1,
+          colour: setColourOf(item.colour),
+        });
+      continue;
+    }
+    const row = rowOf(item.row);
     if (items.length >= MAX_SET_ITEMS) continue;
     // A few things before the camera at most: the rest nearer than none.
     if (
@@ -829,27 +889,46 @@ export function layoutOf(
   const vessel =
     kind === 'vessel' ? (vesselOf(said.vessel) ?? plain.vessel ?? 'bus') : null;
   const focal = focalOf(said.focal, place);
+  const wide =
+    typeof said.width === 'string' ? parseFloat(said.width) : said.width;
+  // A Studio set is as wide as its camera needs, unless the painter says.
+  const width =
+    SET_WIDTHS.find((w) => w === wide) ??
+    (place.features !== undefined ? widthFor(place) : undefined);
+  const placeWords = `${place.name} ${place.look}`;
+  // The story's world first, then the place's own words, then what the
+  // painter chose (with no world, only a pack of no one region), then the
+  // plainest that fits: never one region's by default.
+  const painted = styleOf(said.style);
+  const style =
+    world === undefined
+      ? painted
+      : (packOfWorld(world) ??
+        packOfWorld(null, placeWords) ??
+        (painted && (hasWorld(world) || NEUTRAL_PACKS.includes(painted))
+          ? painted
+          : null) ??
+        plainPack(world, placeWords));
+  // What it scatters: in a pack, only the pack's own and what any place
+  // has (a street of one region never scatters another's).
+  const allowed = style
+    ? new Set<string>([...STYLE_PACKS[style].clutter, ...CLUTTER_EVERYWHERE])
+    : null;
   const clutter = [
     ...new Set(
       (Array.isArray(said.clutter) ? said.clutter : []).flatMap(
         (one): ClutterKind[] => {
           const kindOf = CLUTTER_KINDS.find((k) => k === itemKindOf(one));
-          return kindOf ? [kindOf] : [];
+          return kindOf && (!allowed || allowed.has(kindOf)) ? [kindOf] : [];
         },
       ),
     ),
   ].slice(0, MAX_CLUTTER);
-  const wide =
-    typeof said.width === 'string' ? parseFloat(said.width) : said.width;
-  const width = SET_WIDTHS.find((w) => w === wide);
-  const placeWords = `${place.name} ${place.look}`;
-  const style =
-    world === undefined
-      ? styleOf(said.style)
-      : (packOfWorld(world) ??
-        styleOf(said.style) ??
-        packOfWorld(null, placeWords) ??
-        'nature');
+  const backdropSaid =
+    pick(SET_BACKDROPS, BACKDROP_WORDS, said.backdrop) ?? plain.backdrop;
+  // A danfo is a West African town's bus: anywhere else, a bus.
+  if (style && style !== 'west-african-town')
+    for (const one of items) if (one.kind === 'danfo') one.kind = 'bus';
   const rowsSaid =
     typeof said.audience === 'number'
       ? said.audience
@@ -859,6 +938,10 @@ export function layoutOf(
           ? 0
           : null;
   const watching = style ? audienceFor(placeWords) : null;
+  // A named city's buses and cabs: only where the story's words say it.
+  const livery = vehicleLiveryOf(
+    `${world ? worldWords(world) : ''} ${placeWords}`,
+  );
   const audience =
     rowsSaid !== null
       ? rowsSaid >= 2
@@ -883,9 +966,14 @@ export function layoutOf(
     ground,
     groundColour: setColourOf(said.groundColour),
     backdrop:
-      kind === 'outdoor'
-        ? (pick(SET_BACKDROPS, BACKDROP_WORDS, said.backdrop) ?? plain.backdrop)
-        : 'none',
+      kind !== 'outdoor'
+        ? 'none'
+        : // Zinc rooftops are a West African town's own: elsewhere, a town.
+          backdropSaid === 'rooftops' &&
+            style &&
+            !STYLE_PACKS[style].backdrops.includes('rooftops')
+          ? 'city'
+          : backdropSaid,
     walls: kind === 'outdoor' ? null : setColourOf(said.walls),
     vessel,
     vesselColour: vessel
@@ -898,7 +986,33 @@ export function layoutOf(
     ...(width !== undefined && width !== 1 ? { width } : {}),
     ...(style ? { style } : {}),
     ...(style && audience ? { audience } : {}),
+    ...(reverse.length ? { reverse } : {}),
+    ...(livery ? { livery } : {}),
   };
+}
+
+/** A big room, where people cross the floor: a hall, a church, a market. */
+const BIG_ROOM =
+  /\b(?:halls?|church(?:es)?|temples?|mosques?|synagogues?|markets?|stadiums?|gym(?:nasium)?s?|warehouses?|palaces?|court(?:room)?s?|theatres?|theaters?|auditoriums?|stations?|barns?|throne ?rooms?|ballrooms?|cathedrals?|arenas?)\b/iu;
+/** A place people go a long way across: a road, a field, a shore. */
+const LONG_WAY =
+  /\b(?:roads?|streets?|paths?|tracks?|fields?|beach(?:es)?|shores?|rivers?|riverbanks?|bridges?|highways?|trails?|deserts?|squares?|parks?|pitch(?:es)?|playgrounds?|meadows?|valleys?|plains?|farms?|lanes?|avenues?|harbou?rs?|docks?|camps?)\b/iu;
+
+/**
+ * How wide a Studio place is drawn, in frames, where its painter does not
+ * say (studio-scenery-plan §3.1): a vessel and a small room one frame,
+ * as the camera has no room to pan in them; a big room one and a half;
+ * out of doors one and a half, and two where people go a long way across
+ * it (a road, a field, a shore), so a walk can be followed.
+ */
+export function widthFor(
+  place: Pick<StoryPlace, 'name' | 'look' | 'kind'>,
+): SetWidth {
+  const kind = place.kind ?? 'outdoor';
+  const words = `${place.name} ${place.look}`;
+  if (kind === 'vessel') return 1;
+  if (kind === 'indoor') return BIG_ROOM.test(words) ? 1.5 : 1;
+  return LONG_WAY.test(words) ? 2 : 1.5;
 }
 
 /** A thing's landmark builder: as the painter named it, its parameters clamped; else as its name says; null for none. */
@@ -974,6 +1088,11 @@ const SPOT_AT: Record<string, number> = { ...STATION_SHARES, back: 0.5 };
 /** How near across (a share of the set) a painter's thing is to the stage's own piece of its kind to be that piece again. */
 const STAGED_NEAR = 0.2;
 
+/** Whether a story's world says anything at all. */
+function hasWorld(world: StoryWorld | null | undefined): boolean {
+  return Boolean(world && worldWords(world).trim());
+}
+
 /** The story's world, as the painter is told it. */
 const worldText = (world: StoryWorld | null | undefined) =>
   world
@@ -991,7 +1110,10 @@ function packText(world: StoryWorld | null | undefined): string {
     const pack = STYLE_PACKS[id];
     return `Its look is the "${id}" style (${pack.words}): answer "style": "${id}". Its buildings are ${pack.buildings.join(', ')}; its scenery ${pack.scenery.join(', ')}; its clutter ${pack.clutter.join(', ')}.`;
   }
-  return `Choose its look as "style", one of: ${STYLE_PACK_IDS.map((one) => `"${one}" (${STYLE_PACKS[one].words})`).join('; ')}.`;
+  // With no world, only the packs of no one region: nothing says where
+  // it is, so it is nowhere in particular.
+  const offered = hasWorld(world) ? STYLE_PACK_IDS : NEUTRAL_PACKS;
+  return `Choose its look as "style", the one nearest the place's own words, one of: ${offered.map((one) => `"${one}" (${STYLE_PACKS[one].words})`).join('; ')}.`;
 }
 
 /** The features of a place the stage draws itself, and those the set draws, by the brief's own rule (setThing). */
@@ -1051,6 +1173,26 @@ export function layoutBrief(
 
 export const SET_W = 1600;
 export const SET_H = 900;
+/**
+ * How wide what spans the whole set (its sky, what stands behind the
+ * ground, the ground, a room's walls) is drawn while a set is built: the
+ * frame's 1600, or the set's own width where it is wider (buildSet sets
+ * it, and puts it back). It is drawn from 0 across and moved back by the
+ * margin, so the frame the stagings are laid out in is its middle.
+ */
+let drawW: number = SET_W;
+/** The ink the set being built is drawn in, as a share of its usual (a show's style, SetLook). */
+let inkK = 1;
+/**
+ * Which side of its place the set being built is (studio-views-plan
+ * §4.2): its front, or its other side, whose things before the camera and
+ * on the floor are named apart ("rv-fg-1") so each is faded on its own,
+ * a vessel's other side has no door, and the people watching face the
+ * camera from across the floor.
+ */
+let sideNow: 'front' | 'reverse' = 'front';
+/** What a thing's group is called on the side being built. */
+const sideId = (id: string) => (sideNow === 'reverse' ? `rv-${id}` : id);
 /** The set's own outline: the kit's line where its people stand. */
 const INK_W = setLine(SET_H);
 /** Where the story's people stand, and how many of the set's units a kit unit is there (scene-crowd's own). */
@@ -1179,12 +1321,12 @@ function drawSky(
       : pack && layout.sky === 'day'
         ? pack.light.day
         : SKY[layout.sky];
-  let out = flatRect(-10, -10, SET_W + 20, top + 20, sky);
+  let out = flatRect(-10, -10, drawW + 20, top + 20, sky);
   if (layout.sky === 'night') {
     const stars = Array.from(
       { length: 26 },
       () =>
-        `<circle cx="${r1(random() * SET_W)}" cy="${r1(random() * top * 0.8)}" r="${r1(2 + random() * 2.5)}" ${flatFill('#fff6d8')}/>`,
+        `<circle cx="${r1(random() * drawW)}" cy="${r1(random() * top * 0.8)}" r="${r1(2 + random() * 2.5)}" ${flatFill('#fff6d8')}/>`,
     ).join('');
     out += `<g class="twinkle">${stars}</g>` + circle(1240, 150, 46, '#f6ecc4');
   } else if (layout.weather === 'clear') {
@@ -1200,7 +1342,7 @@ function drawSky(
     const n = layout.weather === 'cloudy' ? 5 : 3;
     const clouds = Array.from({ length: n }, (_, k) =>
       cloud(
-        ((k + 0.3 + random() * 0.4) / n) * SET_W,
+        ((k + 0.3 + random() * 0.4) / n) * drawW,
         90 + random() * Math.max(40, top * 0.3),
         0.7 + random() * 0.5,
         layout.weather === 'cloudy' ? '#f2f4f6' : '#ffffff',
@@ -1220,14 +1362,14 @@ function rolling(
   colour: string,
 ): string {
   let d = `M-20,${r1(base)} L-20,${r1(base - high * 0.6)}`;
-  const step = (SET_W + 40) / bumps;
+  const step = (drawW + 40) / bumps;
   for (let i = 0; i < bumps; i += 1) {
     const x0 = -20 + i * step;
     const peak = base - high * (0.55 + random() * 0.45);
     const end = base - high * (0.45 + random() * 0.3);
     d += ` Q${r1(x0 + step / 2)},${r1(peak - high * 0.3)} ${r1(x0 + step)},${r1(end)}`;
   }
-  d += ` L${SET_W + 20},${r1(base)} Z`;
+  d += ` L${drawW + 20},${r1(base)} Z`;
   return shape(d, colour);
 }
 
@@ -1253,7 +1395,7 @@ function drawBackdrop(
           return flatRect(
             -10,
             y0,
-            SET_W + 20,
+            drawW + 20,
             40,
             k % 2 ? '#c4e2a6' : '#d9e9b0',
           );
@@ -1262,12 +1404,12 @@ function drawBackdrop(
       const hedges = Array.from(
         { length: 7 },
         (_, k) =>
-          `<ellipse cx="${r1((k + 0.5) * (SET_W / 7))}" cy="${r1(base - 112)}" rx="${r1(60 + random() * 30)}" ry="16" ${fill(SET_COLOURS.leaves)}/>`,
+          `<ellipse cx="${r1((k + 0.5) * (drawW / 7))}" cy="${r1(base - 112)}" rx="${r1(60 + random() * 30)}" ry="16" ${fill(SET_COLOURS.leaves)}/>`,
       ).join('');
       return (
         rolling(base - 100, 90, 3, random, '#cfe7b8') +
         shape(
-          `M-20,${base} L-20,${r1(base - 112)} L${SET_W + 20},${r1(base - 112)} L${SET_W + 20},${base} Z`,
+          `M-20,${base} L-20,${r1(base - 112)} L${drawW + 20},${r1(base - 112)} L${drawW + 20},${base} Z`,
           '#d9e9b0',
         ) +
         bands +
@@ -1283,7 +1425,7 @@ function drawBackdrop(
       let out = '';
       const n = 4;
       for (let k = 0; k < n; k += 1) {
-        const cx = ((k + 0.5) / n) * SET_W + (random() - 0.5) * 120;
+        const cx = ((k + 0.5) / n) * drawW + (random() - 0.5) * 120;
         const h = 240 + random() * 120;
         const w = 300 + random() * 120;
         out +=
@@ -1302,18 +1444,18 @@ function drawBackdrop(
     }
     case 'trees': {
       let out = shape(
-        `M-20,${base} L-20,${r1(base - 90)} L${SET_W + 20},${r1(base - 90)} L${SET_W + 20},${base} Z`,
+        `M-20,${base} L-20,${r1(base - 90)} L${drawW + 20},${r1(base - 90)} L${drawW + 20},${base} Z`,
         '#557f31',
       );
       const n = 12;
       for (let k = 0; k < n; k += 1) {
-        const cx = (k / (n - 1)) * SET_W + (random() - 0.5) * 60;
+        const cx = (k / (n - 1)) * drawW + (random() - 0.5) * 60;
         const r = 70 + random() * 40;
         const cy = base - 90 - r * 0.6 - random() * 50;
         out += circle(cx, cy, r, k % 2 ? '#6a9c3e' : SET_COLOURS.leaves);
       }
       for (let k = 0; k < n - 1; k += 1) {
-        const cx = ((k + 0.5) / (n - 1)) * SET_W;
+        const cx = ((k + 0.5) / (n - 1)) * drawW;
         out += circle(
           cx,
           base - 60 - random() * 30,
@@ -1335,7 +1477,7 @@ function drawBackdrop(
       }).join('');
       return (
         shape(
-          `M-20,${base} L-20,${top} L${SET_W + 20},${top} L${SET_W + 20},${base} Z`,
+          `M-20,${base} L-20,${top} L${drawW + 20},${top} L${drawW + 20},${base} Z`,
           SET_COLOURS.water,
         ) + `<g class="ripple">${waves}</g>`
       );
@@ -1345,7 +1487,7 @@ function drawBackdrop(
       let x = -20;
       const walls = ['#efe3cf', '#d8cbb3', '#c9c3ba', '#e6d3a8', '#cfd8e2'];
       let k = 0;
-      while (x < SET_W + 20) {
+      while (x < drawW + 20) {
         const w = 110 + random() * 90;
         const h = 180 + random() * 190;
         const colour = walls[k % walls.length];
@@ -1378,7 +1520,7 @@ function drawBackdrop(
       const n = 7;
       const houses = Array.from({ length: n }, (_, k) => ({
         k,
-        cx: ((k + 0.5) / n) * SET_W + (random() - 0.5) * 90,
+        cx: ((k + 0.5) / n) * drawW + (random() - 0.5) * 90,
         // Some nearer, some farther: never one flat row.
         back: Math.round(random() * 3) * 16,
         k2: random(),
@@ -1469,7 +1611,7 @@ function packBackdrop(
       at.forEach((x, k) => {
         const B = [300, 420, 220][k];
         const H = B * 0.6;
-        const cx = x * SET_W;
+        const cx = x * drawW;
         const apex = cx + B * 0.08;
         out +=
           shape(
@@ -1490,7 +1632,7 @@ function packBackdrop(
     case 'palms': {
       let out = rolling(base, 50, 5, random, tinted(pack, SET_COLOURS.hills));
       for (let k = 0; k < 11; k += 1) {
-        const x = ((k + 0.3 + random() * 0.4) / 11) * SET_W;
+        const x = ((k + 0.3 + random() * 0.4) / 11) * drawW;
         out += palm(x, 110 + random() * 80);
       }
       return out;
@@ -1507,7 +1649,7 @@ function packBackdrop(
       );
       let x = -30;
       let k = 0;
-      while (x < SET_W + 30) {
+      while (x < drawW + 30) {
         const w = 90 + random() * 90;
         const h = (lagos ? 60 : 50) + random() * (lagos ? 90 : 70);
         const b = base - (k % 3) * 6;
@@ -1535,17 +1677,17 @@ function packBackdrop(
         // A mast over the town, and a palm or two.
         out +=
           line(
-            `M${r1(SET_W * 0.72)},${r1(base - 60)} L${r1(SET_W * 0.72)},${r1(base - 300)}`,
+            `M${r1(drawW * 0.72)},${r1(base - 60)} L${r1(drawW * 0.72)},${r1(base - 300)}`,
             FIGURE_INK,
             4,
           ) +
           line(
-            `M${r1(SET_W * 0.72 - 20)},${r1(base - 250)} L${r1(SET_W * 0.72 + 20)},${r1(base - 250)} M${r1(SET_W * 0.72 - 14)},${r1(base - 200)} L${r1(SET_W * 0.72 + 14)},${r1(base - 200)}`,
+            `M${r1(drawW * 0.72 - 20)},${r1(base - 250)} L${r1(drawW * 0.72 + 20)},${r1(base - 250)} M${r1(drawW * 0.72 - 14)},${r1(base - 200)} L${r1(drawW * 0.72 + 14)},${r1(base - 200)}`,
             FIGURE_INK,
             3,
           ) +
-          palm(SET_W * 0.3, 190) +
-          palm(SET_W * 0.9, 160);
+          palm(drawW * 0.3, 190) +
+          palm(drawW * 0.9, 160);
       return out;
     }
     case 'olive hills': {
@@ -1553,7 +1695,7 @@ function packBackdrop(
         rolling(base, 190, 4, random, tinted(pack, '#d7e2b0')) +
         rolling(base, 110, 5, random, tinted(pack, SET_COLOURS.hills));
       for (let k = 0; k < 14; k += 1) {
-        const x = random() * SET_W;
+        const x = random() * drawW;
         const y = base - 20 - random() * 90;
         out +=
           flatRect(x - 3, y - 6, 6, 14, SET_COLOURS.wood) +
@@ -1571,7 +1713,7 @@ function packBackdrop(
         KIT_EXTRAS.concrete,
         COATS.cream,
       ];
-      while (x < SET_W + 20) {
+      while (x < drawW + 20) {
         const w = 70 + random() * 90;
         const h = 170 + random() * 290;
         const face = tinted(pack, faces[Math.floor(random() * faces.length)]);
@@ -1613,13 +1755,13 @@ function drawGround(
       ? GROUND.snow
       : GROUND[layout.ground]);
   let out = shape(
-    `M-20,${r1(top)} L${SET_W + 20},${r1(top)} L${SET_W + 20},${SET_H + 20} L-20,${SET_H + 20} Z`,
+    `M-20,${r1(top)} L${drawW + 20},${r1(top)} L${drawW + 20},${SET_H + 20} L-20,${SET_H + 20} Z`,
     colour,
   );
   const darker = shade(colour, 0.9);
   const marks = (n: number, draw: (x: number, y: number) => string) =>
     Array.from({ length: n }, () => {
-      const x = random() * SET_W;
+      const x = random() * drawW;
       const y = top + 20 + random() * (SET_H - top - 30);
       return draw(x, y);
     }).join('');
@@ -1632,7 +1774,7 @@ function drawGround(
   switch (layout.ground) {
     case 'path': {
       // A path of earth winding from the front, wide, to the far edge, narrow.
-      const mid = SET_W * (0.42 + random() * 0.16);
+      const mid = drawW * (0.42 + random() * 0.16);
       const far = top + 2;
       out += flatShape(
         `M${r1(mid - 24)},${r1(far)} Q${r1(mid - 120)},${r1(top + (SET_H - top) * 0.45)} ${r1(mid - 420)},${SET_H + 20} L${r1(mid + 420)},${SET_H + 20} Q${r1(mid + 120)},${r1(top + (SET_H - top) * 0.45)} ${r1(mid + 24)},${r1(far)} Z`,
@@ -1658,8 +1800,8 @@ function drawGround(
       // The road across the back, the pavement people stand on before it.
       const kerb = top + (SET_H - top) * 0.36;
       out +=
-        flatRect(-10, kerb, SET_W + 20, SET_H - kerb + 10, GROUND.paving) +
-        flatRect(-10, kerb - 8, SET_W + 20, 12, '#c2b397') +
+        flatRect(-10, kerb, drawW + 20, SET_H - kerb + 10, GROUND.paving) +
+        flatRect(-10, kerb - 8, drawW + 20, 12, '#c2b397') +
         Array.from({ length: 9 }, (_, k) =>
           flatRect(
             k * 190 + 30,
@@ -1678,7 +1820,7 @@ function drawGround(
         flatRect(
           -10,
           top + 40 + r * ((SET_H - top) / 5),
-          SET_W + 20,
+          drawW + 20,
           5,
           darker,
         ),
@@ -1714,13 +1856,13 @@ function drawGroundL3(
     );
   const D = SET_H - top;
   let out = shape(
-    `M-20,${r1(top)} L${SET_W + 20},${r1(top)} L${SET_W + 20},${SET_H + 20} L-20,${SET_H + 20} Z`,
+    `M-20,${r1(top)} L${drawW + 20},${r1(top)} L${drawW + 20},${SET_H + 20} L-20,${SET_H + 20} Z`,
     colour,
   );
   // Nearer to farther, the colour shifts toward the haze.
   [0.05, 0.1, 0.16].forEach((k, i) => {
     const h = D * [0.34, 0.2, 0.09][i];
-    out += flatRect(-20, top, SET_W + 40, h, mix(colour, pack.light.haze, k));
+    out += flatRect(-20, top, drawW + 40, h, mix(colour, pack.light.haze, k));
   });
   const darker = shade(colour, 0.9);
   const unit = scaleAtFeet('outdoor', FEET);
@@ -1734,7 +1876,7 @@ function drawGroundL3(
   ) =>
     Array.from({ length: n }, () => {
       const y = depth();
-      const x = random() * SET_W;
+      const x = random() * drawW;
       return draw(x, y, near(y));
     }).join('');
   const tuft = (x: number, y: number, k: number) =>
@@ -1748,14 +1890,14 @@ function drawGroundL3(
     const bottom = SET_H + 20;
     const t = (bottom - top) / (bottom - eye);
     const runs: string[] = [];
-    for (let x0 = -SET_W; x0 <= SET_W * 2; x0 += across) {
-      const x1 = x0 + (SET_W / 2 - x0) * t;
+    for (let x0 = -drawW; x0 <= drawW * 2; x0 += across) {
+      const x1 = x0 + (drawW / 2 - x0) * t;
       runs.push(`M${r1(x0)},${bottom} L${r1(x1)},${r1(top)}`);
     }
     for (let k = 1; k < 40; k += 1) {
       const y = eye + (bottom - eye) / (1 + deep * k);
       if (y <= top + 4) break;
-      runs.push(`M-20,${r1(y)} L${SET_W + 20},${r1(y)}`);
+      runs.push(`M-20,${r1(y)} L${drawW + 20},${r1(y)}`);
     }
     return `<path d="${runs.join(' ')}" fill="none" stroke="${tone}" stroke-width="2"/>`;
   };
@@ -1767,7 +1909,7 @@ function drawGroundL3(
     case 'dirt':
     case 'red earth': {
       // A way worn across it, wide near and narrow far, and a few stones.
-      const mid = SET_W * (0.4 + random() * 0.2);
+      const mid = drawW * (0.4 + random() * 0.2);
       out += flatShape(
         `M${r1(mid - 20)},${r1(top + 2)} Q${r1(mid - 110)},${r1(top + D * 0.45)} ${r1(mid - 380)},${SET_H + 20} L${r1(mid + 380)},${SET_H + 20} Q${r1(mid + 110)},${r1(top + D * 0.45)} ${r1(mid + 20)},${r1(top + 2)} Z`,
         layout.ground === 'path' ? SET_COLOURS.earth : shade(colour, 1.12),
@@ -1799,11 +1941,11 @@ function drawGroundL3(
         flatRect(
           -10,
           kerb,
-          SET_W + 20,
+          drawW + 20,
           SET_H - kerb + 10,
           packColour(pack, GROUND.paving),
         ) +
-        flatRect(-10, kerb - 8, SET_W + 20, 12, '#c2b397') +
+        flatRect(-10, kerb - 8, drawW + 20, 12, '#c2b397') +
         Array.from({ length: 12 }, (_, k) =>
           flatRect(k * 136 + 10, kerb - 8, 4, 12, shade('#c2b397', 0.85)),
         ).join('') +
@@ -1821,7 +1963,7 @@ function drawGroundL3(
         `<path d="M${r1(x)},${r1(y)} l${r1(12 * k)},${r1(5 * k)} l${r1(-6 * k)},${r1(7 * k)} l${r1(14 * k)},${r1(4 * k)}" fill="none" stroke="${shade(GROUND.paving, 0.8)}" stroke-width="${r1(2.4 * k)}" stroke-linecap="round"/>`;
       out += marks(7, (x, y, k) => (y > kerb + 8 ? crack(x, y, k) : ''));
       out += Array.from({ length: 3 }, () => {
-        const x = random() * SET_W;
+        const x = random() * drawW;
         const y = top + 6 + random() * (kerb - top - 20);
         return crack(x, y, near(y));
       }).join('');
@@ -1851,7 +1993,7 @@ function drawFloor(
   drop: number,
 ): string {
   const colour = layout.groundColour ?? GROUND[layout.ground];
-  const d = `M${side},${r1(top)} L${SET_W - side},${r1(top)} L${SET_W + 20},${r1(top + drop)} L${SET_W + 20},${SET_H + 20} L-20,${SET_H + 20} L-20,${r1(top + drop)} Z`;
+  const d = `M${side},${r1(top)} L${drawW - side},${r1(top)} L${drawW + 20},${r1(top + drop)} L${drawW + 20},${SET_H + 20} L-20,${SET_H + 20} L-20,${r1(top + drop)} Z`;
   let out = shape(d, colour);
   const darker = shade(colour, 0.9);
   // Where the floor starts across at a depth: it runs under the side walls' feet.
@@ -1863,7 +2005,7 @@ function drawFloor(
       const y = top + 26 + k * k * 7 + k * 26;
       const x = from(y + 4);
       return y < SET_H
-        ? flatRect(x, y, SET_W - x * 2, 4 + k * 0.6, darker)
+        ? flatRect(x, y, drawW - x * 2, 4 + k * 0.6, darker)
         : '';
     }).join('');
   else if (layout.ground === 'tiles') {
@@ -1873,7 +2015,7 @@ function drawFloor(
         if (!((r + c) % 2)) return '';
         const y = top + 20 + r * band;
         const x0 = Math.max(c * 160, from(y + band));
-        const x1 = Math.min((c + 1) * 160, SET_W - from(y + band));
+        const x1 = Math.min((c + 1) * 160, drawW - from(y + band));
         return x1 > x0
           ? flatRect(x0, y, x1 - x0, band, shade(colour, 0.95))
           : '';
@@ -1892,16 +2034,16 @@ function drawRoom(
 ): string {
   const sideColour = shade(walls, 0.9);
   return (
-    flatRect(-10, -10, SET_W + 20, top + 20, walls) +
+    flatRect(-10, -10, drawW + 20, top + 20, walls) +
     shape(
       `M-20,-20 L${side},-20 L${side},${r1(top)} L-20,${r1(top + drop)} Z`,
       sideColour,
     ) +
     shape(
-      `M${SET_W + 20},-20 L${SET_W - side},-20 L${SET_W - side},${r1(top)} L${SET_W + 20},${r1(top + drop)} Z`,
+      `M${drawW + 20},-20 L${drawW - side},-20 L${drawW - side},${r1(top)} L${drawW + 20},${r1(top + drop)} Z`,
       sideColour,
     ) +
-    rect(side, top - 16, SET_W - side * 2, 16, shade(walls, 0.82))
+    rect(side, top - 16, drawW - side * 2, 16, shade(walls, 0.82))
   );
 }
 
@@ -1977,7 +2119,7 @@ function placed(
   // The kit's outline wherever it stands; one the artist drew keeps its own.
   const stroke = options.own
     ? ''
-    : ` stroke="${FIGURE_INK}" stroke-width="${Math.round((INK_W / s) * 100) / 100}" stroke-linejoin="round"`;
+    : ` stroke="${FIGURE_INK}" stroke-width="${Math.round(((INK_W * inkK) / s) * 100) / 100}" stroke-linejoin="round"`;
   const body = options.lives
     ? `<g class="${options.lives}">${inner}</g>`
     : inner;
@@ -2012,7 +2154,28 @@ function pieceOf(
   seed = 0,
   pack: StylePack | null = null,
   key = '',
+  /** Seen from behind: its back where it has one of its own, else as it is. */
+  back = false,
+  livery: VehicleLivery | null = null,
 ): SceneryPiece {
+  // A named city's own bus and cab (London's red double-decker).
+  if (livery && !colour && (kind === 'bus' || kind === 'taxi')) {
+    const drawn = drawVehicleKit(kind, { livery, plain: true });
+    return { svg: drawn.svg, viewBox: drawn.viewBox };
+  }
+  if (back) {
+    const front = pieceOf(kind, colour, seed, pack, key);
+    const behind = backOf(
+      kind,
+      pack && colour ? packColour(pack, colour) : colour,
+    );
+    if (!behind) return front;
+    // Nothing of its front on it answers the world from behind.
+    const { reacts, roosts, ...rest } = front;
+    void reacts;
+    void roosts;
+    return { ...rest, svg: behind.svg, viewBox: behind.viewBox };
+  }
   if (pack && isBuildingKind(kind))
     return drawBuilding(kind, pack, key, colour ?? undefined);
   if (pack && colour && (isKitKind(kind) || isLandmarkKind(kind)))
@@ -2020,7 +2183,7 @@ function pieceOf(
   if (kind === 'palm')
     return { ...drawPiece('tree', 'palm tree'), lives: 'sway' };
   if (isSceneryKind(kind)) return drawScenery(kind, colour ?? undefined);
-  const piece = drawPiece(kind);
+  const piece = drawPiece(kind, '', { pack: pack?.id ?? null, colour });
   if (kind === 'stall') {
     // Each stall its own: its awning's stripes in its colour, and its
     // wares of several kinds.
@@ -2053,7 +2216,7 @@ const VESSEL_LOOK: Record<
   SetVessel,
   { colour: string; seats: string; walls: string }
 > = {
-  bus: { colour: CLOTH.yellow, seats: CLOTH.blue, walls: PAPER },
+  bus: { colour: CLOTH.blue, seats: CLOTH.red, walls: PAPER },
   train: { colour: CLOTH.teal, seats: CLOTH.red, walls: PAPER },
   plane: { colour: '#e7ecf2', seats: CLOTH.navy, walls: '#eef1f5' },
   boat: { colour: SET_COLOURS.wood, seats: CLOTH.blue, walls: PAPER },
@@ -2144,6 +2307,8 @@ function drawVesselSide(
   colour: string,
   walls: string,
   floor: number,
+  /** Its other side, seen from across the aisle: windows all along, no door. */
+  other = false,
 ): string {
   if (vessel === 'boat') {
     // An open deck: its far rail, the sea beyond it, and a mast.
@@ -2167,7 +2332,7 @@ function drawVesselSide(
   const sill = floor - (vessel === 'plane' ? 250 : 210);
   const glassTop = ceiling + 40;
   // The windows, and the door at the right with its glass.
-  const doorX = vessel === 'plane' ? null : SET_W - 250;
+  const doorX = vessel === 'plane' || other ? null : SET_W - 250;
   const holes: string[] = [];
   const frames: string[] = [];
   if (vessel === 'plane') {
@@ -2181,7 +2346,7 @@ function drawVesselSide(
     }
   } else {
     const right = (doorX ?? SET_W) - 40;
-    const n = vessel === 'train' ? 3 : 4;
+    const n = (vessel === 'train' ? 3 : 4) + (doorX === null ? 1 : 0);
     const gap = 44;
     const w = (right - 40 - gap * (n - 1)) / n;
     for (let k = 0; k < n; k += 1) {
@@ -2339,7 +2504,32 @@ function covered(placings: Placing[]): number {
  * a little, and each kept within the frame by at least half of itself:
  * two shelves at the same spot of the wall hang side by side.
  */
-function spreadOut(placings: Placing[]): void {
+/**
+ * How far into the frame from its edge what stands before the camera may
+ * reach, as a share of it: the people's spots begin a little farther in
+ * (the stage's left, 0.12), so nothing before the camera stands across
+ * them in the wide shot.
+ */
+export const FORE_EDGE = 0.07;
+
+/**
+ * What stands before the camera kept to the frame's edges (clear view):
+ * each moved out, the way it is nearer, until it reaches no farther in
+ * than FORE_EDGE of the frame, however it was spread; the rest of it
+ * past the edge, cut by the frame.
+ */
+function keepForeToEdges(placings: Placing[]): void {
+  for (const one of placings) {
+    if (one.band !== 'foreground') continue;
+    const [a, b] = reachOf(one);
+    const left = (a + b) / 2 < SET_W / 2;
+    if (left && b > FORE_EDGE * SET_W) one.x -= b - FORE_EDGE * SET_W;
+    else if (!left && a < (1 - FORE_EDGE) * SET_W)
+      one.x += (1 - FORE_EDGE) * SET_W - a;
+  }
+}
+
+function spreadOut(placings: Placing[], margin = 0): void {
   const bands = new Map<string, Placing[]>();
   for (const one of placings) {
     if (one.band === 'flat') continue;
@@ -2350,8 +2540,8 @@ function spreadOut(placings: Placing[]): void {
   const within = (one: Placing) => {
     const [a, b] = reachOf(one);
     const w = b - a;
-    if (a < -w * 0.35) one.x += -w * 0.35 - a;
-    if (b > SET_W + w * 0.35) one.x -= b - SET_W - w * 0.35;
+    if (a < -margin - w * 0.35) one.x += -margin - w * 0.35 - a;
+    if (b > SET_W + margin + w * 0.35) one.x -= b - SET_W - margin - w * 0.35;
   };
   for (const list of bands.values()) {
     for (const one of list) if (!one.fixed) within(one);
@@ -2429,10 +2619,51 @@ export interface SetFloor {
 /** A set as layers (studio-scenery-plan §3.2): the layers, its width, its floor, and each thing before the camera, by its group. */
 export interface SetLayering {
   layers: SetLayer[];
-  /** In the set's units: 1600, or wider for a camera that pans (L4). */
+  /** In the set's units: 1600, or wider for a camera that pans (L4), the frame its middle 1600. */
   width: number;
+  /** Where the action is, as a share of the frame across: what the wide shot centres on (§6.3). Absent, the middle. */
+  focal?: number;
   floor: SetFloor;
   fore: { id: string; box: [number, number, number, number] }[];
+  /** Each thing on the floor among the people (the floor layer's), by its group: its box and where its feet are. Absent on a set built before, or with none. */
+  floorThings?: {
+    id: string;
+    box: [number, number, number, number];
+    feet: number;
+  }[];
+  /**
+   * The place's other side, as layers too (studio-views-plan §4.2): what a
+   * camera turned round sees, from the same layout (scene-set-reverse),
+   * its things before the camera and on the floor named "rv-…". Absent on
+   * a set built before it, which is given one from its layout when it is
+   * next used, or on one painted whole, which has none.
+   */
+  reverse?: Omit<SetLayering, 'reverse'>;
+}
+
+/**
+ * How a Studio show's animation style draws its sets (studio-style.ts): a
+ * colour their pack's palette leans toward, how far, and their ink as a
+ * share of its usual weight.
+ */
+export interface SetLook {
+  tint: string;
+  tintK: number;
+  ink: number;
+}
+
+/** A pack as a style draws it: its palette's tint leaned toward the style's. */
+function lookedPack(pack: StylePack, look: SetLook | null): StylePack {
+  if (!look || look.tintK <= 0) return pack;
+  const k = pack.palette.tintK + look.tintK;
+  return {
+    ...pack,
+    palette: {
+      ...pack.palette,
+      tint: mix(pack.palette.tint, look.tint, look.tintK / k),
+      tintK: Math.round(k * 1000) / 1000,
+    },
+  };
 }
 
 /** A set built from its layout: its SVG, its groups by their names, and its layers. */
@@ -2502,13 +2733,123 @@ export function buildSet(
   layout: SetLayout,
   place: StoryPlace,
   own: Record<string, SetPiece> = {},
+  /** The story's world: the people watching are dressed for it. Absent, as the pack's. */
+  world: StoryWorld | null = null,
+  /** A Studio show's animation style: its tint and its ink. Absent, the house look. */
+  look: SetLook | null = null,
+): BuiltSet {
+  const front = buildSide(layout, place, own, world, look, 'front');
+  const reverse = reverseSet(layout, place, own, world, look);
+  return reverse
+    ? {
+        ...front,
+        layered: { ...front.layered, reverse: reverse.layered },
+        notes: [
+          ...front.notes,
+          ...reverse.notes.map((note) => `other side: ${note}`),
+        ],
+      }
+    : front;
+}
+
+/**
+ * A place's other side as layers (studio-views-plan §4.2): built from its
+ * own layout turned round (scene-set-reverse), what the artist drew
+ * mirrored, with nothing asked of a model. Null where it cannot be built.
+ */
+export function reverseSet(
+  layout: SetLayout,
+  place: StoryPlace,
+  own: Record<string, SetPiece> = {},
+  world: StoryWorld | null = null,
+  look: SetLook | null = null,
+): { layered: Omit<SetLayering, 'reverse'>; notes: string[] } | null {
+  try {
+    const turned = reverseLayoutOf(renamedIn(layout), place);
+    const built = buildSide(
+      turned.layout,
+      turned.place,
+      own,
+      world,
+      look,
+      'reverse',
+    );
+    return { layered: built.layered, notes: built.notes };
+  } catch {
+    return null;
+  }
+}
+
+/** One side of a place drawn from its layout: buildSet's, the set's front or its other side. */
+function buildSide(
+  layout: SetLayout,
+  place: StoryPlace,
+  own: Record<string, SetPiece>,
+  world: StoryWorld | null,
+  look: SetLook | null,
+  side: 'front' | 'reverse',
+): BuiltSet {
+  // As wide as its layout says (a vessel one frame, whatever it says): what
+  // spans the whole set drawn that wide, and the frame its middle.
+  const across =
+    (place.kind ?? 'outdoor') === 'vessel'
+      ? SET_W
+      : Math.round(SET_W * (layout.width ?? 1));
+  drawW = across;
+  inkK = look?.ink ?? 1;
+  sideNow = side;
+  try {
+    return buildSetAt(
+      renamedIn(layout),
+      place,
+      own,
+      (across - SET_W) / 2,
+      world,
+      look,
+    );
+  } finally {
+    drawW = SET_W;
+    inkK = 1;
+    sideNow = 'front';
+  }
+}
+
+/** A layout written before a kind was renamed (an okada, now a motorbike), read as it is called now. */
+function renamedIn(layout: SetLayout): SetLayout {
+  const now = <T extends string>(kind: T): T => (RENAMED[kind] ?? kind) as T;
+  const clutter = layout.clutter?.map(now);
+  if (
+    !layout.items.some((one) => RENAMED[one.kind]) &&
+    !layout.clutter?.some((one) => RENAMED[one])
+  )
+    return layout;
+  return {
+    ...layout,
+    items: layout.items.map((one) => ({ ...one, kind: now(one.kind) })),
+    ...(clutter ? { clutter } : {}),
+  };
+}
+
+/** A set built with `margin` of it either side of the frame: what spans it drawn `drawW` wide, moved back by the margin. */
+function buildSetAt(
+  layout: SetLayout,
+  place: StoryPlace,
+  own: Record<string, SetPiece>,
+  margin: number,
+  story: StoryWorld | null,
+  look: SetLook | null,
 ): BuiltSet {
   const kind: PlaceKind = place.kind ?? 'outdoor';
+  /** What spans the whole set, drawn from 0 across, moved back so the frame is its middle. */
+  const whole = (inner: string) =>
+    margin ? `<g transform="translate(${-margin} 0)">${inner}</g>` : inner;
   const random = seeded(`${place.id}:${place.name}`);
   const floor = FLOOR_LINE[kind];
   const studio = place.features !== undefined;
   const { staged, drawn } = featuresOf(place);
-  const pack = layout.style ? STYLE_PACKS[layout.style] : null;
+  const pack = layout.style
+    ? lookedPack(STYLE_PACKS[layout.style], look)
+    : null;
   /** Out of doors in a style pack: its back row on the ground's far edge, and its ground whole. */
   const horizon = pack !== null && kind === 'outdoor';
   const notes: string[] = [];
@@ -2538,9 +2879,9 @@ export function buildSet(
       ? packColour(pack, plainGround)
       : plainGround;
   const underlay = flatRect(
-    -20,
+    -20 - margin,
     floor - 2,
-    SET_W + 40,
+    SET_W + 40 + margin * 2,
     SET_H - floor + 22,
     groundColour,
   );
@@ -2548,7 +2889,7 @@ export function buildSet(
   // Behind everything: the sky and what stands behind the ground, a
   // room's walls, or what a vessel's windows look out on and its side.
   if (kind === 'outdoor') {
-    const sky = `<g id="sky">${drawSky(layout, floor, random, pack)}</g>`;
+    const sky = `<g id="sky">${whole(drawSky(layout, floor, random, pack))}</g>`;
     out.push(sky);
     layers.sky.push(sky, underlay);
     const own = pack?.backdropFor[layout.backdrop];
@@ -2556,14 +2897,15 @@ export function buildSet(
       own && (SET_BACKDROPS as readonly string[]).includes(own)
         ? (own as SetBackdrop)
         : layout.backdrop;
-    const back = drawBackdrop(layout, floor, random, pack, backdrop);
+    const drawnBack = drawBackdrop(layout, floor, random, pack, backdrop);
+    const back = drawnBack && whole(drawnBack);
     if (back) {
       out.push(`<g id="backdrop">${back}</g>`);
       layers.far.push(underlay, `<g id="backdrop">${back}</g>`);
     }
   } else if (kind === 'indoor') {
     // Walls a little paler than their colour, so the people stand out.
-    const walls = `<g id="walls">${drawRoom(layout.walls ? shade(layout.walls, 1.4) : SET_COLOURS.walls, floor, SIDE, DROP)}</g>`;
+    const walls = `<g id="walls">${whole(drawRoom(layout.walls ? shade(layout.walls, 1.4) : SET_COLOURS.walls, floor, SIDE, DROP))}</g>`;
     out.push(walls);
     layers.back.push(walls);
   } else {
@@ -2573,7 +2915,7 @@ export function buildSet(
     out.push(outside);
     layers.far.push(outside);
     parts.outside = 'outside';
-    const side = `<g id="side">${drawVesselSide(vessel, layout.vesselColour ?? look.colour, layout.walls ? shade(layout.walls, 1.4) : look.walls, floor)}</g>`;
+    const side = `<g id="side">${drawVesselSide(vessel, layout.vesselColour ?? look.colour, layout.walls ? shade(layout.walls, 1.4) : look.walls, floor, sideNow === 'reverse')}</g>`;
     out.push(side);
     layers.back.push(side);
   }
@@ -2605,7 +2947,10 @@ export function buildSet(
   const scattered: Scattered[] = pack
     ? clutterOfPack(layout, place, pack, clear)
     : clutterOf(layout, place);
-  for (let item of [...layout.items, ...scattered] as Scattered[]) {
+  // On a set wider than the frame, what stands along the back past its
+  // edges, so a pan finds a street going on, not an empty ground.
+  const beyond = margin ? marginItems(layout, place, pack, margin) : [];
+  for (let item of [...layout.items, ...scattered, ...beyond] as Scattered[]) {
     const key = `${place.id}:${place.name}:${item.kind}:${n}`;
     n += 1;
     // One the stage draws itself, placed again by the painter where it
@@ -2623,7 +2968,15 @@ export function buildSet(
     if ((item.kind === 'window' || item.kind === 'door') && kind !== 'indoor')
       continue;
     if (item.kind === 'window') item = { ...item, kind: 'curtains' };
-    const piece = pieceOf(item.kind, item.colour, placings.length, pack, key);
+    const piece = pieceOf(
+      item.kind,
+      item.colour,
+      placings.length,
+      pack,
+      key,
+      item.back === true,
+      layout.livery ?? null,
+    );
     const [, vy, vw] = piece.viewBox;
     if ((HANGING as readonly string[]).includes(item.kind)) {
       // Only on a wall: on the back wall, at the back row's scale, its
@@ -2742,8 +3095,11 @@ export function buildSet(
     // frame as it is: a palm its real height there would be all trunk.
     const here = row === 'front' && !item.edge ? 1 : real;
     let s = scaleAtFeet(kind, y) * item.scale * here;
-    // Before the camera, low or at the sides (§8.4): at most the bottom
-    // three tenths of the frame, else in its outer eighth.
+    // Before the camera, low and at the sides (§8.4): at most the bottom
+    // three tenths of the frame, and never across the floor where people
+    // stand (a push grows it fastest, over them): at its edge, as a film
+    // frames a shot with something near (keepForeToEdges, after the rest
+    // are spread out).
     if (row === 'foreground' && x > 0.12 && x < 0.88) {
       const low = SET_H * 0.7;
       const fits = (y - low) / Math.max(1, -vy);
@@ -2751,6 +3107,7 @@ export function buildSet(
         if (fits >= s * 0.6) s = fits;
         else x = x < 0.5 ? 0.05 : 0.95;
       }
+      if (pack) x = x < 0.5 ? 0.05 : 0.95;
     }
     placings.push({
       piece,
@@ -2791,6 +3148,7 @@ export function buildSet(
         band: 'far',
         own: true,
         free: true,
+        ...(item.flip ? { flip: true } : {}),
       });
       continue;
     }
@@ -2812,6 +3170,7 @@ export function buildSet(
       band: row,
       own: true,
       ...(pack ? { free: true } : {}),
+      ...(item.flip ? { flip: true } : {}),
     });
   }
   // A vessel's seats along its far side, unless the layout placed its own.
@@ -2842,12 +3201,18 @@ export function buildSet(
   // look names), each its own group, where it stands.
   for (const feature of drawn) {
     if (feature.kind === DRAWN) continue;
-    const row: SetRow = feature.spot === 'back' ? 'back' : 'middle';
+    // Out of doors a door is a building's front, at the back of the ground.
+    const front = kind === 'outdoor' && feature.kind === 'door';
+    const row: SetRow = feature.spot === 'back' || front ? 'back' : 'middle';
     const y = rowFeet(kind, row);
     const id = featureGroup(feature.id);
     parts[id] = id;
     placings.push({
-      piece: drawPiece(feature.kind, feature.name),
+      piece: drawPiece(feature.kind, feature.name, {
+        pack: layout.style,
+        livery: layout.livery ?? null,
+        outdoor: kind === 'outdoor',
+      }),
       kind: feature.kind,
       x: (SPOT_AT[feature.spot] ?? 0.5) * SET_W,
       y,
@@ -2873,7 +3238,9 @@ export function buildSet(
   }
   // In a style pack, what code scatters finds its own room after (below),
   // and never pushes what the painter placed into where the action is.
-  spreadOut(pack ? placings.filter((one) => !one.clutter) : placings);
+  spreadOut(pack ? placings.filter((one) => !one.clutter) : placings, margin);
+  // A layout in a style pack; one written before is drawn as it was.
+  if (pack) keepForeToEdges(placings);
   if (pack) {
     // Clutter never where the action is (§5.3): moved out to its nearer
     // side, and on past whatever it would then stand on; left out when
@@ -3002,14 +3369,15 @@ export function buildSet(
     layout.ground === 'stone'
       ? { ...layout, groundColour: VESSEL_FLOOR }
       : layout;
-  const ground =
+  const ground = whole(
     kind === 'outdoor'
       ? pack
         ? drawGroundL3(layout, floor, random, pack)
         : drawGround(layout, floor, random)
       : kind === 'indoor'
         ? drawFloor(layout, floor, SIDE, DROP)
-        : drawFloor(floorLayout, floor, -20, 0);
+        : drawFloor(floorLayout, floor, -20, 0),
+  );
   const flats = placings
     .filter((one) => one.band === 'flat')
     .map(drawnAt)
@@ -3027,7 +3395,7 @@ export function buildSet(
     // Each tuft of grass answers the world on the one layer it is seen on.
     layers.back.push(`<g>${tuftsWhere(ground, (y) => y < seam)}</g>`);
     layers.ground.push(
-      `<defs><clipPath id="near-ground"><rect x="-20" y="${r1(seam)}" width="${SET_W + 40}" height="${r1(SET_H - seam + 40)}"/></clipPath></defs>` +
+      `<defs><clipPath id="near-ground"><rect x="${-20 - margin}" y="${r1(seam)}" width="${SET_W + 40 + margin * 2}" height="${r1(SET_H - seam + 40)}"/></clipPath></defs>` +
         `<g clip-path="url(#near-ground)"><g id="ground">${tuftsWhere(ground, (y) => y >= seam)}${flats}</g></g>`,
     );
   }
@@ -3050,17 +3418,28 @@ export function buildSet(
   // Before the whole ground, in a style pack out of doors: on the stage's layer.
   if (horizon) layers.stage.push(...backRow);
   else layers.back.push(...backRow);
+  // Where the people watching go on the other side: behind all that
+  // stands on the floor before them.
+  const watchersAt = layers.stage.length;
   if (props.length) {
     const group = `<g id="props">${props.map(drawnAt).join('')}</g>`;
     out.push(group);
     layers.stage.push(group);
     parts.props = 'props';
   }
+  /** The things on the floor among the people, each its own group: one can be faded while it would hide someone. */
+  const onFloor: { id: string; one: Placing }[] = [];
   for (const one of rest.filter((one) => one.band !== 'back')) {
     const drawnOne = drawnAt(one);
     out.push(drawnOne);
     // On the floor among the people, with its contact shadow, as theirs.
-    if (one.band === 'front') layers.floor.push(contactShadow(one), drawnOne);
+    if (one.band === 'front' && pack) {
+      // Each its own group, in a style pack: one can be faded.
+      const id = sideId(`fl-${onFloor.length + 1}`);
+      onFloor.push({ id, one });
+      layers.floor.push(`<g id="${id}">${contactShadow(one)}${drawnOne}</g>`);
+    } else if (one.band === 'front')
+      layers.floor.push(contactShadow(one), drawnOne);
     else layers.stage.push(drawnOne);
   }
 
@@ -3078,21 +3457,51 @@ export function buildSet(
   const fore = placings
     .filter((one) => one.band === 'foreground')
     .sort((a, b) => a.y - b.y || a.x - b.x)
-    .map((one, k) => ({ one, id: `fg-${k + 1}` }));
+    .map((one, k) => ({ one, id: sideId(`fg-${k + 1}`) }));
   for (const { one, id } of fore) {
     const drawnOne = drawnAt({ ...one, id });
     out.push(drawnOne);
     layers.foreground.push(drawnOne);
   }
-  // And the people watching, their backs to the camera (§5.5).
+  // And the people watching, their backs to the camera (§5.5); on the
+  // place's other side, facing it from across the floor, at its back.
   let watching: SetLayering['fore'] = [];
-  if (pack && layout.audience) {
+  if (pack && layout.audience && sideNow === 'reverse') {
+    const words = `${place.name} ${place.look}`;
+    // Their feet across the back of the floor, the nearer row a step forward.
+    const back = rowFeet(kind, 'back');
+    const rows: [number, number] = [
+      back,
+      back + (rowFeet(kind, 'middle') - back) * 0.35,
+    ];
+    const facing = drawFacingAudience({
+      rows: layout.audience,
+      spread: audienceFor(words)?.spread ?? 'full',
+      seed: `${place.id}:${place.name}`,
+      world: story && worldWords(story).trim() ? story : PACK_WORLD[pack.id],
+      kind,
+      focal: layout.focal?.x ?? 0.5,
+      children: /\b(?:class ?rooms?|school|lessons?|pupils|children)\b/iu.test(
+        words,
+      ),
+      W: SET_W,
+      H: SET_H,
+      feet: rows,
+      unit: [scaleAtFeet(kind, rows[0]), scaleAtFeet(kind, rows[1])],
+      // Clear of what stands on the floor (a desk, a bench), so none of
+      // them stands on it or seems to.
+      clear: standing.filter((one) => one.band !== 'back').map(reachOf),
+    });
+    // Among the things standing on the ground, behind the story's people
+    // and behind what stands on the floor nearer the camera than they do.
+    if (facing) layers.stage.splice(watchersAt, 0, facing);
+  } else if (pack && layout.audience) {
     const words = `${place.name} ${place.look}`;
     const audience = drawAudience({
       rows: layout.audience,
       spread: audienceFor(words)?.spread ?? 'full',
       seed: `${place.id}:${place.name}`,
-      world: PACK_WORLD[pack.id],
+      world: story && worldWords(story).trim() ? story : PACK_WORLD[pack.id],
       kind,
       focal: layout.focal?.x ?? 0.5,
       children: /\b(?:class ?rooms?|school|lessons?|pupils|children)\b/iu.test(
@@ -3117,7 +3526,8 @@ export function buildSet(
     ` data-place="${kind}" data-ground="${layout.ground}" data-floor="${r1(floor)}"` +
     (pack
       ? ` data-style="${pack.id}" data-ambient="${pack.ambient.join(' ')}"`
-      : '');
+      : '') +
+    (layout.livery ? ` data-livery="${layout.livery}"` : '');
   const svg =
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${SET_W} ${SET_H}"${world}>` +
     `<g stroke="${FIGURE_INK}" stroke-width="${INK_W}" stroke-linejoin="round" stroke-linecap="round">${out.join('')}</g></svg>`;
@@ -3156,7 +3566,7 @@ export function buildSet(
             svg: layerSvg(
               layers[id].join(''),
               pack
-                ? ` data-place="${kind}" data-ground="${layout.ground}" data-floor="${r1(floor)}" data-layer="${id}" data-style="${pack.id}"`
+                ? ` data-place="${kind}" data-ground="${layout.ground}" data-floor="${r1(floor)}" data-layer="${id}" data-style="${pack.id}"${layout.livery ? ` data-livery="${layout.livery}"` : ''}`
                 : `${world} data-layer="${id}"`,
             ),
             ...(id === 'floor' ? { feet: rowFeet(kind, 'front') } : {}),
@@ -3182,7 +3592,9 @@ export function buildSet(
     parts,
     layered: {
       layers: layerList,
-      width: SET_W,
+      width: SET_W + margin * 2,
+      // Where the wide shot centres: only a set wider than the frame pans to it.
+      ...(layout.focal && margin ? { focal: layout.focal.x } : {}),
       floor: floorOf(kind),
       fore: [
         ...fore.map(({ one, id }) => {
@@ -3200,6 +3612,24 @@ export function buildSet(
         }),
         ...watching,
       ],
+      ...(onFloor.length
+        ? {
+            floorThings: onFloor.map(({ id, one }) => {
+              const [a, b] = reachOf(one);
+              const [, vy, , vh] = one.piece.viewBox;
+              return {
+                id,
+                box: [
+                  r1(a),
+                  r1(one.y + vy * one.s),
+                  r1(b - a),
+                  r1(vh * one.s),
+                ] as [number, number, number, number],
+                feet: r1(one.y),
+              };
+            }),
+          }
+        : {}),
     },
     notes,
     placed: placings.map((one) => {
@@ -3317,6 +3747,7 @@ const AT_HORIZON: ReadonlySet<string> = new Set([
   'parked car',
   'danfo',
   'taxi',
+  'bus',
   'obelisk',
   'columns',
   'pyramid',
@@ -3350,12 +3781,15 @@ const CLUTTER_COLOURS: Readonly<Record<string, readonly string[]>> = {
   'plastic chair': [CLOTH.white, CLOTH.red, CLOTH.blue, CLOTH.green],
   'water drum': [CLOTH.blue, CLOTH.blue, CLOTH.black],
   'parked car': [CLOTH.blue, CLOTH.red, CLOTH.white, CLOTH.grey, CLOTH.green],
-  okada: [CLOTH.red, CLOTH.black, CLOTH.blue],
+  motorbike: [CLOTH.red, CLOTH.black, CLOTH.blue],
   bicycle: [CLOTH.teal, CLOTH.red, CLOTH.yellow],
   bin: [KIT_EXTRAS['dark leaf'], CLOTH.grey, CLOTH.blue],
 };
 
-/** Who the people watching are dressed as, by their pack: the figure kit's wardrobe for its world. */
+/**
+ * Who the people watching are dressed as, by their pack, where the story
+ * gives no world of its own: the figure kit's wardrobe for the pack's.
+ */
 const PACK_WORLD: Record<StylePackId, StoryWorld> = {
   'ancient-near-east': {
     era: 'ancient, BC',
@@ -3381,6 +3815,13 @@ const PACK_WORLD: Record<StylePackId, StoryWorld> = {
   'western-city': {
     era: 'today',
     region: 'a city',
+    culture: '',
+    landscape: '',
+    homes: '',
+  },
+  'modern-town': {
+    era: 'today',
+    region: 'a town',
     culture: '',
     landscape: '',
     homes: '',
@@ -3453,6 +3894,96 @@ function clutterOfPack(
       });
     }
   }
+  return out;
+}
+
+/** How far apart, as a share of the frame, what stands along the back past a wide set's edges is. */
+const MARGIN_EVERY = 0.17;
+
+/**
+ * What stands along the back of a wide set past the frame's edges
+ * (studio-scenery-plan §6.1), so a pan finds the place going on: more of
+ * what the painter stood at the back (two in three), else its pack's own
+ * buildings and scenery, and a little of its clutter; a tree out of
+ * doors, a plant in a room, where there is nothing else to draw on.
+ * Shares of the frame, below 0 on the left and past 1 on the right;
+ * seeded, so the same every time.
+ */
+function marginItems(
+  layout: SetLayout,
+  place: StoryPlace,
+  pack: StylePack | null,
+  margin: number,
+): Scattered[] {
+  const random = seeded(`${place.id}:${place.name}:beyond`);
+  const side = margin / SET_W;
+  const outdoor = (place.kind ?? 'outdoor') === 'outdoor';
+  const painted = layout.items
+    .filter(
+      (one) =>
+        (one.row === 'back' || one.row === 'far') &&
+        !(HANGING as readonly string[]).includes(one.kind) &&
+        one.kind !== 'window' &&
+        one.kind !== 'door' &&
+        !(FLAT as readonly string[]).includes(one.kind) &&
+        !(FEATURE_KINDS as readonly string[]).includes(one.kind),
+    )
+    .map((one) => one.kind);
+  const packs = pack
+    ? [...(outdoor ? pack.buildings : []), ...pack.scenery].flatMap(
+        (one): SetItemKind[] => {
+          const kind = itemKindOf(one);
+          return kind &&
+            !(FEATURE_KINDS as readonly string[]).includes(kind) &&
+            !(HANGING as readonly string[]).includes(kind) &&
+            !(FLAT as readonly string[]).includes(kind)
+            ? [kind]
+            : [];
+        },
+      )
+    : [];
+  const fallback: SetItemKind[] = (
+    outdoor ? ['tree', 'bush'] : ['plant']
+  ).flatMap((one) => {
+    const kind = itemKindOf(one);
+    return kind ? [kind] : [];
+  });
+  const out: Scattered[] = [];
+  const n = Math.max(1, Math.round(side / MARGIN_EVERY));
+  for (const dir of [-1, 1])
+    for (let j = 0; j < n; j += 1) {
+      const pool =
+        painted.length && (random() < 0.67 || !packs.length)
+          ? painted
+          : packs.length
+            ? packs
+            : fallback;
+      if (!pool.length) continue;
+      const kind = pool[Math.floor(random() * pool.length)];
+      const at = ((j + 0.5 + (random() - 0.5) * 0.5) / n) * side;
+      out.push({
+        kind,
+        x: Math.round((dir < 0 ? -at : 1 + at) * 1000) / 1000,
+        row: 'back',
+        scale: Math.round((0.9 + random() * 0.2) * 100) / 100,
+        colour: null,
+        ...(random() < 0.5 ? { flip: true } : {}),
+      });
+    }
+  // And a little of its clutter, one each side, where it scatters some.
+  const clutter = layout.clutter ?? [];
+  if (pack && clutter.length)
+    for (const dir of [-1, 1]) {
+      const kind = clutter[Math.floor(random() * clutter.length)];
+      const at = (0.3 + random() * 0.5) * side;
+      out.push({
+        kind,
+        x: Math.round((dir < 0 ? -at : 1 + at) * 1000) / 1000,
+        row: 'back',
+        scale: 1,
+        colour: null,
+      });
+    }
   return out;
 }
 

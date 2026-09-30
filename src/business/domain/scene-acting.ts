@@ -28,6 +28,23 @@ import {
   moveIdealMs,
   type ActedMove,
 } from './scene-doings';
+import type { FaceKey } from './scene-face-rig';
+import {
+  PERFORM_MS,
+  lineFace,
+  reactionFace,
+  reactionPick,
+  reactionTo,
+  readLine,
+  speakerMoves,
+  startFor,
+  stressedWord,
+  temperOf,
+  type FeltFace,
+  type LineRead,
+  type NameableThing,
+  type PerformMove,
+} from './scene-performance';
 
 /** A line as it is said: who says it, when, and each word's time. */
 export interface SpokenLine {
@@ -45,6 +62,11 @@ export interface SpokenLine {
   side?: -1 | 1;
   /** Shouted, whispered: a shout can startle whoever hears it. */
   pace?: 'calm' | 'quick' | 'slow' | 'whisper' | 'shout';
+  /** What it does to whom it is said to, where the sheet says (scene-performance's aims); else read from its words. */
+  aim?: string;
+  /** The face it is said with and the one felt beneath it, where the sheet says (the rigged face's recipes). */
+  said?: string;
+  felt?: string;
   startMs: number;
   endMs: number;
   words: { text: string; startMs: number; endMs: number }[];
@@ -206,6 +228,18 @@ const EYES_ON: readonly ActedMove[] = [
   'bark',
 ];
 
+/** What a line does that points to a thing on the stage it names. */
+const POINTS_AT: ReadonlySet<string> = new Set([
+  'shows',
+  'orders',
+  'reveals',
+  'asks',
+  'takes',
+]);
+
+/** The steps a line's feeling takes, in and back, and the lean in before a turn: made on their feet. */
+const STEPS: ReadonlySet<string> = new Set(['step-in', 'step-back', 'ready']);
+
 /** What ends sitting or lying down: getting up, or any move that cannot be made sitting (the one list's). */
 const ENDS_HOLD = NEEDS_FEET;
 
@@ -316,6 +350,8 @@ const RANK = {
   entrance: 1,
   named: 2,
   listen: 3,
+  /** A listener's own glance as a line hits them: down, guilty; up, an eye-roll. */
+  react: 3.5,
   speak: 4,
   directed: 5,
 };
@@ -376,6 +412,20 @@ export function actingOf(input: {
   film?: boolean;
   /** When each one goes somewhere else on the stage: a step, which no one takes sitting. */
   goes?: ReadonlyMap<string, readonly number[]>;
+  /**
+   * A film's: what on the stage its lines may name (the set's features,
+   * the things there), looked at or pointed to as they are named
+   * (scene-performance).
+   */
+  things?: readonly NameableThing[];
+  /** A film's: the faces its listeners react with, gathered here for the caller to show (feltEffects). */
+  felt?: FeltFace[];
+  /**
+   * A film's: the face each wears at a moment (the kit's, as the sheet
+   * shows it): what a line is felt under, when it says otherwise. With it,
+   * each actor's acted faces for a rigged face (SceneActingDto.face).
+   */
+  worn?: (id: string, t: number) => string | null;
 }): Record<string, SceneActingDto> {
   const { steps, lines, durationMs } = input;
   const actors = new Set(input.actors);
@@ -389,6 +439,24 @@ export function actingOf(input: {
   const gazes = new Map<string, Gaze[]>();
   const moves = new Map<string, [number, SceneActingMove, number, string?][]>();
   const mouths = new Map<string, [number, string][]>();
+  /** The faces acted on a rigged face, each actor's, and the last each took a line with. */
+  const faces = new Map<string, FaceKey[]>();
+  const lastTaken = new Map<string, string>();
+  const face = (id: string, key: FaceKey) => {
+    if (!actors.has(id) || !input.worn) return;
+    const [at, said, strength, felt, how, ms] = key;
+    faces.set(id, [
+      ...(faces.get(id) ?? []),
+      [
+        Math.round(at),
+        said,
+        Math.round(strength * 100) / 100,
+        felt,
+        how,
+        Math.max(60, Math.round(ms)),
+      ],
+    ]);
+  };
   const gaze = (id: string, one: Gaze) => {
     if (!actors.has(id)) return;
     gazes.set(id, [...(gazes.get(id) ?? []), one]);
@@ -446,6 +514,371 @@ export function actingOf(input: {
   ): '@left' | '@right' => {
     const show = stepAt(steps, t)?.show ?? [];
     return them && show.indexOf(them) > show.indexOf(id) ? '@left' : '@right';
+  };
+
+  /** The arm moves a line is acted with: one at a time. */
+  const ARM_MOVES: ReadonlySet<PerformMove> = new Set<PerformMove>([
+    'gesture',
+    'gesture-left',
+    'point',
+    'reach',
+    'wave',
+    'clap',
+    'palm-out',
+    'plead',
+    'fist',
+    'wag-finger',
+    'hand-chest',
+    'shrug',
+  ]);
+  /**
+   * A film's line acted as what it does (scene-performance): the
+   * speaker's gesture for its aim, fullest on its key word; a look at a
+   * thing on the stage it names, as it names it, and a glance at someone
+   * it names; a small lean in before taking the turn; anger and warmth a
+   * step toward. Whoever it is said to reacts on the word that hits them,
+   * before they answer, with a face to match; a shy one looks away a
+   * moment; the others laugh at a joke, or look to see how it is taken.
+   */
+  const performLine = (
+    line: SpokenLine,
+    i: number,
+    answering: string | null,
+    toward: string | undefined,
+    how: { armsBusy: boolean },
+  ) => {
+    const { speaker, startMs: from, endMs: to, words } = line;
+    if (!words.length) return;
+    const here = others(speaker, from);
+    const read: LineRead = readLine(
+      words.map((w) => w.text),
+      {
+        aim: line.aim,
+        names: new Map([...input.names].filter(([id]) => here.includes(id))),
+        // What they hold themselves is not looked or pointed at: it is shown.
+        things: input.things?.filter((one) => one.aim !== speaker),
+        to: answering,
+      },
+    );
+    const style = styleFor(speaker);
+    const word = (k: number) =>
+      words[Math.max(0, Math.min(words.length - 1, k))];
+    const keyAt = word(read.key).startMs;
+    const next = lines[i + 1];
+    const before = lines[i - 1];
+    // The face it is said with, and felt under (a rigged face's): on as
+    // it begins, full on its key word; a threat or an accusation burning
+    // slowly over it; a lie given away by a flash of what is felt first.
+    const speakerTemper = temperOf(input.traits?.get(speaker) ?? []);
+    const lf = input.worn
+      ? lineFace(read, speakerTemper, input.worn(speaker, from), {
+          said: line.said,
+          felt: line.felt,
+        })
+      : null;
+    if (lf) {
+      const k = speakerTemper.shy ? 0.85 : 1;
+      const held =
+        next && next.speaker !== speaker ? next.startMs + 400 : to + 900;
+      if (lf.lie && lf.felt)
+        face(speaker, [from - 330, lf.felt, k, null, 'flash', 180]);
+      if (lf.how === 'slow')
+        face(speaker, [
+          from - 120,
+          lf.said,
+          k,
+          lf.felt,
+          'slow',
+          held - from + 120,
+        ]);
+      else if (keyAt - from > 450) {
+        face(speaker, [
+          from - 200,
+          lf.said,
+          0.7 * k,
+          lf.felt,
+          'ease',
+          keyAt - 120 - (from - 200),
+        ]);
+        face(speaker, [
+          keyAt - 120,
+          lf.said,
+          k,
+          lf.felt,
+          'ease',
+          held - (keyAt - 120),
+        ]);
+      } else
+        face(speaker, [
+          from - 200,
+          lf.said,
+          k,
+          lf.felt,
+          'ease',
+          held - (from - 200),
+        ]);
+    }
+    /** Someone real to turn to: another here, not a side of the stage. */
+    const them = answering && here.includes(answering) ? answering : null;
+    // A step in, held while the two have it out, and taken back.
+    const stepMs = Math.round(
+      Math.min(
+        5000,
+        Math.max(2000, (next ? next.endMs : to + 1500) - (from - 300) + 600),
+      ),
+    );
+    let armed = false;
+    for (const one of speakerMoves(read)) {
+      if (one.lively && style.energy <= 1.1) continue;
+      const arm = ARM_MOVES.has(one.move);
+      if (arm && (how.armsBusy || armed)) continue;
+      const target =
+        one.toward === 'them'
+          ? one.move === 'step-in' || one.move === 'reach'
+            ? (them ?? undefined)
+            : toward
+          : one.toward === 'thing'
+            ? read.thing?.aim
+            : undefined;
+      if (one.toward && !target) continue;
+      const ms =
+        one.move === 'step-in'
+          ? stepMs
+          : Math.round(PERFORM_MS[one.move] / (arm ? style.energy : 1));
+      const at =
+        one.on === 'start'
+          ? one.move === 'wave'
+            ? from
+            : from - 300
+          : one.on === 'end'
+            ? to + 60
+            : one.on === 'thing' && read.thing
+              ? word(read.thing.word).startMs
+              : keyAt;
+      const start =
+        one.on === 'key' || one.on === 'thing'
+          ? startFor(one.move, ms, at, from - 350)
+          : Math.round(at);
+      move(speaker, start, one.move, ms, target);
+      if (arm) armed = true;
+      // The lively take a praise with a clap, and no other gesture.
+      if (one.lively) break;
+    }
+    // A nod on the stressed word, unless the line says no.
+    if (
+      words.length >= 2 &&
+      read.aim !== 'refuses' &&
+      read.aim !== 'dodges' &&
+      read.aim !== 'agrees'
+    ) {
+      const stressed = word(stressedWord(words.map((w) => w.text)));
+      move(speaker, stressed.startMs, 'nod', 450);
+    }
+    // Brows up on a question.
+    if (/\?["'”’]?\s*$/.test(words.map((w) => w.text).join(' ')))
+      move(speaker, words[words.length - 1].startMs - 200, 'brows', 800);
+    // A thing on the stage it names: looked at as it is named (pointed to
+    // too, where no arm has done so already, when it shows or orders).
+    if (read.thing) {
+      const at = word(read.thing.word).startMs;
+      gaze(speaker, {
+        from: at - 150,
+        to: at + 1000,
+        target: read.thing.aim,
+        turn: 0.5,
+        rank: RANK.directed,
+      });
+      if (!armed && !how.armsBusy && POINTS_AT.has(read.aim))
+        move(
+          speaker,
+          startFor('point', 1300, at, from - 350),
+          'point',
+          1300,
+          read.thing.aim,
+        );
+    }
+    // Someone on the stage it names, not whom it is said to: a glance at them.
+    if (read.named && read.named.id !== speaker) {
+      const at = word(read.named.word).startMs;
+      gaze(speaker, {
+        from: at - 100,
+        to: at + 700,
+        target: read.named.id,
+        turn: 0.35,
+        rank: RANK.directed,
+      });
+    }
+    // Owning up, the eyes go down before the words that say it; dodging,
+    // away from whom they tell.
+    if (read.aim === 'confesses' && keyAt - from > 250)
+      gaze(speaker, {
+        from: from - 150,
+        to: keyAt,
+        target: '@down',
+        turn: 0,
+        rank: RANK.directed,
+      });
+    if (read.aim === 'dodges')
+      gaze(speaker, {
+        from: keyAt,
+        to: to + 200,
+        target: awayFrom(speaker, them, from),
+        turn: 0.45,
+        rank: RANK.directed,
+      });
+    // Taking the turn: a small lean in toward whom they answer, just before.
+    if (
+      before &&
+      before.speaker !== speaker &&
+      from - before.endMs < 2500 &&
+      them &&
+      !read.want
+    )
+      move(speaker, from - 450, 'ready', 600, them);
+    // Whoever it is said to reacts where it hits them, before they answer:
+    // their face on the word that hits; a line that lands (a punchline, a
+    // threat, an accusation, news) taken in full as it ends, the take the
+    // reaction shot cuts to (K8), a flicker of the brows on the word
+    // before it.
+    const punch = read.aim === 'jokes' || read.aim === 'teases';
+    const hitWord = Math.round(word(read.hit).startMs + 150);
+    let hitAt = read.lands ? to + 120 : hitWord;
+    const replyAt = next?.startMs ?? Infinity;
+    if (hitAt > replyAt - 250)
+      hitAt = Math.max(word(read.hit).startMs + 80, replyAt - 450);
+    hitAt = Math.round(hitAt);
+    const felt = Math.min(hitWord, hitAt);
+    const reacting = new Set<string>();
+    const said = words.map((w) => w.text).join(' ');
+    const startled = startles(line, said, true);
+    if (them) {
+      const temper = temperOf(input.traits?.get(them) ?? []);
+      const r = reactionTo(read.aim, temper);
+      // On a rigged face, a face picked among those their temper takes it
+      // with, never the one they took the line before with; its glance
+      // (an eye-roll only with the face that rolls them).
+      const rf = input.worn
+        ? reactionFace(
+            read.aim,
+            temper,
+            reactionPick(them, i),
+            lastTaken.get(them) ?? null,
+          )
+        : null;
+      if (rf) {
+        lastTaken.set(them, rf.recipe);
+        const ms = hitAt - felt + 1900;
+        const double =
+          rf.how === 'take' &&
+          (read.aim === 'reveals' || read.aim === 'shows') &&
+          reactionPick(`${them}:double`, i) < 0.5;
+        if (double) {
+          // A double take: it goes by them a moment, a glance away, and back.
+          face(them, [felt - 60, 'neutral', 1, null, 'ease', 520]);
+          gaze(them, {
+            from: felt + 60,
+            to: felt + 520,
+            target: awayFrom(them, speaker, felt),
+            turn: 0.2,
+            rank: RANK.react,
+          });
+          face(them, [felt + 600, rf.recipe, 1, null, 'take', ms - 600]);
+        } else face(them, [felt - 60, rf.recipe, 1, null, rf.how, ms]);
+        r.glance = rf.glance;
+      }
+      // A shout or a cry of alarm leans them back, whatever else it does.
+      if (startled && r.move !== 'flinch' && r.move !== 'take') {
+        move(them, to + 100, 'lean', 800, speaker);
+        reacting.add(them);
+      } else if (r.move) {
+        const ms = PERFORM_MS[r.move];
+        const away = r.move === 'flinch' || r.move === 'take';
+        move(
+          them,
+          startFor(r.move, ms, hitAt),
+          r.move,
+          ms,
+          away ? speaker : undefined,
+        );
+        reacting.add(them);
+      }
+      if (r.face)
+        input.felt?.push([them, felt - 60, r.face, hitAt - felt + 1900]);
+      if (read.lands && !punch && hitAt - hitWord > 500 && !startled)
+        move(them, hitWord, 'brows', 700);
+      if (r.glance)
+        gaze(them, {
+          from: hitAt + 250,
+          to: hitAt + 1000,
+          target: r.glance,
+          turn: 0.15,
+          rank: RANK.react,
+        });
+      if (r.step) move(them, hitAt, r.step, 2400, speaker);
+      // A shy one, or one accused, cannot hold the look: down a moment.
+      if ((temper.shy || read.aim === 'accuses') && to - from > 1800)
+        gaze(them, {
+          from: Math.round(from + (to - from) * 0.45),
+          to: Math.round(from + (to - from) * 0.45 + 650),
+          target: '@down',
+          turn: 0.1,
+          rank: RANK.react,
+        });
+    }
+    // The rest: a laugh at a joke, a look at whoever a blow is aimed at.
+    here
+      .filter((one) => one !== them)
+      .forEach((one, k) => {
+        if (
+          punch &&
+          read.aim === 'jokes' &&
+          beatOf(`laugh:${one}:${i}`) < 0.7
+        ) {
+          move(one, hitAt + 90 * k, 'laugh', 1100);
+          input.felt?.push([one, hitAt + 90 * k - 60, 'happy', 1500]);
+          face(one, [
+            hitAt + 90 * k - 60,
+            reactionPick(one, i) < 0.5 ? 'delight' : 'amused',
+            1,
+            null,
+            'take',
+            1500,
+          ]);
+          reacting.add(one);
+        } else if (
+          them &&
+          (read.aim === 'threatens' ||
+            read.aim === 'accuses' ||
+            read.aim === 'reveals' ||
+            read.aim === 'confesses')
+        ) {
+          gaze(one, {
+            from: hitAt + 200 + 90 * k,
+            to: hitAt + 1100 + 90 * k,
+            target: them,
+            turn: 0.3,
+            rank: RANK.react,
+          });
+          move(one, hitAt + 150 + 90 * k, 'brows', 800);
+          face(one, [
+            hitAt + 150 + 90 * k,
+            reactionPick(one, i) < 0.5 ? 'worried' : 'surprise',
+            0.7,
+            null,
+            'ease',
+            1100,
+          ]);
+          reacting.add(one);
+        }
+      });
+    // Otherwise a nod as it ends; a startling one leans them back.
+    const one =
+      here.filter((id) => !reacting.has(id))[
+        Math.floor(beatOf(`${speaker}:${i}`) * here.length)
+      ] ?? null;
+    if (one && startled) move(one, to + 100, 'lean', 800, speaker);
+    else if (one && /[.]["'”’]?\s*$/.test(said) && beatOf(`nod:${i}`) < 0.6)
+      move(one, to + 150, 'nod', 500);
   };
 
   // Lines: the speaker looks at whom they talk to, the rest at them.
@@ -631,11 +1064,7 @@ export function actingOf(input: {
         rank: RANK.directed,
       });
     }
-    // A gesture as a line starts: the hand opens toward whom they answer,
-    // or, with no one to face, the arms in turn. A lively one gestures on
-    // a short line too, and quicker; a calm one on every other long one.
     const style = styleFor(speaker);
-    const fewest = style.energy > 1.1 ? 3 : style.energy < 0.9 ? 6 : 4;
     const nth = spokenBy.get(speaker) ?? 0;
     spokenBy.set(speaker, nth + 1);
     const toward = offSide ?? answering ?? undefined;
@@ -647,6 +1076,17 @@ export function actingOf(input: {
         one.atMs < to &&
         one.atMs + (one.ms ?? 1200) > from,
     );
+    // A film's line is acted as what it does (scene-performance).
+    if (input.film) {
+      performLine(line, i, answering, toward, {
+        armsBusy: armsBusy || Boolean(thatWay) || lookRound,
+      });
+      return;
+    }
+    // A gesture as a line starts: the hand opens toward whom they answer,
+    // or, with no one to face, the arms in turn. A lively one gestures on
+    // a short line too, and quicker; a calm one on every other long one.
+    const fewest = style.energy > 1.1 ? 3 : style.energy < 0.9 ? 6 : 4;
     if (
       !thatWay &&
       !lookRound &&
@@ -839,6 +1279,27 @@ export function actingOf(input: {
     });
   }
 
+  // A step in or back is taken on their feet, where they stand: none
+  // while they sit or lie, and each over before they go anywhere else.
+  for (const [id, list] of moves) {
+    const held = list.filter((one) =>
+      (HELD_MOVES as readonly string[]).includes(one[1]),
+    );
+    const walks = input.goes?.get(id) ?? [];
+    moves.set(
+      id,
+      list.flatMap((one) => {
+        if (!STEPS.has(one[1])) return [one];
+        const [at, , ms] = one;
+        if (held.some(([a, , b]) => a < at + ms && a + b > at)) return [];
+        const walk = walks.find((w) => w > at - 200 && w < at + ms);
+        if (walk === undefined) return [one];
+        const left = walk - 200 - at;
+        return left >= 900 ? [[at, one[1], left, one[3]] as typeof one] : [];
+      }),
+    );
+  }
+
   // Met for the first time: a move that says what they are like, a
   // moment after they first come on. A lively one hops, a calm one nods
   // slowly, a shy one looks down.
@@ -892,6 +1353,8 @@ export function actingOf(input: {
     if (input.walks && onStage.has(id)) acted.walks = true;
     const { size } = styleFor(id);
     if (size !== 1) acted.size = size;
+    const acts = faces.get(id);
+    if (acts?.length) acted.face = acts.sort((a, b) => a[0] - b[0]);
     if (Object.keys(acted).length) out[id] = acted;
   }
   return out;

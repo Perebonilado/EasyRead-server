@@ -6,18 +6,26 @@
 import { z } from 'zod';
 import {
   BEAT_KINDS,
+  LINE_AIMS,
+  NARRATOR_MODES,
+  STUDIO_ENDINGS,
+  STUDIO_GENRES,
+  STUDIO_PACES,
+  STUDIO_STYLES,
   SHEET_DEPTHS,
   SHOTS,
   SPOTS,
   STUDIO_AUDIENCES,
   STUDIO_POSES,
   STUDIO_FACES,
+  SHEET_FEELINGS,
   STUDIO_FORMATS,
   STUDIO_KINDS,
   STUDIO_ROLES,
   STUDIO_TONES,
   STUDIO_VOICES,
   TRANSITIONS,
+  OUTLINE_KINDS,
 } from '../../../business/domain/studio/studio';
 import {
   DOING_IDS,
@@ -26,6 +34,16 @@ import {
   TRAVEL_PACES,
 } from '../../../business/domain/scene-doings';
 import { STAGE_PROPS } from '../../../business/domain/scene-props';
+import { THEME_IDS } from '../../../business/domain/scene-themes';
+import { BEAT_ROLES } from '../../../business/domain/studio/studio-story';
+import {
+  genreNamed,
+  toneNamed,
+} from '../../../business/domain/studio/studio-heard';
+import {
+  RUBRIC_KEYS,
+  type RubricKey,
+} from '../../../business/domain/studio/studio-script';
 import {
   BOTTOMS,
   CLOTH_COLOURS,
@@ -92,6 +110,8 @@ export const STUDIO_ACTIONS = [
   'scene',
   'make',
   'episode',
+  'repace',
+  'pages',
 ] as const;
 
 /**
@@ -109,10 +129,30 @@ export const studioTurnSchema = z.object({
       idea: z.string().nullable().catch(null),
       audience: z.enum(STUDIO_AUDIENCES).nullable().catch(null),
       minutes: z.union([z.number(), z.string()]).nullable().catch(null),
-      tone: z.enum(STUDIO_TONES).nullable().catch(null),
+      // A tone or a genre written in words ("dry and ironic", "dark
+      // comedy") is caught as the one it belongs to, never lost.
+      tone: z
+        .enum(STUDIO_TONES)
+        .nullable()
+        .catch(({ input }) =>
+          typeof input === 'string' ? toneNamed(input) : null,
+        ),
       setting: z.string().nullable().catch(null),
       characters: z.string().nullable().catch(null),
       include: z.string().nullable().catch(null),
+      // The maker's own choices, null unless they said them.
+      narrator: z.enum(NARRATOR_MODES).nullable().catch(null),
+      narratorCharacter: z.string().nullable().catch(null),
+      genre: z
+        .enum(STUDIO_GENRES)
+        .nullable()
+        .catch(({ input }) =>
+          typeof input === 'string' ? genreNamed(input) : null,
+        ),
+      ending: z.enum(STUDIO_ENDINGS).nullable().catch(null),
+      pace: z.enum(STUDIO_PACES).nullable().catch(null),
+      style: z.enum(STUDIO_STYLES).nullable().catch(null),
+      look: z.enum(THEME_IDS).nullable().catch(null),
     })
     .catch({
       format: null,
@@ -123,6 +163,13 @@ export const studioTurnSchema = z.object({
       setting: null,
       characters: null,
       include: null,
+      narrator: null,
+      narratorCharacter: null,
+      genre: null,
+      ending: null,
+      pace: null,
+      style: null,
+      look: null,
     }),
   action: z.enum(STUDIO_ACTIONS).catch('none'),
   scene: z.union([z.number(), z.string()]).nullable().catch(null),
@@ -132,6 +179,8 @@ export const studioTurnSchema = z.object({
     .nullable()
     .catch(null),
   request: z.string().nullable().catch(null),
+  // An "outline" change to the story itself: developed again with it.
+  story: z.boolean().nullable().catch(null),
   // The one character a "redraw" changes the look of, by name; or whose
   // new drawing a "choose" chooses.
   character: z.string().nullable().catch(null),
@@ -142,6 +191,70 @@ export const studioTurnSchema = z.object({
   refuse: z.boolean().catch(false),
 });
 
+/** The table read: the rubric's scores, the overall, notes scene by scene, and lines anyone could say. */
+export const studioTableReadSchema = z.object({
+  scores: z.object(
+    Object.fromEntries(
+      RUBRIC_KEYS.map((key) => [key, z.number().nullable().catch(null)]),
+    ) as Record<RubricKey, z.ZodCatch<z.ZodNullable<z.ZodNumber>>>,
+  ),
+  overall: z.number(),
+  scenes: z.array(
+    z.object({
+      scene: z.number(),
+      score: z.number(),
+      notes: z.array(z.string()).catch([]),
+    }),
+  ),
+  voice: z
+    .array(
+      z.object({
+        scene: z.number(),
+        who: z.string(),
+        line: z.string(),
+        why: z.string().catch(''),
+      }),
+    )
+    .catch([]),
+  verdict: z.string().catch(''),
+});
+
+/** The cold read: what a first-time viewer made of the opening. */
+export const studioColdReadSchema = z.object({
+  about: z.string().catch(''),
+  sentence: z.string().catch(''),
+  who: z.string().catch(''),
+  wants: z.string().catch(''),
+  obstacle: z.string().catch(''),
+  stakes: z.string().catch(''),
+  clock: z.string().catch(''),
+  confused: z.array(z.string()).catch([]),
+  // The questions the film means them to ask: never counted as confusion.
+  wondering: z.array(z.string()).catch([]),
+  sure: z.number().catch(0),
+  // Who is who: each person seen, and what they are to the hero.
+  people: z
+    .array(z.object({ who: z.string(), is: z.string().catch('') }))
+    .catch([]),
+  // Anything impossible seen, and its rules as understood.
+  impossible: z.string().catch(''),
+});
+
+/** The retelling: the whole film as a first-time viewer retells it, scene by scene with its join. */
+export const studioRetellSchema = z.object({
+  scenes: z
+    .array(
+      z.object({
+        scene: z.number(),
+        link: z.string().catch('and then'),
+        what: z.string().catch(''),
+      }),
+    )
+    .catch([]),
+  finally: z.string().catch(''),
+  about: z.string().catch(''),
+});
+
 /** Whether a scene made again as asked shows it: the check's verdict. */
 export const studioCheckSchema = z.object({
   resolved: z.boolean().catch(false),
@@ -150,11 +263,15 @@ export const studioCheckSchema = z.object({
   faults: z.array(z.string()).catch([]),
 });
 
-/** A person's look from the kit's lists, each field caught as the plain choice when it is not one of them. */
+/**
+ * A person's look from the kit's lists, each field caught as the plain
+ * choice when it is not one of them; a skin that is none caught as 0, for
+ * the domain to choose by who they are (never one skin for everyone).
+ */
 const lenientFigure = z.object({
   age: z.enum(FIGURE_AGES).catch('adult'),
   build: z.enum(FIGURE_BUILDS).catch('average'),
-  skin: z.number().catch(4),
+  skin: z.number().catch(0),
   hair: z.enum(HAIR_STYLES).catch('short'),
   hairColour: z.enum(HAIR_COLOURS).catch('brown'),
   facialHair: z.enum(FACIAL_HAIR).catch('none'),
@@ -297,6 +414,126 @@ export const studioOutlineSchema = z.object({
       seconds: z.number(),
       teach: z.string().nullable(),
       points: z.array(z.string()),
+      // An explainer made from a document: the pages it teaches, [first, last].
+      pages: z.array(z.number()).nullable().catch(null),
+      into: z.string().nullable(),
+      // An explainer's story clip (studio-clip), and the lesson line after it that points back.
+      kind: z.enum(OUTLINE_KINDS).catch('lesson'),
+      hook: z.string().nullable().catch(null),
+      build: z.enum(['start', 'continue']).nullable().catch(null),
+    }),
+  ),
+  // An explainer's "What next?" (studio-end): 2-3 follow-up questions, each a next episode.
+  next: z.array(z.string()).catch([]),
+});
+
+/** "Now you explain it" (studio-end): the points got and missing, by number, and a kind reply. */
+export const studioTeachBackSchema = z.object({
+  got: z.array(z.number().int()).catch([]),
+  missing: z.array(z.number().int()).catch([]),
+  reply: z.string(),
+});
+
+/** Story development: the premise (studio-story.ts). */
+export const studioPremiseSchema = z.object({
+  title: z.string(),
+  logline: z.string(),
+  theme: z.string(),
+  hook: z.string(),
+  genre: z.enum(STUDIO_GENRES).catch('comedy'),
+  ending: z.enum(STUDIO_ENDINGS).catch('happy'),
+  stakes: z.string(),
+  tools: z.array(z.string()).catch([]),
+  gag: z.string().nullable().catch(null),
+  clues: z.array(z.string()).catch([]),
+  hero: z.string().catch(''),
+  want: z.string().catch(''),
+  obstacle: z.string().catch(''),
+  clock: z.string().nullable().catch(null),
+  normalDay: z.string().catch(''),
+  whyToday: z.string().catch(''),
+  whyCare: z.string().catch(''),
+  oddity: z
+    .object({ what: z.string(), rule: z.string().catch('') })
+    .nullable()
+    .catch(null),
+  spine: z.array(z.string()).catch([]),
+});
+
+/** Story development: each character's personality, by id. */
+export const studioCharactersSchema = z.object({
+  characters: z.array(
+    z.object({
+      id: z.string(),
+      want: z.string(),
+      need: z.string(),
+      flaw: z.string(),
+      fear: z.string(),
+      personality: z.array(z.string()),
+      voice: z.string(),
+      habits: z.array(z.string()),
+      relationships: z
+        .array(
+          z.object({ with: z.string(), is: z.string(), tension: z.string() }),
+        )
+        .catch([]),
+      arc: z.object({ from: z.string(), to: z.string() }),
+    }),
+  ),
+});
+
+/** Story development: the beat sheet, each beat with its planned intensity. */
+export const studioBeatsSchema = z.object({
+  beats: z.array(
+    z.object({
+      role: z.enum(BEAT_ROLES).catch('attempt'),
+      what: z.string(),
+      wants: z.string(),
+      stops: z.string(),
+      changes: z.string(),
+      intensity: z.number(),
+      // Each plant with a short id; a payoff names the ids it pays.
+      plants: z.array(z.object({ id: z.string(), what: z.string() })).catch([]),
+      pays: z.array(z.string()).catch([]),
+      // How it follows the beat before: "therefore" or "but"; null for the first.
+      link: z.string().nullable().catch(null),
+    }),
+  ),
+});
+
+/** Story development: the scene plan, which the outline is built from. */
+export const studioScenePlanSchema = z.object({
+  scenes: z.array(
+    z.object({
+      title: z.string(),
+      beats: z.array(z.number()).catch([]),
+      purpose: z.string(),
+      conflict: z.string(),
+      turn: z.string(),
+      shift: z.string(),
+      moment: z.string(),
+      set: z.string().nullable(),
+      cast: z.array(z.string()),
+      seconds: z.number(),
+      summary: z.string(),
+      // Scene 1: how each part of the setup reaches the viewer.
+      setup: z
+        .array(
+          z.object({
+            part: z.string(),
+            how: z.string().catch('line'),
+            by: z.string().nullable().catch(null),
+            to: z.string().nullable().catch(null),
+            what: z.string().catch(''),
+          }),
+        )
+        .catch([]),
+      value: z
+        .object({ name: z.string(), from: z.string(), to: z.string() })
+        .nullable()
+        .catch(null),
+      start: z.string().catch(''),
+      link: z.string().nullable().catch(null),
     }),
   ),
 });
@@ -343,7 +580,16 @@ export const studioSceneSchema = z.object({
       who: z.string().nullable().catch(null),
       to: z.string().nullable().catch(null),
       say: z.string().catch(''),
-      feeling: z.enum(STUDIO_FACES).nullable().catch(null),
+      // The face shown: the kit's, or any of the rigged face's recipes.
+      feeling: z
+        .enum(SHEET_FEELINGS as [string, ...string[]])
+        .nullable()
+        .catch(null),
+      // What a line's speaker feels beneath it, where they hide it.
+      felt: z
+        .enum(SHEET_FEELINGS as [string, ...string[]])
+        .nullable()
+        .catch(null),
       sign: z.enum(FIGURE_SIGNS).nullable().catch(null),
       // A doing none of the list is kept as written, for the domain to
       // read its words: never lost as nothing.
@@ -363,6 +609,8 @@ export const studioSceneSchema = z.object({
         .catch(null),
       spot: z.enum(SPOTS).nullable().catch(null),
       from: z.enum(LINE_FROMS).nullable().catch(null),
+      // A line's aim: what it does to the one it is said to.
+      aim: z.enum(LINE_AIMS).nullable().catch(null),
       pace: z
         .enum([...LINE_PACES, ...TRAVEL_PACES])
         .nullable()

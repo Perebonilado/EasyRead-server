@@ -613,6 +613,11 @@ export const sceneScriptSchema = z.object({
       speaker: z.string().nullable(),
       music: z.enum(SCENE_MUSIC).nullable(),
       energy: z.enum(['low', 'high']).nullable(),
+      // A question's answers for the viewer to pick (scene-checkpoint): 2-3, one right.
+      choices: z
+        .array(z.object({ text: z.string(), right: z.boolean() }))
+        .nullable()
+        .catch(null),
     }),
   ),
   cast: z.array(
@@ -1052,6 +1057,16 @@ export const drawingJudgeSchema = z.object({
   same: z.number().nullable(),
   place: z.number().nullable(),
   problems: z.array(z.string().max(300)),
+});
+
+/** A made scene's stills, each judged against what its sheet says is there. */
+export const pictureCheckSchema = z.object({
+  stills: z.array(
+    z.object({
+      matches: z.boolean(),
+      wrong: z.array(z.string().max(300)).catch([]),
+    }),
+  ),
 });
 
 /** A short segment around a chapter: its words, its check, or the review. */

@@ -283,7 +283,10 @@ export interface StudioJobData {
     | 'prepare'
     | 'make'
     | 'draw'
-    | 'redraw';
+    | 'redraw'
+    | 'repace';
+  /** For 'repace': the maker's pace (scene-pace makerRate) every made lesson scene's voice is played at now, stretched to it from its own. */
+  pace?: number;
   /** For 'draw': the characters the artist draws at the cast step; for 'redraw', the one drawn again as the maker asks. */
   characterIds?: string[];
   characterId?: string;
@@ -297,6 +300,8 @@ export interface StudioJobData {
   sceneIds?: string[];
   /** The maker's own words for what to change. */
   request?: string;
+  /** For 'outline': the request is for the story itself (the Story step), developed again before the outline. */
+  story?: boolean;
   /** A maker's request for a change to a made scene: written, made again and checked. */
   ask?: StudioAsk;
 }

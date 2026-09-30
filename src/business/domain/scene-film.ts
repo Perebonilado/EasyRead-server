@@ -8,7 +8,9 @@ import type {
   SceneDto,
   SceneEffectDto,
   ScenePlaceDto,
+  ScenePropDto,
   SceneStepDto,
+  SceneThingDto,
 } from '../../contracts';
 import { HELD_IN_MS, HELD_MOVES, actionDoing, doingOf } from './scene-doings';
 
@@ -66,7 +68,7 @@ export function walkLength(
 }
 
 /** How long a walk between two places takes, at a walk: by its true length on the floor. */
-const walkBetween = (
+export const walkBetween = (
   from: Pick<ScenePlaceDto, 'x' | 'w' | 'h'>,
   to: Pick<ScenePlaceDto, 'x' | 'w' | 'h'>,
   W: number,
@@ -80,6 +82,13 @@ const paceAt = (step: SceneStepDto, id: string) =>
     ? RUN_PACE
     : Math.min(RUN_PACE, Math.max(1, step.hurry?.[id] ?? 1));
 const VANISH_MS = 260;
+/** The interactions that carry someone to their step's new place, or on or off the stage (scene-interact's CARRIES): the player moves them, not a walk. */
+const CARRIES_AT: ReadonlySet<string> = new Set([
+  'go-through',
+  'come-through',
+  'climb-stairs',
+  'climb-ladder',
+]);
 
 /** Who comes on at step `k`, and who goes. */
 const newcomersAt = (steps: readonly SceneStepDto[], k: number) =>
@@ -147,9 +156,15 @@ export function settledOf(
       way.k < 0.99;
     return { way, goesIn };
   };
+  /** Whether someone's interaction carries them at a step's moment (through a door, up the stairs): it, not a walk, moves them. */
+  const carriedBy = (id: string, t: number) =>
+    (scene.acting?.[id]?.interact ?? []).some(
+      (one) => CARRIES_AT.has(one.does) && Math.abs(one.at - t) <= 60,
+    );
   steps.forEach((step, k) => {
     at = Math.max(at, step.atMs);
     for (const id of newcomersAt(steps, k)) {
+      if (carriedBy(id, step.atMs)) continue;
       const place = places[k]?.[id];
       const start = entryStart(steps, k, id);
       const entry = step.enter[id];
@@ -181,6 +196,7 @@ export function settledOf(
     for (const id of leaversAt(steps, k)) {
       const place = places[k - 1]?.[id];
       const exit = step.exit?.[id];
+      if (exit?.how === 'through' || carriedBy(id, step.atMs)) continue;
       const by = wayOf(exit?.via, exit?.how);
       if (place && walks(id) && !step.cut)
         at = Math.max(
@@ -208,6 +224,7 @@ export function settledOf(
         const from = places[k - 1]?.[id];
         const to = places[k]?.[id];
         if (!from || !to || !steps[k - 1].show.includes(id)) continue;
+        if (carriedBy(id, step.atMs)) continue;
         at = Math.max(
           at,
           step.atMs +
@@ -230,6 +247,11 @@ export function settledOf(
       );
   for (const [start, , ms] of scene.setting?.crowd?.moves ?? [])
     at = Math.max(at, start + ms);
+  // What someone does with a thing of the set, to its last step; and a
+  // light switched, a door swung by it, seen.
+  for (const acting of Object.values(scene.acting ?? {}))
+    for (const one of acting.interact ?? [])
+      for (const [, start, ms] of one.steps) at = Math.max(at, start + ms);
   // A gate swinging shut is seen to the end of its swing.
   for (const [start] of scene.setting?.featureStates ?? [])
     at = Math.max(at, start + SWING_MS);
@@ -324,11 +346,16 @@ export function walksOf(
       start,
       end,
     });
+  /** Whether someone's interaction carries them at a step's moment (through a door, up the stairs): no walk of the step's. */
+  const carriedBy = (id: string, t: number) =>
+    (scene.acting?.[id]?.interact ?? []).some(
+      (one) => CARRIES_AT.has(one.does) && Math.abs(one.at - t) <= 60,
+    );
   steps.forEach((step, k) => {
     const prev = steps[k - 1];
     for (const id of step.show) {
       const at = places[k]?.[id];
-      if (!at || !walks(id)) continue;
+      if (!at || !walks(id) || carriedBy(id, step.atMs)) continue;
       if (prev?.show.includes(id)) {
         const was = places[k - 1]?.[id];
         if (was && walkLength(was, at, W) > W * 0.02)
@@ -350,6 +377,7 @@ export function walksOf(
       const at = places[k - 1]?.[id];
       if (step.show.includes(id) || !at || !walks(id)) continue;
       const exit = step.exit?.[id];
+      if (exit?.how === 'through' || carriedBy(id, step.atMs)) continue;
       const by = feature(exit?.via);
       const left = exit ? exit.side === 'left' : at.x + at.w / 2 < W / 2;
       const off =
@@ -412,11 +440,23 @@ export function hurried(
             ? Math.min(ms, HELD_IN_MS)
             : ms),
       );
+  // What they do with a thing of the set: they are there before it begins.
+  for (const [id, acting] of Object.entries(scene.acting ?? {}))
+    for (const one of acting.interact ?? [])
+      begins(
+        id,
+        one.at,
+        one.steps.reduce((end, [, at, ms]) => Math.max(end, at + ms), one.at),
+      );
   /** Whether a move of someone's that carries them (a leap, a landing) begins as a step does: the step is the move's, not a walk. */
   const carried = (id: string, at: number) =>
     (scene.acting?.[id]?.moves ?? []).some(
       ([start, move]) =>
         doingOf(move)?.carries && Math.abs(start - at) <= CARRIED_SLACK_MS,
+    ) ||
+    (scene.acting?.[id]?.interact ?? []).some(
+      (one) =>
+        CARRIES_AT.has(one.does) && Math.abs(one.at - at) <= CARRIED_SLACK_MS,
     );
   /** When someone is speaking, from and to: as their mouth moves. */
   const says = (id: string): [number, number][] =>
@@ -506,7 +546,8 @@ export function hurried(
         paceAt(step, id) > 1 ||
         !walks(id) ||
         !steps[k - 1].show.includes(id) ||
-        !moved(id, k)
+        !moved(id, k) ||
+        carried(id, step.atMs)
       )
         continue;
       const quicker =
@@ -545,16 +586,88 @@ export interface View {
 export const CUT_SCALE = 1.25;
 export const CUT_CENTRE = 0.2;
 
-/** A view kept inside the stage. */
-function settle(view: View, W: number, H: number): View {
+/**
+ * A set wider than the frame, as the camera may pan across it (studio-
+ * scenery-plan §6): how far past the frame it runs, left and right, and
+ * where the action is, in the stage's units. A set one frame wide has no
+ * room, and its camera never pans. The player's setSpanOf.
+ */
+export interface SetRoom {
+  span: [number, number];
+  focal: number | null;
+}
+export const NO_ROOM: SetRoom = { span: [0, 0], focal: null };
+/** The frame a set is laid out in, in its units: its middle, on a wider one. */
+export const FRAME_W = 1600;
+export const FRAME_H = 900;
+
+/** The room a set of `setWidth` (its focal a share of the frame) gives a camera on a stage W × H, the set covering the stage. */
+export function roomOf(
+  set: { setWidth?: number; focal?: number } | null | undefined,
+  W: number,
+  H: number,
+): SetRoom {
+  const k = Math.max(W / FRAME_W, H / FRAME_H);
+  const left = (W - FRAME_W * k) / 2;
+  const focal =
+    set?.focal !== undefined ? left + set.focal * FRAME_W * k : null;
+  if (!set?.setWidth || set.setWidth <= FRAME_W + 1)
+    return { span: [0, 0], focal };
+  const side = ((set.setWidth - FRAME_W) / 2) * k - left;
+  return { span: [side, side], focal };
+}
+
+/**
+ * A view kept inside the set: never wider than the frame, never past the
+ * set's edge. On a set one frame wide, inside the stage.
+ */
+function settle(
+  view: View,
+  W: number,
+  H: number,
+  span: readonly [number, number] = [0, 0],
+): View {
   const s = Math.max(1, view.s);
   const hw = W / (2 * s);
   const hh = H / (2 * s);
   return {
     s,
-    x: Math.min(W - hw, Math.max(hw, view.x)),
+    x: Math.min(W + span[1] - hw, Math.max(hw - span[0], view.x)),
     y: Math.min(H - hh, Math.max(hh, view.y)),
   };
+}
+
+/** The most room kept between the people and the frame's edge in the wide shot, as a share of the frame. */
+export const WIDE_ROOM = 0.04;
+
+/**
+ * The wide shot on a set wider than the frame (§6.3): centred on where
+ * the action is, as far as that keeps everyone on the stage in it with a
+ * little room; centred on them where they will not all fit. On a set one
+ * frame wide, the whole stage. The player's wideX.
+ */
+export function wideView(
+  show: readonly string[],
+  places: Record<string, ScenePlaceDto>,
+  W: number,
+  H: number,
+  room: SetRoom = NO_ROOM,
+): View {
+  const [L, R] = room.span;
+  if (L <= 0 && R <= 0) return { s: 1, x: W / 2, y: H / 2 };
+  const people = show.flatMap((id) => {
+    const p = places[id];
+    return p && !id.startsWith('@') && p.w <= W * 0.6 ? [p] : [];
+  });
+  const want = room.focal ?? W / 2;
+  let x = want;
+  if (people.length) {
+    const m = W * WIDE_ROOM;
+    const lo = Math.max(...people.map((p) => p.x + p.w)) + m - W / 2;
+    const hi = Math.min(...people.map((p) => p.x)) - m + W / 2;
+    x = lo > hi ? (lo + hi) / 2 : Math.min(hi, Math.max(lo, want));
+  }
+  return settle({ s: 1, x, y: H / 2 }, W, H, room.span);
 }
 
 /**
@@ -564,18 +677,46 @@ function settle(view: View, W: number, H: number): View {
  * neighbour from being cut in half, which this leaves out.
  */
 export function viewOf(
-  shot: Pick<SceneEffectDto, 'target' | 'part'> | null,
+  shot: ShotLike | null,
   show: readonly string[],
   places: Record<string, ScenePlaceDto>,
   W: number,
   H: number,
+  room: SetRoom = NO_ROOM,
 ): View {
-  const wide = { s: 1, x: W / 2, y: H / 2 };
+  // An insert on a thing alone: where it is as it begins.
+  if (shot?.shot?.kind === 'insert' && shot.shot.box) {
+    const [x, y, w, h] = shot.shot.box;
+    return insertView({ x, y, w, h }, W, H, room.span);
+  }
+  // From the place's other side: the stage reflected, the room too.
+  if (shot && isReverse(shot)) {
+    const turned = reflectPlaces(places, W);
+    const other = reflectRoom(room, W);
+    const kind = shot.shot?.kind;
+    const one = show.includes(shot.target) ? turned[shot.target] : undefined;
+    const two =
+      shot.part && show.includes(shot.part) ? turned[shot.part] : undefined;
+    if (kind === 'ots' && one && two)
+      return otsView(one, two, W, H, other.span, pairSide(shot, places));
+    if (kind === 'crowd' && one) return crowdReverseView(one, W, H, other.span);
+    return viewOf(frontOf(shot), show, turned, W, H, other);
+  }
+  const wide = wideView(show, places, W, H, room);
   const placed = (id: string | null) =>
     id && show.includes(id) ? places[id] : undefined;
   const one = shot ? placed(shot.target) : undefined;
   if (!shot || !one) return wide;
   const two = placed(shot.part);
+  const kind = shot.shot?.kind;
+  if (kind === 'ots' && two) return otsView(one, two, W, H, room.span);
+  if (kind === 'crowd') return crowdView(one, W, H, room.span);
+  if (kind === 'deep') {
+    const deep = deepView(shot.target, show, places, W, H, room.span);
+    if (deep) return deep.view;
+  }
+  if (!kind && !two && shot.shot?.angle === 'low')
+    return lowView(one, W, H, room.span);
   if (two) {
     const x0 = Math.min(one.x, two.x);
     const y0 = Math.min(one.y, two.y);
@@ -592,6 +733,7 @@ export function viewOf(
       },
       W,
       H,
+      room.span,
     );
   }
   return settle(
@@ -605,7 +747,481 @@ export function viewOf(
     },
     W,
     H,
+    room.span,
   );
+}
+
+// ── The shot grammar (studio-views-plan §3) ────────────────────────────────
+
+/** What frames a shot: whom it is on, with whom, and its grammar. */
+export type ShotLike = Pick<SceneEffectDto, 'target' | 'part'> &
+  Partial<Pick<SceneEffectDto, 'shot'>>;
+
+/**
+ * Over the shoulder (the player's own, shots.ts): the one speaking is
+ * framed from the chest up, their top three fifths filling OTS_FILL of the
+ * frame's height (no nearer than OTS_LEAST, no closer than OTS_MOST), and
+ * OTS_OFFSET of the frame's width off its middle, away from the one near.
+ */
+export const OTS_FILL = 0.62;
+export const OTS_LEAST = 1.3;
+export const OTS_MOST = 2.2;
+export const OTS_OFFSET = 0.16;
+/**
+ * The one near the camera in a shot over their shoulder, on the screen:
+ * this tall (a share of the frame's height, so cropped at its foot), their
+ * middle this far in from the frame's edge (a share of its width) and the
+ * top of their box this far down; and at least this far clear of the face
+ * of whoever the shot is on, stepping further off the frame's edge for it,
+ * at most until NEAR_OFF_MOST of them is off it.
+ */
+export const NEAR_TALL = 1.3;
+export const NEAR_EDGE = 0.06;
+export const NEAR_TOP = 0.1;
+export const NEAR_CLEAR = 0.02;
+export const NEAR_OFF_MOST = 0.6;
+/** How far into the floor the one near the camera stands: before its front edge (studio-views-plan §3.1, d > 1). */
+export const NEAR_D = 1.2;
+/**
+ * Deep staging (Richard's kitchen): the one near the camera this tall on
+ * the screen, their middle this far in from the frame's edge; the others
+ * behind at their places, framed together at most this close, their
+ * middle this share of the frame off its middle, away from the one near.
+ */
+export const DEEP_TALL = 0.95;
+export const DEEP_EDGE = 0.1;
+export const DEEP_TOP = 0.1;
+export const DEEP_MOST = 1.25;
+export const DEEP_OFFSET = 0.14;
+/** Over the crowd: this close, the one speaking with the top of their head this far down the frame, the rows before the camera below them. */
+export const CROWD_SCALE = 1.35;
+export const CROWD_HEAD = 0.28;
+
+const middleOf = (p: Pick<ScenePlaceDto, 'x' | 'w'>) => p.x + p.w / 2;
+/** Someone's face in their box: the kit's head, high in the middle (scene-faces-seen's faceOf). */
+const faceIn = (p: Pick<ScenePlaceDto, 'x' | 'y' | 'w' | 'h'>) => ({
+  x: p.x + p.w * 0.3,
+  y: p.y + p.h * 0.03,
+  w: p.w * 0.4,
+  h: p.h * 0.2,
+});
+
+/**
+ * Over the shoulder of `near` onto `one`: where the camera looks. `dir`
+ * is the side of the frame the one it is on is at from the one near (1:
+ * to the right), where the two keep the sides they had elsewhere (a
+ * reverse shot, §4.2); absent, from where they stand.
+ */
+export function otsView(
+  one: ScenePlaceDto,
+  near: ScenePlaceDto,
+  W: number,
+  H: number,
+  span: readonly [number, number] = [0, 0],
+  dir: -1 | 1 = (Math.sign(middleOf(one) - middleOf(near)) || 1) as -1 | 1,
+): View {
+  const s = Math.min(
+    OTS_MOST,
+    Math.max(OTS_LEAST, (OTS_FILL * H) / (one.h * 0.62)),
+  );
+  return settle(
+    {
+      s,
+      x: middleOf(one) - (dir * OTS_OFFSET * W) / s,
+      y: one.y + one.h * 0.3,
+    },
+    W,
+    H,
+    span,
+  );
+}
+
+// ── The reverse (studio-views-plan §4.2) ───────────────────────────────────
+
+/** Whether a shot is taken from the place's other side, the camera turned round. */
+export const isReverse = (shot: ShotLike | null | undefined): boolean =>
+  shot?.shot?.reverse === true;
+
+/** A shot as the front would take it: the same, not turned round. */
+function frontOf(shot: ShotLike): ShotLike {
+  if (!shot.shot) return shot;
+  const { reverse, ...rest } = shot.shot;
+  void reverse;
+  return { ...shot, shot: rest };
+}
+
+/** A place on the stage as a camera turned round sees it: across the other way (W − x − w), at the same depth. */
+export function reflectPlace<T extends Pick<ScenePlaceDto, 'x' | 'w'>>(
+  place: T,
+  W: number,
+): T {
+  return { ...place, x: Math.round((W - place.x - place.w) * 10) / 10 };
+}
+
+/** Every place of a step reflected so. */
+export function reflectPlaces<T extends Pick<ScenePlaceDto, 'x' | 'w'>>(
+  places: Record<string, T>,
+  W: number,
+): Record<string, T> {
+  return Object.fromEntries(
+    Object.entries(places).map(([id, p]) => [id, reflectPlace(p, W)]),
+  );
+}
+
+/** The room a set wider than the frame gives its camera, seen from its other side: its edges swapped, where its action is across the other way. */
+export function reflectRoom(room: SetRoom, W: number): SetRoom {
+  return {
+    span: [room.span[1], room.span[0]],
+    focal: room.focal === null ? null : W - room.focal,
+  };
+}
+
+/**
+ * The side of the frame a shot of two keeps the one it is on at, from the
+ * other (1: to the right), as they stand seen from the front: over the
+ * shoulder from either side of the place, the two keep the sides they
+ * have from the front (the 180° rule, §3.3). A cartoon's cheat: turned
+ * round, the camera stands on the same side of the line between them.
+ */
+export function pairSide(
+  shot: ShotLike,
+  places: Record<string, Pick<ScenePlaceDto, 'x' | 'w'>>,
+): -1 | 1 {
+  const one = places[shot.target];
+  const two = shot.part ? places[shot.part] : undefined;
+  if (!one || !two) return 1;
+  return (Math.sign(middleOf(one) - middleOf(two)) || 1) as -1 | 1;
+}
+
+/** From the stage onto the people watching, across the floor, on the other side: this close, and this far down the frame. */
+export const CROWD_REVERSE_SCALE = 1.2;
+export const CROWD_REVERSE_Y = 0.44;
+
+/**
+ * The crowd's view the other way (§4.2): from behind `one`, who speaks to
+ * them, onto the people watching across the floor, facing us. Where the
+ * camera looks, on the stage reflected.
+ */
+export function crowdReverseView(
+  one: ScenePlaceDto,
+  W: number,
+  H: number,
+  span: readonly [number, number] = [0, 0],
+): View {
+  const s = CROWD_REVERSE_SCALE;
+  // A little off the middle, away from the one it looks past.
+  const away = middleOf(one) <= W / 2 ? 1 : -1;
+  return settle(
+    { s, x: W / 2 + (away * 0.1 * W) / s, y: H * CROWD_REVERSE_Y },
+    W,
+    H,
+    span,
+  );
+}
+
+/** Over the crowd onto `one`, who speaks to them: where the camera looks. */
+export function crowdView(
+  one: ScenePlaceDto,
+  W: number,
+  H: number,
+  span: readonly [number, number] = [0, 0],
+): View {
+  const s = Math.max(1, Math.min(CROWD_SCALE, (0.8 * W) / one.w));
+  return settle(
+    { s, x: middleOf(one), y: one.y + ((0.5 - CROWD_HEAD) * H) / s },
+    W,
+    H,
+    span,
+  );
+}
+
+/** A low angle on one alone frames them whole, at most this close. */
+export const LOW_MOST = 1.6;
+
+/** A low angle on `one` alone (a hero): them whole, their feet low in the frame. */
+export function lowView(
+  one: ScenePlaceDto,
+  W: number,
+  H: number,
+  span: readonly [number, number] = [0, 0],
+): View {
+  const s = Math.max(
+    1,
+    Math.min(LOW_MOST, (0.86 * H) / (one.h * 1.08), (0.7 * W) / one.w),
+  );
+  return settle({ s, x: middleOf(one), y: one.y + one.h * 0.48 }, W, H, span);
+}
+
+/** The people on the stage who are not `id`: not the set, not a crowd. */
+const othersThan = (
+  id: string,
+  show: readonly string[],
+  places: Record<string, ScenePlaceDto>,
+  W: number,
+) =>
+  show.flatMap((other) => {
+    const p = places[other];
+    return other !== id && p && !other.startsWith('@') && p.w <= W * 0.6
+      ? [p]
+      : [];
+  });
+
+/**
+ * Deep staging on `id`, near the camera: where the camera looks (on the
+ * others, behind), and the side of the frame the one near is at. Null
+ * with no one else on the stage.
+ */
+export function deepView(
+  id: string,
+  show: readonly string[],
+  places: Record<string, ScenePlaceDto>,
+  W: number,
+  H: number,
+  span: readonly [number, number] = [0, 0],
+): { view: View; side: -1 | 1 } | null {
+  const near = places[id];
+  const others = othersThan(id, show, places, W);
+  if (!near || !others.length) return null;
+  const mean = others.reduce((sum, p) => sum + middleOf(p), 0) / others.length;
+  const side: -1 | 1 = middleOf(near) > mean ? 1 : -1;
+  const x0 = Math.min(...others.map((p) => p.x));
+  const x1 = Math.max(...others.map((p) => p.x + p.w));
+  const y0 = Math.min(...others.map((p) => p.y));
+  const y1 = Math.max(...others.map((p) => p.y + p.h * 0.75));
+  const s = Math.max(
+    1,
+    Math.min(DEEP_MOST, (0.62 * W) / (x1 - x0), (0.8 * H) / (y1 - y0)),
+  );
+  return {
+    view: settle(
+      { s, x: (x0 + x1) / 2 + (side * DEEP_OFFSET * W) / s, y: (y0 + y1) / 2 },
+      W,
+      H,
+      span,
+    ),
+    side,
+  };
+}
+
+/**
+ * Where someone cheated near the camera stands on the stage for a shot
+ * on `view`: `tall` of the frame's height on the screen, the top of their
+ * box `top` of it down, their middle `edge` of its width in from the edge
+ * at `side`, as far further off the frame as keeps each face in `clear`
+ * seen (at most NEAR_OFF_MOST of them off it); before the floor's front
+ * (NEAR_D). Their box keeps its shape.
+ */
+export function nearPlace(
+  near: Pick<ScenePlaceDto, 'w' | 'h'>,
+  view: View,
+  side: -1 | 1,
+  clear: readonly Pick<ScenePlaceDto, 'x' | 'y' | 'w' | 'h'>[],
+  W: number,
+  H: number,
+  o: { tall: number; edge: number; top: number } = {
+    tall: NEAR_TALL,
+    edge: NEAR_EDGE,
+    top: NEAR_TOP,
+  },
+): ScenePlaceDto {
+  const s = Math.max(1, view.s);
+  const hs = o.tall * H;
+  const ws = (hs * near.w) / Math.max(1, near.h);
+  // Its body, as the faces check takes one: its middle seven tenths.
+  const body = ws * 0.35;
+  let cx = side < 0 ? o.edge * W : W - o.edge * W;
+  for (const one of clear) {
+    const face = faceIn(one);
+    const fx0 = W / 2 + s * (face.x - view.x);
+    const fx1 = fx0 + s * face.w;
+    if (side < 0) cx = Math.min(cx, fx0 - body - NEAR_CLEAR * W);
+    else cx = Math.max(cx, fx1 + body + NEAR_CLEAR * W);
+  }
+  const most = ws * (NEAR_OFF_MOST - 0.5);
+  cx = side < 0 ? Math.max(cx, -most) : Math.min(cx, W + most);
+  const r = (n: number) => Math.round(n * 10) / 10;
+  return {
+    x: r(view.x + (cx - ws / 2 - W / 2) / s),
+    y: r(view.y + (o.top * H - H / 2) / s),
+    w: r(ws / s),
+    h: r(hs / s),
+    d: NEAR_D,
+  };
+}
+
+/**
+ * Whom a shot cheats near the camera, and where they stand for it: the
+ * one over whose shoulder it looks (ots, a little soft), or the one near
+ * in deep staging (sharp: they speak). Null for any other shot, or one
+ * whose people are not there.
+ */
+export function nearOf(
+  shot: ShotLike | null,
+  show: readonly string[],
+  places: Record<string, ScenePlaceDto>,
+  W: number,
+  H: number,
+  room: SetRoom = NO_ROOM,
+): { id: string; place: ScenePlaceDto; view: View; soft: boolean } | null {
+  const kind = shot?.shot?.kind;
+  if (
+    !shot ||
+    (kind !== 'ots' &&
+      kind !== 'deep' &&
+      !(kind === 'crowd' && isReverse(shot)))
+  )
+    return null;
+  const placed = (id: string | null) =>
+    id && show.includes(id) ? places[id] : undefined;
+  const one = placed(shot.target);
+  if (!one) return null;
+  if (isReverse(shot)) {
+    // From the other side: where the stage reflected stands them; over a
+    // shoulder, the one near at the edge they were at from the front.
+    const turned = reflectPlaces(places, W);
+    const other = reflectRoom(room, W);
+    const it = turned[shot.target];
+    if (kind === 'ots') {
+      const near =
+        shot.part && show.includes(shot.part) ? turned[shot.part] : undefined;
+      if (!near || !shot.part) return null;
+      const dir = pairSide(shot, places);
+      const view = otsView(it, near, W, H, other.span, dir);
+      return {
+        id: shot.part,
+        place: nearPlace(near, view, -dir as -1 | 1, [it], W, H),
+        view,
+        soft: true,
+      };
+    }
+    if (kind === 'crowd') {
+      // The one speaking to them, near, from behind, at their own side.
+      const view = crowdReverseView(it, W, H, other.span);
+      const side: -1 | 1 = middleOf(it) <= W / 2 ? -1 : 1;
+      return {
+        id: shot.target,
+        place: nearPlace(it, view, side, [], W, H),
+        view,
+        soft: false,
+      };
+    }
+    return nearOf(frontOf(shot), show, turned, W, H, other);
+  }
+  if (kind === 'ots') {
+    const near = placed(shot.part);
+    if (!near || !shot.part) return null;
+    const view = otsView(one, near, W, H, room.span);
+    const side: -1 | 1 = middleOf(one) >= middleOf(near) ? -1 : 1;
+    return {
+      id: shot.part,
+      place: nearPlace(near, view, side, [one], W, H),
+      view,
+      // Over the shoulder of one listening: a little soft.
+      soft: true,
+    };
+  }
+  const deep = deepView(shot.target, show, places, W, H, room.span);
+  if (!deep) return null;
+  return {
+    id: shot.target,
+    place: nearPlace(
+      one,
+      deep.view,
+      deep.side,
+      othersThan(shot.target, show, places, W),
+      W,
+      H,
+      { tall: DEEP_TALL, edge: DEEP_EDGE, top: DEEP_TOP },
+    ),
+    view: deep.view,
+    // Near in deep staging, and speaking: sharp.
+    soft: false,
+  };
+}
+
+/**
+ * What a shot cheats near the camera, and from which side of the place it
+ * is taken, as a key: two shots that cheat differently, or one from each
+ * side, are always a cut apart.
+ */
+const cheatKey = (shot: ShotLike | null) => {
+  const kind = shot?.shot?.kind;
+  const cheat =
+    shot && (kind === 'ots' || kind === 'deep')
+      ? `${kind}:${shot.target}:${shot.part ?? ''}`
+      : '';
+  return isReverse(shot) ? `${cheat}|reverse` : cheat;
+};
+
+/**
+ * Whether a cut from one shot to the next is a real cut: the pictures
+ * apart enough (apart), or one cheating someone near the camera that the
+ * other does not (over one shoulder and then the other: the one near
+ * changes sides, whatever the camera's move).
+ */
+export function shotsApart(
+  a: ShotLike | null,
+  b: ShotLike | null,
+  va: View,
+  vb: View,
+  W: number,
+  H: number,
+): boolean {
+  return cheatKey(a) !== cheatKey(b) || apart(va, vb, W, H);
+}
+
+/**
+ * Low and high angles on a flat set (studio-views-plan §4.4), a cheat:
+ * the horizon moves ANGLE_TILT of the frame's height, down for a camera
+ * low looking up, up for one high looking down, by each layer behind the
+ * people scaled about the frame's top (low) or bottom (high), the farther
+ * off the more, none from TILT_TO on; and the people are ANGLE_PEOPLE
+ * larger (low) or smaller (high), about their feet. The player's own.
+ */
+export const ANGLE_TILT = 0.08;
+export const ANGLE_PEOPLE = 0.06;
+export const TILT_TO = 0.8;
+/** Where the horizon is, as a share of the frame's height from its pivot: the tilt's scale is set so it moves ANGLE_TILT. */
+const HORIZON_FROM_PIVOT = 0.5;
+
+/** How much of the tilt a layer at `depth` takes: all of it far off, none from TILT_TO on. */
+export const tiltOf = (depth: number): number =>
+  Math.max(0, 1 - depth / TILT_TO);
+
+/** A layer's scale under a low or high angle, and about which edge of the frame (0 the top, 1 the bottom). */
+export function angleLayer(
+  angle: 'low' | 'high' | undefined,
+  depth: number,
+): { k: number; pivot: 0 | 1 } {
+  if (!angle) return { k: 1, pivot: 0 };
+  return {
+    k: 1 + (ANGLE_TILT / HORIZON_FROM_PIVOT) * tiltOf(depth),
+    pivot: angle === 'low' ? 0 : 1,
+  };
+}
+
+/** How much larger the people are under an angle, about their feet. */
+export const anglePeople = (angle: 'low' | 'high' | undefined): number =>
+  angle === 'low' ? 1 + ANGLE_PEOPLE : angle === 'high' ? 1 - ANGLE_PEOPLE : 1;
+
+/** How the things on the floor follow the camera, by how far back they stand: the player's FLOOR_BACK_F and FLOOR_FRONT_F. */
+export const FLOOR_BACK_F = 0.8;
+export const FLOOR_FRONT_F = 1.05;
+
+/**
+ * The depth factor of what stands with its feet at `feet` on a floor from
+ * `back` to `front`: the people's own (1) with none. Everything standing
+ * on the floor with its feet at one depth (a person, a feature the stage
+ * draws, a thing of the floor's layer) has the one factor, so moves
+ * together as the camera pans and pushes.
+ */
+export function floorFactor(
+  feet: number,
+  floor: readonly [number, number] | null | undefined,
+): number {
+  if (!floor || floor[1] - floor[0] < 1) return 1;
+  const d = Math.min(1, Math.max(0, (feet - floor[0]) / (floor[1] - floor[0])));
+  return FLOOR_BACK_F + (FLOOR_FRONT_F - FLOOR_BACK_F) * d;
 }
 
 /** How much less the scenery moves than the stage in front of it as the camera moves: the player's PARALLAX. */
@@ -654,22 +1270,35 @@ export function apart(a: View, b: View, W: number, H: number): boolean {
 export function withoutJumps(
   shots: readonly SceneEffectDto[],
   steps: readonly SceneStepDto[],
-  wide: { w: number; h: number; places: Record<string, ScenePlaceDto>[] },
+  wide: {
+    w: number;
+    h: number;
+    places: Record<string, ScenePlaceDto>[];
+    /** On a set wider than the frame, the room its camera pans in: the wide shot is on where the action is. */
+    room?: SetRoom;
+  },
   durationMs: number,
 ): SceneEffectDto[] {
-  const { w: W, h: H, places } = wide;
+  const { w: W, h: H, places, room = NO_ROOM } = wide;
   /** Where a shot (null: the whole stage) looks at `t`. */
   const view = (shot: SceneEffectDto | null, t: number) => {
     let k = 0;
     steps.forEach((step, i) => {
       if (step.atMs <= t) k = i;
     });
-    return viewOf(shot, steps[k]?.show ?? [], places[k] ?? {}, W, H);
+    return viewOf(shot, steps[k]?.show ?? [], places[k] ?? {}, W, H, room);
   };
   const endOf = (shot: SceneEffectDto) => shot.untilMs ?? durationMs;
   /** Whether a shot going back to the whole stage at its end is a real cut. */
   const leaves = (shot: SceneEffectDto) =>
-    apart(view(shot, endOf(shot) - 1), view(null, endOf(shot)), W, H);
+    shotsApart(
+      shot,
+      null,
+      view(shot, endOf(shot) - 1),
+      view(null, endOf(shot)),
+      W,
+      H,
+    );
   const kept: SceneEffectDto[] = [];
   for (const shot of [...shots].sort((a, b) => a.atMs - b.atMs)) {
     const t = shot.atMs;
@@ -680,11 +1309,447 @@ export function withoutJumps(
       last.untilMs = t;
       now = last;
     }
-    if (apart(view(now, t), view(shot, t), W, H)) kept.push({ ...shot });
+    if (shotsApart(now, shot, view(now, t), view(shot, t), W, H))
+      kept.push({ ...shot });
     else if (now) now.untilMs = Math.max(endOf(now), endOf(shot));
   }
   const last = kept[kept.length - 1];
   if (last && endOf(last) < durationMs && !leaves(last))
     last.untilMs = durationMs;
   return kept;
+}
+
+// ── Inserts (studio-screenwriting K5) ──────────────────────────────────────
+
+type Box = Pick<ScenePlaceDto, 'x' | 'y' | 'w' | 'h'>;
+
+/**
+ * An insert is a true close-up (studio-screenwriting K5): its thing's box
+ * fills INSERT_FILL of the frame's height, and no more than INSERT_WIDE of
+ * its width, its middle in the frame's middle; no nearer than
+ * INSERT_LEAST, no closer than INSERT_MOST. A letter held fills about two
+ * fifths of the frame, and a key handed over as much. The player's own
+ * (shots.ts).
+ */
+export const INSERT_FILL = 0.45;
+export const INSERT_WIDE = 0.6;
+export const INSERT_LEAST = 1.6;
+export const INSERT_MOST = 10;
+/** The kit's figure is drawn this tall in its own units, where its drawing does not say: what a thing in its hand is scaled by. The player's own. */
+export const KIT_FIGURE_H = 234;
+
+/** An insert on a thing where it is: close enough that it fills INSERT_FILL of the frame's height (INSERT_WIDE of its width at most), its middle in the frame's middle. */
+export function insertView(
+  box: Box,
+  W: number,
+  H: number,
+  span: readonly [number, number] = [0, 0],
+): View {
+  const s = Math.min(
+    INSERT_MOST,
+    Math.max(
+      INSERT_LEAST,
+      Math.min(
+        (INSERT_FILL * H) / Math.max(box.h, 1e-3),
+        (INSERT_WIDE * W) / Math.max(box.w, 1e-3),
+      ),
+    ),
+  );
+  return settle({ s, x: box.x + box.w / 2, y: box.y + box.h / 2 }, W, H, span);
+}
+
+/** A thing's drawing as the stage scales it: its own box, and where it is held (or carried in a mouth). */
+export interface ThingDrawn {
+  viewBox: readonly [number, number, number, number];
+  grip: readonly [number, number];
+  mouth?: readonly [number, number];
+}
+
+/** Someone who holds a thing, as the stage draws them: where they stand, their head and shoulders as shares of their box, and how tall their drawing is in its own units. */
+export interface Holder {
+  place: Box;
+  head?: readonly [number, number];
+  /** Each shoulder, as shares of their box (the kit's joints). */
+  shoulder?: Partial<Record<'r' | 'l', readonly [number, number]>>;
+  /** Their drawing's height in its own units: a thing in their hand is drawn at their scale. */
+  unitsTall?: number;
+}
+
+/**
+ * Where a thing held is on the stage: in a hand held before them (the
+ * player's "hold": out from the head a sixth of their width, below the
+ * shoulder), or in a mouth, its grip there; drawn at their scale. The
+ * player's heldBox.
+ */
+export function heldBox(
+  thing: ThingDrawn,
+  by: Holder,
+  hand: 'r' | 'l' | 'mouth',
+): Box {
+  const { place } = by;
+  const at = holdPoint(by, hand);
+  const k = place.h / (by.unitsTall ?? KIT_FIGURE_H);
+  const grip = hand === 'mouth' ? (thing.mouth ?? thing.grip) : thing.grip;
+  return gripBox(thing, grip, at, k, hand === 'l');
+}
+
+/**
+ * A thing's box on the stage with its point `grip` (in its own units) at
+ * `at`, drawn `k` stage units to its one; `flipped`, the other way round
+ * about that point, as the player draws a thing in the left hand.
+ */
+export function gripBox(
+  thing: Pick<ThingDrawn, 'viewBox'>,
+  grip: readonly [number, number],
+  at: readonly [number, number],
+  k: number,
+  flipped = false,
+): Box {
+  const [vx, vy, vw, vh] = thing.viewBox;
+  return {
+    x: at[0] - (flipped ? vx + vw - grip[0] : grip[0] - vx) * k,
+    y: at[1] - (grip[1] - vy) * k,
+    w: vw * k,
+    h: vh * k,
+  };
+}
+
+/** Where someone holds a thing, on the stage: a hand before them, out from the head a sixth of their width and below the shoulder; or at the mouth. The player's "hold" mark. */
+export function holdPoint(
+  by: Holder,
+  hand: 'r' | 'l' | 'mouth',
+): [number, number] {
+  const { place } = by;
+  const head = by.head ?? [0.5, 0.25];
+  const side = hand === 'l' ? -1 : 1;
+  const hx = place.x + place.w * head[0];
+  const hy = place.y + place.h * head[1];
+  const joint = hand === 'mouth' ? undefined : by.shoulder?.[hand];
+  const shoulderY = joint ? place.y + place.h * joint[1] : hy + place.h * 0.22;
+  return hand === 'mouth'
+    ? [hx + place.w * 0.05, hy + place.h * 0.2]
+    : [hx + side * place.w * 0.17, shoulderY + place.h * HOLD_BELOW];
+}
+
+/** A thing held before someone is this far below their shoulder, as a share of their height, where a close shot of them still has it; hands meet to hand a thing over this far below each one's (the player's own). */
+export const HOLD_BELOW = 0.15;
+export const MEET_BELOW = 0.15;
+
+/** The side `other` stands on from `one`: their right hand ("r", the frame's right) or left. */
+export const sideToward = (one: Holder, other: Holder): 'r' | 'l' =>
+  other.place.x + other.place.w / 2 >= one.place.x + one.place.w / 2
+    ? 'r'
+    : 'l';
+
+/** Someone's shoulder on the stage: the kit's joint, else beside the head. */
+export function shoulderOf(one: Holder, hand: 'r' | 'l'): [number, number] {
+  const joint = one.shoulder?.[hand];
+  const head = one.head ?? [0.5, 0.25];
+  return joint
+    ? [
+        one.place.x + one.place.w * joint[0],
+        one.place.y + one.place.h * joint[1],
+      ]
+    : [
+        one.place.x + one.place.w * (head[0] + (hand === 'r' ? 0.15 : -0.15)),
+        one.place.y + one.place.h * (head[1] + 0.22),
+      ];
+}
+
+/** Where the hands of `a`, giving with `hand`, and `b` meet: midway between that shoulder and b's toward a, MEET_BELOW each one's shoulder, on the mean (the player's "meet", the same for both). */
+export function meetPoint(
+  a: Holder,
+  b: Holder,
+  hand: 'r' | 'l' = sideToward(a, b),
+): [number, number] {
+  const sa = shoulderOf(a, hand);
+  const sb = shoulderOf(b, sideToward(b, a));
+  return [
+    (sa[0] + sb[0]) / 2,
+    (sa[1] + a.place.h * MEET_BELOW + sb[1] + b.place.h * MEET_BELOW) / 2,
+  ];
+}
+
+/** Where a thing handed from `a` (in `hand`, the side toward b unless said) to `b` is as it changes hands: its grip where their hands meet (meetPoint), at the giver's scale, the other way round in a left hand. */
+export function handOverBox(
+  thing: ThingDrawn,
+  a: Holder,
+  b: Holder,
+  hand: 'r' | 'l' = sideToward(a, b),
+): Box {
+  const k = a.place.h / (a.unitsTall ?? KIT_FIGURE_H);
+  return gripBox(thing, thing.grip, meetPoint(a, b, hand), k, hand === 'l');
+}
+
+/** Where a thing resting before someone is: on the ground at their feet, toward the others (`toward`, 1 their right), at their scale. The player's restingBox. */
+export function restingBox(thing: ThingDrawn, by: Holder, toward: -1 | 1): Box {
+  const { place } = by;
+  const head = by.head ?? [0.5, 0.25];
+  const k = place.h / (by.unitsTall ?? KIT_FIGURE_H);
+  const [, , vw, vh] = thing.viewBox;
+  const x = place.x + place.w * head[0] + toward * place.w * 0.34;
+  const feet = place.y + place.h;
+  return { x: x - (vw * k) / 2, y: feet - vh * k, w: vw * k, h: vh * k };
+}
+
+/** The stage as a thing on it is found: its things, its steps, where each stands at each, its people's drawings, and its features' boxes. */
+export interface ThingsOnStage {
+  props: readonly ScenePropDto[];
+  steps: readonly Pick<SceneStepDto, 'atMs' | 'show'>[];
+  places: readonly Record<string, ScenePlaceDto>[];
+  drawing: (
+    id: string,
+  ) => Extract<SceneThingDto, { kind: 'drawing' }> | undefined;
+  feature?: (id: string) => Box | undefined;
+}
+
+/** Who has a thing at `t`, and in what; else whom it rests by. From whoever held it first, as what is done with it hands it on or puts it down. Gone (worn, eaten) or in the air, neither. */
+export function holderAt(
+  prop: ScenePropDto,
+  t: number,
+  rigged: (id: string) => boolean,
+): {
+  by: string | null;
+  hand: 'r' | 'l' | 'mouth';
+  near: string | null;
+  gone?: true;
+  flying?: true;
+} {
+  let by: string | null = prop.held?.by ?? null;
+  let hand: 'r' | 'l' | 'mouth' = prop.held?.in ?? 'r';
+  let near: string | null = prop.near;
+  let gone = false;
+  let flying = false;
+  for (const [at, who, does, to] of prop.does) {
+    if (at > t) break;
+    flying = false;
+    if (does === 'take' || does === 'catch' || does === 'doff') {
+      by = who;
+      hand = rigged(who) ? 'r' : 'mouth';
+    } else if (does === 'give' && to && !to.startsWith('@')) {
+      by = to;
+      hand = rigged(to) ? 'r' : 'mouth';
+    } else if (does === 'put' || does === 'drop') {
+      by = null;
+      near = who;
+    } else if (does === 'throw' || does === 'kick') {
+      by = null;
+      near = to && !to.startsWith('@') && !to.startsWith('f:') ? to : who;
+      flying = t - at < 1500;
+    } else if (does === 'wear' || does === 'eat') {
+      by = null;
+      gone = true;
+    }
+  }
+  return {
+    by,
+    hand,
+    near,
+    ...(gone ? { gone: true as const } : {}),
+    ...(flying ? { flying: true as const } : {}),
+  };
+}
+
+/**
+ * Who has each thing at `t` (holderAt), and in which hand: a hand already
+ * full takes nothing more, the other one does, as the player's business
+ * has it; the thing had first keeps its hand.
+ */
+export function handsAt(
+  stage: Pick<ThingsOnStage, 'props' | 'drawing'>,
+  t: number,
+): Map<string, ReturnType<typeof holderAt>> {
+  const rigged = (id: string) => Boolean(stage.drawing(id)?.rig);
+  const since = (prop: ScenePropDto, by: string | null) =>
+    [...prop.does]
+      .reverse()
+      .find(
+        ([at, who, does, to]) =>
+          at <= t &&
+          ((does === 'give' && to === by) ||
+            (who === by &&
+              (does === 'take' || does === 'catch' || does === 'doff'))),
+      )?.[0] ?? -Infinity;
+  const all = stage.props
+    .map((prop) => ({ prop, has: holderAt(prop, t, rigged) }))
+    .sort((a, b) => since(a.prop, a.has.by) - since(b.prop, b.has.by));
+  const full = new Set<string>();
+  for (const { has } of all) {
+    if (!has.by || has.hand === 'mouth' || has.gone) continue;
+    const other = has.hand === 'r' ? 'l' : 'r';
+    if (full.has(`${has.by}|${has.hand}`) && !full.has(`${has.by}|${other}`))
+      has.hand = other;
+    full.add(`${has.by}|${has.hand}`);
+  }
+  return new Map(all.map(({ prop, has }) => [prop.id, has]));
+}
+
+/** How long before a hand-over the hands are out to meet, and after it they part: the player's give (business.ts: 1.6 s, the change 62% in, held out from 15% to 78%). */
+export const MEET_BEFORE_MS = 750;
+export const MEET_AFTER_MS = 250;
+
+/** A hand-over of `thing` whose hands are out together at `t`: when it changes hands, who gives it and to whom. */
+export function handOverAt(
+  props: readonly ScenePropDto[],
+  thing: string,
+  t: number,
+): { at: number; from: string; to: string } | null {
+  const give = props
+    .find((p) => p.id === thing)
+    ?.does.find(
+      ([at, , does, to]) =>
+        does === 'give' &&
+        Boolean(to) &&
+        !to!.startsWith('@') &&
+        t >= at - MEET_BEFORE_MS &&
+        t <= at + MEET_AFTER_MS,
+    );
+  return give ? { at: give[0], from: give[1], to: give[3]! } : null;
+}
+
+/**
+ * The moment an insert frames its thing at, from `from` to `until`: just
+ * after it is handled then (set down, it lies there; picked up, it is in
+ * the hand); a thing handed over, as the hands meet; else its middle.
+ */
+export function insertMoment(
+  props: readonly ScenePropDto[],
+  thing: string,
+  from: number,
+  until: number,
+): number {
+  const done = props
+    .find((p) => p.id === thing)
+    ?.does.find(([at]) => at >= from && at <= until);
+  if (!done) return Math.round((from + until) / 2);
+  if (done[2] === 'give') return Math.max(from + 1, done[0] - 1);
+  return Math.min(until - 1, done[0] + 1);
+}
+
+/**
+ * Where an insert frames its thing, from `from` to `until`: where it is at
+ * the moment it frames (insertMoment), one box, so the thing alone fills
+ * the frame; a thing handed over, where the two hands meet between the
+ * two (the player's "meet"), at the giver's scale, in the hand they hold
+ * it in. Null when it is nowhere to be found.
+ */
+export function insertBoxOf(
+  stage: ThingsOnStage,
+  thing: string,
+  from: number,
+  until: number,
+): (Box & { held?: true }) | null {
+  const t = insertMoment(stage.props, thing, from, until);
+  const prop = stage.props.find((p) => p.id === thing);
+  const give = prop ? handOverAt(stage.props, thing, t) : null;
+  if (prop && give) {
+    let k = 0;
+    stage.steps.forEach((step, i) => {
+      if (step.atMs <= give.at) k = i;
+    });
+    const a = holderOn(stage, give.from, k);
+    const b = holderOn(stage, give.to, k);
+    const hand = handsAt(stage, give.at - 1).get(thing)?.hand;
+    if (a && b)
+      return {
+        ...handOverBox(
+          prop,
+          a,
+          b,
+          hand === 'r' || hand === 'l' ? hand : undefined,
+        ),
+        held: true,
+      };
+  }
+  const box = thingBoxAt(stage, thing, t);
+  const has = prop ? handsAt(stage, t).get(thing) : undefined;
+  return box && has?.by ? { ...box, held: true } : box;
+}
+
+/** A thing in a hand is framed a little low, its middle this share of the frame's height above the frame's: the face of whoever holds it (always above it) kept out of the frame's top, the thing still well within a tenth of the middle. The player's own. */
+export const INSERT_LOW = 0.07;
+
+/** The box an insert's shot frames (insertView), where its thing is: a thing in a hand, a little lower, so the frame sits a little below it (INSERT_LOW). */
+export function insertFramed(
+  box: Box & { held?: true },
+  W: number,
+  H: number,
+): Box {
+  const framed = { x: box.x, y: box.y, w: box.w, h: box.h };
+  if (!box.held) return framed;
+  return {
+    ...framed,
+    y: box.y + (INSERT_LOW * H) / insertView(box, W, H).s,
+  };
+}
+
+/** Someone on the stage at step `k` as a thing's holder: where they stand, their head and shoulders, and their drawing's height. */
+export function holderOn(
+  stage: ThingsOnStage,
+  id: string,
+  k: number,
+): Holder | null {
+  const place = stage.steps[k]?.show.includes(id)
+    ? stage.places[k]?.[id]
+    : undefined;
+  const d = stage.drawing(id);
+  if (!place || !d || d.backdrop) return null;
+  const tall = Number(
+    /viewBox="[^"]*?(-?[\d.]+)"/u.exec(d.svg)?.[1] ?? Number.NaN,
+  );
+  const r = d.joints?.r?.[0];
+  const l = d.joints?.l?.[0];
+  return {
+    place,
+    ...(d.head ? { head: d.head } : {}),
+    ...(r && l ? { shoulder: { r, l } } : {}),
+    ...(d.rig
+      ? Number.isFinite(tall) && tall > 0
+        ? { unitsTall: tall }
+        : {}
+      : d.units
+        ? { unitsTall: d.units }
+        : {}),
+  };
+}
+
+/**
+ * Where a thing is at `t`, on the stage: a feature ("f:<id>") where it
+ * stands; a thing in whoever's hand or mouth has it (heldBox), else before
+ * whoever it rests by (restingBox), toward the others there. Null for one
+ * gone, in the air, or with no one there to find it by.
+ */
+export function thingBoxAt(
+  stage: ThingsOnStage,
+  thing: string,
+  t: number,
+): Box | null {
+  let k = 0;
+  stage.steps.forEach((step, i) => {
+    if (step.atMs <= t) k = i;
+  });
+  if (thing.startsWith('f:')) {
+    const box = stage.feature?.(thing.slice(2));
+    return box && box.w > 0 && box.h > 0 ? box : null;
+  }
+  const prop = stage.props.find((p) => p.id === thing);
+  if (!prop) return null;
+  const has = handsAt(stage, t).get(prop.id);
+  if (!has || has.gone || has.flying) return null;
+  const drawn = { viewBox: prop.viewBox, grip: prop.grip, mouth: prop.mouth };
+  const holding = has.by ? holderOn(stage, has.by, k) : null;
+  if (holding) return heldBox(drawn, holding, has.hand);
+  const at = has.near ? holderOn(stage, has.near, k) : null;
+  if (!at) return null;
+  const mid = at.place.x + at.place.w / 2;
+  const others = (stage.steps[k]?.show ?? []).flatMap((id) => {
+    const p = id !== has.near ? stage.places[k]?.[id] : undefined;
+    return p && stage.drawing(id) && !stage.drawing(id)?.backdrop
+      ? [p.x + p.w / 2]
+      : [];
+  });
+  const mean = others.length
+    ? others.reduce((a, b) => a + b, 0) / others.length
+    : mid + 1;
+  return restingBox(drawn, at, mean >= mid ? 1 : -1);
 }

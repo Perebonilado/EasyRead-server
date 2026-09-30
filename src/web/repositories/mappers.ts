@@ -37,6 +37,7 @@ export function toDocument(row: DocumentModel): Document {
     pageCount: row.pageCount,
     sourceMimeType: row.sourceMimeType,
     source: row.source ?? 'uploaded',
+    origin: row.origin ?? 'reader',
     brief: row.brief ?? null,
     sourceUrl: row.sourceUrl ?? null,
     importManifest: row.importManifest ?? null,

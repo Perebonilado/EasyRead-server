@@ -10,10 +10,12 @@ import {
   type StudioFormat,
 } from '../../business/domain/studio/studio';
 import type { SheetProblem } from '../../business/domain/studio/studio-check';
+import { pickOf } from '../../business/domain/studio/studio-document';
 import {
   EPISODE_PHASES,
   type EpisodeBusy,
   type EpisodePhase,
+  type StudioActivity,
   type StudioEpisodeRecord,
   type StudioMessageRecord,
   type StudioRepository,
@@ -42,6 +44,14 @@ function parsed(kept: string | null | undefined): unknown {
 const json = (value: unknown) =>
   value === null || value === undefined ? null : JSON.stringify(value);
 
+/** An activity as kept, read back: null for none, or for one that cannot be read. */
+function activityOf(kept: string | null | undefined): StudioActivity | null {
+  const value = parsed(kept) as StudioActivity | null;
+  return value && typeof value === 'object' && typeof value.at === 'string'
+    ? value
+    : null;
+}
+
 @Injectable()
 export class SequelizeStudioRepository implements StudioRepository {
   constructor(
@@ -66,6 +76,7 @@ export class SequelizeStudioRepository implements StudioRepository {
         : null,
       brief: briefOf(parsed(row.brief)),
       bible: bible ? bibleOf(bible) : null,
+      documentId: row.documentId ?? null,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };
@@ -89,6 +100,8 @@ export class SequelizeStudioRepository implements StudioRepository {
       shareToken: row.shareToken,
       durationMs: row.durationMs,
       thumbKey: row.thumbKey,
+      activity: activityOf(row.activity),
+      pages: pickOf(parsed(row.pages)),
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };
@@ -114,6 +127,7 @@ export class SequelizeStudioRepository implements StudioRepository {
       thumbKey: row.thumbKey,
       madeHash: row.madeHash,
       durationMs: row.durationMs,
+      activity: activityOf(row.activity),
       updatedAt: row.updatedAt,
     };
   }
@@ -164,9 +178,7 @@ export class SequelizeStudioRepository implements StudioRepository {
 
   async updateShow(
     id: string,
-    patch: Partial<
-      Pick<StudioShowRecord, 'title' | 'format' | 'brief' | 'bible'>
-    >,
+    patch: Parameters<StudioRepository['updateShow']>[1],
   ): Promise<void> {
     await this.shows.update(
       {
@@ -178,6 +190,9 @@ export class SequelizeStudioRepository implements StudioRepository {
           ? { brief: JSON.stringify(patch.brief) }
           : {}),
         ...(patch.bible !== undefined ? { bible: json(patch.bible) } : {}),
+        ...(patch.documentId !== undefined
+          ? { documentId: patch.documentId }
+          : {}),
       },
       { where: { id } },
     );
@@ -193,6 +208,7 @@ export class SequelizeStudioRepository implements StudioRepository {
     number: number;
     title: string;
     phase: EpisodePhase;
+    pages?: StudioEpisodeRecord['pages'];
   }): Promise<StudioEpisodeRecord> {
     const row = await this.episodes.create({
       id: newId(),
@@ -208,6 +224,7 @@ export class SequelizeStudioRepository implements StudioRepository {
       shareToken: null,
       durationMs: null,
       thumbKey: null,
+      pages: json(input.pages ?? null),
     } as never);
     return this.episode(row);
   }
@@ -236,12 +253,13 @@ export class SequelizeStudioRepository implements StudioRepository {
     id: string,
     patch: Parameters<StudioRepository['updateEpisode']>[1],
   ): Promise<void> {
-    const { outline, title, ...rest } = patch;
+    const { outline, title, pages, ...rest } = patch;
     await this.episodes.update(
       {
         ...rest,
         ...(title !== undefined ? { title: title.slice(0, 120) } : {}),
         ...(outline !== undefined ? { outline: json(outline) } : {}),
+        ...(pages !== undefined ? { pages: json(pages) } : {}),
       },
       { where: { id } },
     );
@@ -334,6 +352,24 @@ export class SequelizeStudioRepository implements StudioRepository {
       },
       { where: { id } },
     );
+  }
+
+  async noteActivity(
+    of: { episodeId: string } | { sceneId: string },
+    activity: StudioActivity | null,
+  ): Promise<void> {
+    const kept = { activity: json(activity) };
+    // Said often while a job runs: the row's updatedAt stays as it was.
+    if ('sceneId' in of)
+      await this.scenes.update(kept, {
+        where: { id: of.sceneId },
+        silent: true,
+      });
+    else
+      await this.episodes.update(kept, {
+        where: { id: of.episodeId },
+        silent: true,
+      });
   }
 
   async insertScene(

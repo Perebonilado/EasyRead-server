@@ -1,6 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { SpeechPort } from '../../business/ports/voice.port';
+import {
+  noticeRecovered,
+  noticeRetry,
+} from '../../business/domain/work-progress';
 
 /** How long the health check waits for a container that may be waking. */
 const HEALTH_WAIT_MS = 20_000;
@@ -303,6 +307,7 @@ export class ModalSpeechAdapter implements SpeechPort {
             `The speech service answered ${response.status}: ${(await response.text()).slice(0, 200)}`,
           );
         }
+        noticeRecovered('voice');
         // Asked for timestamps, a service that knows them answers in JSON.
         if (
           (response.headers.get('content-type') ?? '').includes(
@@ -335,6 +340,13 @@ export class ModalSpeechAdapter implements SpeechPort {
           `attempt ${attempt} of ${ModalSpeechAdapter.ATTEMPTS} failed: ${lastError.message}`,
         );
         if (attempt < ModalSpeechAdapter.ATTEMPTS) {
+          noticeRetry({
+            service: 'voice',
+            attempt: attempt + 1,
+            of: ModalSpeechAdapter.ATTEMPTS,
+            waitMs: 5_000 * attempt,
+            error: lastError,
+          });
           await new Promise((resolve) => setTimeout(resolve, 5_000 * attempt));
         }
       } finally {

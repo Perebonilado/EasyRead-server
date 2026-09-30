@@ -5,6 +5,10 @@ import { pcmMs, readPcm16, readWav } from '../../business/domain/wav';
 import { readFileSync } from 'fs';
 import { JWT } from 'google-auth-library';
 import { encodeMp3 } from './audio/mp3';
+import {
+  noticeRecovered,
+  noticeRetry,
+} from '../../business/domain/work-progress';
 
 /** The Gemini API's home. */
 const BASE = 'https://generativelanguage.googleapis.com/v1beta';
@@ -41,9 +45,10 @@ async function paced(perMinute: number): Promise<void> {
       sentAt.push(now);
       return;
     }
-    await new Promise((resolve) =>
-      setTimeout(resolve, 60_000 - (now - sentAt[0]) + 250),
-    );
+    const wait = 60_000 - (now - sentAt[0]) + 250;
+    // Waiting its turn is said, so a scene held here is not taken for stuck.
+    noticeRetry({ service: 'voice', status: 429, waiting: true, waitMs: wait });
+    await new Promise((resolve) => setTimeout(resolve, wait));
   }
 }
 
@@ -136,6 +141,46 @@ const GAP_LEAST_MS = 80;
 /** How far from where a sentence should end its gap may be. */
 const GAP_REACH_MS = 1800;
 
+/** A quiet the voice leaves inside a sentence longer than this is its own hesitation… */
+export const INSIDE_GAP_MS = 600;
+/** …and is trimmed to this (studio-explainer-plan, Ask 1: pause shaping). */
+export const INSIDE_KEEP_MS = 250;
+
+/** The quiet stretches inside a run's speech, in frames, and the frame's length. */
+function quietFrames(
+  samples: Int16Array,
+  rate: number,
+): {
+  frame: number;
+  first: number;
+  last: number;
+  gaps: [number, number][];
+} | null {
+  const frame = Math.max(1, Math.round((rate * FRAME_MS) / 1000));
+  const frames = Math.floor(samples.length / frame);
+  const level: number[] = [];
+  for (let f = 0; f < frames; f += 1) {
+    let sum = 0;
+    for (let i = f * frame; i < (f + 1) * frame; i += 1)
+      sum += samples[i] * samples[i];
+    level.push(Math.sqrt(sum / frame));
+  }
+  const loudest = Math.max(0, ...level);
+  if (!loudest) return null;
+  const quiet = level.map((one) => one < loudest * QUIET_SHARE);
+  const first = quiet.indexOf(false);
+  const last = quiet.lastIndexOf(false);
+  const gaps: [number, number][] = [];
+  for (let f = first; f <= last; f += 1) {
+    if (!quiet[f]) continue;
+    let to = f;
+    while (to + 1 <= last && quiet[to + 1]) to += 1;
+    if ((to - f + 1) * FRAME_MS >= GAP_LEAST_MS) gaps.push([f, to]);
+    f = to;
+  }
+  return { frame, first, last, gaps };
+}
+
 /**
  * Where each sentence of a run ends: the quiet after it, as samples
  * [from, to], found near where the sentence's share of the words puts
@@ -147,31 +192,11 @@ export function sentenceGaps(
   rate: number,
   lengths: number[],
 ): ([number, number] | null)[] {
-  const frame = Math.max(1, Math.round((rate * FRAME_MS) / 1000));
-  const frames = Math.floor(samples.length / frame);
-  const level: number[] = [];
-  for (let f = 0; f < frames; f += 1) {
-    let sum = 0;
-    for (let i = f * frame; i < (f + 1) * frame; i += 1)
-      sum += samples[i] * samples[i];
-    level.push(Math.sqrt(sum / frame));
-  }
-  const loudest = Math.max(0, ...level);
   const boundaries = lengths.length - 1;
-  if (!loudest || boundaries < 1)
+  const heard = quietFrames(samples, rate);
+  if (!heard || boundaries < 1)
     return new Array<null>(Math.max(0, boundaries)).fill(null);
-  const quiet = level.map((one) => one < loudest * QUIET_SHARE);
-  const first = quiet.indexOf(false);
-  const last = quiet.lastIndexOf(false);
-  // The quiet stretches inside the speech.
-  const gaps: [number, number][] = [];
-  for (let f = first; f <= last; f += 1) {
-    if (!quiet[f]) continue;
-    let to = f;
-    while (to + 1 <= last && quiet[to + 1]) to += 1;
-    if ((to - f + 1) * FRAME_MS >= GAP_LEAST_MS) gaps.push([f, to]);
-    f = to;
-  }
+  const { frame, first, last, gaps } = heard;
   const total = lengths.reduce((sum, one) => sum + one, 0) || 1;
   const reach = GAP_REACH_MS / FRAME_MS;
   const found: ([number, number] | null)[] = [];
@@ -199,6 +224,28 @@ export function sentenceGaps(
 }
 
 /**
+ * The long quiets inside a run that are no sentence's end: the voice
+ * hesitating mid-sentence, which Gemini does now and then for a second
+ * or more. In samples.
+ */
+export function innerGaps(
+  samples: Int16Array,
+  rate: number,
+  ends: readonly ([number, number] | null)[],
+): [number, number][] {
+  const heard = quietFrames(samples, rate);
+  if (!heard) return [];
+  const least = INSIDE_GAP_MS / FRAME_MS;
+  return heard.gaps
+    .map(([a, b]): [number, number] => [a * heard.frame, (b + 1) * heard.frame])
+    .filter(
+      ([a, b]) =>
+        (b - a) / heard.frame >= least &&
+        !ends.some((end) => end && end[0] < b && a < end[1]),
+    );
+}
+
+/**
  * A run's audio with each sentence's silence as the page asked for it:
  * the quiet the voice left after a sentence made up to its pause, never
  * cut shorter. The voice is never asked for a pause in words, which it
@@ -213,7 +260,8 @@ export function withPauses(
 }
 
 /**
- * A run's audio with each sentence's silence as the page asked for it, and
+ * A run's audio with each sentence's silence as the page asked for it, a
+ * long hesitation inside a sentence cut to a breath (INSIDE_KEEP_MS), and
  * where each quiet between its sentences now lies, in samples: the times
  * no word can start in.
  */
@@ -227,21 +275,42 @@ export function pausedRun(
     rate,
     pieces.map((piece) => piece.text.length),
   );
+  // Each change, in order: a sentence's quiet made up to its pause (more
+  // silence at its middle), or a hesitation shortened from its middle.
+  const keep = Math.round((INSIDE_KEEP_MS * rate) / 1000);
+  const changes: { from: number; to: number; add: number; end: boolean }[] = [];
+  gaps.forEach((gap, b) => {
+    if (!gap) return;
+    const wanted = Math.round(pieces[b].pauseAfter * rate);
+    changes.push({
+      from: gap[0],
+      to: gap[1],
+      add: Math.max(0, wanted - (gap[1] - gap[0])),
+      end: true,
+    });
+  });
+  for (const [a, b] of innerGaps(samples, rate, gaps))
+    changes.push({ from: a, to: b, add: -(b - a - keep), end: false });
+  changes.sort((x, y) => x.from - y.from);
   const parts: Int16Array[] = [];
   const quiet: [number, number][] = [];
   let from = 0;
   let added = 0;
-  gaps.forEach((gap, b) => {
-    if (!gap) return;
-    const wanted = Math.round(pieces[b].pauseAfter * rate);
-    const more = Math.max(0, wanted - (gap[1] - gap[0]));
-    quiet.push([gap[0] + added, gap[1] + added + more]);
-    if (more <= 0) return;
-    const middle = Math.round((gap[0] + gap[1]) / 2);
-    parts.push(samples.subarray(from, middle), new Int16Array(more));
-    from = middle;
-    added += more;
-  });
+  for (const change of changes) {
+    const middle = Math.round((change.from + change.to) / 2);
+    if (change.end)
+      quiet.push([change.from + added, change.to + added + change.add]);
+    if (change.add > 0) {
+      parts.push(samples.subarray(from, middle), new Int16Array(change.add));
+      from = middle;
+    } else if (change.add < 0) {
+      const cut = -change.add;
+      const cutFrom = middle - Math.floor(cut / 2);
+      parts.push(samples.subarray(from, cutFrom));
+      from = cutFrom + cut;
+    }
+    added += change.add;
+  }
   if (!parts.length) return { samples, quiet };
   parts.push(samples.subarray(from));
   const out = new Int16Array(parts.reduce((n, p) => n + p.length, 0));
@@ -455,6 +524,7 @@ export class GeminiSpeechAdapter implements SpeechPort {
     model: string;
     durationMs: number;
     silencesMs: [number, number][];
+    pcm: { samples: Int16Array; sampleRate: number };
     usage?: { tokensIn: number; tokensOut: number };
   }> {
     const key =
@@ -559,6 +629,8 @@ export class GeminiSpeechAdapter implements SpeechPort {
     }
     return {
       audio: await this.encode(samples, rate),
+      // The samples too: the pace step puts them right without decoding.
+      pcm: { samples, sampleRate: rate },
       mimeType: 'audio/mpeg',
       model: byCloud ? `gemini:${this.cloudModel()}` : `gemini:${model}`,
       durationMs: pcmMs({ samples, sampleRate: rate }),
@@ -780,7 +852,10 @@ export class GeminiSpeechAdapter implements SpeechPort {
           body: JSON.stringify(body),
           signal: AbortSignal.timeout(GeminiSpeechAdapter.REQUEST_MS),
         });
-        if (response.ok) return (await response.json()) as unknown;
+        if (response.ok) {
+          noticeRecovered('voice');
+          return (await response.json()) as unknown;
+        }
         const reason = reasonIn(await response.text());
         if (response.status === 401 || response.status === 403)
           throw refused(
@@ -819,8 +894,16 @@ export class GeminiSpeechAdapter implements SpeechPort {
         this.logger.warn(
           `attempt ${attempt} of ${GeminiSpeechAdapter.ATTEMPTS} failed: ${lastError.message}`,
         );
-        if (attempt < GeminiSpeechAdapter.ATTEMPTS)
+        if (attempt < GeminiSpeechAdapter.ATTEMPTS) {
+          noticeRetry({
+            service: 'voice',
+            attempt: attempt + 1,
+            of: GeminiSpeechAdapter.ATTEMPTS,
+            waitMs: wait,
+            error: lastError,
+          });
           await new Promise((resolve) => setTimeout(resolve, wait));
+        }
       }
     }
     throw lastError ?? new Error('The Gemini voice did not answer');

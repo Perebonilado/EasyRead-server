@@ -52,7 +52,15 @@ import type { z } from 'zod';
 import {
   studioBibleSchema,
   studioOutlineSchema,
+  studioPremiseSchema,
+  studioCharactersSchema,
+  studioBeatsSchema,
+  studioScenePlanSchema,
+  studioTableReadSchema,
+  studioColdReadSchema,
+  studioRetellSchema,
   studioCheckSchema,
+  studioTeachBackSchema,
   studioSceneSchema,
   studioTurnSchema,
 } from './studio-schemas';
@@ -78,6 +86,7 @@ import {
   sceneStorySchema,
   sketchJudgeSchema,
   drawingJudgeSchema,
+  pictureCheckSchema,
   setLayoutSchema,
   lectureExtraSchema,
   spokenQuizSchema,
@@ -775,6 +784,39 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     });
     return {
       value: cleanVerdict(result.object),
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
+  async pictureCheck(input: {
+    stills: { png: Buffer; claims: string }[];
+  }): Promise<LlmResult<{ stills: { matches: boolean; wrong: string[] }[] }>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    // The drawing judge's model: it sees (DeepSeek cannot).
+    const { model, ref } = await this.registry.languageModel('drawing_judge');
+    const result = await generateObject({
+      model,
+      schema: pictureCheckSchema,
+      system: PROMPTS.pictureCheck,
+      temperature: 0,
+      messages: [
+        {
+          role: 'user' as const,
+          content: input.stills.flatMap((still, i) => [
+            { type: 'text' as const, text: `Still ${i + 1}:` },
+            { type: 'file' as const, data: still.png, mediaType: 'image/png' },
+            { type: 'text' as const, text: still.claims },
+          ]),
+        },
+      ],
+      maxRetries: this.maxRetries(),
+    });
+    const stills = input.stills.map(
+      (_, i) => result.object.stills[i] ?? { matches: true, wrong: [] },
+    );
+    return {
+      value: { stills },
       usage: this.usage(ref, result.usage, started),
     };
   }
@@ -2317,6 +2359,8 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     system: string,
     parts: string[],
     revision: StudioRevision,
+    /** Thinking off whatever STUDIO_WRITE_THINKING says: a story clip's sheet (studio-clip). */
+    quick = false,
   ): Promise<LlmResult<Record<string, unknown>>> {
     const started = Date.now();
     const { generateObject } = await this.registry.modules();
@@ -2346,7 +2390,9 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
         system,
         prompt,
         maxRetries: this.maxRetries(),
-        ...this.writerThinking(ref, 'STUDIO_WRITE_THINKING', 'on'),
+        ...(quick
+          ? this.writerThinking(ref, 'STUDIO_CLIP_THINKING', 'off')
+          : this.writerThinking(ref, 'STUDIO_WRITE_THINKING', 'on')),
       }),
     );
     return {
@@ -2381,6 +2427,64 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     );
   }
 
+  studioPremise(
+    input: { brief: string; bible: string; before?: string } & StudioRevision,
+  ): Promise<LlmResult<Record<string, unknown>>> {
+    return this.studioWrite(
+      studioPremiseSchema,
+      STUDIO_PROMPTS.studioPremise,
+      [
+        `The brief:\n${input.brief}`,
+        input.bible,
+        input.before ? `The episodes before this one:\n${input.before}` : '',
+      ],
+      input,
+    );
+  }
+
+  studioCharacters(
+    input: { brief: string; bible: string; story: string } & StudioRevision,
+  ): Promise<LlmResult<Record<string, unknown>>> {
+    return this.studioWrite(
+      studioCharactersSchema,
+      STUDIO_PROMPTS.studioCharacters,
+      [`The brief:\n${input.brief}`, input.bible, input.story],
+      input,
+    );
+  }
+
+  studioBeats(
+    input: {
+      brief: string;
+      bible: string;
+      story: string;
+      structure: string;
+    } & StudioRevision,
+  ): Promise<LlmResult<Record<string, unknown>>> {
+    return this.studioWrite(
+      studioBeatsSchema,
+      STUDIO_PROMPTS.studioBeats,
+      [
+        `The brief:\n${input.brief}`,
+        input.bible,
+        input.story,
+        `The structure for its length:\n${input.structure}`,
+      ],
+      input,
+    );
+  }
+
+  studioScenePlan(
+    input: { brief: string; bible: string; story: string } & StudioRevision,
+  ): Promise<LlmResult<Record<string, unknown>>> {
+    return this.studioWrite(
+      studioScenePlanSchema,
+      STUDIO_PROMPTS.studioScenePlan,
+      [`The brief:\n${input.brief}`, input.bible, input.story],
+      input,
+    );
+  }
+
   studioScene(
     input: {
       brief: string;
@@ -2388,6 +2492,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
       outline: string;
       scene: string;
       before: string;
+      quick?: boolean;
     } & StudioRevision,
   ): Promise<LlmResult<Record<string, unknown>>> {
     return this.studioWrite(
@@ -2401,7 +2506,117 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
         input.before,
       ],
       input,
+      input.quick === true,
     );
+  }
+
+  /**
+   * The table read (S4): the whole script read against the rubric by the
+   * check model (DeepSeek), thinking off unless STUDIO_TABLEREAD_THINKING
+   * says on (Richard, 2026-09-30: it only scores now, for the log, and
+   * thinking made it the dearest call of a film). One call a round.
+   */
+  async studioTableRead(input: {
+    brief: string;
+    bible: string;
+    story: string;
+    narrator: string;
+    script: string;
+    code: string;
+    viewer?: string;
+  }): Promise<LlmResult<Record<string, unknown>>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('studio_check');
+    const prompt = [
+      `The brief:\n${input.brief}`,
+      input.bible,
+      input.story,
+      input.narrator,
+      `The script:\n<script>\n${input.script.replace(/<\/?script>/giu, '')}\n</script>`,
+      `What code found across the script:\n${input.code}`,
+      input.viewer
+        ? `What a first-time viewer said after watching scene 1, seeing and hearing only the film (judge clarity by this, against the premise):\n<viewer>\n${input.viewer.replace(/<\/?viewer>/giu, '')}\n</viewer>`
+        : '',
+    ]
+      .filter(Boolean)
+      .join('\n\n');
+    const result = await this.againIfMisshapen(() =>
+      generateObject({
+        model,
+        schema: studioTableReadSchema,
+        system: STUDIO_PROMPTS.studioTableRead,
+        prompt,
+        maxRetries: this.maxRetries(),
+        ...this.writerThinking(ref, 'STUDIO_TABLEREAD_THINKING', 'off'),
+      }),
+    );
+    return {
+      value: result.object,
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
+  /**
+   * The cold read: a first-time viewer's read of the film's opening, as
+   * it shows it, by the check model (DeepSeek) with thinking off unless
+   * STUDIO_COLDREAD_THINKING says on. One small call a table read.
+   */
+  async studioColdRead(input: {
+    kind: string;
+    film: string;
+  }): Promise<LlmResult<Record<string, unknown>>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('studio_check');
+    const result = await this.againIfMisshapen(() =>
+      generateObject({
+        model,
+        schema: studioColdReadSchema,
+        system: STUDIO_PROMPTS.studioColdRead,
+        prompt: [
+          input.kind,
+          `What you saw and heard:\n<film>\n${input.film.replace(/<\/?film>/giu, '')}\n</film>`,
+        ].join('\n\n'),
+        maxRetries: this.maxRetries(),
+        ...this.writerThinking(ref, 'STUDIO_COLDREAD_THINKING', 'off'),
+      }),
+    );
+    return {
+      value: result.object,
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
+  /**
+   * The retelling: a first-time viewer's spine of the whole film, as it
+   * shows it, by the check model (DeepSeek) with thinking off unless
+   * STUDIO_COLDREAD_THINKING says on. One small call a table read.
+   */
+  async studioRetell(input: {
+    kind: string;
+    film: string;
+  }): Promise<LlmResult<Record<string, unknown>>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('studio_check');
+    const result = await this.againIfMisshapen(() =>
+      generateObject({
+        model,
+        schema: studioRetellSchema,
+        system: STUDIO_PROMPTS.studioRetell,
+        prompt: [
+          input.kind,
+          `What you saw and heard:\n<film>\n${input.film.replace(/<\/?film>/giu, '')}\n</film>`,
+        ].join('\n\n'),
+        maxRetries: this.maxRetries(),
+        ...this.writerThinking(ref, 'STUDIO_COLDREAD_THINKING', 'off'),
+      }),
+    );
+    return {
+      value: result.object,
+      usage: this.usage(ref, result.usage, started),
+    };
   }
 
   /**
@@ -2443,6 +2658,40 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
         prompt,
         maxRetries: this.maxRetries(),
         ...this.writerThinking(ref, 'STUDIO_CHECK_THINKING', 'off'),
+      }),
+    );
+    return {
+      value: result.object,
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
+  async studioTeachBack(input: {
+    topic: string;
+    points: string[];
+    answer: string;
+    who: string | null;
+  }): Promise<LlmResult<{ got: number[]; missing: number[]; reply: string }>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } =
+      await this.registry.languageModel('studio_teach_back');
+    // The viewer's words inside their marker: data to judge, never instructions.
+    const words = input.answer.replace(/<\/?viewer_words>/giu, '');
+    const result = await this.againIfMisshapen(() =>
+      generateObject({
+        model,
+        schema: studioTeachBackSchema,
+        system: STUDIO_PROMPTS.studioTeachBack,
+        prompt: [
+          `The lesson: ${input.topic}`,
+          `It was made for: ${input.who ?? 'anyone curious'}`,
+          `What it taught:\n${input.points.map((p, i) => `${i + 1}. ${p}`).join('\n')}`,
+          `Their explanation:\n<viewer_words>\n${words}\n</viewer_words>`,
+        ].join('\n\n'),
+        maxRetries: this.maxRetries(),
+        maxOutputTokens: 400,
+        ...this.writerThinking(ref, 'STUDIO_TEACH_BACK_THINKING', 'off'),
       }),
     );
     return {

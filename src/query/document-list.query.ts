@@ -53,10 +53,12 @@ export class DocumentListQuery {
     const { page, limit, offset } = clampPagination(filters);
 
     // A school's documents are the school's, whoever uploaded them: they
-    // show on the school dashboard, never among a person's own.
+    // show on the school dashboard, never among a person's own. The
+    // Studio's own documents are the Studio's: never listed or searched here.
     const where: Record<string | symbol, unknown> = {
       userId,
       institutionId: null,
+      origin: 'reader',
       deletedAt: null,
     };
     if (filters.status) where.status = filters.status;
@@ -109,7 +111,12 @@ export class DocumentListQuery {
   /** Empty-state check: has this user ever uploaded anything? (PRD FR-2.4) */
   async hasAny(userId: string): Promise<boolean> {
     const row = await this.documents.findOne({
-      where: { userId, institutionId: null, deletedAt: null } as never,
+      where: {
+        userId,
+        institutionId: null,
+        origin: 'reader',
+        deletedAt: null,
+      } as never,
       attributes: ['id'],
     });
     return row !== null;
@@ -143,7 +150,7 @@ export class DocumentListQuery {
               institutionId: scope.institutionId,
               publishedAt: { [Op.ne]: null },
             }
-          : { userId, institutionId: null }),
+          : { userId, institutionId: null, origin: 'reader' }),
         deletedAt: null,
         status: 'ready',
       } as never,

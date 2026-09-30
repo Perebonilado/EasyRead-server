@@ -14,6 +14,12 @@ import {
   type TextRun,
 } from '../../business/domain/reading-order';
 import { downsampleRgba, encodePng } from './images/image-codec';
+import type { Bookmark, PageHeading } from '../../business/domain/chapters';
+
+/** The large lines kept of a page, from its top: a chapter's heading and its title. */
+const HEADING_LINES = 4;
+/** How deep into a PDF's outline its entries are read. */
+const OUTLINE_DEPTH = 2;
 
 /** Filters that separate a figure from furniture. */
 const MIN_FIGURE_EDGE = 100;
@@ -132,6 +138,113 @@ export class PdfjsToolkitAdapter implements PdfToolkitPort {
       throw new Error('None of the pages could be read');
     }
     return pages;
+  }
+
+  async bookmarks(pdf: Buffer): Promise<Bookmark[]> {
+    let doc: Awaited<ReturnType<PdfjsToolkitAdapter['load']>> | null = null;
+    try {
+      doc = await this.load(pdf);
+      const outline = await doc.getOutline();
+      if (!outline?.length) return [];
+      const open = doc;
+      const out: Bookmark[] = [];
+      type Item = { title: string; dest: unknown; items?: Item[] };
+      const pageOf = async (dest: unknown): Promise<number | null> => {
+        try {
+          const explicit = (
+            typeof dest === 'string' ? await open.getDestination(dest) : dest
+          ) as unknown[] | null;
+          const target = explicit?.[0];
+          if (typeof target === 'number') return target + 1;
+          if (target && typeof target === 'object')
+            return (
+              (await open.getPageIndex(
+                target as Parameters<typeof open.getPageIndex>[0],
+              )) + 1
+            );
+        } catch {
+          // A destination that leads nowhere: the entry has no page.
+        }
+        return null;
+      };
+      const walk = async (items: Item[], depth: number) => {
+        for (const item of items) {
+          out.push({
+            title: String(item.title ?? ''),
+            page: await pageOf(item.dest),
+            depth,
+          });
+          if (item.items?.length && depth + 1 < OUTLINE_DEPTH)
+            await walk(item.items, depth + 1);
+        }
+      };
+      await walk(outline, 0);
+      return out;
+    } catch (error) {
+      this.logger.warn(`Bookmarks unread: ${(error as Error).message}`);
+      return [];
+    } finally {
+      await doc?.destroy();
+    }
+  }
+
+  async headings(pdf: Buffer): Promise<PageHeading[]> {
+    let doc: Awaited<ReturnType<PdfjsToolkitAdapter['load']>> | null = null;
+    const out: PageHeading[] = [];
+    try {
+      doc = await this.load(pdf);
+      for (let pageNumber = 1; pageNumber <= doc.numPages; pageNumber++) {
+        try {
+          const page = await doc.getPage(pageNumber);
+          const content = await page.getTextContent();
+          page.cleanup();
+          // Each run's size, and the page's ordinary size: the one most of
+          // its letters are set in.
+          const runs: { y: number; size: number; str: string }[] = [];
+          for (const item of content.items) {
+            if (!('str' in item) || !item.str.trim()) continue;
+            const transform = item.transform as number[];
+            runs.push({
+              y: transform[5],
+              size: Math.abs(transform[3]) || 10,
+              str: item.str,
+            });
+          }
+          if (!runs.length) continue;
+          const weight = new Map<number, number>();
+          for (const run of runs) {
+            const size = Math.round(run.size * 2) / 2;
+            weight.set(size, (weight.get(size) ?? 0) + run.str.length);
+          }
+          const body = [...weight.entries()].sort((a, b) => b[1] - a[1])[0][0];
+          // Lines by height on the page, top first; each as large as its largest run.
+          const lines = new Map<number, { size: number; parts: string[] }>();
+          for (const run of runs) {
+            const y = Math.round(run.y / 2) * 2;
+            const line = lines.get(y) ?? { size: 0, parts: [] };
+            line.size = Math.max(line.size, run.size);
+            line.parts.push(run.str);
+            lines.set(y, line);
+          }
+          const large = [...lines.entries()]
+            .sort((a, b) => b[0] - a[0])
+            .map(([, line]) => ({
+              text: line.parts.join(' ').replace(/\s+/g, ' ').trim(),
+              size: line.size,
+            }))
+            .filter((line) => line.text && line.size >= body * 1.3)
+            .slice(0, HEADING_LINES);
+          if (large.length) out.push({ page: pageNumber, lines: large, body });
+        } catch {
+          // A page that cannot be read has no heading.
+        }
+      }
+    } catch (error) {
+      this.logger.warn(`Headings unread: ${(error as Error).message}`);
+    } finally {
+      await doc?.destroy();
+    }
+    return out;
   }
 
   /**

@@ -43,6 +43,14 @@ import { WEAR_WORDS } from './scene-wear';
 
 /** Doings done in or on a bed or a seat, named in their own words: "climbs into bed", "sits up in bed". */
 const IN_OR_ON: ReadonlySet<DoingId> = new Set(['stand-up', 'lie-down', 'sit']);
+/** Doings whose own words name the thing of the set they are done with: "through the door", "up the stairs", "on the tap". */
+const NAMES_ITS_FEATURE: ReadonlySet<DoingId> = new Set([
+  'go-through',
+  'climb-stairs',
+  'knock',
+  'turn-on-tap',
+  'lean-on',
+]);
 /** A thing worn, named in a doing's own words: "puts his coat on". */
 const WORN_IN = new RegExp(`\\b(?:${WEAR_WORDS})\\b`, 'iu');
 
@@ -606,6 +614,9 @@ export interface ReadDoing {
 /** Words before a verb that make it a word for a thing, not something done: "a dropped piece", "the open door". */
 const DETERMINER =
   /\b(?:a|an|the|his|her|their|its|my|your|our|this|that|some)\s+$/iu;
+/** Someone's, just before a word: "Pip's hands", "Maya’s shoe"; never a short form ("he's", "it's", "there's"). */
+const POSSESSED =
+  /\b(?!(?:he|she|it|that|there|here|what|who|where|when|how|let)['’]s\b)\p{L}+['’]s\s+$/iu;
 /** Taking one of a doing is doing it: "takes a sip", "takes a quick look"; never "takes a dropped piece". */
 const TAKES_ONE = /\bt(?:ake|akes|ook|aking)\s+an?\s+(?:\p{L}+\s+){0,2}$/iu;
 const TAKEN =
@@ -678,6 +689,15 @@ export function doingsIn(
   found.sort(
     (a, b) => a.at - b.at || b.end - b.at - (a.end - a.at) || a.order - b.order,
   );
+  // A name is never a verb: "Squeak", a toy mouse, is not a squeak, and
+  // wherever the words name someone or something of the show's by a
+  // capitalised name, nothing done is read there.
+  const names = knownWords
+    .filter((name) => /^\p{Lu}/u.test(name))
+    .flatMap((name) => [
+      ...text.matchAll(new RegExp(`\\b${escaped(name)}\\b`, 'gu')),
+    ])
+    .map((m) => ({ at: m.index, end: m.index + m[0].length }));
   const verbs = found
     .filter(
       (one, i) =>
@@ -685,6 +705,9 @@ export function doingsIn(
     )
     .filter(
       (one) =>
+        !names.some((n) => n.at <= one.at && one.at < n.end) &&
+        // Nor is a word for someone's own ("Pip's hands"): a thing of theirs.
+        !POSSESSED.test(text.slice(Math.max(0, one.at - 24), one.at)) &&
         !NOT_DONE.test(text.slice(Math.max(0, one.at - 24), one.at)) &&
         (!DETERMINER.test(text.slice(Math.max(0, one.at - 8), one.at)) ||
           (TAKEN.test(text.slice(one.at, one.end)) &&
@@ -706,7 +729,15 @@ export function doingsIn(
       const earlier = namedIn(text.slice(0, verb.at), known.actors);
       return { id: earlier[earlier.length - 1]?.id ?? null, start: verb.at };
     }
-    return { id: null, start: verb.at };
+    // No one named: its words start with its clause, so a thing that does
+    // it keeps its place ("the branch slips"); the first, with the words.
+    if (i === 0) return { id: null, start: 0 };
+    let start = verb.at;
+    for (const m of before.matchAll(
+      /[,;:—–]\s*|\b(?:and|but|then|so|while|as|when)\s+/giu,
+    ))
+      start = from + m.index + m[0].length;
+    return { id: null, start };
   });
   const out: ReadDoing[] = [];
   verbs.forEach((verb, i) => {
@@ -759,6 +790,15 @@ export function doingsIn(
     if (IN_OR_ON.has(verb.id)) {
       const rests = RESTING_WORDS.exec(text.slice(verb.at, verb.end));
       if (rests) feature = { at: -1, word: rests[1] };
+    }
+    // A thing of the set named in the doing's own words ("walks through
+    // the door", "climbs the stairs", "turns on the tap"): where it is done.
+    if (!feature && NAMES_ITS_FEATURE.has(verb.id)) {
+      const inside = featuresNamedIn(
+        text.slice(verb.at, verb.end),
+        ownFeatures,
+      )[0];
+      if (inside) feature = { at: 0, word: inside.word };
     }
     // The thing: named after the verb, or inside its words ("lifts the cup
     // up"), never the verb itself ("bowls the ball").
@@ -872,6 +912,7 @@ export function doingsIn(
       (verb.id === 'leave' ||
         verb.id === 'enter' ||
         verb.id === 'squeeze' ||
+        verb.id === 'go-through' ||
         BY_WAY.test(after.slice(0, feature.at)));
     const featureId = feature ? featureIdOf(feature.word) : null;
     const target =

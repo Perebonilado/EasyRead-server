@@ -1,4 +1,19 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import {
+  paceAsked,
+  nudged,
+  studioMakerRate,
+} from '../../domain/studio/studio-pace';
+import { scoreOf } from '../../domain/studio/studio-score';
+import {
+  isStoryChange,
+  keptPersonas,
+  storyOf,
+} from '../../domain/studio/studio-story';
+import { narratorRuleOf } from '../../domain/studio/studio-narrator';
+import { heardBrief } from '../../domain/studio/studio-heard';
+import { lookHeard, showTheme } from '../../domain/studio/studio-look';
+import { audienceChips, whoHeard } from '../../domain/studio/studio-audience';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { randomBytes, randomUUID } from 'node:crypto';
 import type {
   SceneDto,
@@ -6,6 +21,7 @@ import type {
   StudioMessageDto,
   StudioMessagePageDto,
   StudioPlayDto,
+  StudioTeachBackDto,
   StudioSceneDto,
   StudioShowCardDto,
   StudioShowDto,
@@ -17,6 +33,7 @@ import {
   SOURCE_CHARS,
   bibleOf,
   briefMissing,
+  BRIEF_CONTROLS,
   briefOf,
   mendExplainerLines,
   outlineOf,
@@ -24,6 +41,7 @@ import {
   storySheetOf,
   type SceneSheet,
   type StudioBible,
+  type StudioBrief,
   type StudioCharacter,
   type StudioOutline,
 } from '../../domain/studio/studio';
@@ -60,7 +78,8 @@ import {
   noteOf,
   type DrawingFailure,
 } from '../../domain/drawing-failures';
-import { joinOf } from '../../domain/studio/studio-edit';
+import { joinFor } from '../../domain/studio/studio-edit';
+import { clipJoin } from '../../domain/studio/studio-clip';
 import { storyBibleFor } from '../../domain/studio/studio-stage';
 import {
   describeForProducer,
@@ -96,6 +115,8 @@ import {
 import { SceneVoiceService } from '../admin/scene-voice.service';
 import { EntitlementsService } from '../documents/entitlements.service';
 import { StudioCastService, optionPreview } from './studio-cast.service';
+import { explainerPlay, teachBack } from './studio-engage';
+import { StudioDocumentsService } from './studio-documents.service';
 import { EVENT_LINES, historyOf, logEvent } from './studio-log';
 import {
   bibleDto,
@@ -115,7 +136,8 @@ const SOURCE_AT = 900;
 /** The latest of a show's thread sent with it; earlier ones are asked for a page at a time. */
 const THREAD = 80;
 /** What the maker is looking at, in the producer's words. */
-const LOOKING_AT: Partial<Record<EpisodePhase, string>> = {
+const LOOKING_AT: Partial<Record<EpisodePhase | 'story', string>> = {
+  story: 'the story (its premise, characters and beats)',
   outline: 'the outline',
   cast: 'the cast',
   script: 'the scenes',
@@ -150,6 +172,21 @@ const REFUSAL =
  * Every show belongs to its maker: anything asked for by anyone else is
  * not found, never refused, so no one learns what exists.
  */
+/** What a brief still needs, asked in words: the idea may always be left to us. */
+const STILL_TO_SAY: Partial<Record<keyof StudioBrief, string>> = {
+  format: 'whether it is a story or an explainer',
+  idea: 'what it is about (or say "you pick")',
+  audience: 'who it is for',
+  minutes: 'how long it runs',
+  tone: 'how it should feel',
+};
+
+/** The look an explainer plays in, for its show and its player; nothing for a story. */
+const themeOfShow = (show: StudioShowRecord) => {
+  const theme = showTheme(show.brief, show.bible);
+  return theme ? { theme } : {};
+};
+
 @Injectable()
 export class StudioService {
   private readonly logger = new Logger(StudioService.name);
@@ -164,6 +201,8 @@ export class StudioService {
     private readonly entitlements: EntitlementsService,
     private readonly cast: StudioCastService,
     private readonly voices: SceneVoiceService,
+    /** The show's document, its pages chosen in words (studio-documents). */
+    @Optional() private readonly documents?: StudioDocumentsService,
   ) {}
 
   // ── Whose it is ─────────────────────────────────────────────────────────
@@ -273,6 +312,7 @@ export class StudioService {
       brief: briefDto(show.brief),
       briefMissing: briefMissing(show.brief),
       bible,
+      ...themeOfShow(show),
       episodes: episodes.map((e) => ({
         id: e.id,
         number: e.number,
@@ -362,8 +402,82 @@ export class StudioService {
     for (const key of ['setting', 'characters', 'include', 'source'] as const)
       if (key in patch && (patch[key] === null || patch[key] === ''))
         brief[key] = null;
+    // A control set back to "leave it to us" is chosen by the Studio again.
+    for (const key of BRIEF_CONTROLS)
+      if (key in patch && (patch[key] === null || patch[key] === ''))
+        delete brief[key];
+    if (brief.narrator !== 'character') delete brief.narratorCharacter;
+    // Whom it is for, taken back: the four words stay.
+    if ('who' in patch && patch.who === null) delete brief.who;
     await this.studio.updateShow(show.id, { brief, format: brief.format });
+    // An explainer's Pace chip changed: its made scenes are played at the
+    // new pace, stretched, never voiced again.
+    if (brief.format === 'explainer' && brief.pace !== show.brief.pace)
+      await this.repaceMade({ ...show, brief });
     return this.showDto({ ...show, brief, format: brief.format });
+  }
+
+  /**
+   * The made scenes of an explainer's latest episode with any, played at
+   * the brief's pace now (StudioProcessor.repace). Whether any were.
+   */
+  private async repaceMade(
+    show: StudioShowRecord,
+    episode?: StudioEpisodeRecord,
+  ): Promise<boolean> {
+    const episodes = episode
+      ? [episode]
+      : await this.studio.listEpisodes(show.id);
+    for (const one of [...episodes].reverse()) {
+      const scenes = await this.studio.listScenes(one.id);
+      if (!scenes.some((s) => s.sceneKey && s.sheet?.kind === 'explainer'))
+        continue;
+      await this.enqueue(show, one, {
+        kind: 'repace',
+        pace: studioMakerRate(show.brief),
+      });
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * "The voice is a bit slow": an explainer's voice made a little quicker
+   * or slower (studio-pace), its made scenes played at it and timed again,
+   * nothing voiced again. What to say, in code's own words.
+   */
+  private async repaceAsked(
+    show: StudioShowRecord,
+    episode: StudioEpisodeRecord,
+    request: string,
+    said: string,
+  ): Promise<{ note: string | null; tried: string | null }> {
+    if (show.brief.format !== 'explainer')
+      return {
+        note: "A story's lines keep the pace their characters say them at. Tell me which scene feels slow, and I can tighten it.",
+        tried: null,
+      };
+    const change = paceAsked(request) ?? paceAsked(said);
+    if (change === null)
+      return { note: 'Should the voice be quicker or slower?', tried: null };
+    const before = show.brief.voicePace ?? 1;
+    const after = nudged(before, change);
+    if (after === before)
+      return {
+        note: `The voice is as ${change > 0 ? 'quick' : 'slow'} as it goes without sounding stretched. The Pace chips on the brief can change it too.`,
+        tried: null,
+      };
+    const brief = briefOf({ voicePace: after }, show.brief);
+    await this.studio.updateShow(show.id, { brief });
+    show.brief = brief;
+    const made = await this.repaceMade(show, episode);
+    const way = change > 0 ? 'quicker' : 'slower';
+    return {
+      note: null,
+      tried: made
+        ? `Making the voice a little ${way}: the scenes made are timed again to it, nothing voiced again.`
+        : `The voice will be a little ${way} when the film is made.`,
+    };
   }
 
   /**
@@ -381,7 +495,10 @@ export class StudioService {
     // A set's features are the sheets' own: the maker's edit keeps them;
     // and whoever the artist drew is drawn so until the maker chooses one
     // of the kit's.
-    const bible = keptKits(keptFeatures(bibleOf(body), before), before);
+    const bible = keptPersonas(
+      keptKits(keptFeatures(bibleOf(body), before), before),
+      before,
+    );
     if (before) {
       // Anyone the maker did not send keeps their place; ids never change.
       const ids = new Set(bible.characters.map((c) => c.id));
@@ -513,11 +630,10 @@ export class StudioService {
       : text.slice(0, MESSAGE_CHARS);
     // What the buttons did is in it too, a line each from the Studio; the
     // message now is its own, even if work finished just after it came.
-    const history = historyOf(
-      (await this.studio.listMessages(show.id, 17)).filter(
-        (m) => m.id !== mine.id,
-      ),
+    const before = (await this.studio.listMessages(show.id, 17)).filter(
+      (m) => m.id !== mine.id,
     );
+    const history = historyOf(before);
     const scenes = await this.studio.listScenes(episode.id);
     const carried = carriedWears(scenes, show.bible);
     const state = describeForProducer({
@@ -571,7 +687,48 @@ export class StudioService {
     }
 
     let brief = briefOf(draft.brief, show.brief);
+    // Held to the maker's own words: the tone a chip names, the genre they
+    // said, an idea left to us or said loosely taken as the idea.
+    brief = briefOf(
+      heardBrief({
+        said: brief,
+        before: show.brief,
+        words: pasted ? '' : said,
+        gathering: episode.phase === 'brief' && !pasted,
+      }),
+      brief,
+    );
     if (pasted) brief = { ...brief, source: text.slice(0, SOURCE_CHARS) };
+    // Whom it is for, heard by code from the maker's own words (a grade, a
+    // year, an age, a course, a job; what they know, their English), as
+    // the brief is gathered or when the producer took them as a new
+    // audience; never from a name or a place.
+    // Their own text is not their words: only the level it names counts.
+    const makerSaid = [
+      ...before
+        .filter(
+          (m) =>
+            m.role === 'user' &&
+            m.episodeId === episode.id &&
+            m.content.length < SOURCE_AT,
+        )
+        .map((m) => m.content),
+      pasted ? '' : said,
+    ].join('\n');
+    if (episode.phase === 'brief' || brief.audience !== show.brief.audience)
+      brief = briefOf(
+        { who: whoHeard(brief, pasted ? '' : said, makerSaid) },
+        brief,
+      );
+    // An explainer's look asked for in words, at any phase: "make it
+    // dark" is the dark one of the look it has now.
+    const look = pasted
+      ? null
+      : lookHeard(
+          said,
+          showTheme({ ...brief, look: show.brief.look }, show.bible) ?? 'paper',
+        );
+    if (look && brief.format === 'explainer') brief = { ...brief, look };
     const briefChanged = JSON.stringify(brief) !== JSON.stringify(show.brief);
     if (briefChanged) {
       await this.studio.updateShow(show.id, { brief, format: brief.format });
@@ -582,15 +739,72 @@ export class StudioService {
     let note: string | null = null;
     /** What was set going on scenes, said in code's own words. */
     let tried: string | null = null;
+    /** The chips code asks the next thing with, in place of the producer's. */
+    let asked: { choices: string[]; also?: string[] } | null = null;
+    // Pages of the show's document chosen in words ("chapter 4", "pages
+    // 40–55"): heard by code first, whatever the producer took them for;
+    // a subject ("the part about osmosis") only when it took them so.
+    const pagesHeard =
+      !draft.refuse &&
+      this.documents &&
+      show.brief.document &&
+      (draft.action === 'pages' || draft.action === 'none')
+        ? await this.documents
+            .heard(
+              show,
+              draft.action === 'pages' && draft.request ? draft.request : said,
+            )
+            .catch(() => null)
+        : null;
+    if (pagesHeard && pagesHeard.how !== 'subject' && draft.action === 'none')
+      draft = { ...draft, action: 'pages' };
+    // "The voice is a bit slow", of an explainer made: its pace, read by
+    // code first, whatever the producer made of it.
+    if (
+      !draft.refuse &&
+      draft.action === 'none' &&
+      show.brief.format === 'explainer' &&
+      !pasted &&
+      paceAsked(said) !== null &&
+      scenes.some((s) => s.sceneKey)
+    )
+      draft = { ...draft, action: 'repace', request: said };
     try {
       if (!draft.refuse)
         switch (draft.action) {
+          case 'pages': {
+            if (!this.documents || !show.brief.document) {
+              note =
+                'Give me a document first: the paperclip beside the box adds one.';
+              break;
+            }
+            if (!pagesHeard) {
+              note =
+                'Which part of it? Tell me a chapter or the pages, or choose them on the card.';
+              break;
+            }
+            const chosen = await this.documents.chooseHeard(
+              show,
+              episode,
+              pagesHeard,
+            );
+            episode = chosen.episode;
+            tried =
+              chosen.ask?.content ??
+              `I'll plan it from ${chosen.line.replace(/^Using /, '')}.`;
+            asked = chosen.ask;
+            break;
+          }
           case 'outline':
+            // A change to the story itself (the plot, who someone is, the
+            // ending) develops the story again, as its card does; one to
+            // the scenes alone changes the outline, the story kept.
             note = await this.askOutline(
               show,
               episode,
               draft.request,
               briefChanged,
+              draft.story ?? isStoryChange(draft.request),
             );
             break;
           case 'approve':
@@ -724,6 +938,14 @@ export class StudioService {
           case 'episode':
             episode = await this.newEpisode(show, draft.request ?? said);
             break;
+          case 'repace':
+            ({ note, tried } = await this.repaceAsked(
+              show,
+              episode,
+              draft.request ?? said,
+              said,
+            ));
+            break;
           default:
             break;
         }
@@ -748,9 +970,22 @@ export class StudioService {
           scenes.some((s) => s.sceneKey),
         ),
       meta: {
-        choices: note
-          ? []
-          : draft.choices.slice(0, 5).map((c) => c.slice(0, 40)),
+        // An explainer's audience is asked with its own chips: one row,
+        // and what they know as a second only when nothing said it yet.
+        ...(asked
+          ? {
+              choices: asked.choices,
+              ...(asked.also ? { also: asked.also } : {}),
+            }
+          : note || draft.refuse || draft.action !== 'none'
+            ? {
+                choices: note
+                  ? []
+                  : draft.choices.slice(0, 5).map((c) => c.slice(0, 40)),
+              }
+            : (audienceChips(brief, makerSaid) ?? {
+                choices: draft.choices.slice(0, 5).map((c) => c.slice(0, 40)),
+              })),
         action: draft.action,
         refused: draft.refuse,
       },
@@ -774,7 +1009,7 @@ export class StudioService {
       : undefined;
     if (scene)
       return `scene ${scene.position + 1}${scene.sheet ? ` ("${scene.sheet.title}")` : ''}`;
-    return LOOKING_AT[focus?.step as EpisodePhase] ?? null;
+    return LOOKING_AT[focus?.step as EpisodePhase | 'story'] ?? null;
   }
 
   /**
@@ -851,12 +1086,14 @@ export class StudioService {
     episode: StudioEpisodeRecord,
     request: string | null,
     briefChanged = false,
+    /** The request is for the story itself: developed again, then the outline built from it. */
+    story = false,
   ): Promise<string | null> {
     if (episode.phase === 'script' || episode.phase === 'made')
       return 'The scenes are written now: tell me which scene to change, and how.';
     const missing = briefMissing(show.brief);
     if (missing.length)
-      return `Before the outline, I still need: ${missing.join(', ')}.`;
+      return `Before the outline, tell me ${missing.map((m) => STILL_TO_SAY[m] ?? m).join(', and ')}.`;
     if (!(await this.studio.claimEpisode(episode.id, 'outline')))
       return episode.busy === 'outline' && briefChanged
         ? 'Noted. The outline is being written right now; once it is done I will write it again with that in it.'
@@ -864,6 +1101,7 @@ export class StudioService {
     await this.enqueue(show, episode, {
       kind: 'outline',
       ...(request && episode.outline ? { request } : {}),
+      ...(story && show.brief.format !== 'explainer' ? { story: true } : {}),
     });
     return null;
   }
@@ -1029,6 +1267,16 @@ export class StudioService {
       await this.enqueue(show, episode, { kind: 'script' });
       return null;
     }
+    // The script's job gave up with scenes left unwritten: asked again
+    // (the thread's "Try again"), it is written again.
+    if (episode.phase === 'script') {
+      const scenes = await this.studio.listScenes(episode.id);
+      if (!scenes.some((s) => s.status === 'failed' && !s.sheet)) return null;
+      if (!(await this.studio.claimEpisode(episode.id, 'script')))
+        return 'One moment: I am still working on it.';
+      await this.enqueue(show, episode, { kind: 'script' });
+      return null;
+    }
     return null;
   }
 
@@ -1071,6 +1319,32 @@ export class StudioService {
     return this.episode(userId, episodeId);
   }
 
+  /**
+   * The story changed as the maker asks on its card (the Story step): it
+   * is developed again, the change made and the rest kept, and the
+   * outline built from it again.
+   */
+  async rewriteStory(
+    userId: string,
+    episodeId: string,
+    request: string | null,
+  ): Promise<StudioEpisodeDto> {
+    const { show, episode } = await this.requireEpisode(userId, episodeId);
+    if (show.brief.format === 'explainer')
+      throw new ValidationError('An explainer has no story to change.');
+    const words = request?.trim().slice(0, MESSAGE_CHARS) || null;
+    if (words) await this.hear(userId, words);
+    const note = await this.askOutline(show, episode, words, false, true);
+    if (note) throw new ValidationError(note);
+    if (words) await this.heard(show, episode, 'Story', words);
+    await this.log(show, episode, {
+      what: 'asked',
+      step: 'story',
+      line: 'Developing the story again',
+    });
+    return this.episode(userId, episodeId);
+  }
+
   /** The outline changed by hand: scenes reordered, cut, reworded. */
   async editOutline(
     userId: string,
@@ -1084,9 +1358,15 @@ export class StudioService {
       );
     if (episode.busy)
       throw new ValidationError('One moment: I am still working on it.');
-    const outline: StudioOutline = show.bible
+    const edited: StudioOutline = show.bible
       ? mendOutline(outlineOf(body), show.bible)
       : outlineOf(body);
+    // Its story is its own step's, never the hand edit's: kept as it was.
+    const { story: _sent, ...plain } = edited;
+    void _sent;
+    const outline: StudioOutline = episode.outline?.story
+      ? { ...plain, story: episode.outline.story }
+      : plain;
     if (!outline.scenes.length)
       throw new ValidationError('Keep at least one scene.');
     await this.studio.updateEpisode(episode.id, {
@@ -1437,7 +1717,14 @@ export class StudioService {
       const grown = withFound(bible, next.set, mended);
       if (grown !== bible)
         await this.studio.updateShow(show.id, { bible: grown });
-      problems = checkSheet(next, grown, planned?.seconds ?? null, before);
+      problems = checkSheet(
+        next,
+        grown,
+        planned?.seconds ?? null,
+        before,
+        narratorRuleOf(show.brief, grown),
+        show.brief.audience,
+      );
     } else {
       next = mendExplainerLines(scene.sheet, body);
       problems = checkExplainer(next, {
@@ -1488,6 +1775,8 @@ export class StudioService {
               show.bible,
               planned?.seconds ?? null,
               await this.endBefore(episode.id, scene.position, show.bible),
+              narratorRuleOf(show.brief, show.bible),
+              show.brief.audience,
             )
           : []
         : checkExplainer(sheet, {
@@ -1713,6 +2002,20 @@ export class StudioService {
     scenes: StudioSceneRecord[],
     watermark: boolean,
   ): StudioPlayDto {
+    const made = scenes.filter((s) => s.sceneKey && s.audioKey && s.durationMs);
+    // The film's music is scored from its story: a story's, never an explainer's.
+    const story =
+      show.brief.format !== 'explainer'
+        ? storyOf(episode.outline?.story)
+        : null;
+    const score = story
+      ? scoreOf({
+          brief: show.brief,
+          story,
+          cast: show.bible?.characters ?? [],
+          scenes: made,
+        })
+      : undefined;
     return {
       episodeId: episode.id,
       title: episode.title,
@@ -1720,16 +2023,49 @@ export class StudioService {
       number: episode.number,
       watermark,
       madeWith: MADE_WITH,
-      scenes: scenes
-        .filter((s) => s.sceneKey && s.audioKey && s.durationMs)
-        .map((s, i, made) => ({
+      ...themeOfShow(show),
+      ...(score ? { score } : {}),
+      // An explainer's checkpoints, host, recap, "What next?" and teach-back (Ask 9).
+      ...explainerPlay(
+        show,
+        episode.outline,
+        made.map((s) => s.sheet),
+      ),
+      scenes: made.map((s, i) => {
+        // From the scene the film shows before it, by code (an explainer's
+        // may carry a thing across, go into a part or push on); the first
+        // comes up from black.
+        const side = (one: StudioSceneRecord) => ({
+          sheet: one.sheet,
+          scene: episode.outline?.scenes[one.position] ?? null,
+          // A continuous build carries its stage on (E5): only an
+          // explainer's scene, straight after the one it continues.
+          build:
+            one.sheet?.kind === 'explainer' &&
+            made[i - 1]?.position === one.position - 1
+              ? (episode.outline?.scenes[one.position]?.build ?? null)
+              : null,
+        });
+        // Into and out of an explainer's story clip (studio-clip): a
+        // dissolve or an iris in, and out of it the clip shrinks into its
+        // card on the next lesson's stage.
+        const joined = i
+          ? (clipJoin(
+              made[i - 1].sheet,
+              s.sheet,
+              show.brief.format,
+              showTheme(show.brief, show.bible),
+            ) ??
+            joinFor(side(made[i - 1]), side(s), show.bible?.pictures ?? []))
+          : { join: 'dip' as const };
+        return {
           id: s.id,
           title: s.sheet?.title ?? `Scene ${s.position + 1}`,
           durationMs: s.durationMs!,
           transition: s.sheet?.transition ?? 'cut',
-          // From the scene the film shows before it; the first comes up from black.
-          join: i ? joinOf(made[i - 1].sheet, s.sheet) : 'dip',
-        })),
+          ...joined,
+        };
+      }),
     };
   }
 
@@ -1820,10 +2156,52 @@ export class StudioService {
     return this.playOf(show, episode, scenes, watermarked);
   }
 
+  /**
+   * "Now you explain it" on an explainer's end card: the viewer's words
+   * checked against its points (studio-engage), by its maker or, on a
+   * shared film, by anyone with its link.
+   */
+  async teachBack(
+    userId: string,
+    episodeId: string,
+    answer: unknown,
+  ): Promise<StudioTeachBackDto> {
+    const { show, episode } = await this.requireEpisode(userId, episodeId);
+    return this.checkTeachBack(show, episode, answer);
+  }
+
+  async teachBackShared(
+    token: string,
+    answer: unknown,
+  ): Promise<StudioTeachBackDto> {
+    const { show, episode } = await this.shared(token);
+    return this.checkTeachBack(show, episode, answer);
+  }
+
+  private async checkTeachBack(
+    show: StudioShowRecord,
+    episode: StudioEpisodeRecord,
+    answer: unknown,
+  ): Promise<StudioTeachBackDto> {
+    const checked = await teachBack(
+      this.llm,
+      (usage) => this.record(episode.id, 'studio_teach_back', usage),
+      show,
+      episode.outline,
+      answer,
+    );
+    if (!checked)
+      throw new ValidationError(
+        'Write a sentence or two explaining what the film taught.',
+      );
+    return checked;
+  }
+
   async sharedFile(
     token: string,
     sceneId: string,
-    what: 'scene' | 'audio',
+    /** A thumb: a story clip's still, the card of it the next lesson shows. */
+    what: 'scene' | 'audio' | 'thumb',
   ): Promise<string> {
     const { episode } = await this.shared(token);
     const scene = await this.studio.findScene(sceneId);
@@ -1834,7 +2212,7 @@ export class StudioService {
 
   private async record(
     episodeId: string,
-    task: 'studio_chat' | 'studio_write',
+    task: 'studio_chat' | 'studio_write' | 'studio_teach_back',
     usage: LlmUsage,
   ): Promise<void> {
     await this.calls

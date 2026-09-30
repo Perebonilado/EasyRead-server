@@ -3,6 +3,7 @@ import type {
   SceneVoiceEngine,
   VoiceCast,
 } from '../domain/scene-voice';
+import type { VoiceRates } from '../domain/scene-pace';
 
 /**
  * The voices the worker can speak with, as it said when it last started:
@@ -21,6 +22,8 @@ export interface AppSettingsRecord {
   sceneVoice: SceneVoiceEngine | null;
   /** The admin's voices for the narrator and each kind of character, by engine: ElevenLabs' and Cartesia's. */
   voiceCast: Partial<Record<ListedEngine, VoiceCast>>;
+  /** Each voice's measured rate (voice:calibrate); absent or empty until measured. */
+  voiceRates?: VoiceRates;
   /** Null until a worker has started since there were settings. */
   worker: WorkerVoices | null;
   changedBy: string | null;
@@ -34,6 +37,8 @@ export interface AppSettingsRepository {
     patch: {
       sceneVoice?: SceneVoiceEngine | null;
       voiceCast?: AppSettingsRecord['voiceCast'];
+      /** Rates measured, laid over those kept, voice by voice. */
+      voiceRates?: VoiceRates;
     },
     changedBy: string,
     now: Date,

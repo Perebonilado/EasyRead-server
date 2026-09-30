@@ -17,9 +17,16 @@
  */
 import { createHash } from 'node:crypto';
 import {
+  personaOf,
+  storyOf,
+  type Persona,
+  type StudioStory,
+} from './studio-story';
+import {
   FIGURE_POSES,
   FIGURE_SIGNS,
   PLAIN_FIGURE,
+  figureFor,
   figureOf,
   isGear,
   type FigureFace,
@@ -31,6 +38,13 @@ import { ASKED_FACES, KIT_FACES } from '../scene-figure';
 import { animalOf, type AnimalSpec } from '../scene-animal';
 import { creatureOf, type CreatureSpec } from '../scene-creature';
 import { faceNamed } from '../scene-feeling';
+import {
+  FACE_OF_RECIPE,
+  RECIPE_NAMES,
+  RECIPE_OF_FACE,
+  recipeNamed,
+  type FaceRecipe,
+} from '../scene-face-rig';
 import {
   ACTION_DOINGS,
   FEATURE_KINDS,
@@ -87,6 +101,20 @@ import {
   type StoryWeather,
   type StoryWorld,
 } from '../scene-story';
+import { genreNamed, toneNamed } from './studio-heard';
+import { nextQuestionsOf } from './studio-end';
+import { THEME_IDS, type ThemeId } from '../scene-themes';
+import {
+  briefDocumentOf,
+  type BriefDocument,
+  type PageRange,
+} from './studio-document';
+import {
+  AUDIENCE_BAND,
+  BAND_AUDIENCE,
+  whoOf,
+  type AudienceProfile,
+} from './studio-audience';
 
 // ── The brief ─────────────────────────────────────────────────────────────
 
@@ -114,15 +142,88 @@ export type StudioTone = (typeof STUDIO_TONES)[number];
 /** How long an episode may be, in minutes. */
 export const EPISODE_MINUTES = [0.5, 5] as const;
 
+/**
+ * Who tells a story (studio-story-plan §2): no one (a pure film, carried
+ * by lines and action), lightly (a line to open or close a scene, and to
+ * bridge between them), a storyteller throughout, or one of the cast
+ * telling it in their own voice.
+ */
+export const NARRATOR_MODES = [
+  'none',
+  'light',
+  'storyteller',
+  'character',
+] as const;
+export type NarratorMode = (typeof NARRATOR_MODES)[number];
+
+/** What kind of story it is (§2, §3C). */
+export const STUDIO_GENRES = [
+  'comedy',
+  'adventure',
+  'mystery',
+  'drama',
+  'fable',
+  'slice-of-life',
+  'romance',
+  'dark-comedy',
+  'spooky',
+] as const;
+export type StudioGenre = (typeof STUDIO_GENRES)[number];
+
+/** How it ends. */
+export const STUDIO_ENDINGS = [
+  'happy',
+  'bittersweet',
+  'twist',
+  'open',
+  'moral',
+] as const;
+export type StudioEnding = (typeof STUDIO_ENDINGS)[number];
+
+/** How fast it goes: its scenes, its cuts, its jokes. */
+export const STUDIO_PACES = ['gentle', 'lively', 'snappy'] as const;
+export type StudioPace = (typeof STUDIO_PACES)[number];
+
+/** How it looks and moves: the animation style presets (§2.1, studio-style.ts). */
+export const STUDIO_STYLES = [
+  'picture-book',
+  'bold-cartoon',
+  'sitcom',
+  'adventure',
+  'cosy',
+] as const;
+export type StudioStyle = (typeof STUDIO_STYLES)[number];
+
+/**
+ * The genres for an audience (§3C): dark comedy is for adults, and for
+ * teens kept mild; never for children, whatever is asked. Anything else
+ * suits everyone, told for their age.
+ */
+export function genreFor(
+  genre: StudioGenre | null | undefined,
+  audience: StudioAudience | null,
+): StudioGenre | null {
+  if (!genre) return null;
+  if (genre === 'dark-comedy' && audience !== 'adults' && audience !== 'teens')
+    return 'comedy';
+  return genre;
+}
+
 export interface StudioBrief {
   format: StudioFormat | null;
   /** What it is about, in the maker's own words. */
   idea: string;
+  /** Whom it is for, in four words: derived from `who` where the maker said more. */
   audience: StudioAudience | null;
+  /**
+   * Whom it is for, as the maker said it (studio-audience.ts): an age
+   * band, what they know, their goal, their English. Absent until said.
+   */
+  who?: AudienceProfile;
   /** How long an episode runs. */
   minutes: number | null;
   tone: StudioTone | null;
-  /** A story's where and when: "a busy market in Lagos, today". */
+  /** A story's where and when: "a harbour town, today", "a castle long ago". */
   setting: string | null;
   /** A story's people, as the maker said them. */
   characters: string | null;
@@ -130,7 +231,47 @@ export interface StudioBrief {
   include: string | null;
   /** Text they gave to make it from: notes, a syllabus, a story. */
   source: string | null;
+  /**
+   * The document they gave in the chat (studio-document.ts), and the
+   * pages last chosen of it: an episode teaches its own pages, kept on it.
+   */
+  document?: BriefDocument;
+  /**
+   * The maker's own controls (studio-story-plan §2), each absent until
+   * they choose, when sensible ones follow from the idea and the audience.
+   */
+  narrator?: NarratorMode;
+  /** In "character" mode, who of the cast tells it: their name, or id once known. */
+  narratorCharacter?: string;
+  genre?: StudioGenre;
+  ending?: StudioEnding;
+  pace?: StudioPace;
+  style?: StudioStyle;
+  /**
+   * The maker's "a bit faster" or "slower" for an explainer's voice in the
+   * chat, as a multiplier on its pace (studio-pace): set by code, absent
+   * at 1.
+   */
+  voicePace?: number;
+  /** An explainer's look (scene-themes); absent, chosen by code (studio-look's themeFor). */
+  look?: ThemeId;
+  /**
+   * An explainer's host (studio-host), on or off, as the maker said;
+   * absent, on for children and off for grown-ups.
+   */
+  host?: boolean;
 }
+
+/** The maker's controls of a brief, each present only when chosen. */
+export const BRIEF_CONTROLS = [
+  'narrator',
+  'narratorCharacter',
+  'genre',
+  'ending',
+  'pace',
+  'style',
+  'look',
+] as const;
 
 export const EMPTY_BRIEF: StudioBrief = {
   format: null,
@@ -176,7 +317,7 @@ export function briefOf(
     raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
   const has = (key: string) => said[key] !== undefined && said[key] !== null;
   const minutes = Number(said.minutes);
-  return {
+  const out: StudioBrief = {
     format: has('format')
       ? (oneOf(STUDIO_FORMATS)(said.format) ?? base.format)
       : base.format,
@@ -193,8 +334,11 @@ export function briefOf(
             ) * 2,
           ) / 2
         : base.minutes,
+    // A tone in other words is the one it belongs to: "dry and ironic" is funny.
     tone: has('tone')
-      ? (oneOf(STUDIO_TONES)(said.tone) ?? base.tone)
+      ? (oneOf(STUDIO_TONES)(said.tone) ??
+        toneNamed(text(said.tone, 60)) ??
+        base.tone)
       : base.tone,
     setting: has('setting') ? textOrNull(said.setting) : base.setting,
     characters: has('characters')
@@ -202,6 +346,69 @@ export function briefOf(
       : base.characters,
     include: has('include') ? textOrNull(said.include, 600) : base.include,
     source: has('source') ? textOrNull(said.source, SOURCE_CHARS) : base.source,
+  };
+  // Whom it is for: a profile said sets the four words; four words said
+  // that are not the profile's take its band back to theirs.
+  const document = has('document')
+    ? (briefDocumentOf(said.document) ?? base.document)
+    : base.document;
+  let who = has('who') ? whoOf(said.who, base.who) : base.who;
+  if (who && has('who')) out.audience = BAND_AUDIENCE[who.band];
+  else if (who && out.audience && BAND_AUDIENCE[who.band] !== out.audience)
+    who = whoOf({ band: AUDIENCE_BAND[out.audience] }, who);
+  // The controls: each as said, else as it was; absent until chosen.
+  const narrator = has('narrator')
+    ? (oneOf(NARRATOR_MODES)(said.narrator) ?? base.narrator)
+    : base.narrator;
+  const narratorCharacter =
+    narrator === 'character'
+      ? has('narratorCharacter')
+        ? text(said.narratorCharacter, 40) || base.narratorCharacter
+        : base.narratorCharacter
+      : undefined;
+  const genre = genreFor(
+    has('genre')
+      ? (oneOf(STUDIO_GENRES)(said.genre) ??
+          genreNamed(text(said.genre, 60)) ??
+          base.genre)
+      : base.genre,
+    out.audience,
+  );
+  const ending = has('ending')
+    ? (oneOf(STUDIO_ENDINGS)(said.ending) ?? base.ending)
+    : base.ending;
+  const pace = has('pace')
+    ? (oneOf(STUDIO_PACES)(said.pace) ?? base.pace)
+    : base.pace;
+  const style = has('style')
+    ? (oneOf(STUDIO_STYLES)(said.style) ?? base.style)
+    : base.style;
+  const nudge = has('voicePace') ? Number(said.voicePace) : base.voicePace;
+  const voicePace =
+    nudge !== undefined &&
+    Number.isFinite(nudge) &&
+    nudge >= 0.8 &&
+    nudge <= 1.2
+      ? Math.round(nudge * 1000) / 1000
+      : base.voicePace;
+  const look = has('look')
+    ? (oneOf(THEME_IDS)(said.look) ?? base.look)
+    : base.look;
+  const host =
+    has('host') && typeof said.host === 'boolean' ? said.host : base.host;
+  return {
+    ...out,
+    ...(document ? { document } : {}),
+    ...(who ? { who } : {}),
+    ...(narrator ? { narrator } : {}),
+    ...(narratorCharacter ? { narratorCharacter } : {}),
+    ...(genre ? { genre } : {}),
+    ...(ending ? { ending } : {}),
+    ...(pace ? { pace } : {}),
+    ...(style ? { style } : {}),
+    ...(voicePace && voicePace !== 1 ? { voicePace } : {}),
+    ...(look ? { look } : {}),
+    ...(typeof host === 'boolean' ? { host } : {}),
   };
 }
 
@@ -235,6 +442,22 @@ export const TONE_MOOD: Record<StudioTone, SceneMood> = {
 
 /** Spoken words a second, for reckoning how long a scene runs before it is voiced. */
 export const WORDS_A_SECOND = 2.4;
+
+/**
+ * An explainer outline's `teach`, words a second of its scene: a little
+ * fuller than the narration (the writer keeps to its main ideas), and
+ * the one figure the outline's prompt, its check and the writer's
+ * "fuller" note all use.
+ */
+export const TEACH_WORDS_A_SECOND = 2.6;
+
+/**
+ * The most a scene's words may run over what its seconds hold before it
+ * is fuller than it can say: the writer's cap on its narration, the
+ * outline check's on its teach, and the writer's note to keep to the
+ * main ideas.
+ */
+export const FULLEST = 1.3;
 
 // ── The bible ─────────────────────────────────────────────────────────────
 
@@ -294,6 +517,15 @@ export interface StudioCharacter {
    * absent until then.
    */
   drawn?: string;
+  /**
+   * Who they are (studio-story-plan §1.2): want, need, flaw, fear,
+   * specific traits, how they talk, their habits, relationships and arc.
+   * Kept for the show, so every episode keeps it. Absent until a story
+   * is developed with them.
+   */
+  persona?: Persona;
+  /** An explainer's host (studio-host): opens its films, asks their questions, may act in its clips. */
+  host?: true;
 }
 
 export interface StudioSet {
@@ -319,7 +551,7 @@ export interface StudioSet {
  * scene names it, as new places and people are.
  */
 export interface StudioFeature {
-  /** Its id in every sheet: the word for it, "gate", "danfo". */
+  /** Its id in every sheet: the word for it, "gate", "bus". */
   id: string;
   name: string;
   /** One of the list's kinds, or "drawn": one of the show's own, which the artist draws. */
@@ -328,6 +560,12 @@ export interface StudioFeature {
   spot: Spot | 'back';
   /** Whether it opens and shuts: a gate, a door, a window. */
   opens: boolean;
+  /**
+   * The same door seen from its other side, on another set
+   * (studio-interactions-plan §2.1): one who goes through it at the end of
+   * a scene there comes in through this one as the next scene here opens.
+   */
+  link?: { set: string; feature: string };
 }
 
 /** The kinds the stage draws as one particular thing, whatever they are called. */
@@ -352,6 +590,18 @@ function kindNamed(noun: string): FeatureKind | null {
   );
 }
 
+/** A feature's link to the same door on another set, when it is a sound one. */
+const linkOf = (raw: unknown): StudioFeature['link'] | null => {
+  if (!raw || typeof raw !== 'object') return null;
+  const { set, feature } = raw as Record<string, unknown>;
+  return typeof set === 'string' &&
+    typeof feature === 'string' &&
+    set &&
+    feature
+    ? { set: set.slice(0, 60), feature: feature.slice(0, 60) }
+    : null;
+};
+
 /**
  * A set's features made sound: each an id of its own, a kind from the
  * list (or the artist's), a spot. `others` are the show's characters and
@@ -375,9 +625,9 @@ export function featuresOf(
       // ("a wooden gate"), else the artist's to draw if its name could be
       // one: never a thing handled or carried, one of the cast, a place,
       // the ground or the weather.
-      // A kind the stage draws as one thing (a vehicle is a danfo, a stall
-      // a market stall) only when its name says so: "the half-built ark"
-      // put down as a vehicle is the artist's to draw, never a bus.
+      // A kind the stage draws as one thing (a vehicle is a road vehicle,
+      // a stall a market stall) only when its name says so: "the half-built
+      // ark" put down as a vehicle is the artist's to draw, never a bus.
       const given = oneOf(FEATURE_KINDS)(f.kind);
       const listed =
         given && (!ONE_LOOK.has(given) || FEATURE_WORDS[given].test(noun))
@@ -420,6 +670,7 @@ export function featuresOf(
             (f.opens || listed || kind === DRAWN)
               ? f.opens
               : kind !== DRAWN && OPENING_FEATURES.includes(kind),
+          ...(linkOf(f.link) ? { link: linkOf(f.link)! } : {}),
         },
       ];
     })
@@ -557,21 +808,30 @@ function freeId(id: string, taken: Set<string>): string {
   return out;
 }
 
-/** A person's figure as sent, made sound by the kit; plain when nothing usable came. */
-function figureFrom(raw: unknown, voice: StudioVoice): FigureSpec {
+/**
+ * A person's figure as sent, made sound by the kit. What it does not say
+ * (their skin, their hair, their top when nothing usable came) is chosen
+ * by their id, so no two plain people look alike and no one skin is
+ * everyone's by default.
+ */
+function figureFrom(
+  raw: unknown,
+  voice: StudioVoice,
+  seed: string,
+): FigureSpec {
   const age =
     voice === 'girl' || voice === 'boy'
       ? 'child'
       : voice === 'old woman' || voice === 'old man'
         ? 'elder'
         : 'adult';
-  if (!raw || typeof raw !== 'object')
-    return {
-      ...PLAIN_FIGURE,
-      age,
-      hair: voice === 'girl' || voice === 'woman' ? 'long' : PLAIN_FIGURE.hair,
-    };
-  return figureOf({ age, ...(raw as Record<string, unknown>) });
+  const plain = figureFor(seed, {
+    age,
+    top: PLAIN_FIGURE.top,
+    ...(voice === 'girl' || voice === 'woman' ? { hair: 'long' as const } : {}),
+  });
+  if (!raw || typeof raw !== 'object') return plain;
+  return figureOf({ age, ...(raw as Record<string, unknown>) }, plain);
 }
 
 /** A bible made sound: ids unique and kept, every character a voice, every person a figure. */
@@ -596,14 +856,15 @@ export function bibleOf(raw: unknown): StudioBible {
       // And only a creature the creature kit's, when its body is the kit's.
       const creature =
         kind === 'creature' && c.creature ? creatureOf(c.creature) : null;
+      const id = freeId(studioId(text(c.id, 40) || name), taken);
       return [
         {
-          id: freeId(studioId(text(c.id, 40) || name), taken),
+          id,
           name,
           kind,
           role: oneOf(STUDIO_ROLES)(c.role) ?? 'supporting',
           look: text(c.look, 300),
-          figure: kind === 'person' ? figureFrom(c.figure, voice) : null,
+          figure: kind === 'person' ? figureFrom(c.figure, voice, id) : null,
           // Kept only when there is one, so a character without is as it was.
           ...(animal ? { animal } : {}),
           ...(creature ? { creature } : {}),
@@ -623,6 +884,8 @@ export function bibleOf(raw: unknown): StudioBible {
           ...(typeof c.drawn === 'string' && /^[a-f0-9]{6,32}$/.test(c.drawn)
             ? { drawn: c.drawn }
             : {}),
+          ...(personaOf(c.persona) ? { persona: personaOf(c.persona)! } : {}),
+          ...(c.host === true ? { host: true as const } : {}),
         },
       ];
     });
@@ -704,13 +967,56 @@ export interface OutlineScene {
   teach: string | null;
   /** An explainer's scene: its small ideas, each with what to show for it. */
   points: string[];
+  /** An explainer made from a document: the pages it teaches, first and last. Absent otherwise. */
+  pages?: PageRange;
+  /**
+   * An explainer's scene that goes inside a part of what the scene before
+   * ended on ("nucleus"): the film zooms into it (Ask 4 D). Code decides,
+   * and dissolves where it cannot. Absent or null, none said.
+   */
+  into?: string | null;
+  /**
+   * An explainer's scene that is a story clip (studio-clip, Ask 5): a
+   * short acted moment in `set` with `cast`, showing what `teach` says in
+   * one line, written as a story's scene is. Absent, a lesson scene (and a
+   * story's scene in a story).
+   */
+  kind?: OutlineKind;
+  /** A clip's: the narrator's line in the lesson after it that points back to it. Absent otherwise. */
+  hook?: string;
+  /**
+   * An explainer's scene in a continuous build (studio-explainer-plan,
+   * part C): "start" begins a diagram the scenes after it grow, "continue"
+   * carries on the one before's. Set by the writer and by code
+   * (studio-build withBuilds). Absent or null, a scene of its own.
+   */
+  build?: 'start' | 'continue' | null;
 }
+
+/** What an explainer's scene is: a lesson page, or a short acted story clip. */
+export const OUTLINE_KINDS = ['lesson', 'clip'] as const;
+export type OutlineKind = (typeof OUTLINE_KINDS)[number];
+
+/** How long a story clip runs, least and most, in seconds (studio-clip gates it). */
+export const CLIP_SECONDS = [6, 20] as const;
 
 export interface StudioOutline {
   title: string;
   /** The episode in a sentence. */
   logline: string;
   scenes: OutlineScene[];
+  /**
+   * The story it was built from (studio-story.ts): the premise, the beat
+   * sheet and the scene plan. Kept with the outline; absent for an
+   * explainer, and for an outline written before story development.
+   */
+  story?: StudioStory;
+  /**
+   * An explainer's "What next?" (studio-end): two or three questions a
+   * curious viewer might ask after it, each a next episode. Written with
+   * the outline; absent for a story, or when none were.
+   */
+  next?: string[];
 }
 
 export const MAX_SCENES = 12;
@@ -720,7 +1026,11 @@ export const SCENE_SECONDS = [10, 90] as const;
 export function outlineOf(raw: unknown): StudioOutline {
   const said =
     raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+  const story = storyOf(said.story);
+  const next = nextQuestionsOf(said.next, text(said.title, 80));
   return {
+    ...(story ? { story } : {}),
+    ...(next.length ? { next } : {}),
     title: text(said.title, 80) || 'Untitled',
     logline: text(said.logline, 300),
     scenes: (Array.isArray(said.scenes) ? said.scenes : [])
@@ -732,6 +1042,12 @@ export function outlineOf(raw: unknown): StudioOutline {
         const summary = text(s.summary, 500);
         if (!title && !summary) return [];
         const seconds = Number(s.seconds);
+        // A story clip is short: it may run below a lesson scene's least.
+        const clip = s.kind === 'clip';
+        const least = clip ? CLIP_SECONDS[0] : SCENE_SECONDS[0];
+        const pages = Array.isArray(s.pages)
+          ? s.pages.map(Number).filter((n) => Number.isFinite(n) && n >= 1)
+          : [];
         return [
           {
             title: title || summary.split(/[.!?]/)[0].slice(0, 60),
@@ -742,18 +1058,32 @@ export function outlineOf(raw: unknown): StudioOutline {
               .filter(Boolean)
               .slice(0, 6),
             seconds: Number.isFinite(seconds)
-              ? Math.round(
-                  Math.min(
-                    SCENE_SECONDS[1],
-                    Math.max(SCENE_SECONDS[0], seconds),
-                  ),
-                )
-              : 30,
+              ? Math.round(Math.min(SCENE_SECONDS[1], Math.max(least, seconds)))
+              : clip
+                ? CLIP_SECONDS[1]
+                : 30,
             teach: textOrNull(s.teach, 2000),
             points: (Array.isArray(s.points) ? s.points : [])
               .map((p) => text(p, 240))
               .filter(Boolean)
               .slice(0, 6),
+            ...(pages.length
+              ? {
+                  pages: [
+                    Math.floor(Math.min(...pages.slice(0, 2))),
+                    Math.floor(Math.max(...pages.slice(0, 2))),
+                  ] as PageRange,
+                }
+              : {}),
+            ...(textOrNull(s.into, 60) ? { into: textOrNull(s.into, 60) } : {}),
+            // Kept only for a clip, so a lesson's outline reads as it was.
+            ...(clip ? { kind: 'clip' as const } : {}),
+            ...(clip && textOrNull(s.hook, 300)
+              ? { hook: textOrNull(s.hook, 300)! }
+              : {}),
+            ...(s.build === 'start' || s.build === 'continue'
+              ? { build: s.build }
+              : {}),
           },
         ];
       }),
@@ -802,6 +1132,50 @@ export const BEAT_KINDS = [
 export type BeatKind = (typeof BEAT_KINDS)[number];
 
 /**
+ * What a line does to the one it is said to (studio-screenwriting W2,
+ * McKee's "dialogue is action"): every line is a move to change the
+ * other person. A line that only reports what the viewer can see has no
+ * aim. The acting reads it too: a threat is played as one.
+ */
+export const LINE_AIMS = [
+  'asks',
+  'begs',
+  'pleads',
+  'orders',
+  'refuses',
+  'warns',
+  'threatens',
+  'bargains',
+  'teases',
+  'jokes',
+  'accuses',
+  'comforts',
+  'confesses',
+  'dodges',
+  'lies',
+  'reveals',
+  'praises',
+] as const;
+export type LineAim = (typeof LINE_AIMS)[number];
+
+/** A line's aim as a writer said it: one of the list, or its plain verb ("ask", "threat"); null for none. */
+export function aimOf(value: unknown): LineAim | null {
+  if (typeof value !== 'string') return null;
+  const said = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z]/gu, '');
+  if (!said) return null;
+  if ((LINE_AIMS as readonly string[]).includes(said)) return said as LineAim;
+  const found = LINE_AIMS.find(
+    (aim) =>
+      aim.replace(/e?s$/u, '') === said.replace(/(?:e?s|ing|ed)$/u, '') ||
+      said.startsWith(aim.replace(/e?s$/u, '')),
+  );
+  return found ?? null;
+}
+
+/**
  * One beat of a scene, flat: every field present, null where its kind
  * does not use it. A line is said by `who` to `to`; a narration by the
  * narrator; an action is `who` doing `do` (toward `target`, or to `spot`,
@@ -816,7 +1190,11 @@ export interface SheetBeat {
   to: string | null;
   /** A line's words; the narrator's; for anything else what it shows, unspoken. */
   say: string;
-  feeling: FigureFace | null;
+  /**
+   * The face shown: one of the kit's faces, or any of the rigged face's
+   * recipes ("smug", "worried"). On a line, the face it is said with.
+   */
+  feeling: SheetFeeling | null;
   sign: FigureSign | null;
   do: DoingId | null;
   /** The thing handled: one of the lists', or one of the show's own. */
@@ -837,7 +1215,58 @@ export interface SheetBeat {
   via?: string;
   /** What the writer asked for that is none of the doings, kept as they wrote it. */
   doSaid?: string;
+  /** A line's aim: what it does to the one it is said to (a threat, a bargain). Absent on a sheet written before aims, and on any other kind. */
+  aim?: LineAim;
+  /**
+   * What a line's speaker feels beneath the face they show (`feeling`),
+   * where the two part ways: "I'm fine" said sad, a brave face over fear,
+   * sarcasm. A recipe's name. Absent, they feel what they show.
+   */
+  felt?: FaceRecipe;
 }
+
+/** A face a sheet may ask for: one of the kit's, or a rigged face's recipe. */
+export type SheetFeeling = FigureFace | FaceRecipe;
+
+/** Every face a sheet may ask for, the kit's first: for the writer's schema. */
+export const SHEET_FEELINGS: readonly SheetFeeling[] = [
+  ...STUDIO_FACES,
+  ...RECIPE_NAMES.filter(
+    (name) => !(Object.values(RECIPE_OF_FACE) as string[]).includes(name),
+  ),
+];
+
+/**
+ * A face as a writer named it: one of the kit's faces as it is; else a
+ * rigged face's recipe (by its name, or in other words: "smirking" is
+ * smug), the kit's own name where a recipe is one of its faces ("joy" is
+ * happy); else the kit's nearest (faceNamed). Null for none.
+ */
+export function feelingNamed(value: unknown): SheetFeeling | null {
+  if (typeof value !== 'string') return null;
+  const face = asFace(value.trim().toLowerCase());
+  if (face) return face;
+  const recipe = recipeNamed(value);
+  if (recipe)
+    return (Object.values(RECIPE_OF_FACE) as string[]).includes(recipe)
+      ? (asFace(FACE_OF_RECIPE[recipe]) ?? recipe)
+      : recipe;
+  return faceNamed(value);
+}
+
+/** The kit's face for a sheet's: its own, or a recipe's nearest (what a drawing with no rigged face wears). */
+export function kitFaceOf(feeling: SheetFeeling): FigureFace {
+  return (
+    asFace(feeling) ??
+    asFace(FACE_OF_RECIPE[feeling as FaceRecipe]) ??
+    'neutral'
+  );
+}
+
+/** Whether a sheet's face is a recipe beyond the kit's own faces: the rigged face shows it as itself. */
+export const isOwnRecipe = (
+  feeling: SheetFeeling | null | undefined,
+): feeling is FaceRecipe => Boolean(feeling) && !asFace(feeling);
 
 /**
  * How someone is as a Studio scene opens: standing, sitting (on a seat
@@ -878,10 +1307,26 @@ export interface SheetProp {
   in?: string;
 }
 
-export const SHOTS = ['wide', 'close', 'two'] as const;
+/**
+ * The writer's shots: the whole stage, one close, two together; and hints
+ * the shot grammar takes (studio-views-plan §3.2): over the shoulder of
+ * `with` onto `on` ("ots"), the two face to face in profile ("profile"),
+ * `on` seen from low (a hero) or from high (small or sad).
+ */
+export const SHOTS = [
+  'wide',
+  'close',
+  'two',
+  'ots',
+  'profile',
+  'low',
+  'high',
+] as const;
 export type Shot = (typeof SHOTS)[number];
+/** The shots framed on two: `with` is kept for them. */
+export const TWO_SHOTS: ReadonlySet<Shot> = new Set(['two', 'ots', 'profile']);
 
-/** Where the camera is from a beat on: the whole stage, one person close, or two framed together. */
+/** Where the camera is from a beat on: the whole stage, one person close, two framed together, or one of the grammar's hints. */
 export interface SheetShot {
   beat: number;
   shot: Shot;
@@ -910,6 +1355,18 @@ export interface StorySheet {
   props: SheetProp[];
   beats: SheetBeat[];
   camera: SheetShot[];
+  /**
+   * Notes for the camera, as data (studio-screenwriting K5): a thing the
+   * story plants, handled on screen at this beat, wants a close shot of
+   * it (an insert) so the viewer notices it. Absent, none.
+   */
+  inserts?: SheetInsert[];
+}
+
+/** An insert shot asked for: the thing, at the beat that handles it (from 0). */
+export interface SheetInsert {
+  beat: number;
+  thing: string;
 }
 
 /** An explainer's scene: the narration and the storyboard, as the lesson writer writes a page. */
@@ -932,6 +1389,11 @@ const asFace = (value: unknown): FigureFace | null =>
   typeof value === 'string' && FIGURE_FACE_LIST.includes(value)
     ? (value as FigureFace)
     : null;
+/** A sheet's face as the rigged face's recipe: the kit's faces by theirs. */
+export const recipeOfFeeling = (
+  feeling: SheetFeeling | null | undefined,
+): FaceRecipe | null =>
+  feeling ? (RECIPE_OF_FACE[feeling] ?? (feeling as FaceRecipe)) : null;
 
 /**
  * A thing as a model or a person named it: one of the lists', else a
@@ -994,10 +1456,7 @@ export function beatOf(raw: unknown): SheetBeat | null {
         : null,
     say: text(b.say, 600),
     feeling:
-      kind === 'line' || kind === 'reaction'
-        ? (asFace(b.feeling) ??
-          (typeof b.feeling === 'string' ? faceNamed(b.feeling) : null))
-        : null,
+      kind === 'line' || kind === 'reaction' ? feelingNamed(b.feeling) : null,
     sign: kind === 'reaction' ? oneOf(FIGURE_SIGNS)(b.sign) : null,
     do: doing,
     prop,
@@ -1020,6 +1479,12 @@ export function beatOf(raw: unknown): SheetBeat | null {
   if (thing) out.thing = thing;
   if (via) out.via = featureIdOf(via);
   if (doSaid) out.doSaid = doSaid;
+  const aim = kind === 'line' ? aimOf(b.aim) : null;
+  if (aim) out.aim = aim;
+  // What is felt beneath the face shown: kept only where it differs.
+  const felt = kind === 'line' ? recipeNamed(text(b.felt, 40)) : null;
+  if (felt && felt !== 'neutral' && felt !== recipeOfFeeling(out.feeling))
+    out.felt = felt;
   return out;
 }
 
@@ -1090,6 +1555,17 @@ export function storySheetOf(raw: unknown): StorySheet {
       return [{ beat, shot, on: id(s.on) || null, with: id(s.with) || null }];
     })
     .sort((a, b) => a.beat - b.beat);
+  const inserts = (Array.isArray(said.inserts) ? said.inserts : [])
+    .slice(0, 6)
+    .flatMap((one: unknown): SheetInsert[] => {
+      if (!one || typeof one !== 'object') return [];
+      const s = one as Record<string, unknown>;
+      const beat = Math.round(Number(s.beat));
+      const thing = text(s.thing, 40);
+      return thing && Number.isFinite(beat) && beat >= 0 && beat < beats.length
+        ? [{ beat, thing }]
+        : [];
+    });
   return {
     kind: 'story',
     title: text(said.title, 80) || 'A scene',
@@ -1104,6 +1580,7 @@ export function storySheetOf(raw: unknown): StorySheet {
     props,
     beats,
     camera,
+    ...(inserts.length ? { inserts } : {}),
   };
 }
 

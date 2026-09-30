@@ -41,6 +41,8 @@ export interface PillPlace {
   w: number;
   h: number;
   size: number;
+  /** How much farther off its arrow than usual: an arrow too short to hold it beside it, on a build's board. */
+  lift?: number;
 }
 
 export const LABEL = {
@@ -71,6 +73,8 @@ const columnShare = (room: Rect) =>
 
 /** An arrow's label, as the player sets it: its size and the room around its words. */
 export const PILL = { size: 26, padX: 30, heightEm: 1.7, offset: 12 } as const;
+/** How far off its arrow a label on a build's board may be lifted, nearest first, when beside it is not clear. */
+export const PILL_LIFTS = [0, 16, 32, 56, 88, 128] as const;
 /** How far short of the things it joins an arrow stops: at its tail and at its head. */
 export const ARROW_GAP = { tail: 16, head: 26 } as const;
 
@@ -347,10 +351,30 @@ export function pillBox(path: Point[], pill: PillPlace): Rect {
   const { at, dir } = along(path, pill.t);
   const n = normalOf(dir);
   const reach =
-    Math.abs(n[0]) * (pill.w / 2) + Math.abs(n[1]) * (pill.h / 2) + PILL.offset;
+    Math.abs(n[0]) * (pill.w / 2) +
+    Math.abs(n[1]) * (pill.h / 2) +
+    PILL.offset +
+    (pill.lift ?? 0);
   const cx = at[0] + n[0] * pill.side * reach;
   const cy = at[1] + n[1] * pill.side * reach;
   return { x: cx - pill.w / 2, y: cy - pill.h / 2, w: pill.w, h: pill.h };
+}
+
+/**
+ * A lifted label's tie: from its arrow (a little off the line) to the
+ * near edge of its box, as the player draws it.
+ */
+export function tieOf(path: Point[], pill: PillPlace): Segment {
+  const { at, dir } = along(path, pill.t);
+  const n = normalOf(dir);
+  const box = pillBox(path, pill);
+  const edge = Math.abs(n[0]) * (pill.w / 2) + Math.abs(n[1]) * (pill.h / 2);
+  const cx = box.x + box.w / 2;
+  const cy = box.y + box.h / 2;
+  return [
+    [at[0] + n[0] * pill.side * 6, at[1] + n[1] * pill.side * 6],
+    [cx - n[0] * pill.side * edge, cy - n[1] * pill.side * edge],
+  ];
 }
 
 export const overlapArea = (a: Rect, b: Rect) =>
@@ -395,30 +419,58 @@ export const segmentsOf = (path: Point[]): Segment[] =>
 /**
  * An arrow's label placed on its arrow where it touches nothing: the
  * middle first, then either side of it, then nearer the ends; the least
- * crowded when nowhere is clear.
+ * crowded when nowhere is clear. `strict` (a build's board): at the
+ * arrow's middle, beside it or lifted farther off it, kept `pad` clear of
+ * every box and inside the stage's margin, or not set at all.
  */
 export function placePill(input: {
   label: string;
   path: Point[];
   avoid: { boxes: Rect[]; segments: Segment[] };
   stage: { w: number; h: number };
+  /** `inset`: how far in from the stage's edges it stays, within its margin. */
+  strict?: { pad: number; inset?: number };
 }): PillPlace | null {
   const w = Math.max(60, measureText(input.label, PILL.size, 600) + PILL.padX);
   const h = PILL.size * PILL.heightEm;
+  const pad = input.strict?.pad ?? 0;
+  const tries: { t: number; lift: number }[] = input.strict
+    ? PILL_LIFTS.map((lift) => ({ t: 0.5, lift }))
+    : [0.5, 0.4, 0.6, 0.3, 0.7].map((t) => ({ t, lift: 0 }));
   let best: { pill: PillPlace; cost: number } | null = null;
-  for (const t of [0.5, 0.4, 0.6, 0.3, 0.7])
+  for (const { t, lift } of tries)
     for (const side of [1, -1] as const) {
-      const pill: PillPlace = { t, side, w, h, size: PILL.size };
-      const box = pillBox(input.path, pill);
+      const pill: PillPlace = {
+        t,
+        side,
+        w,
+        h,
+        size: PILL.size,
+        ...(lift ? { lift } : {}),
+      };
+      const set = pillBox(input.path, pill);
+      const box = {
+        x: set.x - pad,
+        y: set.y - pad,
+        w: set.w + pad * 2,
+        h: set.h + pad * 2,
+      };
       let cost = 0;
       for (const other of input.avoid.boxes) cost += overlapArea(box, other);
       for (const segment of input.avoid.segments)
         if (crosses(segment, box, 4)) cost += w * h * 0.5;
+      // A label lifted off its arrow is tied back to it: the tie crosses nothing either.
+      if (lift) {
+        const tie = tieOf(input.path, pill);
+        for (const other of input.avoid.boxes)
+          if (crosses(tie, other, pad)) cost += w * h * 0.5;
+      }
+      const inset = input.strict?.inset ?? 0;
       const off =
-        Math.max(0, -box.x) +
-        Math.max(0, -box.y) +
-        Math.max(0, box.x + box.w - input.stage.w) +
-        Math.max(0, box.y + box.h - input.stage.h);
+        Math.max(0, inset - box.x) +
+        Math.max(0, inset - box.y) +
+        Math.max(0, box.x + box.w - (input.stage.w - inset)) +
+        Math.max(0, box.y + box.h - (input.stage.h - inset));
       cost += off * h * 4;
       // Nearer the middle is better, all else equal.
       cost += Math.abs(t - 0.5) * 2;
@@ -427,6 +479,7 @@ export function placePill(input: {
     }
   // Nowhere clear on an arrow too short for it: better no label than one
   // on top of something.
+  if (input.strict) return null;
   return best && best.cost < w * h * 0.05 ? best.pill : null;
 }
 
@@ -1027,7 +1080,15 @@ export interface Ink {
 }
 
 export interface Collision {
-  kind: 'words-words' | 'words-ink' | 'words-arrow' | 'words-off';
+  kind:
+    | 'words-words'
+    | 'words-ink'
+    | 'words-arrow'
+    | 'words-off'
+    /** On a build's board (scene-board): words or things overlapping at all. */
+    | 'board-overlap'
+    /** On a build's board: the camera's view cutting through a thing. */
+    | 'view-cuts';
   a: string;
   b: string;
 }

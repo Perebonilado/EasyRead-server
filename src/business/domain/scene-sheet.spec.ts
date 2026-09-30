@@ -7,7 +7,9 @@ import {
   figureSheet,
   introCallouts,
   measureSheet,
+  missingByCode,
   mouthOf,
+  drawnByCode,
   notDrawnYet,
   setsOf,
   SHEET_VERSION,
@@ -341,5 +343,71 @@ describe('a drawing asked to change, and what came back', () => {
     const rounder = drawnAlike(egg(190), egg(120));
     expect(rounder).toBeLessThan(0.8);
     expect(rounder).toBeGreaterThan(0.5);
+  });
+});
+
+describe('who code draws, and who is missing from a cast that code can draw', () => {
+  const pigeon = {
+    species: 'pigeon',
+    build: 'stout',
+    size: 'small',
+    coat: 'grey',
+    second: 'white',
+    pattern: 'belly',
+    ears: null,
+    tail: 'short',
+    mane: null,
+    horns: null,
+    wear: { neck: 'collar', back: null, head: null, feet: null },
+    wearColour: 'red',
+  } as never;
+  const one = (id: string, name: string, more: Record<string, unknown>) => ({
+    id,
+    name,
+    aliases: [],
+    role: 'main' as const,
+    look: '',
+    traits: [],
+    firstPage: 1,
+    met: 0,
+    voice: null,
+    ...more,
+  });
+  const bible = {
+    characters: [
+      one('dee', 'Dee', { kind: 'person' }),
+      one('arnie', 'Arnie', { kind: 'animal', animal: pigeon }),
+      one('mira', 'Mira', { kind: 'creature', look: 'a mermaid' }),
+      one('voice', 'The Voice', { kind: 'person', presence: 'heard' }),
+    ],
+    places: [],
+  } as never;
+  const script = {
+    cast: ['dee', 'arnie', 'mira', 'voice'].map((id) => ({
+      id,
+      kind: 'character',
+      ref: id,
+    })),
+  } as unknown as Pick<SceneScript, 'cast'>;
+
+  it('draws a person, an animal with a kit spec and a creature with one; never one only the artist can draw', () => {
+    expect(drawnByCode({ kind: 'person' })).toBe(true);
+    expect(drawnByCode({ kind: 'animal', animal: pigeon })).toBe(true);
+    expect(drawnByCode({ kind: 'animal', look: 'a grey pigeon' })).toBe(false);
+    expect(drawnByCode({ kind: 'animal', look: 'a grey pigeon' }, true)).toBe(
+      true,
+    );
+    expect(drawnByCode({ kind: 'creature', look: 'a mermaid' })).toBe(false);
+    expect(drawnByCode({ kind: null })).toBe(false);
+  });
+
+  it("names the pigeon missing from Richard's cast, never someone kept, only heard or the artist's", () => {
+    const sheet = {} as CharacterSheet;
+    expect(
+      missingByCode(script, bible, { dee: sheet }).map((c) => c.id),
+    ).toEqual(['arnie']);
+    expect(missingByCode(script, bible, { dee: sheet, arnie: sheet })).toEqual(
+      [],
+    );
   });
 });

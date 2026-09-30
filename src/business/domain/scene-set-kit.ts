@@ -1,12 +1,12 @@
 /**
  * The scenery pieces L3 adds (studio-scenery-plan §5.3, §5.7): the
  * clutter that makes a place busy and lived in (poles and wires, bins,
- * plastic chairs, a laundry line, a generator, a parked car, an okada,
+ * plastic chairs, a laundry line, a generator, a parked car, a motorbike,
  * water drums, a bicycle, a street sign, a hydrant, clay pots, a
  * woodpile), and the pieces the packs need: an ancient riverside's
  * obelisk, temple columns, reeds and palm grove; a city's subway
- * entrance, streetlamp, taxi and hot-dog cart; a Lagos street's umbrella
- * stall, a danfo parked, a gutter bridge.
+ * entrance, streetlamp, taxi, bus and hot-dog cart; a West African
+ * street's umbrella stall, a danfo parked, a gutter bridge.
  *
  * Each is drawn at its real size in the kit's units (a metre is about
  * 132), so it stands true beside the people wherever it is placed. Signs
@@ -16,6 +16,13 @@
 import { CLOTH, COATS, KIT_EXTRAS, SET_COLOURS, FIGURE_INK } from './scene-ink';
 import { segment } from './scene-set-pieces';
 import type { SceneryPiece } from './scene-set-scenery';
+import { drawVehicleKit, type VehicleKitKind } from './scene-vehicles';
+
+/** A vehicle of the kit (scene-vehicles) standing parked, side on, as scenery: drawn as the stage's are, with no rig. */
+function parked(kind: VehicleKitKind, colour: string): SceneryPiece {
+  const drawn = drawVehicleKit(kind, { colour, plain: true });
+  return { svg: drawn.svg, viewBox: drawn.viewBox };
+}
 import {
   circle,
   flatRect,
@@ -39,7 +46,7 @@ export const KIT_KINDS = [
   'laundry line',
   'generator',
   'parked car',
-  'okada',
+  'motorbike',
   'water drum',
   'bicycle',
   'street sign',
@@ -55,8 +62,9 @@ export const KIT_KINDS = [
   'subway entrance',
   'streetlamp',
   'taxi',
+  'bus',
   'hot dog cart',
-  // A Lagos street's.
+  // A West African street's.
   'umbrella stall',
   'danfo',
   'gutter bridge',
@@ -74,7 +82,6 @@ const LEAF = SET_COLOURS.leaves;
 const LEAF_DARK = KIT_EXTRAS['dark leaf'];
 const PAPER = KIT_EXTRAS.paper;
 const STEEL = KIT_EXTRAS.steel;
-const GLASS = KIT_EXTRAS.glass;
 const GOLD = KIT_EXTRAS.gold;
 const CONCRETE = KIT_EXTRAS.concrete;
 const STONE = SET_COLOURS.stone;
@@ -87,56 +94,6 @@ const wheel = (x: number, r: number, rim = STEEL) =>
   circle(x, -r, r, TYRE) +
   circle(x, -r, r * 0.55, rim) +
   circle(x, -r, r * 0.16, DARK);
-
-/** A car side on, `long` metres long: its body, its windows and its wheels; a taxi's sign on its roof. */
-function car(colour: string, long: number, taxi: boolean): string {
-  const L = m(long) / 2;
-  const sill = -m(0.35);
-  const belt = -m(0.95);
-  const roof = -m(1.42);
-  const body = poly([
-    [-L, sill],
-    [-L, belt + 18],
-    [-L + m(0.35), belt],
-    [-L + m(1.15), belt],
-    [-L + m(1.55), roof],
-    [L - m(1.35), roof],
-    [L - m(0.8), belt],
-    [L - m(0.15), belt + 10],
-    [L, belt + 30],
-    [L, sill],
-  ]);
-  const glass = poly([
-    [-L + m(1.3), belt - 6],
-    [-L + m(1.62), roof + 10],
-    [-2, roof + 10],
-    [-2, belt - 6],
-  ]);
-  const glass2 = poly([
-    [8, belt - 6],
-    [8, roof + 10],
-    [L - m(1.42), roof + 10],
-    [L - m(0.95), belt - 6],
-  ]);
-  return (
-    shadowOf(L * 0.9) +
-    shape(body, colour) +
-    shape(glass, GLASS) +
-    shape(glass2, GLASS) +
-    line(
-      `M${r1(-L + 20)},${r1(belt + 40)} L${r1(L - 20)},${r1(belt + 40)}`,
-      FIGURE_INK,
-      2,
-    ) +
-    (taxi
-      ? rect(-m(0.3), roof - m(0.2), m(0.6), m(0.2), PAPER, 4) +
-        flatRect(-L + 10, belt + 50, 2 * L - 20, 14, DARK)
-      : '') +
-    rect(L - 30, belt + 26, 26, 16, GOLD, 4) +
-    wheel(-L + m(0.85), m(0.34)) +
-    wheel(L - m(0.85), m(0.34))
-  );
-}
 
 /**
  * A piece of the kit's added scenery, drawn; `colour` is its own where it
@@ -291,53 +248,11 @@ export function drawKit(kind: KitKind, colour?: string): SceneryPiece {
       );
     }
     case 'parked car':
-      return framed(car(colour ?? CLOTH.blue, 4.2, false), [
-        -m(2.1),
-        -m(1.45),
-        m(4.2),
-        m(1.45),
-      ]);
+      return parked('car', colour ?? CLOTH.blue);
     case 'taxi':
-      return framed(car(colour ?? CLOTH.yellow, 4.4, true), [
-        -m(2.2),
-        -m(1.65),
-        m(4.4),
-        m(1.65),
-      ]);
-    case 'okada': {
-      // A motorbike on its stand: two wheels, its frame and tank, its
-      // seat, its handlebars and its lamp.
-      const c = colour ?? CLOTH.red;
-      const L = m(0.95);
-      const r = m(0.3);
-      return framed(
-        shadowOf(L) +
-          wheel(-L + r, r) +
-          wheel(L - r, r) +
-          line(
-            `M${r1(-L + r)},${r1(-r)} L${r1(-m(0.1))},${r1(-m(0.62))} L${r1(L - r)},${r1(-r)}`,
-            FIGURE_INK,
-            7,
-          ) +
-          line(
-            `M${r1(-L + r)},${r1(-r)} L${r1(-m(0.1))},${r1(-m(0.62))} L${r1(L - r)},${r1(-r)}`,
-            DARK,
-            3,
-          ) +
-          shape(
-            `M${r1(-m(0.35))},${r1(-m(0.62))} Q${r1(-m(0.1))},${r1(-m(0.86))} ${r1(m(0.3))},${r1(-m(0.72))} L${r1(m(0.2))},${r1(-m(0.55))} Z`,
-            c,
-          ) +
-          rect(-m(0.75), -m(0.76), m(0.5), m(0.1), DARK, 8) +
-          line(
-            `M${r1(m(0.42))},${r1(-m(0.6))} L${r1(m(0.62))},${r1(-m(1.08))} L${r1(m(0.5))},${r1(-m(1.12))}`,
-            FIGURE_INK,
-            4,
-          ) +
-          circle(m(0.7), -m(0.9), 12, GOLD),
-        [-L, -m(1.15), 2 * L, m(1.15)],
-      );
-    }
+      return parked('taxi', colour ?? CLOTH.yellow);
+    case 'motorbike':
+      return parked('motorbike', colour ?? CLOTH.red);
     case 'water drum': {
       const c = colour ?? CLOTH.blue;
       const W = m(0.3);
@@ -352,39 +267,8 @@ export function drawKit(kind: KitKind, colour?: string): SceneryPiece {
         [-W, -H - 8, 2 * W, H + 8],
       );
     }
-    case 'bicycle': {
-      const r = m(0.33);
-      const L = m(0.85);
-      const c = colour ?? CLOTH.teal;
-      const hubL: [number, number] = [-L + r, -r];
-      const hubR: [number, number] = [L - r, -r];
-      const seat: [number, number] = [-m(0.12), -m(0.92)];
-      const bars: [number, number] = [m(0.38), -m(0.98)];
-      const crank: [number, number] = [-m(0.02), -r];
-      const spokes = (x: number) =>
-        line(
-          `M${r1(x - r * 0.8)},${r1(-r)} L${r1(x + r * 0.8)},${r1(-r)} M${r1(x)},${r1(-r * 1.8)} L${r1(x)},${r1(-r * 0.2)}`,
-          FIGURE_INK,
-          1.4,
-        );
-      const frame = `M${r1(hubL[0])},${r1(hubL[1])} L${r1(seat[0])},${r1(seat[1] + 20)} L${r1(crank[0])},${r1(crank[1])} Z M${r1(seat[0])},${r1(seat[1] + 20)} L${r1(bars[0] - 10)},${r1(bars[1] + 20)} L${r1(crank[0])},${r1(crank[1])} M${r1(bars[0] - 10)},${r1(bars[1] + 20)} L${r1(hubR[0])},${r1(hubR[1])}`;
-      return framed(
-        shadowOf(L) +
-          circle(hubL[0], hubL[1], r, 'none') +
-          circle(hubR[0], hubR[1], r, 'none') +
-          spokes(hubL[0]) +
-          spokes(hubR[0]) +
-          line(frame, FIGURE_INK, 7) +
-          line(frame, c, 3.4) +
-          rect(seat[0] - 22, seat[1], 44, 10, DARK, 5) +
-          line(
-            `M${r1(bars[0] - 10)},${r1(bars[1] + 20)} L${r1(bars[0])},${r1(bars[1])} L${r1(bars[0] + 24)},${r1(bars[1] - 4)}`,
-            FIGURE_INK,
-            4,
-          ),
-        [-L, -m(1.05), 2 * L, m(1.05)],
-      );
-    }
+    case 'bicycle':
+      return parked('bicycle', colour ?? CLOTH.teal);
     case 'street sign': {
       // A pole with a plate on it: an arrow, a bar, a ring; never words.
       const c = colour ?? CLOTH.green;
@@ -775,51 +659,10 @@ export function drawKit(kind: KitKind, colour?: string): SceneryPiece {
         counter: true,
       };
     }
-    case 'danfo': {
-      // A danfo parked: the yellow minibus with its black stripes, its
-      // windows, and its roof rack loaded.
-      const L = m(2.5);
-      const c = colour ?? CLOTH.yellow;
-      const top = -m(2.05);
-      return framed(
-        shadowOf(L * 0.9) +
-          shape(
-            poly([
-              [-L, -m(0.35)],
-              [-L, top + 30],
-              [-L + 20, top],
-              [L - m(0.8), top],
-              [L - m(0.2), top + m(0.8)],
-              [L, top + m(0.9)],
-              [L, -m(0.35)],
-            ]),
-            c,
-          ) +
-          flatRect(-L, -m(0.95), 2 * L, 16, DARK) +
-          flatRect(-L, -m(0.75), 2 * L, 10, DARK) +
-          [0, 1, 2, 3]
-            .map((k) =>
-              rect(-L + 30 + k * m(0.95), top + 24, m(0.8), m(0.62), GLASS, 4),
-            )
-            .join('') +
-          shape(
-            poly([
-              [L - m(0.95), top + 24],
-              [L - m(0.72), top + 24],
-              [L - m(0.28), top + m(0.8)],
-              [L - m(0.95), top + m(0.8)],
-            ]),
-            GLASS,
-          ) +
-          rect(-L + 40, top - 20, 2 * L - m(1.2), 14, STEEL, 3) +
-          rect(-L + 70, top - 58, 90, 40, CLOTH.blue, 6) +
-          rect(-L + 180, top - 46, 120, 28, CLOTH.red, 6) +
-          rect(L - 24, -m(0.9), 24, 18, GOLD, 4) +
-          wheel(-L + m(0.8), m(0.4)) +
-          wheel(L - m(0.8), m(0.4)),
-        [-L, top - 58, 2 * L, -top + 58],
-      );
-    }
+    case 'bus':
+      return parked('bus', colour ?? CLOTH.blue);
+    case 'danfo':
+      return parked('danfo', colour ?? CLOTH.yellow);
     case 'gutter bridge': {
       // An open drain along the street and the slab laid over it to cross:
       // flat on the ground, and ground.

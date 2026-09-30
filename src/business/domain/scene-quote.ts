@@ -11,6 +11,7 @@
 import type { Callout } from './scene-callouts';
 import { measureText } from './scene-font';
 import { groupId } from './scene-ids';
+import { PAPER } from './scene-themes';
 
 export interface QuoteSpec {
   text: string;
@@ -24,8 +25,9 @@ const LEFT = 118;
 const RIGHT = 60;
 const TOP = 70;
 const RULE_X = 40;
-const INK = '#1F2A37';
-const ACCENT = '#E0663A';
+// Drawn in the paper theme's tokens: the player recolours them for any other theme (scene-themes).
+const INK = PAPER.ink;
+const ACCENT = PAPER.accent;
 
 /** A word reduced to what it is, to find a phrase in the passage. */
 const key = (word: string) =>

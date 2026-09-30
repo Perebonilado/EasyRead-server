@@ -29,7 +29,9 @@ import { JOIN_SECONDS, joinOf, joinsSeconds, type Join } from './studio-edit';
 import { describeBible } from './studio-words';
 import {
   ACTION_MOST_S,
+  CHILD_SEQUENCE_MOST_S,
   QUIET_MOST_S,
+  SEQUENCE_MOST_S,
   fliesS,
   placeThingId,
   quietItem,
@@ -148,8 +150,34 @@ describe('the Studio: a scene decided before it is drawn', () => {
     expect(bible.characters[2].figure).toBeNull();
     const twins = bibleOf({
       characters: [
-        { name: 'Ada', voice: 'girl', figure: { age: 'child', hair: 'afro' } },
-        { name: 'Ada', voice: 'girl', figure: { age: 'child', hair: 'afro' } },
+        {
+          name: 'Ada',
+          voice: 'girl',
+          figure: {
+            age: 'child',
+            hair: 'afro',
+            skin: 5,
+            hairColour: 'black',
+            topColour: 'green',
+            bottomColour: 'navy',
+            accentColour: 'red',
+            build: 'average',
+          },
+        },
+        {
+          name: 'Ada',
+          voice: 'girl',
+          figure: {
+            age: 'child',
+            hair: 'afro',
+            skin: 5,
+            hairColour: 'black',
+            topColour: 'green',
+            bottomColour: 'navy',
+            accentColour: 'red',
+            build: 'average',
+          },
+        },
       ],
       sets: [{ name: 'School' }],
     });
@@ -322,8 +350,8 @@ describe('the Studio: a scene decided before it is drawn', () => {
       who: 'mama',
       do: 'enter',
     });
-    // A feeling in other words is the nearest face.
-    expect(sheet.beats[mama].feeling).toBe('afraid');
+    // A feeling in other words is the rigged face's own for it: worried.
+    expect(sheet.beats[mama].feeling).toBe('worried');
     // She takes the fruit up before she gives it.
     const give = sheet.beats.findIndex((b) => b.do === 'give');
     expect(sheet.beats[give - 1]).toMatchObject({
@@ -708,7 +736,7 @@ describe('the words win', () => {
     expect(sheet.beats[both + 1]).toMatchObject({
       who: 'pip',
       do: 'wag',
-      say: 'Wags his tail.',
+      say: 'Pip wags his tail.',
     });
     // Words that name nothing the stage does: the closest it has, a nod.
     const odd = mendSheet(
@@ -1194,11 +1222,14 @@ describe('the quiet between lines', () => {
   });
 
   it('quickens even the actions past ten seconds, and never a quiet of pauses past six', () => {
-    const long = Array.from({ length: 8 }, () => action('tobi', 1.5));
+    // Two long actions and a look: an action's quiet (not a sequence),
+    // ten at most.
+    const long = [action('tobi', 5), item('tobi', 1.5), action('tobi', 5)];
     const { total, lengths, limit } = timeQuiet(long);
     expect(limit).toBe(ACTION_MOST_S);
     expect(total).toBe(ACTION_MOST_S);
-    expect(lengths.every((s) => s < 1.5 && s >= 0.75)).toBe(true);
+    expect(lengths[0]).toBeLessThan(5);
+    expect(lengths[2]).toBeLessThan(5);
     const pauses = Array.from({ length: 4 }, () => ({
       who: null,
       s: 2,
@@ -1209,7 +1240,63 @@ describe('the quiet between lines', () => {
     }));
     expect(timeQuiet(pauses)).toMatchObject({ total: QUIET_MOST_S, limit: 6 });
     // The voice keeps the longest quiet a stage asks.
-    expect(HOLD_LIMIT_S).toBe(ACTION_MOST_S);
+    expect(HOLD_LIMIT_S).toBe(SEQUENCE_MOST_S);
+  });
+
+  it('asks a line into a break-in only past twenty seconds for adults, fifteen for children', () => {
+    const breakIn = (n: number) =>
+      storySheetOf({
+        title: 'The fire escape',
+        set: 'market',
+        onStage: [{ who: 'tobi', spot: 'left' }],
+        beats: [
+          beat({ kind: 'line', who: 'tobi', say: 'Right. Up we go.' }),
+          ...Array.from({ length: n }, (_, k) =>
+            beat({
+              kind: 'action',
+              who: 'tobi',
+              do: k % 2 ? 'jump' : 'fall',
+              say: k % 2 ? 'Tobi jumps to the next rail.' : 'Tobi drops down.',
+            }),
+          ),
+          beat({ kind: 'line', who: 'tobi', say: 'In. I am in.' }),
+        ],
+      });
+    // The shortest run of moves that runs past fifteen seconds.
+    let n = 3;
+    const asked = (k: number) =>
+      timeQuiet(
+        mendSheet(breakIn(k), bible)
+          .sheet.beats.slice(1, -1)
+          .map((b) => quietItem(b)),
+      ).asked;
+    while (asked(n) <= CHILD_SEQUENCE_MOST_S + 0.05) n += 1;
+    expect(asked(n)).toBeLessThan(SEQUENCE_MOST_S);
+    const quiet = (audience: 'adults' | 'children') =>
+      checkSheet(
+        mendSheet(breakIn(n), bible).sheet,
+        bible,
+        null,
+        null,
+        null,
+        audience,
+      ).filter((p) => p.rule === 'quiet');
+    expect(quiet('adults')).toEqual([]);
+    expect(quiet('children')[0].message).toMatch(/; 15 at most/);
+  });
+
+  it("holds a physical sequence (a climb, a break-in) up to twenty seconds, or as a children's film asks", () => {
+    // Nine moves toward one goal, 13.5 seconds: played as written.
+    const climb = Array.from({ length: 9 }, () => action('maya', 1.5));
+    const played = timeQuiet(climb);
+    expect(played.limit).toBe(SEQUENCE_MOST_S);
+    expect(played.total).toBe(13.5);
+    expect(played.asked).toBe(13.5);
+    // For children, fifteen: sixteen seconds of it is quickened to fit.
+    const longer = Array.from({ length: 16 }, () => action('maya', 1));
+    const child = timeQuiet(longer, undefined, CHILD_SEQUENCE_MOST_S);
+    expect(child.limit).toBe(CHILD_SEQUENCE_MOST_S);
+    expect(child.total).toBe(CHILD_SEQUENCE_MOST_S);
   });
 
   it("gives Maya's throw its wind-up and settle in a crowded quiet, and the voice the room for it", () => {

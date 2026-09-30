@@ -1,4 +1,5 @@
 import type {
+  DocumentOrigin,
   DocumentSource,
   DocumentBrief,
   DocumentStatus,
@@ -17,6 +18,8 @@ export interface DocumentProps {
   sourceMimeType: string;
   sizeBytes: number;
   source: DocumentSource;
+  /** The Studio's own document, never listed among the reader's; absent, the reader's. */
+  origin?: DocumentOrigin;
   brief: DocumentBrief | null;
   sourceUrl: string | null;
   importManifest: ImportManifest | null;
@@ -81,6 +84,11 @@ export class Document {
 
   hide(): void {
     this.props.publishedAt = null;
+  }
+
+  /** Given to the Studio: read lightly, never listed in the library. */
+  isStudio(): boolean {
+    return this.props.origin === 'studio';
   }
 
   /** A PDF is already canonical, so it skips conversion entirely (§4.2). */

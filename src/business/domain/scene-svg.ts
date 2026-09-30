@@ -18,6 +18,7 @@ import { Text, type Element } from 'domhandler';
 import { elements, removeNode, textOf, walk } from './scene-dom';
 import { groupId, idKey, type DrawingThing } from './scene-script';
 import { liftCallouts, type Callout, type InkField } from './scene-callouts';
+import { clearDrawnWords } from './scene-drawn-words';
 import { renderSvg, type InkBox } from './scene-raster';
 import type { SetGround } from './scene-ground';
 import type { SetLayering } from './scene-set-layout';
@@ -818,7 +819,16 @@ export interface GatedDrawing {
   /** And what they wear, in words: as drawn, then in each outfit they change into ("red pyjamas", "a blue uniform and grey trousers"). */
   outfits?: string[];
   /** Drawn by a kit with rig 2 (studio-world-plan §4.6): what swings is drawn as chains. Absent, rig 1. */
-  rigVersion?: 2;
+  rigVersion?: 2 | 3;
+  /** On rig 3 (studio-views-plan §1.2), each view's group, front first: the person drawn from every side. */
+  views?: string[];
+  /** On rig 3, each view's arms (shoulder, elbow, hand), in its own units, as `joints` is the front's. */
+  viewJoints?: Partial<
+    Record<
+      'front' | '3q' | 'profile' | 'back3q' | 'back',
+      Record<'r' | 'l', [[number, number], [number, number], [number, number]]>
+    >
+  >;
   /** On rig 2, each part that swings (scene-dangles), its root in its own units. */
   dangles?: Dangle[];
   /** On rig 2, one who walks: how far one full stride carries them, in its own units, and how they go. */
@@ -1113,6 +1123,29 @@ export async function gateDrawing(
         );
     } catch (error) {
       mended.push(`labels left as drawn: ${(error as Error).message}`);
+    }
+  // Words the artist drew with no part to name, set clear of the rest of
+  // the drawing (scene-drawn-words): a title off the seal beside it.
+  if (!options.backdrop)
+    try {
+      const cleared = await clearDrawnWords(root, viewBox);
+      const done = cleared.filter((one) => one.did !== 'left');
+      if (done.length) {
+        mended.push(
+          `set ${done.length} run${done.length === 1 ? '' : 's'} of drawn words clear (${done.map((one) => `"${one.words}" off ${one.over.join(', ')}`).join('; ')})`,
+        );
+        const measured = await renderSvg(
+          render(root, { xmlMode: true, selfClosingTags: true }),
+        );
+        if (measured.ink && measured.ink.width > 0) ink = measured.ink;
+      }
+      const left = cleared.filter((one) => one.did === 'left');
+      if (left.length)
+        mended.push(
+          `drawn words left over the drawing: ${left.map((one) => `"${one.words}"`).join(', ')}`,
+        );
+    } catch (error) {
+      mended.push(`drawn words not measured: ${(error as Error).message}`);
     }
   svg = render(root, { xmlMode: true, selfClosingTags: true });
   const framed = options.backdrop ? viewBox : framedBox(viewBox, ink);

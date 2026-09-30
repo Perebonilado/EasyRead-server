@@ -25,10 +25,23 @@ export const STYLE_PACK_IDS = [
   'biblical-village',
   'west-african-town',
   'western-city',
+  'modern-town',
   'village-farm',
   'nature',
 ] as const;
 export type StylePackId = (typeof STYLE_PACK_IDS)[number];
+
+/**
+ * The packs of no one region: what a place is drawn in when the story's
+ * world names none. A present-day place with nothing to say where it is
+ * is a plain modern town (or a village, or out in nature), never one
+ * region's streets by default.
+ */
+export const NEUTRAL_PACKS: readonly StylePackId[] = [
+  'modern-town',
+  'village-farm',
+  'nature',
+];
 
 /** What a building's walls are made of. */
 export const WALL_KINDS = [
@@ -322,7 +335,7 @@ export const STYLE_PACKS: Record<StylePackId, StylePack> = {
     id: 'west-african-town',
     name: 'West African town (Lagos today)',
     words:
-      'Lagos and West African towns today: painted block houses with zinc roofs, kiosks and umbrella stalls, poles and wires, water tanks, danfos and okadas',
+      'Lagos and West African towns today: painted block houses with zinc roofs, kiosks and umbrella stalls, poles and wires, water tanks, danfos and okadas (motorbikes)',
     walls: [
       ['painted block', 0.55],
       ['plaster', 0.35],
@@ -377,7 +390,7 @@ export const STYLE_PACKS: Record<StylePackId, StylePack> = {
       'kiosk',
       'umbrella stall',
       'danfo',
-      'okada',
+      'motorbike',
       'generator',
       'gutter bridge',
       'poles',
@@ -395,7 +408,7 @@ export const STYLE_PACKS: Record<StylePackId, StylePack> = {
       'laundry line',
       'generator',
       'parked car',
-      'okada',
+      'motorbike',
       'water drum',
       'street sign',
       'basket',
@@ -521,6 +534,79 @@ export const STYLE_PACKS: Record<StylePackId, StylePack> = {
     },
     light: { day: S.sky, sun: E.gold, haze: '#dde5ea' },
     ambient: ['pigeons', 'birds', 'dogs'],
+  },
+  'modern-town': {
+    id: 'modern-town',
+    name: 'modern town',
+    words:
+      'a present-day town anywhere, of no one country: plain houses and flats, small shops with awnings, a school, trees and benches, parked cars and bicycles',
+    walls: [
+      ['plaster', 0.4],
+      ['painted block', 0.3],
+      ['brick', 0.2],
+      ['clapboard', 0.1],
+    ],
+    roofs: [
+      ['flat', 0.4],
+      ['tile', 0.35],
+      ['shingle', 0.25],
+    ],
+    windows: [
+      ['sash', 0.55],
+      ['shopfront', 0.3],
+      ['louvred', 0.15],
+    ],
+    extras: {
+      awning: 0.3,
+      balcony: 0.2,
+      stoop: 0.3,
+      parapet: 0.35,
+      signboard: 0.35,
+      waterTank: 0.05,
+      ac: 0.2,
+      satellite: 0.1,
+      chimney: 0.1,
+      lamp: 0.25,
+      flag: 0,
+      plants: 0.45,
+    },
+    proportions: {
+      storeyM: 3,
+      storeys: [1, 3],
+      widthM: [5, 9],
+      pitch: 0.4,
+      detail: 1,
+    },
+    buildings: ['house', 'shop', 'kiosk', 'classroom', 'tenement'],
+    grounds: ['paving', 'road', 'grass', 'path'],
+    backdrops: ['city', 'village', 'trees', 'hills'],
+    backdropFor: {},
+    scenery: [
+      'tree',
+      'bush',
+      'bench',
+      'streetlamp',
+      'bin',
+      'street sign',
+      'parked car',
+      'bicycle',
+      'plant',
+      'flowers',
+      'kiosk',
+    ],
+    clutter: ['bin', 'bench', 'plant', 'bicycle', 'parked car', 'street sign'],
+    density: 2,
+    palette: {
+      walls: [S.walls, COATS.cream, C.white, S.stone, C.yellow, S.water],
+      roofs: [S.roofs, COATS['dark grey'], C.grey],
+      doors: [C.blue, C.green, C.red, E['dark wood']],
+      trims: [C.white, E.paper],
+      awnings: [C.green, C.blue, C.red, C.teal],
+      tint: C.blue,
+      tintK: 0,
+    },
+    light: { day: S.sky, sun: E.gold, haze: S.walls },
+    ambient: ['birds', 'pigeons', 'dogs'],
   },
   'village-farm': {
     id: 'village-farm',
@@ -725,15 +811,19 @@ const PACK_WORDS: Record<StylePackId, [RegExp, number][]> = {
       /\b(?:lagos|danfos?|nigeria(?:n|ns)?|west africa(?:n)?|yoruba|igbo|hausa|accra|ghana(?:ian)?|abuja|ibadan|okadas?|kekes?|agbada|dakar|senegal(?:ese)?|lom[eé]|benin city|kano|port harcourt|surulere|ikeja|lekki|yaba)\b/iu,
       4,
     ],
-    [/\b(?:africa(?:n)?|zinc roofs?|compounds?)\b/iu, 1],
+    [/\bzinc roofs?\b/iu, 1],
   ],
   'western-city': [
     [
       /\b(?:new york|manhattan|brooklyn|harlem|london|paris|chicago|boston|toronto|philadelphia|san francisco|dublin|edinburgh)\b/iu,
       4,
     ],
+    [/\b(?:subway|skyscrapers?|brownstones?|terraced houses)\b/iu, 1],
+  ],
+  // A town or a city of no one country: the words for one, in any world.
+  'modern-town': [
     [
-      /\b(?:city|cities|downtown|subway|skyscrapers?|brownstones?|apartments?|high street|terraced houses)\b/iu,
+      /\b(?:city|cities|towns?|downtown|suburbs?|neighbou?rhoods?|apartments?|flats|high street|shopping (?:street|centre|center|mall))\b/iu,
       1,
     ],
   ],
@@ -746,7 +836,7 @@ const PACK_WORDS: Record<StylePackId, [RegExp, number][]> = {
   ],
   nature: [
     [
-      /\b(?:forests?|jungle|woods|beach|desert|rivers?|mountains?|lakes?|islands?|savannah?|wilderness|cave|seaside|ocean)\b/iu,
+      /\b(?:forests?|jungle|woods|beach|desert|rivers?|mountains?|lakes?|islands?|savannah?|wilderness|caves?|seaside|ocean|clearings?|glades?|valleys?|canyons?|waterfalls?|streams?|swamps?|marsh(?:es)?|tundra|glaciers?|volcano(?:es)?|reefs?|prairies?|grasslands?)\b/iu,
       0.5,
     ],
   ],
@@ -757,6 +847,7 @@ const PACK_ORDER: readonly StylePackId[] = [
   'ancient-near-east',
   'west-african-town',
   'western-city',
+  'modern-town',
   'village-farm',
   'nature',
 ];
@@ -799,6 +890,28 @@ export function packOfWorld(
   if (scores[first] < PACK_LEAST) return null;
   if (scores[first] - scores[second] < PACK_MARGIN) return null;
   return first;
+}
+
+/** An era long before today: a story set then is never a modern town. */
+const LONG_AGO =
+  /\b(?:ancient|b\.?c\.?e?|biblical|medieval|middle ages|prehistoric|stone age|bronze age|iron age|romans?|vikings?|pharaohs?|long ago|once upon a time|olden|fairy ?tales?|[1-9](?:st|nd|rd|th) century|1[0-8](?:st|nd|rd|th) century|1[0-8]\d\ds?)\b/iu;
+
+/**
+ * The pack a place is drawn in when neither the story's world nor its own
+ * words decide one, and none the painter chose will do: out in nature
+ * for a place its words say is (a forest, a beach), a village for a
+ * village or a farm, nature for a story long ago, and else a plain
+ * present-day town of no one country. Never one region's by default.
+ */
+export function plainPack(
+  world: StoryWorld | null | undefined,
+  placeWords = '',
+): StylePackId {
+  const scores = packScores(placeWords);
+  if (scores['village-farm'] > 0) return 'village-farm';
+  if (scores.nature > 0) return 'nature';
+  if (LONG_AGO.test(world?.era ?? '')) return 'nature';
+  return 'modern-town';
 }
 
 /** A pack named in words ("Lagos", "ancient Egypt", "west-african-town"); null for none. */

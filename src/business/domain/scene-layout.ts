@@ -19,6 +19,12 @@ import {
   type LabelPlace,
 } from './scene-labels';
 import { figureFrame } from './scene-figure';
+import {
+  KIT_PER_METRE,
+  spaceOut,
+  type NearPair,
+  type Spaced,
+} from './scene-spacing';
 import type { SceneLayout } from './scene-script';
 
 export const STAGINGS = {
@@ -254,9 +260,11 @@ export function captionLines(
   text: string,
   width: number,
   size: number,
+  /** The smallest it may be set: a caption's least unless said. */
+  least: number = CAPTION_SIZE.min,
 ): { lines: string[]; size: number } {
   const words = text.trim().split(/\s+/).filter(Boolean);
-  for (let s = size; s >= CAPTION_SIZE.min; s -= 2) {
+  for (let s = size; s >= least; s -= 2) {
     const lines: string[] = [];
     let current = '';
     for (const word of words) {
@@ -274,7 +282,7 @@ export function captionLines(
       return { lines, size: s };
   }
   // Still too long at the smallest: two lines, the second cut short.
-  const s = CAPTION_SIZE.min;
+  const s = least;
   const lines: string[] = [];
   let current = '';
   for (const word of words) {
@@ -295,6 +303,82 @@ export function captionLines(
   if (lines.join(' ') !== words.join(' '))
     lines[last] = `${lines[last].trimEnd()}…`;
   return { lines: lines.slice(0, 2), size: s };
+}
+
+/**
+ * Words broken into lines inside a width at one size: as many to a line
+ * as fit, and a word longer than the width broken in two with a hyphen,
+ * its first part as long as fits and never under three letters either
+ * side. Null when that is more than `most` lines.
+ */
+function brokenLines(
+  text: string,
+  width: number,
+  s: number,
+  most: number,
+): string[] | null {
+  const lines: string[] = [];
+  for (const word of text.trim().split(/\s+/).filter(Boolean)) {
+    const last = lines[lines.length - 1];
+    if (last !== undefined && measureText(`${last} ${word}`, s, 600) <= width) {
+      lines[lines.length - 1] = `${last} ${word}`;
+      continue;
+    }
+    if (measureText(word, s, 600) <= width) {
+      lines.push(word);
+      continue;
+    }
+    let cut = word.length - 3;
+    while (cut > 3 && measureText(`${word.slice(0, cut)}-`, s, 600) > width)
+      cut -= 1;
+    lines.push(`${word.slice(0, cut)}-`, word.slice(cut));
+  }
+  return lines.length <= most &&
+    lines.every((l) => measureText(l, s, 600) <= width)
+    ? lines
+    : null;
+}
+
+/**
+ * A drawing's caption set whole: as captionLines sets it, but where that
+ * would cut it short ("Consent and confidentiali…"), in up to three lines
+ * from the caption's least size down to CARD_LEAST, a word too long for
+ * the width broken with a hyphen. The caption's band is as tall as its
+ * lines (fitInSlot), so the drawing gives it the room.
+ */
+export function captionWhole(
+  text: string,
+  width: number,
+  size: number,
+): { lines: string[]; size: number } {
+  const set = captionLines(text, width, size);
+  if (!set.lines.some((line) => line.endsWith('…'))) return set;
+  for (let s = CAPTION_SIZE.min; s >= CARD_LEAST; s -= 2) {
+    const lines = brokenLines(text, width, s, 3);
+    if (lines) return { lines, size: s };
+  }
+  return set;
+}
+
+/** The smallest a card's or a caption's words are set rather than cut short. */
+export const CARD_LEAST = 20;
+
+/**
+ * A card's words set whole in a width: two lines at most, down to
+ * CARD_LEAST, a word too long for the width broken with a hyphen.
+ */
+export function wholeWords(
+  text: string,
+  width: number,
+  size: number,
+): { lines: string[]; size: number } {
+  const fitted = captionLines(text, width, size, CARD_LEAST);
+  if (!fitted.lines.some((line) => line.endsWith('…'))) return fitted;
+  for (let s = size; s >= CARD_LEAST; s -= 2) {
+    const lines = brokenLines(text, width, s, 2);
+    if (lines) return { lines, size: s };
+  }
+  return fitted;
 }
 
 /** The largest size a run of text can be set at to fit a width, up to a ceiling. */
@@ -379,7 +463,7 @@ export function fitInSlot(
       Math.min(CAPTION_SIZE.max, slot.h * 0.11),
     );
     const caption = thing.caption
-      ? captionLines(thing.caption, slot.w * 0.96, base)
+      ? captionWhole(thing.caption, slot.w * 0.96, base)
       : null;
     const band = caption ? caption.lines.length * caption.size * LINE + 14 : 0;
     const art = {
@@ -510,6 +594,11 @@ export function fitInSlot(
       Math.floor((lines.size * slot.h) / tall),
     );
   }
+  // A card's words are never cut short ("Contracepti…"): the whole slot
+  // across, smaller down to CARD_LEAST, and a word too long for it even
+  // so broken where it may be, with a hyphen.
+  if (lines.lines.some((line) => line.endsWith('…')))
+    lines = wholeWords(thing.text, slot.w * 0.94, lines.size);
   const textH = lines.lines.length * lines.size * LINE;
   const padX = thing.style === 'title' ? 0 : lines.size * 0.9;
   const padY = lines.size * padding;
@@ -746,6 +835,16 @@ export function floorAt(
 }
 
 /**
+ * How big someone with their feet at `feet` is beside the people where
+ * they have always stood (`floor`), by the set's pinhole about its eye
+ * line: floorAt's own k, for feet anywhere on the ground, the floor's
+ * back and beyond it too.
+ */
+export function pinholeK(feet: number, floor: number, eye: number): number {
+  return Math.round(((feet - eye) / Math.max(1, floor - eye)) * 1000) / 1000;
+}
+
+/**
  * How someone at each place of a group stands in depth when nothing says
  * (studio-scenery-plan §4.1): one or two (a conversation) at the depth
  * people have always stood; three with the middle one a step back; four
@@ -798,12 +897,40 @@ export interface FeatureAcross {
   x: number;
   w: number;
   /** Its own ground, and how big someone is there beside the people: where one under or behind it stands; and where one up it stands, across and their feet's y. */
-  way?: { y: number; k: number; perch?: number; upX?: number };
+  way?: {
+    y: number;
+    k: number;
+    perch?: number;
+    upX?: number;
+    /** One up it stands in the middle of where things catch (a landing, a rung), not beside it: stairs, a ladder. */
+    upMiddle?: boolean;
+    /**
+     * The ground it stands on, where its feet are: where one beside it,
+     * behind it or under it stands. Its way may be above it (a bus's
+     * door sill, a stall's counter), where one goes in, not where one
+     * stands. Absent, its way's y.
+     */
+    ground?: number;
+  };
   /** The y of its seat, for one who sits on it. */
   seat?: number;
   /** Where one lies along it: its top's y, its head end and its foot end across, and where one sitting up in it sits across. */
   lies?: { y: number; head: number; foot: number; sits: number };
+  /** A body one stands beside, not before (a bus, a stall, a well, a crate): one by it stands clear of it, at its side. */
+  solid?: boolean;
 }
+
+/** The kinds of feature one by it stands clear of, at its side: its body is solid to the ground, and wide. */
+export const SOLID_BESIDE: ReadonlySet<string> = new Set([
+  'vehicle',
+  'stall',
+  'well',
+  'crate',
+]);
+/** How far one behind a feature stands back of its ground, as a share of the stage's height: behind it, never beside it. */
+export const BEHIND_BACK = 0.03;
+/** How much of their width either side of someone's middle their body fills: the kit's shoulders and hem. */
+export const BODY_HALF = 0.28;
 
 /**
  * How far the player sinks the kit's hips sitting down, as a share of the
@@ -861,6 +988,13 @@ export function layoutStations(input: {
   shares?: StationShares;
   /** The floor's depth: the camera's eye line on this stage, and how low the floor's front edge may come. Absent, everyone on one line, as before. */
   floor?: { eye: number; bottom: number };
+  /**
+   * Who are to be near whom at each step, and why (scene-spacing): two
+   * talking, one gone over to another, a thing handed over, a hug. With
+   * a scale, everyone is spaced as people stand: these near, no one in
+   * anyone's body.
+   */
+  near?: readonly (readonly NearPair[])[];
 }): Record<string, Place>[] {
   const { w: W, margin } = STAGINGS[input.staging];
   const { unit, floor, slot } = input.scale;
@@ -901,8 +1035,15 @@ export function layoutStations(input: {
       const feature = by ? input.features.get(by[1]) : undefined;
       if (by && feature) {
         const side = Number(by[2]) * (flip ? -1 : 1);
-        // At its end: over its edge a little, clear of its middle.
-        x = feature.x + side * (feature.w * 0.35 + w * 0.2);
+        // At its end: over its edge a little, clear of its middle; by a
+        // solid body (a bus), at its side, their body clear of it.
+        const reach = feature.solid
+          ? Math.max(
+              feature.w * 0.35 + w * 0.2,
+              feature.w / 2 + w * (BODY_HALF - 0.02),
+            )
+          : feature.w * 0.35 + w * 0.2;
+        x = feature.x + side * reach;
       }
     }
     return Math.min(W - margin - w * 0.3, Math.max(margin + w * 0.3, x));
@@ -912,9 +1053,13 @@ export function layoutStations(input: {
     string,
     { station: string; x: number; d?: number; asked?: number }
   >();
-  return input.steps.map((step) => {
+  return input.steps.map((step, stepAt) => {
     const out: Record<string, Place> = {};
     const placed: { id: string; x: number; w: number; low?: boolean }[] = [];
+    /** Where each stood the step before, for the side they keep when stepped apart. */
+    const before = new Map([...kept].map(([id, one]) => [id, one]));
+    /** Each one's body as spaceOut moves it, and the part of them to move with it. */
+    const bodies: (Spaced & { place: Place; size: { w: number } })[] = [];
     // Those who stay put first, then whoever moves, around them.
     const order = [...step.show].sort(
       (a, b) =>
@@ -954,7 +1099,21 @@ export function layoutStations(input: {
           (!byOrBehind &&
             (input.pieces ?? []).some(
               (p) => Math.abs(p.x - at) < p.w * 0.4 + size.w * 0.2,
-            ));
+            )) ||
+          overBody(at);
+        // Beside a solid body (a bus), never over it: held to the stage's
+        // edge, its far side may be on it.
+        const beside = /^by:([^:]+)/.exec(station)?.[1];
+        const body = beside ? input.features.get(beside) : undefined;
+        function overBody(at: number): boolean {
+          if (!body?.solid) return false;
+          const half = size!.w * BODY_HALF;
+          return (
+            Math.min(at + half, body.x + body.w / 2) -
+              Math.max(at - half, body.x - body.w / 2) >
+            size!.w * 0.08
+          );
+        }
         // Beside a feature where someone stands already: its other side.
         if (station.startsWith('by:') && crowded(x)) {
           const other = across(station, size.w, true);
@@ -1004,10 +1163,25 @@ export function layoutStations(input: {
         ...(d !== undefined ? { d } : {}),
         ...(asked !== undefined ? { asked } : {}),
       });
-      const k = way?.k ?? onFloor?.k ?? 1;
       const low = Boolean(at) && station.startsWith('under:');
-      if (up && way?.upX !== undefined) x = way.upX - size.w * 0.3;
-      let feet = up ? way.perch! : (way?.y ?? onFloor?.feet ?? floor);
+      if (up && way?.upX !== undefined)
+        x = way.upX - (way.upMiddle ? 0 : size.w * 0.3);
+      // Beside it, behind it or under it: on the ground it stands on (not
+      // up at its way, a bus's sill), behind it a step back of it; on a
+      // floor with depth, as big as the floor makes them there, as anyone
+      // walking there is.
+      const beside = way && !up && /^(?:by|behind|under):/.test(station);
+      const ground = beside
+        ? (way.ground ?? way.y) -
+          (station.startsWith('behind:') && way.ground !== undefined
+            ? STAGINGS[input.staging].h * BEHIND_BACK
+            : 0)
+        : undefined;
+      const k =
+        ground !== undefined && depthed && way?.ground !== undefined
+          ? pinholeK(ground, floor, depthed.eye)
+          : (way?.k ?? onFloor?.k ?? 1);
+      let feet = up ? way.perch! : (ground ?? way?.y ?? onFloor?.feet ?? floor);
       // On a seat or in a bed: their hips where it is sat on, their legs
       // hanging before it (or under its cover); lying, along it from its
       // foot end, their head at its head.
@@ -1043,7 +1217,48 @@ export function layoutStations(input: {
         h: round(size.h * k),
         ...(depthed ? { d: d ?? depthOfK(k) } : {}),
       };
+      // Their body, for spacing: lying along a seat or a bed, as long as
+      // they lie; free to step only at a spot of their own or a point.
+      if (unit && depthed) {
+        const lying = rests?.lie && feature?.lies;
+        const was = before.get(id);
+        bodies.push({
+          id,
+          x: lying ? (feature.lies!.head + x) / 2 : x,
+          half: lying
+            ? Math.abs(x - feature.lies!.head) / 2
+            : size.w * k * BODY_HALF,
+          d: d ?? depthOfK(k),
+          perM: unit * k * KIT_PER_METRE,
+          free:
+            (station in (input.shares ?? STATION_SHARES) ||
+              station.startsWith('@')) &&
+            !rests,
+          ...(was && was.station !== station ? { was: was.x } : {}),
+          place: out[id],
+          size: { w: size.w * k },
+        });
+      }
     });
+    // Everyone spaced as people stand (scene-spacing): who talk, go over
+    // or hand over near, no one in anyone's body.
+    if (bodies.length > 1) {
+      const widest = Math.max(...bodies.map((b) => b.size.w));
+      const spaced = spaceOut(bodies, input.near?.[stepAt] ?? [], {
+        least: margin + widest * 0.3,
+        most: W - margin - widest * 0.3,
+      });
+      for (const body of bodies) {
+        const to = spaced.get(body.id);
+        if (to === undefined || Math.abs(to - body.x) < 0.5) continue;
+        const shift = to - body.x;
+        body.place.x = round(body.place.x + shift);
+        const one = kept.get(body.id);
+        if (one) one.x = round(one.x + shift);
+        const at = placed.find((p) => p.id === body.id);
+        if (at) at.x += shift;
+      }
+    }
     for (const id of [...kept.keys()])
       if (!step.show.includes(id)) kept.delete(id);
     return out;

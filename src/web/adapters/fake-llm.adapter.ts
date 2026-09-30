@@ -2,6 +2,7 @@
  * Every method implements the async LlmGatewayPort with a synchronous body;
  * that is the whole point of a deterministic offline stand-in. */
 import { dialogueOf } from '../../business/domain/scene-dialogue';
+import { RUBRIC_KEYS } from '../../business/domain/studio/studio-script';
 import type { ScreenplayDraft } from '../../business/domain/scene-screenplay';
 import type { WorkedSolution } from '../../business/domain/maths-work';
 import { levelIn } from '../../business/domain/scene-stage';
@@ -548,6 +549,17 @@ export class FakeLlmAdapter implements LlmGatewayPort {
     });
   }
 
+  /** Every still as the sheet says: the fake film is never made again. */
+  pictureCheck(input: {
+    stills: { png: Buffer; claims: string }[];
+  }): Promise<LlmResult<{ stills: { matches: boolean; wrong: string[] }[] }>> {
+    const started = Date.now();
+    return Promise.resolve({
+      value: { stills: input.stills.map(() => ({ matches: true, wrong: [] })) },
+      usage: this.usage(started, 800 * input.stills.length, 40),
+    });
+  }
+
   /**
    * The page's own sentences as the narration, one drawing and one word on
    * the stage: enough for the whole scene pipeline to run with no key.
@@ -852,6 +864,7 @@ export class FakeLlmAdapter implements LlmGatewayPort {
     topicTitle: string;
     material: string;
     context: string;
+    profile?: string;
   }): Promise<LlmResult<SceneScriptDraft>> {
     const started = Date.now();
     const sentences = input.material
@@ -891,16 +904,39 @@ export class FakeLlmAdapter implements LlmGatewayPort {
         fitReason: null,
         title: input.topicTitle.slice(0, 60),
         mood: 'curious',
-        beats: says.map((say, i) => ({
-          say,
-          pause: i === says.length - 1 ? ('long' as const) : ('short' as const),
-          delivery:
-            i === 0
-              ? ('hook' as const)
-              : i === says.length - 1
-                ? ('recap' as const)
-                : ('explain' as const),
-        })),
+        beats: [
+          ...says.map((say, i) => ({
+            say,
+            pause:
+              i === says.length - 1 ? ('long' as const) : ('short' as const),
+            delivery:
+              i === 0
+                ? ('hook' as const)
+                : i === says.length - 1
+                  ? ('recap' as const)
+                  : ('explain' as const),
+          })),
+          // A scene its audience's recipe asks to check (studio-checkpoint):
+          // one question with its answers, and the answer said after it.
+          ...(/asks the viewer one question/.test(input.profile ?? '')
+            ? [
+                {
+                  say: 'Quick check: which part did we start with?',
+                  pause: 'long' as const,
+                  delivery: 'question' as const,
+                  choices: [
+                    { text: opening(says[0]), right: true },
+                    { text: 'the very end', right: false },
+                  ],
+                },
+                {
+                  say: `We started with ${opening(says[0]).toLowerCase()}.`,
+                  pause: 'long' as const,
+                  delivery: 'explain' as const,
+                },
+              ]
+            : []),
+        ],
         cast: [
           {
             id: 'main',
@@ -1831,13 +1867,67 @@ export class FakeLlmAdapter implements LlmGatewayPort {
   }): Promise<LlmResult<Record<string, unknown>>> {
     const started = Date.now();
     const explainer = /format: explainer/i.test(input.brief);
+    // An explainer about people (a fever): a nurse and a child for its
+    // story clips (studio-clip), in a clinic room.
+    const people = explainer && /\b(?:fever|nurse|clinic)\b/i.test(input.brief);
     return {
       value: explainer
         ? {
-            characters: [],
-            sets: [],
+            characters: people
+              ? [
+                  {
+                    id: 'amara',
+                    name: 'Nurse Amara',
+                    kind: 'person',
+                    role: 'main',
+                    look: 'a nurse in a blue uniform',
+                    figure: {
+                      age: 'adult',
+                      top: 'uniform',
+                      topColour: 'blue',
+                      skin: 5,
+                    },
+                    size: null,
+                    voice: 'woman',
+                    voicePick: 0,
+                    traits: ['calm'],
+                    carries: null,
+                  },
+                  {
+                    id: 'sam',
+                    name: 'Sam',
+                    kind: 'person',
+                    role: 'supporting',
+                    look: 'a boy in a green t-shirt',
+                    figure: {
+                      age: 'child',
+                      top: 't-shirt',
+                      topColour: 'green',
+                      skin: 2,
+                    },
+                    size: null,
+                    voice: 'boy',
+                    voicePick: 0,
+                    traits: ['worried'],
+                    carries: null,
+                  },
+                ]
+              : [],
+            sets: people
+              ? [
+                  {
+                    id: 'clinic',
+                    name: 'The clinic room',
+                    look: 'a bright clinic room with a cupboard and a clock',
+                    kind: 'indoor',
+                    stand: 'on',
+                    front: null,
+                    sound: null,
+                  },
+                ]
+              : [],
             world: null,
-            subject: 'a lesson',
+            subject: people ? 'health: fever' : 'a lesson',
             maths: false,
             pictures: [],
           }
@@ -1914,9 +2004,70 @@ export class FakeLlmAdapter implements LlmGatewayPort {
   }): Promise<LlmResult<Record<string, unknown>>> {
     const started = Date.now();
     const explainer = /format: explainer/i.test(input.brief);
+    // Made from a document's pages: the scenes share them out, in order.
+    const marked = [...input.brief.matchAll(/\[page (\d+)\]/g)].map((m) =>
+      Number(m[1]),
+    );
+    const half = Math.ceil(marked.length / 2);
+    const pagesOf = (n: number) =>
+      marked.length
+        ? n === 1
+          ? [marked[0], marked[half - 1]]
+          : [
+              marked[Math.min(half, marked.length - 1)],
+              marked[marked.length - 1],
+            ]
+        : null;
+    // With people for clips (studio-clip): watch, then understand.
+    const clips = explainer && /For story clips only/.test(input.bible);
+    if (clips) {
+      const lesson = (n: number, teach: string) => ({
+        title: `Part ${n}`,
+        summary: `The lesson, part ${n}.`,
+        set: null,
+        cast: [],
+        seconds: 30,
+        teach,
+        points: ['a thermometer', 'a body warming up'],
+        kind: 'lesson',
+        hook: null,
+        into: null,
+      });
+      return {
+        value: {
+          title: 'What is a fever?',
+          logline: 'Why a body gets hot when it fights a germ.',
+          scenes: [
+            lesson(
+              1,
+              'Your body likes to stay at about thirty-seven degrees. When germs get in, your body turns up its own heat to fight them. That extra heat is called a fever, and it is a sign your body is working hard.',
+            ),
+            {
+              title: 'At the clinic',
+              summary: 'Nurse Amara takes Sam’s temperature.',
+              set: 'clinic',
+              cast: ['amara', 'sam'],
+              seconds: 12,
+              teach:
+                'The nurse reads the thermometer: thirty-nine degrees is a fever.',
+              points: [],
+              kind: 'clip',
+              hook: 'Did you see the number on the thermometer?',
+              into: null,
+            },
+            lesson(
+              3,
+              'A thermometer measures how hot your body is. Thirty-nine degrees is more than your usual thirty-seven, so Sam has a fever. Rest, water and time help the body win, and a grown-up checks it again later.',
+            ),
+          ],
+        },
+        usage: this.usage(started, input.brief.length / 4, 200),
+      };
+    }
     const scenes = [1, 2].map((n) =>
       explainer
         ? {
+            pages: pagesOf(n),
             title: `Part ${n}`,
             summary: `The lesson, part ${n}.`,
             set: null,
@@ -1941,8 +2092,210 @@ export class FakeLlmAdapter implements LlmGatewayPort {
         title: explainer ? 'A lesson' : 'Ada and Kofi',
         logline: 'Two friends play.',
         scenes,
+        // An explainer's "What next?" (studio-end), written with the outline.
+        next: explainer
+          ? [
+              'Why are most leaves green?',
+              'What do plants do at night?',
+              'How does water get up a tall tree?',
+            ]
+          : [],
       },
       usage: this.usage(started, input.brief.length / 4, 200),
+    };
+  }
+
+  /** Story development, faked: Ada and Kofi's kite, in two scenes in the yard. */
+  async studioPremise(input: {
+    brief: string;
+  }): Promise<LlmResult<Record<string, unknown>>> {
+    const started = Date.now();
+    return {
+      value: {
+        title: 'Ada and Kofi',
+        logline:
+          'Ada wants to fly the kite she built before the wind drops, but Kofi has tied it to the tree as a joke and cannot untie his own knot.',
+        theme: 'a joke is only funny if everyone is laughing',
+        hook: 'A kite tugs at a string that goes nowhere.',
+        genre: 'comedy',
+        ending: 'happy',
+        stakes: 'the last good wind of the day',
+        tools: ['ticking clock: the wind is dropping', 'it gets worse'],
+        gag: 'Kofi says every knot is his best knot',
+        clues: [],
+        hero: 'ada',
+        want: 'to fly the kite she built',
+        obstacle: "Kofi's knot on the tree",
+        clock: 'before the wind drops at sunset',
+        normalDay: 'Ada flies a kite in the yard every windy afternoon',
+        whyToday: 'today Kofi tied her new kite to the tree as a joke',
+        whyCare: 'she built the kite herself from old newspaper',
+        oddity: null,
+        spine: [
+          'Once upon a time there was a girl called Ada who built kites.',
+          'Every day she flew one in the yard.',
+          'Until one day Kofi tied her new kite to the tree as a joke.',
+          'Because of that they pulled, and the knot only got tighter.',
+          'Until finally Kofi owned up and Ada untied it with one tug.',
+          'Ever since then Kofi asks before he ties anything.',
+        ],
+      },
+      usage: this.usage(started, input.brief.length / 4, 120),
+    };
+  }
+
+  async studioCharacters(input: {
+    brief: string;
+  }): Promise<LlmResult<Record<string, unknown>>> {
+    const started = Date.now();
+    const sheet = (id: string, want: string, flaw: string, other: string) => ({
+      id,
+      want,
+      need: 'to laugh at themselves',
+      flaw,
+      fear: 'being left out',
+      personality: ['counts everything twice', 'hums when thinking'],
+      voice: 'short sentences, a pet phrase: "watch this"',
+      habits: ['taps a foot'],
+      relationships: [
+        { with: other, is: 'best friends', tension: 'who is in charge' },
+      ],
+      arc: { from: 'proud', to: 'laughing along' },
+    });
+    return {
+      value: {
+        characters: [
+          sheet(
+            'ada',
+            'to fly her kite',
+            'never admits she needs help',
+            'kofi',
+          ),
+          sheet('kofi', 'to make Ada laugh', 'takes jokes too far', 'ada'),
+        ],
+      },
+      usage: this.usage(started, input.brief.length / 4, 160),
+    };
+  }
+
+  async studioBeats(input: {
+    brief: string;
+  }): Promise<LlmResult<Record<string, unknown>>> {
+    const started = Date.now();
+    const beat = (
+      role: string,
+      what: string,
+      intensity: number,
+      plants: string[] = [],
+      pays: string[] = [],
+    ) => ({
+      role,
+      what,
+      wants: 'Ada wants to fly the kite',
+      stops: 'the knot',
+      changes: 'things get harder',
+      intensity,
+      plants,
+      pays,
+      link:
+        role === 'setup'
+          ? null
+          : /problem|twist/u.test(role)
+            ? 'but'
+            : 'therefore',
+    });
+    return {
+      value: {
+        beats: [
+          beat('setup', 'Ada shows Kofi her kite.', 2, ['knot']),
+          beat('problem', 'The kite is tied to the tree.', 5),
+          beat(
+            'attempt',
+            'They pull, the knot tightens, and Kofi says it is his best knot.',
+            6,
+          ),
+          beat('twist', 'Kofi admits he tied it with his best knot.', 8),
+          beat(
+            'payoff',
+            'Ada unties it with one tug and they fly it.',
+            3,
+            [],
+            ['knot'],
+          ),
+        ],
+      },
+      usage: this.usage(started, input.brief.length / 4, 160),
+    };
+  }
+
+  async studioScenePlan(input: {
+    brief: string;
+  }): Promise<LlmResult<Record<string, unknown>>> {
+    const started = Date.now();
+    const scene = (n: number, beats: number[], turn: string) => ({
+      title: `Scene ${n}`,
+      beats,
+      purpose: 'moves the story on',
+      conflict: 'Ada wants to fly the kite; the knot will not give',
+      turn,
+      shift: 'hope to worry',
+      moment: 'the kite tugging at the tree',
+      set: 'yard',
+      cast: ['ada', 'kofi'],
+      seconds: 30,
+      summary: `Ada and Kofi play, part ${n}.`,
+      setup:
+        n === 1
+          ? [
+              {
+                part: 'want',
+                how: 'line',
+                by: 'ada',
+                to: 'kofi',
+                what: 'my kite is stuck',
+              },
+              {
+                part: 'obstacle',
+                how: 'thing',
+                by: '',
+                to: '',
+                what: "Kofi's knot on the tree",
+              },
+              {
+                part: 'stakes',
+                how: 'line',
+                by: 'ada',
+                to: 'kofi',
+                what: 'the last wind of the day',
+              },
+              {
+                part: 'clock',
+                how: 'line',
+                by: 'ada',
+                to: 'kofi',
+                what: 'before the wind drops',
+              },
+            ]
+          : [],
+      value: {
+        name: 'flying',
+        from: n === 1 ? '+' : '-',
+        to: n === 1 ? '-' : '+',
+      },
+      start:
+        n === 1
+          ? 'Ada tugs at the kite string tied to the tree'
+          : 'Kofi picks at his own knot',
+      link: n === 1 ? null : 'but',
+    });
+    return {
+      value: {
+        scenes: [
+          scene(1, [0, 1, 2], 'the knot is tighter than ever'),
+          scene(2, [3, 4], 'the kite flies'),
+        ],
+      },
+      usage: this.usage(started, input.brief.length / 4, 160),
     };
   }
 
@@ -1950,11 +2303,100 @@ export class FakeLlmAdapter implements LlmGatewayPort {
     scene: string;
   }): Promise<LlmResult<Record<string, unknown>>> {
     const started = Date.now();
-    const line = (who: string, to: string, say: string, feeling: string) => ({
+    // A story clip inside an explainer (studio-clip): the nurse reads the thermometer.
+    const clip = /story clip inside an animated lesson/.test(input.scene)
+      ? /about \d+ seconds, in (\S+) with ([^:]+):/.exec(input.scene)
+      : null;
+    if (clip) {
+      const [nurse, child] = clip[2].split(/,\s*/);
+      const beat = (over: Record<string, unknown>) => ({
+        who: null,
+        to: null,
+        say: '',
+        feeling: null,
+        sign: null,
+        do: null,
+        thing: null,
+        target: null,
+        prop: null,
+        spot: null,
+        from: null,
+        pace: null,
+        seconds: null,
+        ...over,
+      });
+      return {
+        value: {
+          title: '39 degrees is a fever',
+          set: clip[1],
+          time: 'day',
+          weather: 'clear',
+          crowd: 'none',
+          mood: 'calm',
+          music: 'calm',
+          transition: 'cut',
+          onStage: [
+            {
+              who: nurse,
+              spot: 'centre-left',
+              pose: 'standing',
+              face: 'neutral',
+              holding: 'thermometer',
+            },
+            {
+              who: child ?? nurse,
+              spot: 'centre-right',
+              pose: 'standing',
+              face: 'sad',
+              holding: null,
+            },
+          ],
+          props: [],
+          beats: [
+            beat({
+              kind: 'line',
+              who: child,
+              to: nurse,
+              say: 'My head feels so hot.',
+              feeling: 'sad',
+              from: 'here',
+              aim: 'begs',
+            }),
+            beat({
+              kind: 'business',
+              who: nurse,
+              say: 'Nurse Amara reads the thermometer.',
+              do: 'use',
+              thing: 'thermometer',
+            }),
+            beat({
+              kind: 'line',
+              who: nurse,
+              to: child,
+              say: 'Thirty-nine degrees. That is a fever, Sam.',
+              feeling: 'neutral',
+              from: 'here',
+              aim: 'reveals',
+            }),
+            beat({ kind: 'reaction', who: child, feeling: 'surprised' }),
+          ],
+          camera: [],
+        },
+        usage: this.usage(started, input.scene.length / 4, 200),
+      };
+    }
+    const line = (
+      who: string,
+      to: string,
+      say: string,
+      feeling: string,
+      aim: string,
+    ) => ({
       kind: 'line',
       who,
       to,
       say,
+      aim,
       feeling,
       sign: null,
       do: null,
@@ -2006,8 +2448,20 @@ export class FakeLlmAdapter implements LlmGatewayPort {
             pace: null,
             seconds: null,
           },
-          line('ada', 'kofi', 'Kofi, come and see this!', 'happy'),
-          line('kofi', 'ada', 'What is it?', 'thinking'),
+          line(
+            'ada',
+            'kofi',
+            'Kofi, my kite is stuck in your knot, and the last wind of the day drops at sunset!',
+            'angry',
+            'accuses',
+          ),
+          line(
+            'kofi',
+            'ada',
+            'Best knot I ever tied. Want me to untie it?',
+            'happy',
+            'teases',
+          ),
         ],
         camera: [],
       },
@@ -2016,9 +2470,113 @@ export class FakeLlmAdapter implements LlmGatewayPort {
   }
 
   /**
+   * The table read, offline: every scene read and passed, a little over
+   * the bar, so nothing is written again without the network.
+   */
+  async studioTableRead(input: {
+    script: string;
+  }): Promise<LlmResult<Record<string, unknown>>> {
+    const started = Date.now();
+    const count = (input.script.match(/^SCENE \d+:/gmu) ?? []).length;
+    const scores = Object.fromEntries(RUBRIC_KEYS.map((key) => [key, 7.5]));
+    return Promise.resolve({
+      value: {
+        scores,
+        overall: 7.5,
+        scenes: Array.from({ length: count }, (_, k) => ({
+          scene: k + 1,
+          score: 7.5,
+          notes: [],
+        })),
+        voice: [],
+        verdict: 'A clear little story that works.',
+      },
+      usage: this.usage(started, input.script.length / 4, 200),
+    });
+  }
+
+  /**
+   * The cold read, offline: a viewer who followed it, its first spoken
+   * line taken for what it is about.
+   */
+  async studioColdRead(input: {
+    kind: string;
+    film: string;
+  }): Promise<LlmResult<Record<string, unknown>>> {
+    const started = Date.now();
+    const first =
+      /^\s+[^[\n]+?: (.+)$/mu.exec(input.film)?.[1] ?? 'a short story';
+    return Promise.resolve({
+      value: {
+        about: first,
+        sentence: `The first one to speak wants ${first}.`,
+        who: 'the first one to speak',
+        wants: first,
+        obstacle: 'what is in their way',
+        stakes: 'what they could lose',
+        clock: '',
+        confused: [],
+        wondering: [],
+        sure: 8,
+        people: [],
+        impossible: '',
+      },
+      usage: this.usage(started, input.film.length / 4, 120),
+    });
+  }
+
+  /** The retelling, offline: each scene joined to the one before by "therefore". */
+  async studioRetell(input: {
+    kind: string;
+    film: string;
+  }): Promise<LlmResult<Record<string, unknown>>> {
+    const started = Date.now();
+    const count = (input.film.match(/^SCENE \d+\./gmu) ?? []).length;
+    return Promise.resolve({
+      value: {
+        scenes: Array.from({ length: count }, (_, k) => ({
+          scene: k + 1,
+          link: k ? 'therefore' : '',
+          what: `Scene ${k + 1} happens.`,
+        })),
+        finally: '',
+        about: 'a short story',
+      },
+      usage: this.usage(started, input.film.length / 4, 120),
+    });
+  }
+
+  /**
    * The check of a scene made again as asked, offline: done when the film
    * reads differently now and code sees nothing wrong in it.
    */
+  /** "Now you explain it", faked: a point is got when its first word is in their words. */
+  studioTeachBack(input: {
+    topic: string;
+    points: string[];
+    answer: string;
+    who: string | null;
+  }): Promise<LlmResult<{ got: number[]; missing: number[]; reply: string }>> {
+    const started = Date.now();
+    const said = input.answer.toLowerCase();
+    const got: number[] = [];
+    const missing: number[] = [];
+    input.points.forEach((point, i) => {
+      const word = point.toLowerCase().match(/[a-z]{4,}/)?.[0];
+      (word && said.includes(word) ? got : missing).push(i + 1);
+    });
+    return Promise.resolve({
+      value: {
+        got,
+        missing: missing.slice(0, 3),
+        reply: missing.length
+          ? `Nice work! You explained ${got.length} of ${input.points.length} ideas. Can you add: ${input.points[missing[0] - 1]}?`
+          : 'Brilliant, you explained every idea!',
+      },
+      usage: this.usage(started, 300, 80),
+    });
+  }
+
   async studioCheck(input: {
     words: string;
     request: string;

@@ -2,7 +2,7 @@
  * The fixed things of a set that a story acts on, drawn by code in the
  * figure kit's hand: a gate that swings shut, a door someone goes out by,
  * a bench someone sits on or looks under, a goalpost someone stands by, a
- * danfo someone jumps into. Drawn at the kit's own size (a grown person is
+ * bus or a car someone gets into. Drawn at the kit's own size (a grown person is
  * about 192 tall), standing on the ground at y = 0, their middle at x = 0,
  * so the stage stands them among the people at the people's own scale.
  *
@@ -14,8 +14,33 @@
  * the rest (a tree, a stall, a well) as groups of their own; whatever the
  * painting has not got is drawn here, so nothing a sheet names is missing.
  */
+import type { SceneAffordancesDto, SceneVehicleDto } from '../../contracts';
 import type { FeatureKind } from './scene-doings';
 import { FIGURE_INK } from './scene-figure';
+import { STYLE_PACKS, type StylePackId } from './scene-style-packs';
+import {
+  colourNamed,
+  drawVehicleKit,
+  vehicleKitKindOf,
+  type VehicleKitKind,
+  type VehicleLivery,
+} from './scene-vehicles';
+
+export { colourNamed };
+
+/**
+ * How a piece is drawn beyond its kind and name: the style pack of the
+ * place it stands in (a gate, a wall and a road vehicle are drawn as that
+ * place has them), and its own colour where one is given.
+ */
+export interface PieceLook {
+  pack?: StylePackId | null;
+  colour?: string | null;
+  /** A city's look for its buses and cabs, where the story names the city (London's red buses). */
+  livery?: VehicleLivery | null;
+  /** It stands out of doors: a door there is a building's, drawn in its front. */
+  outdoor?: boolean;
+}
 
 /** A set piece as the stage gets it. */
 export interface SetPiece {
@@ -57,6 +82,23 @@ export interface SetPiece {
   reacts?: { as: 'sway' | 'hang' | 'curtain' | 'flag'; len: number };
   /** Where birds may sit on it, in its own units. */
   roosts?: [number, number][];
+  /**
+   * What it offers the people who use it (studio-interactions-plan §1.1),
+   * in its own units: handles, the doorway's line, seats, grips, steps and
+   * rungs, what is laid over them, where one leans, what one operates,
+   * what slides. Drawn by code, so its points are exact.
+   */
+  affordances?: SceneAffordancesDto;
+  /** One up it stands in the middle of where things catch (its landing, a rung), not beside it: stairs, a ladder. */
+  upMiddle?: true;
+  /** A vehicle of the kit (scene-vehicles): what it is, its view, how it rides. */
+  vehicle?: SceneVehicleDto;
+  /**
+   * The part of it people stand by and go through, across, in its own
+   * units, where that is less than the whole: the doorway of a building's
+   * front. Absent, all of it.
+   */
+  stand?: [number, number];
 }
 
 /**
@@ -83,6 +125,15 @@ export const ACTED_PIECES: readonly FeatureKind[] = [
   'sofa',
   'bed',
   'steps',
+  // Used by the people at them (studio-interactions-plan I2): sat at, leant
+  // on, climbed, switched on, turned on.
+  'table',
+  'stairs',
+  'ladder',
+  'counter',
+  'cupboard',
+  'switch',
+  'sink',
   'goalpost',
   'crate',
   'fence',
@@ -101,6 +152,8 @@ export const PERCHED_KINDS: ReadonlySet<string> = new Set<FeatureKind>([
   'wall',
   'steps',
   'tree',
+  'stairs',
+  'ladder',
 ]);
 
 /** How high one stands up a feature of a kind, in the kit's units; undefined for one no one stands up. */
@@ -175,8 +228,73 @@ const bars = (x0: number, x1: number, y0: number, y1: number, n: number) =>
 const frond = (dx: number, dy: number, colour: string) =>
   `<path d="M28,-424 Q${r1(28 + dx * 0.45)},${r1(-470 + dy * 0.2)} ${r1(28 + dx)},${r1(-424 + dy)} Q${r1(28 + dx * 0.5)},${r1(-438 + dy * 0.3)} 28,-412 Z" ${fill(colour)}/>`;
 
-/** A set piece of a kind, drawn; a tree as its name says (a palm). */
-export function drawPiece(kind: FeatureKind, name = ''): SetPiece {
+/** The road vehicles the stage draws a feature of kind "vehicle" as, by what its name calls it: the kit (scene-vehicles) draws these and more. */
+export const VEHICLE_KINDS = [
+  'car',
+  'taxi',
+  'van',
+  'truck',
+  'bus',
+  'danfo',
+] as const;
+export type VehicleKind = VehicleKitKind;
+
+/**
+ * Which vehicle a name says: a taxi, a van, a truck, a bus, a bicycle, a
+ * canoe, a donkey cart by its own word, and a danfo only by its name or
+ * as a West African town's bus. A name with none of the words is its
+ * place's first vehicle (a car; an ancient place's cart), or a car.
+ */
+export const vehicleKindOf = (
+  name: string,
+  pack: StylePackId | null = null,
+): VehicleKitKind => vehicleKitKindOf(name, pack);
+
+/** The pack a set was built in, as its drawing (or its first layer) is marked; null for none. */
+export function setPackOf(
+  drawing:
+    | { svg?: string; layered?: { layers?: { svg: string }[] } | null }
+    | null
+    | undefined,
+): StylePackId | null {
+  if (!drawing) return null;
+  const marked = /data-style="([a-z-]+)"/u.exec(
+    `${drawing.svg ?? ''} ${drawing.layered?.layers?.[0]?.svg ?? ''}`,
+  )?.[1];
+  return marked && marked in STYLE_PACKS ? (marked as StylePackId) : null;
+}
+
+/** The city look a set was built with, as its drawing is marked (London's buses); null for none. */
+export function setLiveryOf(
+  drawing:
+    | { svg?: string; layered?: { layers?: { svg: string }[] } | null }
+    | null
+    | undefined,
+): VehicleLivery | null {
+  const marked = /data-livery="([a-z-]+)"/u.exec(
+    `${drawing?.svg ?? ''} ${drawing?.layered?.layers?.[0]?.svg ?? ''}`,
+  )?.[1];
+  return marked === 'london' || marked === 'new-york' ? marked : null;
+}
+
+/** Whether a set's drawing is of a place out of doors (its data-place mark). */
+export function setOutdoorOf(
+  drawing:
+    | { svg?: string; layered?: { layers?: { svg: string }[] } | null }
+    | null
+    | undefined,
+): boolean {
+  return /data-place="outdoor"/u.test(
+    `${drawing?.svg ?? ''} ${drawing?.layered?.layers?.[0]?.svg ?? ''}`,
+  );
+}
+
+/** A set piece of a kind, drawn; a tree as its name says (a palm), a road vehicle as its name says (a bus, a car), and a gate and a wall as its place has them. */
+export function drawPiece(
+  kind: FeatureKind,
+  name = '',
+  look: PieceLook = {},
+): SetPiece {
   if (kind === 'tree' && /\b(?:palms?|coconut|date palm)\b/iu.test(name))
     // A tall palm, as on a beach: its trunk ringed and leaning a little,
     // its fronds and coconuts at the top, about two and a half grown-ups
@@ -229,66 +347,60 @@ export function drawPiece(kind: FeatureKind, name = ''): SetPiece {
       ],
     };
   switch (kind) {
-    case 'gate': {
-      // A compound's metal gate between two concrete posts, wider than it
-      // is high and about a grown-up's shoulder high, as such gates are:
-      // its leaf hinged on the left post, a latch on the right.
-      const leaf =
-        `<g id="leaf">` +
-        rect(-76, -128, 152, 10, METAL) +
-        rect(-76, -22, 152, 10, METAL) +
-        rect(-76, -128, 10, 116, METAL) +
-        rect(66, -128, 10, 116, METAL) +
-        rect(-76, -76, 152, 8, METAL) +
-        bars(-66, 66, -118, -22, 7) +
-        rect(56, -92, 14, 10, YELLOW) +
-        `</g>`;
-      // The compound's wall runs off each side of it, beyond its frame, so
-      // it is a gateway in a wall, never a gate on its own; going through
-      // it is going out.
-      const wall = (x: number) =>
-        rect(x, -112, 170, 112, CONCRETE, 0) +
-        rect(x - 4, -120, 178, 10, '#c2b397') +
-        line(
-          `M${x},-74 L${x + 170},-74 M${x},-38 L${x + 170},-38 M${x + 60},-112 L${x + 60},-74 M${x + 120},-74 L${x + 120},-38 M${x + 40},-38 L${x + 40},0`,
-          '#a99a80',
-          2,
-        );
-      return {
-        ...framed(
-          wall(-264) +
-            wall(94) +
-            shadow(90) +
-            leaf +
-            rect(-94, -146, 18, 146, CONCRETE) +
-            rect(76, -146, 18, 146, CONCRETE) +
-            rect(-98, -154, 26, 10, CONCRETE) +
-            rect(72, -154, 26, 10, CONCRETE),
-          [-98, -154, 196, 160],
-        ),
-        leaf: { id: 'leaf', hinge: [-76, -70] },
-        opening: [-76, -128, 76, 0],
-      };
-    }
+    case 'gate':
+      return drawGate(look.pack ?? null);
     case 'door': {
+      // Out of doors, a door is a building's: never on its own.
+      if (look.outdoor) return drawBuildingDoor(look.pack ?? null);
       // A doorway in a stretch of wall: the dark room beyond, the door
-      // hinged on its left.
+      // hinged on its left, its knob on its right, and a bell beside it.
+      // The wall and the doorframe are one group, the near frame: laid
+      // over one going through the doorway, so they pass through it, not
+      // in front of it; the dark inside is its own, behind the leaf.
       return {
         ...framed(
-          rect(-80, -236, 160, 236, CONCRETE, 0) +
-            rect(-86, -244, 172, 12, '#c2b397') +
+          `<g id="dark">` +
             rect(-48, -204, 96, 204, DARK, 0) +
+            `</g>` +
             `<g id="leaf">` +
             rect(-48, -204, 96, 204, WOOD, 0) +
             rect(-36, -190, 72, 80, PLANK, 3) +
             rect(-36, -98, 72, 84, PLANK, 3) +
             `<circle cx="32" cy="-100" r="5" ${fill(YELLOW)}/>` +
             `</g>` +
-            rect(-56, -212, 112, 10, WOOD_DARK),
+            `<g id="frame">` +
+            `<path d="M-80,-236 L80,-236 L80,0 L56,0 L56,-212 L-56,-212 L-56,0 L-80,0 Z" ${fill(CONCRETE)}/>` +
+            rect(-86, -244, 172, 12, '#c2b397') +
+            rect(-56, -212, 8, 212, WOOD_DARK, 0) +
+            rect(48, -212, 8, 212, WOOD_DARK, 0) +
+            rect(-56, -212, 112, 10, WOOD_DARK) +
+            rect(61, -133, 11, 14, WHITE, 2) +
+            `<circle cx="66.5" cy="-126" r="3.2" ${fill(STONE)}/>` +
+            `</g>`,
           [-86, -244, 172, 244],
         ),
         leaf: { id: 'leaf', hinge: [-48, -102] },
         opening: [-48, -204, 48, 0],
+        affordances: {
+          handles: [
+            { id: 'knob', at: [32, -100], side: 'out' },
+            { id: 'knob-in', at: [32, -100], side: 'in' },
+          ],
+          threshold: {
+            line: [
+              [-48, 0],
+              [48, 0],
+            ],
+            inside: 'behind',
+          },
+          masks: [{ id: 'frame-near', group: 'frame' }],
+          dark: 'dark',
+          operates: [
+            { id: 'knock', at: [16, -128], does: 'knock' },
+            { id: 'bell', at: [66.5, -126], does: 'bell' },
+          ],
+          side: 1,
+        },
       };
     }
     case 'window': {
@@ -330,6 +442,19 @@ export function drawPiece(kind: FeatureKind, name = ''): SetPiece {
         seat: 50,
         lies: { top: 58, head: -80, foot: 88, sits: 0 },
         opening: [-70, -46, 70, 0],
+        affordances: {
+          seats: [
+            {
+              id: 'seat',
+              hip: [0, -58],
+              feet: [
+                [-10, 0],
+                [10, 0],
+              ],
+              pose: 'bench',
+            },
+          ],
+        },
       };
     case 'chair':
       return {
@@ -344,17 +469,74 @@ export function drawPiece(kind: FeatureKind, name = ''): SetPiece {
           [-36, -124, 72, 130],
         ),
         seat: 52,
+        affordances: {
+          seats: [
+            {
+              id: 'seat',
+              hip: [0, -58],
+              feet: [
+                [-10, 0],
+                [10, 0],
+              ],
+              pose: 'chair',
+            },
+          ],
+          grips: [{ id: 'back', at: [-29, -112] }],
+        },
       };
     case 'table':
+      // A table seen from the front, a cloth over its front, and its chair
+      // tucked in behind it: one who sits at it pulls the chair out (it
+      // slides back and aside), sits, and tucks it in, and the table's
+      // front is laid over their legs (studio-interactions-plan §2.2).
       return {
         ...framed(
           shadow(84) +
+            `<g id="chair">` +
+            rect(-26, -128, 8, 76, WOOD_DARK) +
+            rect(18, -128, 8, 76, WOOD_DARK) +
+            rect(-26, -124, 52, 10, PLANK, 3) +
+            rect(-26, -104, 52, 10, PLANK, 3) +
+            rect(-30, -58, 60, 9, PLANK, 3) +
+            rect(-24, -50, 6, 42, WOOD_DARK) +
+            rect(18, -50, 6, 42, WOOD_DARK) +
+            `</g>` +
+            `<g id="front">` +
             rect(-70, -70, 10, 70, WOOD_DARK) +
             rect(60, -70, 10, 70, WOOD_DARK) +
-            rect(-86, -80, 172, 12, PLANK, 4),
-          [-86, -80, 172, 86],
+            `<path d="M-84,-74 L84,-74 L80,-24 Q60,-18 40,-24 Q20,-18 0,-24 Q-20,-18 -40,-24 Q-60,-18 -80,-24 Z" ${fill(WHITE)}/>` +
+            line(
+              'M-60,-70 L-58,-28 M0,-70 L0,-26 M60,-70 L58,-28',
+              '#d9d4c8',
+              2,
+            ) +
+            rect(-88, -84, 176, 12, PLANK, 4) +
+            `</g>`,
+          [-88, -128, 176, 134],
         ),
         opening: [-60, -68, 60, 0],
+        seat: 52,
+        affordances: {
+          seats: [
+            {
+              id: 'chair',
+              hip: [0, -54],
+              feet: [
+                [-10, 0],
+                [10, 0],
+              ],
+              hands: [
+                [-30, -84],
+                [30, -84],
+              ],
+              pose: 'table',
+            },
+          ],
+          grips: [{ id: 'chair-back', at: [0, -124] }],
+          masks: [{ id: 'body-front', group: 'front' }],
+          slides: [{ group: 'chair', by: [44, -6] }],
+          side: 1,
+        },
       };
     case 'bed':
       // A bed long enough for a grown-up to lie on, its head to the left:
@@ -385,6 +567,19 @@ export function drawPiece(kind: FeatureKind, name = ''): SetPiece {
         seat: 54,
         lies: { top: 54, head: -100, foot: 104, sits: -78 },
         cover: 'cover',
+        affordances: {
+          seats: [
+            {
+              id: 'edge',
+              hip: [0, -54],
+              feet: [
+                [-10, 0],
+                [10, 0],
+              ],
+              pose: 'bed',
+            },
+          ],
+        },
       };
     case 'sofa':
       // A sofa: its back, two arms and the cushions, long enough to lie on.
@@ -403,6 +598,19 @@ export function drawPiece(kind: FeatureKind, name = ''): SetPiece {
         ),
         seat: 50,
         lies: { top: 50, head: -92, foot: 92, sits: -40 },
+        affordances: {
+          seats: [
+            {
+              id: 'seat',
+              hip: [0, -52],
+              feet: [
+                [-10, 0],
+                [10, 0],
+              ],
+              pose: 'sofa',
+            },
+          ],
+        },
       };
     case 'tree':
       return {
@@ -455,24 +663,7 @@ export function drawPiece(kind: FeatureKind, name = ''): SetPiece {
       };
     }
     case 'wall':
-      return {
-        ...framed(
-          rect(-124, -96, 248, 96, CONCRETE, 0) +
-            rect(-130, -106, 260, 12, '#c2b397') +
-            line(
-              'M-124,-64 L124,-64 M-124,-32 L124,-32 M-60,-94 L-60,-64 M40,-94 L40,-64 M-10,-64 L-10,-32 M90,-64 L90,-32 M-80,-32 L-80,0 M30,-32 L30,0',
-              '#a99a80',
-              2,
-            ),
-          [-130, -106, 260, 106],
-        ),
-        perch: 106,
-        roosts: [
-          [-80, -106],
-          [0, -106],
-          [80, -106],
-        ],
-      };
+      return drawWall(look.pack ?? null);
     case 'fence': {
       const pickets = Array.from({ length: 9 }, (_, i) => {
         const x = -112 + i * 28;
@@ -531,34 +722,20 @@ export function drawPiece(kind: FeatureKind, name = ''): SetPiece {
         ),
       };
     case 'vehicle': {
-      // A danfo: a yellow minibus side on, its black stripe and windows,
-      // and its side door, which slides back to let people in and out.
+      // Drawn by the vehicle kit, from the side, as its place has it.
+      const kit = drawVehicleKit(vehicleKindOf(name, look.pack ?? null), {
+        name,
+        pack: look.pack ?? null,
+        colour: look.colour ?? null,
+        livery: look.livery ?? null,
+      });
       return {
-        ...framed(
-          `<ellipse cx="0" cy="0" rx="220" ry="8" ${flat('#1d1a22')} fill-opacity="0.12"/>` +
-            `<path d="M-236,-34 L-236,-168 Q-236,-200 -204,-200 L176,-200 Q214,-200 226,-160 L240,-110 L240,-34 Z" ${fill(YELLOW)}/>` +
-            rect(-236, -104, 476, 12, DARK, 0) +
-            [-214, -150, -86]
-              .map((x) => rect(x, -186, 54, 52, GLASS, 4))
-              .join('') +
-            `<path d="M130,-186 L180,-186 Q206,-186 214,-160 L222,-134 L130,-134 Z" ${fill(GLASS)}/>` +
-            rect(4, -190, 108, 156, DARK, 3) +
-            `<g id="leaf">` +
-            rect(4, -190, 108, 156, YELLOW, 3) +
-            rect(14, -182, 88, 46, GLASS, 4) +
-            rect(4, -104, 108, 12, DARK, 0) +
-            rect(88, -86, 16, 6, WHITE) +
-            `</g>` +
-            [-150, 160]
-              .map(
-                (x) =>
-                  `<circle cx="${x}" cy="-30" r="32" ${fill(DARK)}/><circle cx="${x}" cy="-30" r="13" ${fill(STONE)}/>`,
-              )
-              .join(''),
-          [-240, -200, 480, 202],
-        ),
-        leaf: { id: 'leaf', hinge: [4, -112], slide: -100 },
-        opening: [4, -190, 112, -34],
+        svg: kit.svg,
+        viewBox: kit.viewBox,
+        ...(kit.leaf ? { leaf: kit.leaf } : {}),
+        ...(kit.opening ? { opening: kit.opening } : {}),
+        affordances: kit.affordances,
+        vehicle: kit.vehicle,
       };
     }
     case 'steps':
@@ -571,6 +748,190 @@ export function drawPiece(kind: FeatureKind, name = ''): SetPiece {
         ),
         seat: 44,
         perch: 66,
+        // Seen from the front: one who climbs them goes up them away from
+        // the camera, a foot on each tread in turn.
+        affordances: {
+          steps: [
+            [0, -22],
+            [0, -44],
+            [0, -66],
+          ],
+        },
+      };
+    case 'stairs': {
+      // A flight of stairs seen from the side, rising to the right to a
+      // landing, with a rail: one who climbs it goes up a tread at a time,
+      // and stands on the landing (its perch) at the top.
+      const treads = [0, 1, 2, 3, 4].map((k) => ({
+        x: -84 + 28 * k,
+        y: -22 * (k + 1),
+      }));
+      const outline =
+        `M-84,0 ` +
+        treads.map((t) => `L${t.x},${t.y + 22} L${t.x},${t.y}`).join(' ') +
+        ` L120,-110 L120,0 Z`;
+      return {
+        ...framed(
+          shadow(100) +
+            `<path d="${outline}" ${fill(CONCRETE)}/>` +
+            line(
+              treads.map((t) => `M${t.x},${t.y} L${t.x + 28},${t.y}`).join(' '),
+              '#b8aa90',
+              2,
+            ) +
+            line(
+              'M-80,-22 L-80,-96 M28,-110 L28,-184 M116,-110 L116,-184',
+              WOOD_DARK,
+              5,
+            ) +
+            line('M-84,-92 L28,-180 L120,-180', WOOD, 6),
+          [-84, -184, 204, 184],
+        ),
+        seat: 22,
+        perch: 110,
+        crown: [84, -150],
+        upMiddle: true,
+        affordances: {
+          steps: [
+            ...treads.map((t): [number, number] => [t.x + 14, t.y]),
+            [84, -110],
+          ],
+          grips: [
+            { id: 'rail-low', at: [-80, -94] },
+            { id: 'rail-high', at: [28, -180] },
+          ],
+          side: -1,
+        },
+      };
+    }
+    case 'ladder': {
+      // A wooden ladder standing against the wall, seen from the front:
+      // one who climbs it goes up it facing it, a foot on each rung in
+      // turn and their hands on the rungs above, and stands on its fourth.
+      const rungs = [26, 52, 78, 104, 130, 156, 182];
+      return {
+        ...framed(
+          shadow(34) +
+            line('M-24,0 L-22,-200 M24,0 L22,-200', FIGURE_INK, 9) +
+            line('M-24,0 L-22,-200 M24,0 L22,-200', WOOD, 5) +
+            rungs.map((y) => rect(-23, -y - 3, 46, 6, PLANK, 2)).join(''),
+          [-30, -204, 60, 204],
+        ),
+        perch: 104,
+        crown: [0, -150],
+        upMiddle: true,
+        affordances: {
+          rungs: rungs.map((y): [number, number] => [0, -y]),
+          grips: [
+            { id: 'rail-l', at: [-22, -150] },
+            { id: 'rail-r', at: [22, -150] },
+          ],
+          side: -1,
+        },
+      };
+    }
+    case 'counter':
+      // A kitchen counter seen from the front, a bowl and a jar on it:
+      // one who leans on it has a hip against its end and a hand on its
+      // top.
+      return {
+        ...framed(
+          shadow(100) +
+            rect(-96, -84, 192, 84, WOOD, 3) +
+            rect(-84, -70, 80, 58, PLANK, 2) +
+            rect(4, -70, 80, 58, PLANK, 2) +
+            rect(-12, -44, 6, 14, WOOD_DARK, 2) +
+            rect(10, -44, 6, 14, WOOD_DARK, 2) +
+            rect(-102, -94, 204, 12, STONE, 3) +
+            `<path d="M-64,-94 Q-50,-78 -36,-94 Z" ${fill(WHITE)}/>` +
+            rect(40, -118, 22, 24, GLASS, 4) +
+            rect(38, -122, 26, 6, WOOD_DARK, 2),
+          [-102, -122, 204, 122],
+        ),
+        affordances: {
+          leans: [
+            { hip: [-98, -52], hand: [-84, -94] },
+            { hip: [98, -52], hand: [84, -94] },
+          ],
+          grips: [{ id: 'top', at: [0, -94] }],
+        },
+      };
+    case 'cupboard':
+      // A tall cupboard: its door hinged on its left (a knob on its
+      // right), a drawer below that pulls out toward the camera.
+      return {
+        ...framed(
+          shadow(56) +
+            rect(-50, -172, 100, 172, WOOD, 3) +
+            rect(-44, -164, 88, 102, DARK, 0) +
+            `<g id="leaf">` +
+            rect(-44, -164, 88, 102, PLANK, 2) +
+            rect(-36, -156, 72, 86, '#d4aa7d', 2) +
+            `<circle cx="32" cy="-112" r="4.5" ${fill(WOOD_DARK)}/>` +
+            `</g>` +
+            `<g id="drawer">` +
+            rect(-44, -56, 88, 44, PLANK, 2) +
+            rect(-12, -38, 24, 7, WOOD_DARK, 3) +
+            `</g>` +
+            rect(-54, -178, 108, 10, WOOD_DARK, 2),
+          [-54, -178, 108, 178],
+        ),
+        leaf: { id: 'leaf', hinge: [-44, -113] },
+        opening: [-44, -164, 44, -62],
+        affordances: {
+          handles: [
+            { id: 'knob', at: [32, -112], side: 'out' },
+            { id: 'drawer', at: [0, -34], side: 'out' },
+          ],
+          slides: [{ group: 'drawer', by: [0, 7] }],
+          side: 1,
+        },
+      };
+    case 'switch':
+      // A light switch on the wall, at a grown-up's shoulder: its rocker
+      // down (off) as drawn, flicked up (on).
+      return {
+        ...framed(
+          rect(-9, -124, 18, 26, WHITE, 3) +
+            `<g id="toggle">` +
+            rect(-3.5, -113, 7, 10, STONE, 2) +
+            `</g>`,
+          [-12, -130, 24, 130],
+        ),
+        affordances: {
+          operates: [{ id: 'switch', at: [0, -111], does: 'switch' }],
+          slides: [{ group: 'toggle', by: [0, -6] }],
+          side: 1,
+        },
+      };
+    case 'sink':
+      // A sink on its cupboard, a tap over it: turned on, water runs from
+      // the spout, and drips after.
+      return {
+        ...framed(
+          shadow(64) +
+            rect(-58, -78, 116, 78, WHITE, 3) +
+            rect(-50, -64, 48, 54, '#e6e2d8', 2) +
+            rect(2, -64, 48, 54, '#e6e2d8', 2) +
+            rect(-64, -86, 128, 10, STONE, 3) +
+            `<path d="M-40,-86 Q0,-72 40,-86 Z" ${fill('#bcd3df')}/>` +
+            `<path d="M18,-86 L18,-110 Q18,-118 8,-118 L2,-118 L2,-110" fill="none" stroke="${FIGURE_INK}" stroke-width="7" stroke-linecap="round"/>` +
+            `<path d="M18,-86 L18,-110 Q18,-118 8,-118 L2,-118 L2,-110" fill="none" stroke="${METAL}" stroke-width="3.4" stroke-linecap="round"/>` +
+            `<g id="knob">` +
+            rect(22, -106, 12, 6, METAL, 2) +
+            `</g>` +
+            `<g id="water" opacity="0">` +
+            rect(0, -108, 4, 24, '#9cc7e4', 2) +
+            `</g>` +
+            `<g id="drip" opacity="0">` +
+            `<circle cx="2" cy="-100" r="2.6" ${fill('#9cc7e4')}/>` +
+            `</g>`,
+          [-64, -120, 128, 120],
+        ),
+        affordances: {
+          operates: [{ id: 'tap', at: [28, -103], does: 'tap' }],
+          side: 1,
+        },
       };
     case 'swing':
       return {
@@ -614,6 +975,352 @@ export function drawPiece(kind: FeatureKind, name = ''): SetPiece {
         roosts: [[0, -186]],
       };
   }
+}
+
+// ── Gates and walls as their place has them ───────────────────────────────
+
+/** How a place's gates and walls are built: a compound's concrete, a town's brick or plaster, a farm's timber, an old town's stone. */
+type Build = 'compound' | 'town' | 'rural' | 'stone';
+const buildOf = (pack: StylePackId | null): Build =>
+  pack === 'west-african-town'
+    ? 'compound'
+    : pack === 'village-farm' || pack === 'nature'
+      ? 'rural'
+      : pack === 'ancient-near-east' || pack === 'biblical-village'
+        ? 'stone'
+        : 'town';
+
+const BRICK = '#b8674f';
+const BRICK_LINE = '#94503d';
+const PLASTER = '#e8dcc6';
+const STONE_WALL = '#cbbf9f';
+
+/** A stretch of wall `w` wide from x, `h` high, as its place builds one. */
+function wallRun(x: number, w: number, h: number, build: Build): string {
+  if (build === 'rural') {
+    // A timber rail fence: posts and two rails.
+    const n = Math.max(2, Math.round(w / 56));
+    const posts = Array.from({ length: n }, (_, i) =>
+      rect(x + (i * (w - 10)) / (n - 1), -h + 10, 10, h - 10, WOOD_DARK, 1),
+    ).join('');
+    return (
+      posts +
+      rect(x, -h + 22, w, 9, WOOD, 1) +
+      rect(x, -h * 0.45, w, 9, WOOD, 1)
+    );
+  }
+  const colour =
+    build === 'compound' ? CONCRETE : build === 'stone' ? STONE_WALL : BRICK;
+  const joints =
+    build === 'compound'
+      ? `M${x},-74 L${x + w},-74 M${x},-38 L${x + w},-38 M${x + 60},-112 L${x + 60},-74 M${x + 120},-74 L${x + 120},-38 M${x + 40},-38 L${x + 40},0`
+      : build === 'town'
+        ? Array.from({ length: Math.floor(h / 18) }, (_, row) => {
+            const y = -h + 12 + row * 18;
+            const off = row % 2 ? 22 : 0;
+            const verticals = Array.from(
+              { length: Math.floor((w - off) / 44) },
+              (_, k) =>
+                `M${r1(x + off + k * 44)},${r1(y)} L${r1(x + off + k * 44)},${r1(y + 18)}`,
+            ).join(' ');
+            return `M${x},${r1(y)} L${x + w},${r1(y)} ${verticals}`;
+          }).join(' ')
+        : `M${x},${-Math.round(h * 0.66)} L${x + w},${-Math.round(h * 0.66)} M${x},${-Math.round(h * 0.33)} L${x + w},${-Math.round(h * 0.33)} M${x + Math.round(w * 0.35)},${-h + 8} L${x + Math.round(w * 0.35)},${-Math.round(h * 0.66)} M${x + Math.round(w * 0.7)},${-Math.round(h * 0.66)} L${x + Math.round(w * 0.7)},${-Math.round(h * 0.33)} M${x + Math.round(w * 0.24)},${-Math.round(h * 0.33)} L${x + Math.round(w * 0.24)},0`;
+  return (
+    rect(x, -h + 8, w, h - 8, colour, 0) +
+    rect(x - 4, -h, w + 8, 10, build === 'town' ? PLASTER : '#c2b397') +
+    line(
+      joints,
+      build === 'town' ? BRICK_LINE : '#a99a80',
+      build === 'town' ? 1.6 : 2,
+    )
+  );
+}
+
+/**
+ * A gate in its wall, as its place has one, its wall running off each
+ * side beyond its frame, so it is a gateway, never a gate on its own:
+ * going through it is going out. A West African compound's metal gate
+ * between concrete posts; a town's garden gate between brick piers; a
+ * farm's timber gate in a rail fence; an old town's wooden gate in a
+ * stone wall. Its leaf is hinged on the left post, a latch on the right.
+ */
+/** A gate's affordances (interactions I1): its latch, both sides; the threshold; its posts the near frame; a knock. */
+const GATE_AFFORDANCES = (latch: [number, number]): SceneAffordancesDto => ({
+  handles: [
+    { id: 'latch', at: latch, side: 'out' },
+    { id: 'latch-in', at: latch, side: 'in' },
+  ],
+  threshold: {
+    line: [
+      [-76, 0],
+      [76, 0],
+    ],
+    inside: 'behind',
+  },
+  masks: [{ id: 'frame-near', group: 'posts' }],
+  operates: [{ id: 'knock', at: [30, -104], does: 'knock' }],
+  side: 1,
+});
+
+function drawGate(pack: StylePackId | null): SetPiece {
+  const build = buildOf(pack);
+  if (build === 'compound') {
+    // A compound's metal gate between two concrete posts, wider than it
+    // is high and about a grown-up's shoulder high, as such gates are.
+    const leaf =
+      `<g id="leaf">` +
+      rect(-76, -128, 152, 10, METAL) +
+      rect(-76, -22, 152, 10, METAL) +
+      rect(-76, -128, 10, 116, METAL) +
+      rect(66, -128, 10, 116, METAL) +
+      rect(-76, -76, 152, 8, METAL) +
+      bars(-66, 66, -118, -22, 7) +
+      rect(56, -92, 14, 10, YELLOW) +
+      `</g>`;
+    return {
+      ...framed(
+        wallRun(-264, 170, 120, build) +
+          wallRun(94, 170, 120, build) +
+          shadow(90) +
+          leaf +
+          // Its posts are the near frame one going through passes behind.
+          `<g id="posts">` +
+          rect(-94, -146, 18, 146, CONCRETE) +
+          rect(76, -146, 18, 146, CONCRETE) +
+          rect(-98, -154, 26, 10, CONCRETE) +
+          rect(72, -154, 26, 10, CONCRETE) +
+          `</g>`,
+        [-98, -154, 196, 160],
+      ),
+      leaf: { id: 'leaf', hinge: [-76, -70] },
+      opening: [-76, -128, 76, 0],
+      affordances: GATE_AFFORDANCES([63, -87]),
+    };
+  }
+  const post =
+    build === 'rural' ? WOOD_DARK : build === 'stone' ? STONE_WALL : BRICK;
+  const cap =
+    build === 'rural' ? WOOD : build === 'stone' ? '#b9ad8c' : PLASTER;
+  const leafColour =
+    build === 'town' ? WHITE : build === 'stone' ? WOOD : PLANK;
+  // A town's picket gate; a farm's five-bar gate with its brace; an old
+  // town's gate of planks.
+  const body =
+    build === 'town'
+      ? Array.from({ length: 7 }, (_, i) => {
+          const x = -70 + i * 22;
+          return `<path d="M${x - 8},-16 L${x - 8},-104 L${x},-116 L${x + 8},-104 L${x + 8},-16 Z" ${fill(leafColour)}/>`;
+        }).join('') +
+        rect(-76, -92, 152, 9, leafColour, 2) +
+        rect(-76, -40, 152, 9, leafColour, 2)
+      : build === 'rural'
+        ? [-118, -94, -70, -46, -22]
+            .map((y) => rect(-76, y, 152, 9, leafColour, 2))
+            .join('') +
+          rect(-76, -122, 12, 110, leafColour, 2) +
+          rect(64, -122, 12, 110, leafColour, 2) +
+          line('M-66,-18 L66,-116', FIGURE_INK, 11) +
+          line('M-66,-18 L66,-116', leafColour, 7)
+        : Array.from({ length: 6 }, (_, i) =>
+            rect(-76 + i * 25.4, -126, 25.4, 112, leafColour, 1),
+          ).join('') +
+          rect(-76, -104, 152, 10, WOOD_DARK, 1) +
+          rect(-76, -44, 152, 10, WOOD_DARK, 1);
+  const leaf = `<g id="leaf">` + body + rect(58, -84, 12, 10, METAL) + `</g>`;
+  return {
+    ...framed(
+      wallRun(-264, 170, build === 'rural' ? 110 : 112, build) +
+        wallRun(94, 170, build === 'rural' ? 110 : 112, build) +
+        shadow(90) +
+        leaf +
+        `<g id="posts">` +
+        rect(-94, -146, 18, 146, post) +
+        rect(76, -146, 18, 146, post) +
+        rect(-98, -154, 26, 10, cap) +
+        rect(72, -154, 26, 10, cap) +
+        `</g>`,
+      [-98, -154, 196, 160],
+    ),
+    leaf: { id: 'leaf', hinge: [-76, -70] },
+    opening: [-76, -128, 76, 0],
+    affordances: GATE_AFFORDANCES([64, -79]),
+  };
+}
+
+/** The door's own parts, the same in a room's wall and a building's front: the dark beyond, and its leaf. */
+const DOOR_DARK = `<g id="dark">` + rect(-48, -204, 96, 204, DARK, 0) + `</g>`;
+const doorLeaf = (colour: string) =>
+  `<g id="leaf">` +
+  rect(-48, -204, 96, 204, colour, 0) +
+  rect(-36, -190, 72, 80, PLANK, 3) +
+  rect(-36, -98, 72, 84, PLANK, 3) +
+  `<circle cx="32" cy="-100" r="5" ${fill(YELLOW)}/>` +
+  `</g>`;
+/** A door's affordances, in a room's wall or a building's front: its knob both sides, the threshold, the near frame, a knock and a bell. */
+const DOOR_AFFORDANCES: SceneAffordancesDto = {
+  handles: [
+    { id: 'knob', at: [32, -100], side: 'out' },
+    { id: 'knob-in', at: [32, -100], side: 'in' },
+  ],
+  threshold: {
+    line: [
+      [-48, 0],
+      [48, 0],
+    ],
+    inside: 'behind',
+  },
+  masks: [{ id: 'frame-near', group: 'frame' }],
+  dark: 'dark',
+  operates: [
+    { id: 'knock', at: [16, -128], does: 'knock' },
+    { id: 'bell', at: [66.5, -126], does: 'bell' },
+  ],
+  side: 1,
+};
+
+/** Half a building front's width, and its height, in the kit's units: about four metres by four and a half, two storeys. */
+const FRONT_HALF = 220;
+const FRONT_TALL = 500;
+
+/** The joints of a wall's face within a box: a town's brick courses, an old town's stone blocks, a farm's boards. */
+function faceJoints(
+  [x0, y0, x1, y1]: [number, number, number, number],
+  build: Build,
+): string {
+  if (build === 'rural') {
+    const out: string[] = [];
+    for (let x = x0 + 28; x < x1; x += 28)
+      out.push(`M${r1(x)},${r1(y0)} L${r1(x)},${r1(y1)}`);
+    return out.join(' ');
+  }
+  const course = build === 'town' ? 18 : build === 'stone' ? 40 : 60;
+  const brick = build === 'town' ? 44 : build === 'stone' ? 70 : 120;
+  const out: string[] = [];
+  for (let row = 0, y = y1 - course; y > y0; row += 1, y -= course) {
+    out.push(`M${r1(x0)},${r1(y)} L${r1(x1)},${r1(y)}`);
+    const off = row % 2 ? brick / 2 : 0;
+    for (let x = x0 + off + brick; x < x1; x += brick)
+      out.push(`M${r1(x)},${r1(y)} L${r1(x)},${r1(Math.min(y1, y + course))}`);
+  }
+  return out.join(' ');
+}
+
+/** A window of a building's front: its surround, its glass and its sill. */
+const frontWindow = (
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  trim: string,
+) =>
+  rect(x - 6, y - 6, w + 12, h + 12, trim, 2) +
+  rect(x, y, w, h, GLASS, 0) +
+  line(`M${r1(x + w / 2)},${r1(y)} L${r1(x + w / 2)},${r1(y + h)}`, trim, 5) +
+  rect(x - 10, y + h + 4, w + 20, 9, trim, 2);
+
+/**
+ * A door out of doors, as the way into a building (never a door on its
+ * own in a street): the building's front drawn round it, two storeys, as
+ * its place builds one (a town's brick with plaster trim, a compound's
+ * plastered block, a farm's boards, an old town's stone), with windows
+ * beside it and above it, and its door in the doorway as a room's is,
+ * the same leaf, knob, threshold, knock and bell. The whole front is the
+ * near frame: one going in passes behind it, into the building. People
+ * stand by its doorway, not by the whole front (stand).
+ */
+function drawBuildingDoor(pack: StylePackId | null): SetPiece {
+  const build = buildOf(pack);
+  const wall =
+    build === 'compound'
+      ? PLASTER
+      : build === 'stone'
+        ? STONE_WALL
+        : build === 'rural'
+          ? PLANK
+          : BRICK;
+  const joint =
+    build === 'town' ? BRICK_LINE : build === 'rural' ? WOOD_DARK : '#a99a80';
+  const trim =
+    build === 'rural' ? WOOD_DARK : build === 'town' ? PLASTER : '#c2b397';
+  const H = FRONT_HALF;
+  const T = FRONT_TALL;
+  // The front with its doorway cut out, so the door and the dark show.
+  const face =
+    `<path d="M${-H},${-T} L${H},${-T} L${H},0 L56,0 L56,-212 L-56,-212 L-56,0 L${-H},0 Z" ${fill(wall)}/>` +
+    line(
+      [
+        faceJoints([-H, -T + 16, -60, 0], build),
+        faceJoints([60, -T + 16, H, 0], build),
+        faceJoints([-60, -T + 16, 60, -250], build),
+      ].join(' '),
+      joint,
+      1.6,
+    );
+  const storey = -270;
+  const windows =
+    frontWindow(-176, -186, 76, 96, trim) +
+    frontWindow(100, -186, 76, 96, trim) +
+    [-170, -38, 94].map((x) => frontWindow(x, -438, 76, 110, trim)).join('');
+  return {
+    ...framed(
+      shadow(H - 10) +
+        DOOR_DARK +
+        doorLeaf(WOOD) +
+        `<g id="frame">` +
+        face +
+        // A band between the storeys and a cornice along the top.
+        rect(-H, storey, 2 * H, 10, trim, 1) +
+        rect(-H - 8, -T - 14, 2 * H + 16, 18, trim, 2) +
+        windows +
+        // The doorway's surround, lintel, and its bell.
+        rect(-86, -244, 172, 12, trim) +
+        rect(-56, -212, 8, 212, WOOD_DARK, 0) +
+        rect(48, -212, 8, 212, WOOD_DARK, 0) +
+        rect(-56, -212, 112, 10, WOOD_DARK) +
+        rect(61, -133, 11, 14, WHITE, 2) +
+        `<circle cx="66.5" cy="-126" r="3.2" ${fill(STONE)}/>` +
+        // A step before it, the pavement's edge of the building.
+        rect(-70, -8, 140, 8, '#b9b2a4', 1) +
+        `</g>`,
+      [-H - 8, -T - 14, 2 * H + 16, T + 14],
+    ),
+    leaf: { id: 'leaf', hinge: [-48, -102] },
+    opening: [-48, -204, 48, 0],
+    affordances: DOOR_AFFORDANCES,
+    stand: [-86, 86],
+    roosts: [
+      [-H + 20, -T - 14],
+      [H - 20, -T - 14],
+    ],
+  };
+}
+
+/** A stretch of wall as its place builds one, to stand by or climb up on. */
+function drawWall(pack: StylePackId | null): SetPiece {
+  const build = buildOf(pack);
+  // A farm's wall is a dry stone wall, never its rail fence: one climbs up on it.
+  const as = build === 'rural' ? 'stone' : build;
+  return {
+    ...framed(
+      as === 'compound'
+        ? rect(-124, -96, 248, 96, CONCRETE, 0) +
+            rect(-130, -106, 260, 12, '#c2b397') +
+            line(
+              'M-124,-64 L124,-64 M-124,-32 L124,-32 M-60,-94 L-60,-64 M40,-94 L40,-64 M-10,-64 L-10,-32 M90,-64 L90,-32 M-80,-32 L-80,0 M30,-32 L30,0',
+              '#a99a80',
+              2,
+            )
+        : wallRun(-124, 248, 106, as),
+      [-130, -106, 260, 106],
+    ),
+    perch: 106,
+    roosts: [
+      [-80, -106],
+      [0, -106],
+      [80, -106],
+    ],
+  };
 }
 
 /** Whether the stage draws a feature itself: always one people act on; any other, where the painting has not got it. */

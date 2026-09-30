@@ -67,11 +67,12 @@ export const LINE_PACE_SPEED: Record<LinePace, number> = {
 /**
  * The longest silence a sentence may keep after it, for what happens in
  * it: a book's screenplay asks three seconds at most; a Studio scene up to
- * six (a chase, a look round), or ten with an action in it (a throw, a
- * jump, a thing handled: studio-stage's ACTION_MOST_S), carried by its
- * music.
+ * six (a look round), ten with an action in it (a throw, a jump, a thing
+ * handled: studio-stage's ACTION_MOST_S), or twenty for a physical
+ * sequence (a climb, a break-in, a chase: its SEQUENCE_MOST_S), carried by
+ * its music.
  */
-export const HOLD_LIMIT_S = 10;
+export const HOLD_LIMIT_S = 20;
 
 /** Each sentence's pace and the silence after it, in seconds. */
 /**
@@ -159,13 +160,38 @@ export const DELIVERY_STYLE: Record<SceneDelivery, string> = {
 };
 
 /**
+ * A lesson's mood and delivery with no pace in them: the pace is said
+ * once, by the word its measured rate chose (scene-pace paceWordFor), not
+ * leaned on by "unhurried" in every note, which slowed Gemini to 120–135
+ * words a minute.
+ */
+export const LESSON_MOOD_STYLE: Record<SceneMood, string> = {
+  calm: 'calm and warm',
+  bright: 'bright and upbeat',
+  curious: 'curious, with a sense of wonder',
+  serious: 'gentle and sober',
+  playful: 'playful, with a smile in the voice',
+};
+
+export const LESSON_DELIVERY_STYLE: Record<SceneDelivery, string> = {
+  hook: 'inviting',
+  explain: 'clear',
+  key: 'landing the point',
+  aside: 'light',
+  question: 'asking, then leaving room',
+  recap: 'warm, steady',
+};
+
+/**
  * One sentence's direction: the page's mood, the sentence's delivery,
- * and the new term it says first, stressed.
+ * and the new term it says first, stressed. With a pace word (a lesson's,
+ * chosen by its measured rate), the pace is that word alone.
  */
 export function voiceStyle(
   mood: SceneMood,
   delivery: SceneDelivery,
   terms: readonly string[] = [],
+  pace?: string,
 ): string {
   const stress = terms.length
     ? `; stressing ${terms
@@ -173,6 +199,8 @@ export function voiceStyle(
         .map((term) => `"${term}"`)
         .join(' and ')}`
     : '';
+  if (pace)
+    return `${LESSON_MOOD_STYLE[mood] ?? LESSON_MOOD_STYLE.curious}; ${LESSON_DELIVERY_STYLE[delivery] ?? LESSON_DELIVERY_STYLE.explain}; ${pace} pace${stress}`;
   return `${MOOD_STYLE[mood] ?? MOOD_STYLE.curious}; ${DELIVERY_STYLE[delivery] ?? DELIVERY_STYLE.explain}${stress}`;
 }
 
@@ -436,6 +464,21 @@ export function characterVoice(
   };
 }
 
+/**
+ * One of the cast telling the story (a Studio show's "character"
+ * narrator): their own voice, at their pace, directed as telling it in
+ * the first person. Null when they have no voice of their own: the
+ * narrator's own says it.
+ */
+export function narratingSpeaker(speaker: Speaker | null): Speaker | null {
+  return speaker
+    ? {
+        ...speaker,
+        style: `${speaker.style.replace(/, saying their own line$/u, '')}, telling the story in their own words`,
+      }
+    : null;
+}
+
 /** A breath between the narrator and a character within one sentence. */
 export const TURN_S = 0.12;
 
@@ -591,8 +634,8 @@ const voicedOf = (beat: SceneBeat) => [
  * voice it was made with, never voiced again.
  */
 export function voicedAlike(
-  a: Pick<SceneScript, 'beats' | 'mood' | 'lead' | 'opening'>,
-  b: Pick<SceneScript, 'beats' | 'mood' | 'lead' | 'opening'>,
+  a: Pick<SceneScript, 'beats' | 'mood' | 'lead' | 'opening' | 'narrator'>,
+  b: Pick<SceneScript, 'beats' | 'mood' | 'lead' | 'opening' | 'narrator'>,
 ): boolean {
   const said = (script: typeof a) =>
     JSON.stringify([
@@ -600,6 +643,8 @@ export function voicedAlike(
       script.lead ?? 0,
       script.opening?.show.length ? 1 : 0,
       script.beats.map(voicedOf),
+      // Who tells it: the narrator's own voice, or one of the cast's.
+      ...(script.narrator ? [script.narrator] : []),
     ]);
   return said(a) === said(b);
 }

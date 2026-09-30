@@ -107,6 +107,12 @@ export interface StudioAsk {
   remedy?: { wear?: { who: string; thing: string }[] };
   /** Made again without spending the maker's film: the Studio's own try again. */
   free?: boolean;
+  /**
+   * The Studio's own try again at what its picture check found wrong
+   * (studio-scenery-plan §8.6), not at a maker's words: quiet in the
+   * thread, and not checked as a maker's ask is.
+   */
+  picture?: true;
 }
 
 /** A piece of the Studio's work on one episode. */
@@ -119,7 +125,10 @@ export interface StudioJob {
     | 'prepare'
     | 'make'
     | 'draw'
-    | 'redraw';
+    | 'redraw'
+    | 'repace';
+  /** For 'repace': the maker's pace (scene-pace makerRate) every made lesson scene's voice is played at now, stretched to it from its own. */
+  pace?: number;
   /** For 'draw': the characters the artist draws at the cast step; for 'redraw', the one drawn again as the maker asks. */
   characterIds?: string[];
   characterId?: string;
@@ -130,6 +139,8 @@ export interface StudioJob {
   /** For 'prepare': the scenes to make once the cast and the places are drawn. */
   sceneIds?: string[];
   request?: string;
+  /** For 'outline': the request is for the story itself (the Story step), developed again before the outline. */
+  story?: boolean;
   /** A maker's request for a change to a made scene: written, made again and checked. */
   ask?: StudioAsk;
 }

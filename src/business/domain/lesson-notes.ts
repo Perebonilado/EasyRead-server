@@ -1,3 +1,4 @@
+import { sameSubject } from './scene-picture-label';
 import {
   nameKeys,
   partNames,
@@ -466,6 +467,9 @@ export function carryOver(
     const drawing = ending.drawings[thing.id];
     if (thing.kind !== 'drawing' || kept?.kind !== 'drawing' || !drawing)
       return thing;
+    // The same id is the same thing only when it is drawn as one: another
+    // name or subject under it is drawn anew, never the page before's.
+    if (!sameSubject(kept, thing)) return thing;
     reuse.set(thing.id, drawing);
     return kept;
   });

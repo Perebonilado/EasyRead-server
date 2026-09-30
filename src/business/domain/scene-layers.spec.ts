@@ -36,6 +36,7 @@ import {
 import { WALK_DEPTH, settledOf, walkLength, walksOf } from './scene-film';
 import {
   FACE_COVERED,
+  SEEN_SMALLEST,
   covered,
   faceOf,
   keepFacesSeen,
@@ -55,6 +56,8 @@ import {
   type EndState,
 } from './studio/studio-check';
 import {
+  SHEET_DEPTH,
+  SMALL_DEPTH,
   depthSaid,
   placeThingId,
   stageStory,
@@ -136,7 +139,9 @@ describe('a set built as layers', () => {
       expect(layer.svg).toMatch(
         new RegExp(`^<svg[^>]*viewBox="0 0 ${SET_W} ${SET_H}"[^>]*><g stroke=`),
       );
-    expect(layered.width).toBe(SET_W);
+    // A road people go a long way across: two frames wide, for the camera
+    // to pan and follow a walk across (L4), its frame the middle.
+    expect(layered.width).toBe(SET_W * 2);
     // The floor's things stand where the front row does, among the people.
     expect(layered.layers[5].feet).toBe(rowFeet('outdoor', 'front'));
     // Every piece placed is in the flat picture too.
@@ -185,8 +190,14 @@ describe('a set built as layers', () => {
     });
     // Only those of the list the kit draws.
     expect(layout.clutter).toEqual(['chair', 'basket', 'cart']);
-    expect(layout.width).toBeUndefined();
-    expect(layoutOf({ ...MARKET, width: 2 }, place()).width).toBe(2);
+    // A Studio road is two frames wide unless the painter says; a book's
+    // page, whose camera never pans, one.
+    expect(layout.width).toBe(2);
+    expect(layoutOf({ ...MARKET, width: 1 }, place()).width).toBeUndefined();
+    expect(layoutOf({ ...MARKET, width: '1.5' }, place()).width).toBe(1.5);
+    expect(
+      layoutOf(MARKET, place({ features: undefined })).width,
+    ).toBeUndefined();
     // Four things before the camera at most.
     const many = layoutOf(
       {
@@ -484,6 +495,105 @@ describe('faces kept in view', () => {
     expect(notes.join(' ')).toMatch(/fg-1 faded/);
   });
 
+  /** A small dog at depth d, as big as he is there: 224 high where people have always stood. */
+  const dog = (d: number, x = 1200) => {
+    const at = floorAt(d, 844, 496, 888);
+    const h = 224 * at.k;
+    return { x, y: at.feet - h, w: h * 0.8, h, d };
+  };
+
+  it('brings a small one who speaks nearer where he is too small to see, and says so', () => {
+    const places = [
+      {
+        maya: { x: 200, y: 844 - 420, w: 210, h: 420, d: 0.5 },
+        pip: dog(0.15),
+      },
+    ];
+    expect(places[0].pip.h / H).toBeLessThan(SEEN_SMALLEST);
+    const { notes } = keepFacesSeen({
+      ...base,
+      steps: [{ atMs: 0, show: ['maya', 'pip'] }],
+      lines: [{ who: 'pip', startMs: 500, endMs: 1500 }],
+      places,
+    });
+    const pip = places[0].pip;
+    expect(pip.d).toBeGreaterThan(0.15);
+    expect(pip.h / H).toBeGreaterThanOrEqual(SEEN_SMALLEST);
+    // Where he stood across the stage: his middle kept.
+    expect(pip.x + pip.w / 2).toBeCloseTo(dog(0.15).x + dog(0.15).w / 2, 0);
+    expect(notes).toEqual([
+      "staging: pip was small (20% of the frame's height) as they spoke; pip steps nearer 2 times",
+    ]);
+    // Maya, a child at the back of the floor, is seen well: left there.
+    expect(places[0].maya.d).toBe(0.5);
+  });
+
+  it('brings a small one nearer as someone acts toward him; not one at a feature, or hidden, or one seen close', () => {
+    const acts = [
+      { who: 'maya', toward: 'pip', startMs: 500, endMs: 1500 },
+    ] as const;
+    const step = [{ atMs: 0, show: ['maya', 'pip'] }];
+    const maya = { x: 200, y: 844 - 420, w: 210, h: 420, d: 0.5 };
+    const toward = [{ maya: { ...maya }, pip: dog(0.15) }];
+    const hugged = keepFacesSeen({
+      ...base,
+      steps: step,
+      lines: [],
+      acts,
+      places: toward,
+    });
+    expect(toward[0].pip.h / H).toBeGreaterThanOrEqual(SEEN_SMALLEST);
+    expect(hugged.notes.join(' ')).toMatch(
+      /pip was small .* as someone acted toward them; pip steps nearer/,
+    );
+    // By a feature at the back, he may not step nearer: left, and said.
+    const byIt = [{ maya: { ...maya }, pip: dog(0) }];
+    const left = keepFacesSeen({
+      ...base,
+      steps: step,
+      lines: [],
+      acts,
+      places: byIt,
+      open: () => false,
+    });
+    expect(byIt[0].pip).toEqual(dog(0));
+    expect(left.notes.join(' ')).toMatch(/pip is small .* left there/);
+    // Under the bench on purpose: his to be small in.
+    const under = [{ maya: { ...maya }, pip: dog(0.15) }];
+    expect(
+      keepFacesSeen({
+        ...base,
+        steps: step,
+        lines: [],
+        acts,
+        places: under,
+        hiding: (_, id) => id === 'pip',
+      }).notes,
+    ).toEqual([]);
+    expect(under[0].pip).toEqual(dog(0.15));
+    // A close shot on him the whole while: he is seen big.
+    const close = [{ maya: { ...maya }, pip: dog(0.15) }];
+    expect(
+      keepFacesSeen({
+        ...base,
+        steps: step,
+        lines: [],
+        acts,
+        places: close,
+        shots: [
+          {
+            atMs: 400,
+            untilMs: 1600,
+            target: 'pip',
+            part: null,
+            do: 'zoom',
+          },
+        ],
+      }).notes,
+    ).toEqual([]);
+    expect(close[0].pip).toEqual(dog(0.15));
+  });
+
   it('sees a face in a close shot as the camera frames it, before the camera moving more than the people', () => {
     const view = viewOf(
       { target: 'maya', part: null },
@@ -642,13 +752,17 @@ describe('no face hidden on the fixtures', () => {
       if (where.id === 'market') {
         const thing = scene.things.find((t) => t.id === placeThingId('market'));
         expect(thing?.kind === 'drawing' && thing.layers?.length).toBe(7);
-        expect(thing?.kind === 'drawing' && thing.setWidth).toBe(SET_W);
+        // Wider than the frame, for the camera to pan (L4).
+        expect(
+          thing?.kind === 'drawing' &&
+            [SET_W * 1.5, SET_W * 2].includes(thing.setWidth ?? 0),
+        ).toBe(true);
       }
       before = endStateOf(fixed, show, before);
     }
   });
 
-  it('keeps every speaker’s face seen with two rows of people watching before the camera (L3)', async () => {
+  it('keeps the people watching out of a scene not about them, though its place has two rows of them (L3)', async () => {
     const bible = bibleOf(fixture('maya', 'bible.json'));
     const sheet = (n: number) =>
       storySheetOf(fixture('maya', `s${n}-sheet.json`));
@@ -660,7 +774,6 @@ describe('no face hidden on the fixtures', () => {
       'Maya',
     ).places;
     let watched = 0;
-    let alive = 0;
     for (let n = 1; n <= 5; n += 1) {
       show = withFeatures(
         show,
@@ -689,27 +802,37 @@ describe('no face hidden on the fixtures', () => {
       const { scene } = withMouths(
         voiced(script, ['pip'], { [placeThingId(where.id)]: set }).scene,
       );
-      expect({ scene: n, hidden: hiddenFaces(scene, set) }).toEqual({
-        scene: n,
-        hidden: [],
-      });
-      // Alive for the scene: their heads turn to whoever speaks.
+      // Not a scene about them (Maya and her friends talk among
+      // themselves): the people watching are not before the camera at all,
+      // in any shot, and hide no one.
       const thing = scene.things.find((t) => t.id === placeThingId(where.id));
       const fore =
         thing?.kind === 'drawing'
           ? thing.layers?.find((layer) => layer.id === 'foreground')
           : undefined;
-      if (fore && /@keyframes au-q\d/.test(fore.svg)) alive += 1;
-      // Seen without fading anyone of them: they stand low enough.
+      expect({
+        scene: n,
+        rows: Boolean(fore?.svg.includes('data-audience')),
+      }).toEqual({ scene: n, rows: false });
       expect(
         (scene.setting?.fades ?? []).filter(([, , id]) =>
           id.startsWith('fg-au-'),
         ),
       ).toEqual([]);
+      const shown = set.layered && {
+        ...set,
+        layered: {
+          ...set.layered,
+          fore: set.layered.fore.filter((f) => !f.id.startsWith('fg-au-')),
+        },
+      };
+      expect({ scene: n, hidden: hiddenFaces(scene, shown ?? set) }).toEqual({
+        scene: n,
+        hidden: [],
+      });
       before = endStateOf(fixed, show, before);
     }
     expect(watched).toBe(5);
-    expect(alive).toBeGreaterThan(0);
   });
 
   it("keeps Tobi's face seen in his bedroom", async () => {
@@ -728,5 +851,75 @@ describe('no face hidden on the fixtures', () => {
       true,
     );
     expect(hiddenFaces(scene, set)).toEqual([]);
+  });
+});
+
+describe('a small one stood forward on the floor', () => {
+  const show = () => bibleOf(fixture('maya', 'bible.json'));
+  const staged = (patch: object) => {
+    const bible = show();
+    const sheet = repairSheet(
+      storySheetOf({
+        ...(fixture('maya', 's4-sheet.json') as object),
+        ...patch,
+      }),
+      bible,
+    );
+    return stageStory(sheet, bible);
+  };
+  const onStage = [
+    { who: 'maya', spot: 'left', pose: 'standing' },
+    { who: 'tobi', spot: 'centre', pose: 'standing' },
+    { who: 'pip', spot: 'right', pose: 'standing' },
+  ];
+  /** How far back someone is asked to stand at each step they are on the stage. */
+  const depths = (script: ReturnType<typeof stageStory>, id: string) =>
+    script.steps.flatMap((step) =>
+      step.stage?.show.includes(id) ? [step.stage.depth?.[id]] : [],
+    );
+
+  it('stands a puppy who acts and is spoken to in the front half, and leaves the children as the stager spreads them', () => {
+    const script = staged({
+      onStage,
+      beats: [
+        { kind: 'narration', say: 'The field is wide and green.' },
+        { kind: 'action', who: 'pip', do: 'hop', say: 'Pip hops about.' },
+        { kind: 'line', who: 'maya', to: 'pip', say: 'Come here, you!' },
+      ],
+    });
+    const pip = depths(script, 'pip');
+    expect(pip.length).toBeGreaterThan(0);
+    expect(pip.every((d) => d === SMALL_DEPTH)).toBe(true);
+    expect(SMALL_DEPTH).toBeGreaterThanOrEqual(0.5);
+    expect(depths(script, 'maya').every((d) => d === undefined)).toBe(true);
+    expect(depths(script, 'tobi').every((d) => d === undefined)).toBe(true);
+  });
+
+  it('leaves a puppy who does nothing and is not named where the stager spreads him', () => {
+    const script = staged({
+      onStage,
+      beats: [
+        { kind: 'narration', say: 'The field is wide and green.' },
+        { kind: 'line', who: 'maya', to: 'tobi', say: 'Shall we play?' },
+        { kind: 'line', who: 'tobi', to: 'maya', say: 'Yes, let us!' },
+      ],
+    });
+    expect(depths(script, 'pip').every((d) => d === undefined)).toBe(true);
+  });
+
+  it('keeps a puppy at the back where the sheet says so, even as he acts', () => {
+    const script = staged({
+      onStage: [
+        ...onStage.slice(0, 2),
+        { who: 'pip', spot: 'right', pose: 'standing', depth: 'back' },
+      ],
+      beats: [
+        { kind: 'action', who: 'pip', do: 'hop', say: 'Pip hops about.' },
+        { kind: 'line', who: 'maya', to: 'pip', say: 'Come here, you!' },
+      ],
+    });
+    const pip = depths(script, 'pip');
+    expect(pip.length).toBeGreaterThan(0);
+    expect(pip.every((d) => d === SHEET_DEPTH.back)).toBe(true);
   });
 });

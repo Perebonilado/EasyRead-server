@@ -5,7 +5,8 @@ import {
   mendExplainerLines,
   storySheetOf,
 } from '../../domain/studio/studio';
-import { describeScene } from '../../domain/studio/studio-words';
+import { describeBrief, describeScene } from '../../domain/studio/studio-words';
+import { recipeFor } from '../../domain/studio/studio-audience';
 import { carriedWears } from '../../domain/studio/studio-check';
 import type {
   StudioEpisodeRecord,
@@ -14,6 +15,7 @@ import type {
 } from '../../repositories/studio.repository';
 import {
   blockersOf,
+  briefDto,
   explainerCard,
   messageDto,
   needsMaking,
@@ -245,6 +247,62 @@ describe('the Studio, as the app sees it', () => {
     const said = describeScene('middle', 20);
     expect(said).toMatch(/about 20 seconds: about 48 spoken words/);
     expect(said).not.toMatch(/150 to 250/);
+  });
+
+  it("tells an explainer's writer its audience's recipe, and whether the scene asks a question", () => {
+    const recipe = recipeFor({ band: 'primary-upper', prior: 'new' });
+    const said = describeScene('early', 30, {
+      recipe,
+      check: true,
+      said: 'Grade 5',
+    });
+    expect(said).toMatch(/eight to eleven[^\n]*The maker said "Grade 5"\./);
+    expect(said).toMatch(/Sentences of 5 to 13 words/);
+    expect(said).toMatch(/delivery "question"/);
+    expect(said).toMatch(/one worked example for each idea/);
+    expect(said).toMatch(/about 30 seconds: about 72 spoken words/);
+  });
+
+  it("gives the brief's audience as the maker said it, and how to teach them", () => {
+    const words = describeBrief(
+      briefOf({
+        format: 'explainer',
+        idea: 'Blood pressure',
+        who: { band: 'university', said: 'First-year nursing', prior: 'new' },
+      }),
+    );
+    expect(words).toContain(
+      'Audience: adults (college and university): First-year nursing · new to it',
+    );
+    expect(words).toMatch(/Teaching them:\n.*college or university/);
+    // Four words alone, as before.
+    expect(describeBrief(briefOf({ audience: 'teens' }))).toContain(
+      'Audience: teens (secondary school)',
+    );
+  });
+
+  it("marks an explainer's scene to be made again when whom it teaches changes, and not before", () => {
+    const sheet = explainerSheetOf({
+      kind: 'explainer',
+      title: 'A',
+      draft: null,
+    });
+    const plain = briefOf({ format: 'explainer', audience: 'children' });
+    const said = briefOf(
+      { who: { band: 'primary-upper', said: 'Grade 5' } },
+      plain,
+    );
+    expect(sceneFingerprint(sheet, null, plain)).toBe(
+      sceneFingerprint(sheet, null, briefOf({}, plain)),
+    );
+    expect(sceneFingerprint(sheet, null, said)).not.toBe(
+      sceneFingerprint(sheet, null, plain),
+    );
+    expect(briefDto(said).who).toEqual({
+      band: 'primary-upper',
+      said: 'Grade 5',
+    });
+    expect(briefDto(plain).who).toBeUndefined();
   });
 });
 

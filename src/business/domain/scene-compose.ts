@@ -16,11 +16,34 @@ import type {
   ScenePlaceDto,
   ScenePropDto,
   SceneStepDto,
+  SceneSetReverseDto,
   SceneSettingDto,
+  SceneShotAngle,
+  SceneShotKind,
   SceneThingDto,
   SceneTiming,
 } from '../../contracts';
+import type { SetLayering } from './scene-set-layout';
 import { actingOf, type DirectedMove, type SpokenLine } from './scene-acting';
+import {
+  feltEffects,
+  grammarRead,
+  nameableThings,
+  readLine,
+  type FeltFace,
+} from './scene-performance';
+import { withViews } from './scene-views';
+import { guessAffordances } from './scene-affordances';
+import { withInteractions, type TimedInteraction } from './scene-interact';
+import {
+  INSERT_EARLY_MS,
+  PHYSICAL_MOVES,
+  grammarCamera,
+  insertWindows,
+  keepTheLine,
+  withInserts,
+  type InsertAsk,
+} from './scene-shots';
 import {
   crowdHeads,
   asideOf,
@@ -43,15 +66,20 @@ import {
   placeVoice,
   placeLabels,
   placePill,
+  tieOf,
+  crosses,
   segmentsOf,
   type Collision,
   type Ink,
   type Words,
 } from './scene-labels';
+import { climbsGrounded, keepGrounded } from './scene-grounding';
 import {
+  SOLID_BESIDE,
   STAGINGS,
   STATION_SHARES,
   extentOf,
+  fitInSlot,
   floorAt,
   layoutStations,
   restingAt,
@@ -68,12 +96,23 @@ import {
   type StagingName,
 } from './scene-layout';
 import {
+  boardOverlaps,
+  cellBox,
+  frameBox,
+  slices,
+  type BoardItem,
+  type BoardStage,
+  type Box as BoardBox,
+} from './scene-board';
+import {
   FACES,
   STORY_MOVES,
   isCodeThing,
   quotedSpans,
   type CharacterThing,
+  type SceneCameraAsk,
   type SceneScript,
+  type SceneStage,
   type SceneStep,
   type SceneThing,
 } from './scene-script';
@@ -89,6 +128,7 @@ import {
 import { wearableOf } from './scene-wear';
 import {
   ACTED_MOVES,
+  BIG_MOVES,
   DOINGS,
   HELD_MOVES,
   THING_ACTIONS,
@@ -105,8 +145,17 @@ import {
   PERCHED_KINDS,
   coveredPiece,
   drawPiece,
+  setLiveryOf,
+  setOutdoorOf,
+  setPackOf,
   featureGroup,
 } from './scene-set-pieces';
+import {
+  describeSpacing,
+  spacingFaults,
+  type NearPair,
+  type NearWhy,
+} from './scene-spacing';
 import type { DocumentProfile } from './scene-profile';
 import {
   WALK_MAX_MS,
@@ -115,15 +164,32 @@ import {
   againstScenery,
   hurried,
   settledOf,
+  MEET_AFTER_MS,
+  MEET_BEFORE_MS,
+  insertBoxOf,
+  insertFramed,
+  type ThingsOnStage,
   viewOf,
   walkEase,
   walksOf,
   withoutJumps,
+  roomOf,
   type StageWalk,
 } from './scene-film';
 import type { GatedDrawing } from './scene-svg';
-import { keepFacesSeen } from './scene-faces-seen';
-import { audienceAlive, type AudienceTurn } from './scene-set-audience';
+import {
+  fitCheatsToShots,
+  keepFacesSeen,
+  keepInClearView,
+} from './scene-faces-seen';
+import {
+  audienceAlive,
+  audienceOutOfShots,
+  crowdAddressed,
+  withoutAudience,
+  type AudienceTurn,
+} from './scene-set-audience';
+import { PAPER, themeOf, type ExplainerTheme } from './scene-themes';
 import { anchorMs, quietGaps, spaced, type TimedBeat } from './scene-timing';
 import { numberWords } from './spoken';
 
@@ -259,6 +325,18 @@ const shareOf = (
   Math.round(((y - viewBox[1]) / viewBox[3]) * 1000) / 1000,
 ];
 
+/** A set's other side as the player takes it: its layers, width, where its action is, and its floor (studio-views-plan §4.2). */
+function reverseDto(
+  reverse: NonNullable<SetLayering['reverse']>,
+): SceneSetReverseDto {
+  return {
+    layers: reverse.layers.map((layer) => ({ ...layer })),
+    setWidth: reverse.width,
+    ...(reverse.focal !== undefined ? { focal: reverse.focal } : {}),
+    floor: [reverse.floor.back, reverse.floor.front],
+  };
+}
+
 /**
  * The thing as the client gets it: its drawing, or a card with its name
  * when the drawing failed. On a story's page nothing is labelled: no
@@ -325,6 +403,18 @@ export function thingDto(
       ? {
           layers: drawing.layered.layers.map((layer) => ({ ...layer })),
           setWidth: drawing.layered.width,
+          // Where the action is on a wide set, and its floor: the camera's (§6).
+          ...(drawing.layered.focal !== undefined
+            ? { focal: drawing.layered.focal }
+            : {}),
+          floor: [drawing.layered.floor.back, drawing.layered.floor.front] as [
+            number,
+            number,
+          ],
+          // Its other side, for a shot from there (studio-views-plan §4.2).
+          ...(drawing.layered.reverse?.layers.length
+            ? { reverse: reverseDto(drawing.layered.reverse) }
+            : {}),
         }
       : {}),
     ...(drawing.callouts.length && !story
@@ -382,12 +472,31 @@ export function thingDto(
     ...(drawing.acts && drawing.outfits?.length
       ? { wears: drawing.outfits }
       : {}),
-    // Drawn by a kit with rig 2: what swings, and how far a stride goes.
-    ...(drawing.rigVersion === 2
+    // Drawn by a kit with rig 2: what swings, and how far a stride goes;
+    // with rig 3, from every side too, and its views.
+    ...(drawing.rigVersion === 2 || drawing.rigVersion === 3
       ? {
-          rigVersion: 2 as const,
+          rigVersion: drawing.rigVersion,
           ...(drawing.dangles?.length ? { dangles: drawing.dangles } : {}),
           ...(drawing.stride ? { stride: drawing.stride } : {}),
+          ...(drawing.rigVersion === 3 && drawing.views?.length
+            ? { views: drawing.views }
+            : {}),
+          // And each view's arms, as shares of the box, as `joints` is
+          // the front's: a hand aimed from where it is in the view shown.
+          ...(drawing.rigVersion === 3 && drawing.acts && drawing.viewJoints
+            ? {
+                viewJoints: Object.fromEntries(
+                  Object.entries(drawing.viewJoints).map(([view, arms]) => [
+                    view,
+                    {
+                      r: arms.r.map((p) => shareOf(drawing.viewBox, p)),
+                      l: arms.l.map((p) => shareOf(drawing.viewBox, p)),
+                    },
+                  ]),
+                ),
+              }
+            : {}),
         }
       : {}),
     // A person the kit drew in bed or lying for the whole scene: so said.
@@ -481,6 +590,9 @@ export function sidesKept(
 
 /** How long before a character comes on their first face is put on: the player fades a state in over 320ms. */
 const FACE_EARLY_MS = 400;
+
+/** Shorter than this, in the kit's units, one is small: judged by how much of them is seen (the stager's SMALL_UNITS). */
+const SMALL_STANDING = 150;
 
 /** A face a drawing does not have, as the nearest one it does: an animal the artist drew has no face of pain, nor its eyes closed. */
 const NEAREST_FACE: Record<string, string> = {
@@ -752,7 +864,11 @@ export function storyShots(
       beat.pace === 'whisper' ||
       beat.pace === 'shout' ||
       STRONG_FACES.has(faceAt(speaker, at + 400) ?? '');
-    if (strong && on.length >= 2 && at - lastClose >= SHOT_APART_MS) {
+    if (
+      strong &&
+      on.length >= 2 &&
+      at - lastClose >= SHOT_APART_MS * (script.energy?.cut ?? 1)
+    ) {
       const from = Math.max(0, at - 200);
       const until = Math.min(end + 500, changeAfter(at));
       if (until - from >= SHOT_LEAST_MS) {
@@ -852,6 +968,67 @@ export interface Doing {
   toMs: number;
 }
 
+/** A shot as the camera takes it: on whom, with whom, and its grammar. */
+interface Framed {
+  on: string;
+  with: string | null;
+  kind?: SceneShotKind;
+  angle?: SceneShotAngle;
+  /** From the place's other side (studio-views-plan §4.2). */
+  reverse?: true;
+}
+
+/**
+ * A shot asked for, framed on who is there (`on`, the stage then): a
+ * two-shot, over the shoulder or in profile only with the other there
+ * (else one alone, close); a low or high angle on one alone.
+ */
+function framedAs(ask: SceneCameraAsk, on: readonly string[]): Framed {
+  const other =
+    ask.with && ask.with !== ask.on && on.includes(ask.with) ? ask.with : null;
+  const one = ask.on!;
+  switch (ask.shot) {
+    case 'two':
+      return { on: one, with: other };
+    case 'ots':
+    case 'profile':
+      return other
+        ? {
+            on: one,
+            with: other,
+            kind: ask.shot,
+            ...(ask.reverse && ask.shot === 'ots' ? { reverse: true } : {}),
+          }
+        : { on: one, with: null };
+    case 'deep':
+      return { on: one, with: null, kind: ask.shot };
+    case 'crowd':
+      return {
+        on: one,
+        with: null,
+        kind: ask.shot,
+        ...(ask.reverse ? { reverse: true } : {}),
+      };
+    case 'low':
+    case 'high':
+      return { on: one, with: null, angle: ask.shot };
+    default:
+      return {
+        on: one,
+        with: null,
+        ...(ask.angle ? { angle: ask.angle } : {}),
+      };
+  }
+}
+
+/** Whether two shots frame the same, grammar and all. */
+const same = (a: SceneEffectDto, b: SceneEffectDto) =>
+  a.target === b.target &&
+  a.part === b.part &&
+  (a.shot?.kind ?? null) === (b.shot?.kind ?? null) &&
+  (a.shot?.angle ?? null) === (b.shot?.angle ?? null) &&
+  (a.shot?.reverse ?? false) === (b.shot?.reverse ?? false);
+
 /**
  * The camera as a scene says it (the Studio's sheets), cut as a film is:
  * the whole stage, one person close, or two framed together, each from
@@ -896,16 +1073,29 @@ export function directedShots(
     at: number;
     /** From a moment in a quiet: the stage may change at it, as its doing does. */
     moment: boolean;
-    shot: { on: string; with: string | null } | null;
+    shot: Framed | null;
   }[] = [];
-  for (const shot of [...(script.camera ?? [])].sort(
+  const asks = [...(script.camera ?? [])].sort(
     (a, b) => a.beat - b.beat || (a.after ?? -1) - (b.after ?? -1),
-  )) {
+  );
+  // Code's own at moments of its own (a hero's pose) among the rest, in
+  // the order they come.
+  const timeOf = (one: SceneCameraAsk) =>
+    one.atMs ??
+    (one.after !== undefined && options.momentMs
+      ? options.momentMs(one.beat, one.after)
+      : (beats[Math.max(0, Math.min(one.beat, beats.length - 1))]?.startMs ??
+        0));
+  if (asks.some((one) => one.atMs !== undefined))
+    asks.sort((a, b) => timeOf(a) - timeOf(b));
+  for (const shot of asks) {
     const b = Math.max(0, Math.min(shot.beat, beats.length - 1));
     const moment =
-      shot.after !== undefined && options.momentMs
-        ? options.momentMs(shot.beat, shot.after)
-        : null;
+      shot.atMs !== undefined
+        ? shot.atMs
+        : shot.after !== undefined && options.momentMs
+          ? options.momentMs(shot.beat, shot.after)
+          : null;
     // One who goes off at the moment is seen close as the line before it
     // is said, until they go.
     const leaving =
@@ -928,16 +1118,7 @@ export function directedShots(
     const on = stageAt(moment !== null ? moment - 1 : beats[b].startMs + 50);
     const framed =
       shot.shot !== 'wide' && shot.on && on.includes(shot.on)
-        ? {
-            on: shot.on,
-            with:
-              shot.shot === 'two' &&
-              shot.with &&
-              shot.with !== shot.on &&
-              on.includes(shot.with)
-                ? shot.with
-                : null,
-          }
+        ? framedAs(shot, on)
         : null;
     if (wanted[wanted.length - 1]?.at === at) wanted.pop();
     wanted.push({ at, moment: moment !== null && !leaving, shot: framed });
@@ -945,7 +1126,9 @@ export function directedShots(
   const shots: SceneEffectDto[] = [];
   wanted.forEach(({ at: asked, moment, shot }, i) => {
     if (!shot) return;
-    const framed = (who: string) => who === shot.on || who === shot.with;
+    // Deep staging has everyone on the stage in it.
+    const framed = (who: string) =>
+      shot.kind === 'deep' || who === shot.on || who === shot.with;
     const others = (options.doings ?? []).filter((one) => !framed(one.who));
     // Something being done by someone else as it would begin: once it is,
     // unless it is all but done.
@@ -986,27 +1169,26 @@ export function directedShots(
     until = Math.round(until);
     if (until <= at) return;
     const last = shots[shots.length - 1];
-    // The same framing again at once: one shot.
-    if (
-      last &&
-      last.untilMs === at &&
-      last.target === shot.on &&
-      last.part === shot.with
-    ) {
-      last.untilMs = until;
-      return;
-    }
-    shots.push({
+    const effect: SceneEffectDto = {
       atMs: at,
       target: shot.on,
       part: shot.with,
       do: 'zoom',
       untilMs: until,
-      shot: { enter: 'cut' },
-    });
+      shot: {
+        enter: 'cut',
+        ...(shot.kind ? { kind: shot.kind } : {}),
+        ...(shot.angle ? { angle: shot.angle } : {}),
+        ...(shot.reverse ? { reverse: true as const } : {}),
+      },
+    };
+    // The same framing again at once: one shot.
+    if (last && last.untilMs === at && same(last, effect)) {
+      last.untilMs = until;
+      return;
+    }
+    shots.push(effect);
   });
-  const same = (a: SceneEffectDto, b: SceneEffectDto) =>
-    a.target === b.target && a.part === b.part;
   // A shot too short to take in is none: what was on before holds through it.
   for (let i = shots.length - 1; i >= 0; i -= 1) {
     const shot = shots[i];
@@ -1034,6 +1216,161 @@ export function directedShots(
     .map((shot) =>
       shot.untilMs! > tail ? { ...shot, untilMs: durationMs } : shot,
     );
+}
+
+/** A thing handled in a quiet is done this near its moment: an insert on it waits for it. */
+const HANDLED_NEAR_MS = 500;
+
+/**
+ * The inserts of a Studio film's scene (studio-screenwriting K5): a close
+ * shot on a thing alone, framed where it is, for about a second and a
+ * half, on or just after the moment it is handled or named, cut in the
+ * gaps between words. Asked for by the sheet (a thing it plants, as it is
+ * handled), and wherever a line shows or reveals a thing on the stage it
+ * names. A thing no one has or stands by, and no feature, is not shown.
+ */
+function insertShots(input: {
+  script: SceneScript;
+  beats: readonly TimedBeat[];
+  steps: readonly SceneStepDto[];
+  places: readonly Record<string, ScenePlaceDto>[];
+  props: readonly ScenePropDto[];
+  features: ReadonlyMap<string, { x: number; y: number; w: number; h: number }>;
+  drawing: (
+    id: string,
+  ) => Extract<SceneThingDto, { kind: 'drawing' }> | undefined;
+  momentMs: (beat: number, after: number) => number;
+  endMs: number;
+}): SceneEffectDto[] {
+  const { script, beats, steps, places, props } = input;
+  const things = nameableThings(script).flatMap((one) =>
+    one.id ? [{ aim: one.id, words: one.words }] : [],
+  );
+  const wordsOf = (k: number) => {
+    const beat = beats[k];
+    return beat ? beat.words.map(([a, b]) => beat.text.slice(a, b)) : [];
+  };
+  /** Where a beat's words name a thing: its word's moment. */
+  const namedAt = (k: number, thing: string): number | null => {
+    const beat = beats[k];
+    if (!beat) return null;
+    const read = readLine(wordsOf(k), {
+      things: things.filter((one) => one.aim === thing),
+    });
+    return read.thing ? (beat.words[read.thing.word]?.[2] ?? null) : null;
+  };
+  const asks: InsertAsk[] = [];
+  for (const one of script.inserts ?? []) {
+    if (!beats[Math.max(0, one.beat)]) continue;
+    // A thing handled in a quiet: at the moment it changes hands (the
+    // hand closing, letting go), where the stage has it done.
+    const moment =
+      one.after !== undefined ? input.momentMs(one.beat, one.after) : null;
+    const done =
+      moment === null
+        ? undefined
+        : props
+            .find((p) => p.id === one.thing)
+            ?.does.find(([at]) => at >= moment - HANDLED_NEAR_MS)?.[0];
+    const atMs =
+      moment !== null
+        ? done !== undefined && done - moment < HANDLED_NEAR_MS * 4
+          ? done
+          : moment
+        : (namedAt(one.beat, one.thing) ??
+          beats[one.beat].endMs + AFTER_WORDS_MS);
+    // A thing handed over: while the hands are out together, from just
+    // after they reach out until they part, so it is seen where they meet.
+    const handed = props
+      .find((p) => p.id === one.thing)
+      ?.does.find(([at, , does]) => at === atMs && does === 'give');
+    asks.push(
+      handed
+        ? {
+            thing: one.thing,
+            atMs: atMs - MEET_BEFORE_MS + INSERT_EARLY_MS - 100,
+            ms: MEET_BEFORE_MS + MEET_AFTER_MS + 200,
+          }
+        : { thing: one.thing, atMs },
+    );
+  }
+  // A line that shows or reveals a thing it names, as the writer or its
+  // words say: the thing, as it is named.
+  script.beats.forEach((beat, k) => {
+    if (beat.kind !== 'line' || !beats[k]) return;
+    const read = readLine(wordsOf(k), { aim: beat.aim ?? null, things });
+    if ((read.aim !== 'shows' && read.aim !== 'reveals') || !read.thing) return;
+    const atMs = beats[k].words[read.thing.word]?.[2];
+    if (atMs !== undefined) asks.push({ thing: read.thing.aim, atMs });
+  });
+  if (!asks.length) return [];
+  const windows = insertWindows(
+    asks,
+    beats.flatMap((beat) =>
+      beat.words.map(([, , startMs, endMs]) => ({ startMs, endMs })),
+    ),
+    input.endMs,
+  );
+  const stage: ThingsOnStage = {
+    props,
+    steps,
+    places,
+    drawing: input.drawing,
+    feature: (id) => input.features.get(id),
+  };
+  return windows.flatMap((one): SceneEffectDto[] => {
+    // Where it is at the moment the shot frames it: a thing handed over,
+    // where the hands meet; one in a hand, framed a little low.
+    const found = insertBoxOf(stage, one.thing, one.fromMs, one.untilMs);
+    if (!found) return [];
+    const box = insertFramed(found, STAGINGS.wide.w, STAGINGS.wide.h);
+    return [
+      {
+        atMs: one.fromMs,
+        untilMs: one.untilMs,
+        target: one.thing,
+        part: null,
+        do: 'zoom',
+        shot: {
+          enter: 'cut',
+          kind: 'insert',
+          box: [
+            Math.round(box.x * 10) / 10,
+            Math.round(box.y * 10) / 10,
+            Math.round(box.w * 10) / 10,
+            Math.round(box.h * 10) / 10,
+          ],
+        },
+      },
+    ];
+  });
+}
+
+/** The moves that are a feeling: the camera pushes in on them (studio-scenery-plan §6.2). */
+export const FEELING_MOVES: ReadonlySet<string> = new Set(['sob', 'hug']);
+
+/**
+ * Close shots on a feeling, pushed in harder (studio-scenery-plan §6.2):
+ * one whose person sobs or hugs while it is on says so (`pan: "push"`),
+ * and the player pushes in on it more than on any other shot, the layers
+ * parting as it does. Copies; the rest as they were.
+ */
+export function pushedOnFeeling(
+  shots: readonly SceneEffectDto[],
+  acting: Readonly<
+    Record<string, { moves?: [number, string, number, string?][] }>
+  >,
+): SceneEffectDto[] {
+  return shots.map((shot) => {
+    const until = shot.untilMs ?? shot.atMs;
+    const felt = [shot.target, shot.part].some((who) =>
+      (who ? (acting[who]?.moves ?? []) : []).some(
+        ([at, move, ms]) =>
+          FEELING_MOVES.has(move) && at < until && at + ms > shot.atMs,
+      ),
+    );
+    return felt ? { ...shot, pan: 'push' as const } : { ...shot };
+  });
 }
 
 /**
@@ -1099,7 +1436,16 @@ export function composeScene(input: ComposeInput): {
   const { script, beats, durationMs } = input;
   /** A Studio film's scene; and one whose camera its sheet directs. */
   const film = input.profile?.film === true;
-  const cameraDirected = Boolean(script.camera?.length);
+  /**
+   * A Studio film's story, its people at their stations and saying lines:
+   * code picks its shots by the shot grammar (scene-shots), the writer's
+   * asks among them, once everyone's place is known (below).
+   */
+  const grammar =
+    film &&
+    script.stations === true &&
+    script.beats.some((beat) => beat.kind === 'line');
+  const cameraDirected = Boolean(script.camera?.length) || grammar;
   // A story's page: its characters and places are the story's own.
   const story = script.cast.some(
     (thing) => thing.kind === 'character' || thing.kind === 'place',
@@ -1206,13 +1552,34 @@ export function composeScene(input: ComposeInput): {
   );
   let k = 0;
   for (const t of timed) if (t.step.stage) t.atMs = stageTimes[k++];
+  // What someone does with a thing of the set, from its step's moment: one
+  // that carries them (through a door, up the stairs) at its change of
+  // place; timed into its steps once the scene is made (scene-interact).
+  const interactions: TimedInteraction[] = timed.flatMap((t) =>
+    (t.step.interact ?? []).map((one) => ({
+      who: one.who,
+      does: one.does,
+      feature: one.feature,
+      atMs: Math.round(t.atMs),
+      ms: Math.round(one.s * 1000),
+      ...(one.side ? { side: one.side } : {}),
+      ...(one.part ? { part: one.part } : {}),
+      ...(one.to ? { to: one.to } : {}),
+    })),
+  );
 
   const steps: SceneStepDto[] = [];
   /** A Studio scene's stations at each step: where each one stands (SceneStage.at). */
   const stationed = script.stations === true;
   const stationsAt: Record<string, string>[] = [];
+  /** A continuous build's stage at each step (scene-board): its cells, what has receded, what the camera frames. */
+  const boardsAt = new Map<SceneStepDto, BoardStage>();
+  /** Its things carried on from the scene before: on the stage from its first moment, with no entrance. */
+  const carriedOn = new Set(script.board?.carried ?? []);
   /** And how far back each stands where it is said (SceneStage.depth), each step's beside its stations. */
   const depthsAt: Record<string, number>[] = [];
+  /** Whom each one who goes somewhere at a step goes over to (SceneGoing.toward). */
+  const towardAt: Record<string, string>[] = [];
   const effects: SceneEffectDto[] = [];
   /** What the writer asked someone to do toward someone: acted, below. */
   const directed: DirectedMove[] = [];
@@ -1270,7 +1637,10 @@ export function composeScene(input: ComposeInput): {
           JSON.stringify(stage.depth ?? {}))) &&
     !stage.going &&
     (a.backdrop ?? null) === (painted(stage.backdrop) ?? backdrop) &&
-    a.layout === stage.layout &&
+    (script.board
+      ? JSON.stringify(boardsAt.get(a) ?? null) ===
+        JSON.stringify(stage.board ?? null)
+      : a.layout === stage.layout) &&
     a.show.join() === stage.show.join() &&
     a.arrows
       .map((x) => x.id)
@@ -1305,6 +1675,7 @@ export function composeScene(input: ComposeInput): {
     });
     stationsAt.push({});
     depthsAt.push({});
+    towardAt.push({});
     before = stage.show;
     focus = stage.show[0] ?? null;
     charactersSeen = stage.show.some(
@@ -1314,11 +1685,16 @@ export function composeScene(input: ComposeInput): {
   for (const timedStep of timed) {
     const { atMs } = timedStep;
     let { step } = timedStep;
-    if (step.stage) {
+    // A build's stage is the board as code set it: nothing reordered.
+    if (step.stage && !script.board) {
       const kept = sidesKept(wordsFirst(step.stage, byId), castById);
       step = {
         ...step,
-        stage: { ...step.stage, ...kept, show: keepTogether(kept.show) },
+        stage: {
+          ...step.stage,
+          layout: kept.layout as SceneStage['layout'],
+          show: keepTogether(kept.show),
+        },
       };
     }
     // The writer restating the stage as it stands: its effects, and no change.
@@ -1361,18 +1737,21 @@ export function composeScene(input: ComposeInput): {
       const opening = !charactersSeen && step.at.beat === firstBeat;
       for (const id of newcomers)
         enter[id] =
-          character(id) &&
-          (cut ||
-            step.stage.cutIn?.includes(id) ||
-            (opening && !arriving.has(id)) ||
-            (cutAway.has(id) && !arriving.has(id)))
-            ? { how: 'fade' }
-            : entranceFor(
-                id,
-                { layout: step.stage.layout, arrows },
-                before,
-                byId.get(id),
-              );
+          // A build's drawings are drawn on, stroke by stroke (the player's draw).
+          script.board && castById.get(id)?.kind === 'drawing'
+            ? { how: 'draw' }
+            : character(id) &&
+                (cut ||
+                  step.stage.cutIn?.includes(id) ||
+                  (opening && !arriving.has(id)) ||
+                  (cutAway.has(id) && !arriving.has(id)))
+              ? { how: 'fade' }
+              : entranceFor(
+                  id,
+                  { layout: step.stage.layout, arrows },
+                  before,
+                  byId.get(id),
+                );
       if (step.stage.show.some(character)) charactersSeen = true;
       // Whoever a cut takes off the stage comes back by a cut too, not
       // walking on; whoever walks off is gone.
@@ -1417,11 +1796,13 @@ export function composeScene(input: ComposeInput): {
           exit[id] = {
             side: how.side === '@left' ? 'left' : 'right',
             ...(how.via ? { via: how.via } : {}),
-            ...(how.squeeze
-              ? { how: 'squeeze' as const }
-              : how.pace === 'run'
-                ? { how: 'run' as const }
-                : {}),
+            ...(how.through
+              ? { how: 'through' as const }
+              : how.squeeze
+                ? { how: 'squeeze' as const }
+                : how.pace === 'run'
+                  ? { how: 'run' as const }
+                  : {}),
           };
         else if (enter[id] && how.via)
           enter[id] = { ...enter[id], via: how.via };
@@ -1431,13 +1812,18 @@ export function composeScene(input: ComposeInput): {
             side: how.side === '@left' ? 'left' : 'right',
           };
       }
+      // What the board carried on is there as the scene opens: no entrance.
+      if (!steps.length) for (const id of carriedOn) delete enter[id];
+      const board = script.board ? step.stage.board : undefined;
       steps.push({
         atMs: Math.round(atMs),
-        layout: step.stage.layout,
+        layout: board ? 'board' : step.stage.layout,
         show: step.stage.show,
         arrows,
         enter,
         focus,
+        ...(board?.faded.length ? { faded: [...board.faded] } : {}),
+        ...(board?.page ? { page: true as const } : {}),
         ...(backdrop ? { backdrop } : {}),
         ...(cut ? { cut: true as const } : {}),
         ...(Object.keys(exit).length ? { exit } : {}),
@@ -1445,8 +1831,16 @@ export function composeScene(input: ComposeInput): {
         ...(Object.keys(behind).length ? { behind } : {}),
         ...(Object.keys(abed).length ? { abed } : {}),
       });
+      if (board) boardsAt.set(steps[steps.length - 1], board);
       stationsAt.push({ ...(step.stage.at ?? {}) });
       depthsAt.push({ ...(step.stage.depth ?? {}) });
+      towardAt.push(
+        Object.fromEntries(
+          Object.entries(step.stage.going ?? {}).flatMap(([id, g]) =>
+            g.toward ? [[id, g.toward]] : [],
+          ),
+        ),
+      );
       before = step.stage.show;
     }
     step.effects.forEach((effect, i) => {
@@ -1531,6 +1925,7 @@ export function composeScene(input: ComposeInput): {
           });
           stationsAt.push({ ...(stationsAt[stationsAt.length - 1] ?? {}) });
           depthsAt.push({ ...(depthsAt[depthsAt.length - 1] ?? {}) });
+          towardAt.push({});
           delete steps[steps.length - 1].cut;
           before = show;
         }
@@ -1621,6 +2016,10 @@ export function composeScene(input: ComposeInput): {
         ...(beat.to ? { to: beat.to } : {}),
         ...(from ? { from, side: offSide(line.speaker) } : {}),
         ...(beat.kind === 'line' && beat.pace ? { pace: beat.pace } : {}),
+        // What the writer said it does, and its faces: over the words' reading.
+        ...(beat.kind === 'line' && beat.aim ? { aim: beat.aim } : {}),
+        ...(beat.kind === 'line' && beat.said ? { said: beat.said } : {}),
+        ...(beat.kind === 'line' && beat.felt ? { felt: beat.felt } : {}),
         startMs: words[0][2],
         endMs: to,
         words: words.map((w) => ({
@@ -1916,6 +2315,22 @@ export function composeScene(input: ComposeInput): {
   };
   // How each character acts, planned from who says what and when: where
   // they look, their mouths, their gestures, and what the writer asked.
+  // A film's listeners react with a face too (scene-performance).
+  const felt: FeltFace[] = [];
+  // The face each wears from moment to moment, as the effects show it:
+  // what a film's line is felt under (a rigged face's acting).
+  const faceNames = new Set<string>(FACES);
+  const shownFaces = effects
+    .filter((e) => e.do === 'show' && e.part && faceNames.has(e.part))
+    .sort((a, b) => a.atMs - b.atMs);
+  const worn = (id: string, t: number): string | null => {
+    let out: string | null = null;
+    for (const e of shownFaces) {
+      if (e.atMs > t + 250) break;
+      if (e.target === id) out = e.part;
+    }
+    return out;
+  };
   const acting = actingOf({
     actors: script.cast
       .filter(
@@ -1966,7 +2381,21 @@ export function composeScene(input: ComposeInput): {
     ),
     goes: goesAt(),
     film,
+    ...(film ? { things: nameableThings(script), felt, worn } : {}),
   });
+  const reacted = feltEffects(
+    effects,
+    felt,
+    new Set<string>(FACES),
+    (id, f) => {
+      const drawing = byId.get(id);
+      return drawing?.kind === 'drawing' && f in drawing.states;
+    },
+  );
+  if (reacted.length) {
+    effects.push(...reacted);
+    effects.sort((a, b) => a.atMs - b.atMs);
+  }
   /**
    * When the crowd reacts: it cheers when a group's line is a shout or the
    * words say it cheers, and gasps when they say it marvels or is afraid.
@@ -2046,8 +2475,15 @@ export function composeScene(input: ComposeInput): {
           ? {
               svg: piece.svg,
               ...(piece.leaf ? { leaf: piece.leaf } : {}),
+              // A vehicle of the kit: its wheels, its springs, its lights.
+              ...(piece.vehicle ? { vehicle: piece.vehicle } : {}),
               ...(piece.front ? { front: true as const } : {}),
               ...(piece.enters ? { enters: true as const } : {}),
+              // What it offers the people who use it: its own, or, one of
+              // the show's own, guessed from what it is.
+              ...((piece.affordances ?? guessAffordances(piece))
+                ? { affordances: piece.affordances ?? guessAffordances(piece)! }
+                : {}),
             }
           : {}),
         at: { box: at('box'), wide: at('wide') },
@@ -2198,14 +2634,14 @@ export function composeScene(input: ComposeInput): {
   // A screenplay's camera: the whole stage as it opens and while the
   // narrator speaks; on two who trade lines while others stand by; close
   // on a whisper, a shout or a strong face.
-  if (cameraDirected)
+  if (cameraDirected && !grammar)
     effects.push(
       ...directedShots(script, beats, steps, durationMs, {
         momentMs,
         doings: doingsSeen(),
       }),
     );
-  else if (script.beats.some((beat) => beat.kind))
+  else if (!grammar && script.beats.some((beat) => beat.kind))
     effects.push(...storyShots(script, beats, steps, effects, durationMs));
   /** The step a moment falls in. */
   const stepOf = (t: number) => {
@@ -2348,8 +2784,8 @@ export function composeScene(input: ComposeInput): {
         : [];
     },
     acting: (id) => Boolean(acting[id]),
-    // The camera a sheet directs is the whole of it.
-    shots: !cameraDirected,
+    // The camera a sheet directs is the whole of it; so is a build's.
+    shots: !cameraDirected && !script.board,
   });
   effects.sort((a, b) => a.atMs - b.atMs);
 
@@ -2392,6 +2828,35 @@ export function composeScene(input: ComposeInput): {
   // it stands at each staging, among the people at their scale.
   const setId = painted(script.backdrop);
   const setDrawing = setId ? drawings.get(setId) : null;
+  /** The room the set gives the camera to pan in on a stage W × H: none on a set one frame wide. */
+  const setRoomFor = (W: number, H: number) =>
+    roomOf(
+      setDrawing?.layered
+        ? {
+            setWidth: setDrawing.layered.width,
+            ...(setDrawing.layered.focal !== undefined
+              ? { focal: setDrawing.layered.focal }
+              : {}),
+          }
+        : null,
+      W,
+      H,
+    );
+  /**
+   * The set's other side (studio-views-plan §4.2), where it has one on the
+   * same floor as its front (so everyone stands on the ground from either
+   * side): null for a set painted whole, or one built before it.
+   */
+  const reverseSide = (() => {
+    const layered = setDrawing?.layered;
+    const other = layered?.reverse;
+    return layered &&
+      other?.layers.length &&
+      other.floor.back === layered.floor.back &&
+      other.floor.front === layered.floor.front
+      ? other
+      : null;
+  })();
   const setFrame: [number, number, number, number] = setDrawing?.viewBox ?? [
     0, 0, 1600, 900,
   ];
@@ -2403,6 +2868,14 @@ export function composeScene(input: ComposeInput): {
       ),
     ),
   );
+  /** Out of doors, a door is a building's: its front drawn round it, at the back of the ground, never standing in the road. */
+  const outdoor =
+    script.setting?.place === 'outdoor' ||
+    (!script.setting?.place && setOutdoorOf(setDrawing));
+  const atBack = (feature: { spot: string; kind: string }) =>
+    feature.spot === 'back' ||
+    feature.kind === 'vehicle' ||
+    (outdoor && feature.kind === 'door');
   const setFeatures = (script.features ?? []).map((feature) => {
     // The painter's group for it: asked for, or drawn unasked.
     const group = featureGroup(feature.id);
@@ -2428,11 +2901,37 @@ export function composeScene(input: ComposeInput): {
         ? null
         : feature.kind === DRAWN
           ? (script.drawn?.features?.[feature.id] ?? coveredPiece())
-          : drawPiece(feature.kind, feature.name),
+          : drawPiece(feature.kind, feature.name, {
+              pack: setPackOf(setDrawing),
+              livery: setLiveryOf(setDrawing),
+              outdoor,
+            }),
       group: box ? found : null,
       box: box ?? null,
     };
   });
+  /**
+   * Where people stand by a feature, across: its middle and width, or
+   * where it has a part they stand by (a building's doorway), that part.
+   */
+  const standOf = (
+    id: string,
+    f: { x: number; w: number },
+  ): { x: number; w: number } => {
+    const piece = setFeatures.find((one) => one.feature.id === id)?.piece;
+    const stand = piece?.stand;
+    if (!piece || !stand) return { x: f.x + f.w / 2, w: f.w };
+    const [vx, , vw] = piece.viewBox;
+    const u = f.w / vw;
+    return {
+      x: f.x + ((stand[0] + stand[1]) / 2 - vx) * u,
+      w: (stand[1] - stand[0]) * u,
+    };
+  };
+  /** Each feature's kind, by its id. */
+  const kindOf = new Map<string, string>(
+    setFeatures.map(({ feature }) => [feature.id, feature.kind]),
+  );
   /** Each feature where it stands at a staging, once the people's scale is known. */
   const featurePlaces: Record<StagingName, Map<string, FeaturePlace>> = {
     box: new Map(),
@@ -2446,9 +2945,6 @@ export function composeScene(input: ComposeInput): {
     const stage = STAGINGS[staging];
     const on = setFrameOn(setFrame, stage);
     const [, vy, , vh] = setFrame;
-    const horizon = setDrawing?.ground
-      ? on.toStage(0, vy + setDrawing.ground.horizon * vh)[1]
-      : stage.h * 0.64;
     const out = new Map<string, FeaturePlace>();
     /** Where the pieces stood so far stand across the stage: the next keeps clear of them. */
     const taken: [number, number][] = [];
@@ -2465,8 +2961,7 @@ export function composeScene(input: ComposeInput): {
             vy + one.box[3] * vh,
           )
         : [0, 0];
-      const back =
-        one.feature.spot === 'back' || one.feature.kind === 'vehicle';
+      const back = atBack(one.feature);
       let placed = placeFeature({
         staging,
         spot: one.feature.spot,
@@ -2476,7 +2971,9 @@ export function composeScene(input: ComposeInput): {
         back,
         unit,
         floor,
-        horizon: Math.min(horizon, floor - 60),
+        // On a floor with depth, by its pinhole's eye line, as its people
+        // stand: one as big as a piece at its feet is the piece's size.
+        horizon: floorEye(staging, floor),
       });
       // Two pieces the stage stands at one spot stand side by side: the
       // later toward the middle of the stage, clear of the first.
@@ -2533,6 +3030,47 @@ export function composeScene(input: ComposeInput): {
   const floors: Partial<
     Record<StagingName, { floor: number; eye: number; bottom: number }>
   > = {};
+  /**
+   * Who are to be near whom at each step, and why (scene-spacing): who
+   * talk (a line, to whom it is said, else the one who spoke before), who
+   * go over to someone, who hand a thing over, who hug or reach for
+   * someone. The stage spaces everyone by these, in metres.
+   */
+  const nearAt: NearPair[][] = steps.map((step, k) => {
+    const from = step.atMs;
+    const to = steps[k + 1]?.atMs ?? durationMs;
+    const on = new Set(step.show);
+    const out: NearPair[] = [];
+    const add = (
+      a: string | null | undefined,
+      b: string | null | undefined,
+      why: NearWhy,
+    ) => {
+      if (!a || !b || a === b || !on.has(a) || !on.has(b)) return;
+      if (out.some((p) => (p.a === a && p.b === b) || (p.a === b && p.b === a)))
+        return;
+      out.push({ a, b, why });
+    };
+    const inStep = (t: number) => t >= from && t < to;
+    let before: string | null = null;
+    for (const line of spoken) {
+      if (line.startMs >= to) break;
+      if (inStep(line.startMs) && !line.from)
+        add(line.speaker, line.to ?? before, 'talk');
+      if (!line.from) before = line.speaker;
+    }
+    for (const [id, whom] of Object.entries(towardAt[k] ?? {}))
+      add(id, whom, 'toward');
+    for (const does of handled.values())
+      for (const [t, who, action, whom] of does)
+        if (action === 'give' && inStep(t)) add(who, whom, 'reach');
+    for (const [id, acted] of Object.entries(acting))
+      for (const [t, move, , whom] of acted.moves ?? [])
+        if (inStep(t) && typeof whom === 'string')
+          if (move === 'hug') add(id, whom, 'touch');
+          else if (move === 'reach') add(id, whom, 'reach');
+    return out;
+  });
   /** Every step of a staging laid out: each thing in its slot, and people standing together. */
   const layoutsOf = (staging: StagingName): Record<string, Place>[] => {
     const lookup = new Map(
@@ -2561,6 +3099,7 @@ export function composeScene(input: ComposeInput): {
       };
       floors[staging] = floorNow;
       return layoutStations({
+        near: nearAt,
         shares: stationShares(largest),
         steps: steps.map((step, k) => ({
           show: step.show,
@@ -2577,11 +3116,23 @@ export function composeScene(input: ComposeInput): {
           [...placed].map(([id, f]) => [
             id,
             {
-              x: f.x + f.w / 2,
-              w: f.w,
-              way: { y: f.way.y, k: f.way.k, perch: f.up.perch, upX: f.up.x },
+              ...standOf(id, f),
+              way: {
+                y: f.way.y,
+                k: f.way.k,
+                perch: f.up.perch,
+                upX: f.up.x,
+                ground: f.feet,
+                ...(setFeatures.find((one) => one.feature.id === id)?.piece
+                  ?.upMiddle
+                  ? { upMiddle: true }
+                  : {}),
+              },
               ...(f.seat !== undefined ? { seat: f.seat } : {}),
               ...(f.lies ? { lies: f.lies } : {}),
+              ...(SOLID_BESIDE.has(kindOf.get(id) ?? '')
+                ? { solid: true }
+                : {}),
             },
           ]),
         ),
@@ -2591,7 +3142,7 @@ export function composeScene(input: ComposeInput): {
           const f = placed.get(feature.id);
           return piece &&
             f &&
-            feature.spot !== 'back' &&
+            !atBack(feature) &&
             (feature.kind === 'gate' ||
               feature.kind === 'door' ||
               (feature.kind === DRAWN && piece.enters))
@@ -2614,10 +3165,25 @@ export function composeScene(input: ComposeInput): {
           ...(thing.stands ? { stands: thing.stands } : {}),
         });
     }
+    // A build's board: each thing in its cell, where it stays.
+    if (script.board)
+      return steps.map((step) => {
+        const { w, h, margin } = STAGINGS[staging];
+        const cells = boardsAt.get(step)?.cells ?? {};
+        const out: Record<string, Place> = {};
+        for (const id of step.show) {
+          const thing = lookup.get(id);
+          const cell = cells[id];
+          if (!thing || !cell) continue;
+          const room = cellBox(cell, w, h, margin, script.board?.rows);
+          out[id] = { ...fitInSlot(thing, room), room };
+        }
+        return out;
+      });
     return steps.map((step) => {
       const crowded = step.show.length > 2;
       const laidOut = layoutStep(
-        step.layout,
+        step.layout as SceneStage['layout'],
         step.show,
         crowded ? crowd : lookup,
         staging,
@@ -2639,7 +3205,7 @@ export function composeScene(input: ComposeInput): {
    * fades from its wide staging, the one it plays at.
    */
   const facesKept = (): {
-    fades: [number, number, string][];
+    fades: [number, number, string, number?][];
     notes: string[];
   } => {
     const lines = script.beats.flatMap((beat, i) =>
@@ -2654,6 +3220,8 @@ export function composeScene(input: ComposeInput): {
         : [],
     );
     const shots = effects.filter((effect) => effect.do === 'zoom');
+    /** The shots the clear-view rule may drop: those left are taken. */
+    const clearShots = [...shots];
     const layered = setDrawing?.layered;
     const foreDepth =
       layered?.layers.find((layer) => layer.id === 'foreground')?.depth ?? 1.2;
@@ -2667,19 +3235,28 @@ export function composeScene(input: ComposeInput): {
     const hiding = (k: number, id: string) =>
       /^(?:behind|under|in):/.test(stationsAt[k]?.[id] ?? '');
     const out = {
-      fades: [] as [number, number, string][],
+      fades: [] as [number, number, string, number?][],
       notes: [] as string[],
     };
     for (const staging of ['box', 'wide'] as const) {
       const stage = STAGINGS[staging];
       const on = setFrameOn(setFrame, stage);
       const floor = floors[staging];
-      const mended = keepFacesSeen({
+      const faces: Parameters<typeof keepFacesSeen>[0] = {
         W: stage.w,
         H: stage.h,
+        // On a wide set, the wide shot is where the action is (§6.3).
+        room: setRoomFor(stage.w, stage.h),
         steps,
         places: layouts[staging],
         lines,
+        // What each one does, toward whom: they matter then, and are seen.
+        acts: directed.map((move) => ({
+          who: move.target,
+          toward: move.other,
+          startMs: move.atMs,
+          endMs: move.atMs + (move.ms ?? 1000),
+        })),
         shots,
         features: setFeatures.flatMap(({ feature, piece }) => {
           const f = featurePlaces[staging].get(feature.id);
@@ -2694,19 +3271,63 @@ export function composeScene(input: ComposeInput): {
               ]
             : [];
         }),
-        fore: (layered?.fore ?? []).map(({ id, box }) => {
-          const [x0, y0] = on.toStage(box[0], box[1]);
-          const [x1, y1] = on.toStage(box[0] + box[2], box[1] + box[3]);
-          return { id, box: { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } };
-        }),
+        // The people watching before the camera only in a scene about them.
+        fore: (layered?.fore ?? [])
+          .filter(({ id }) => addressed || !id.startsWith('fg-au'))
+          .map(({ id, box }) => {
+            const [x0, y0] = on.toStage(box[0], box[1]);
+            const [x1, y1] = on.toStage(box[0] + box[2], box[1] + box[3]);
+            return { id, box: { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } };
+          }),
         foreDepth,
+        // The set's other side, for the shots taken from there: its things
+        // before the camera and on its floor, on the stage (§4.2 of the
+        // views plan).
+        ...(reverseSide
+          ? {
+              reverse: {
+                fore: reverseSide.fore.map(({ id, box }) => {
+                  const [x0, y0] = on.toStage(box[0], box[1]);
+                  const [x1, y1] = on.toStage(box[0] + box[2], box[1] + box[3]);
+                  return { id, box: { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } };
+                }),
+                foreDepth:
+                  reverseSide.layers.find((layer) => layer.id === 'foreground')
+                    ?.depth ?? foreDepth,
+                floorThings: (reverseSide.floorThings ?? []).map(
+                  ({ id, box, feet }) => {
+                    const [x0, y0] = on.toStage(box[0], box[1]);
+                    const [x1, y1] = on.toStage(
+                      box[0] + box[2],
+                      box[1] + box[3],
+                    );
+                    return {
+                      id,
+                      box: { x: x0, y: y0, w: x1 - x0, h: y1 - y0 },
+                      feet: on.toStage(0, feet)[1],
+                    };
+                  },
+                ),
+              },
+            }
+          : {}),
         open,
+        // Too small to see, one beside a feature may step nearer too.
+        nearer: (k, id) =>
+          open(k, id) || (stationsAt[k]?.[id] ?? '').startsWith('by:'),
         hiding,
         atDepth: (place, d) => {
           if (!floor || place.d === undefined) return null;
           const was = floorAt(place.d, floor.floor, floor.eye, floor.bottom);
           const now = floorAt(d, floor.floor, floor.eye, floor.bottom);
-          const k = now.k / Math.max(0.01, was.k);
+          // One by a feature stands on its own ground, maybe back of the
+          // floor: as big as they are there, from where their feet are.
+          const feet = place.y + place.h;
+          const wasK =
+            Math.abs(feet - was.feet) > 1
+              ? (feet - floor.eye) / Math.max(1, floor.floor - floor.eye)
+              : was.k;
+          const k = now.k / Math.max(0.01, wasK);
           const round = (n: number) => Math.round(n * 10) / 10;
           const w = place.w * k;
           const h = place.h * k;
@@ -2721,19 +3342,271 @@ export function composeScene(input: ComposeInput): {
         },
         name: (id) => nameOf(castById.get(id)) ?? id,
         durationMs,
-      });
+      };
+      const mended = keepFacesSeen(faces);
       // A film plays wide: what it says is its wide staging's.
       if (staging === 'wide' || !film) {
         out.fades.push(...mended.fades);
         if (staging === 'wide') out.notes.push(...mended.notes);
+        // And everyone who matters in clear view, in every shot: no thing
+        // of the place over them (the clear-view rule).
+        const drawnAs = (id: string) => {
+          const dto = byId.get(id);
+          return dto?.kind === 'drawing' ? dto : undefined;
+        };
+        const units = (id: string) => geometry.get(id)?.stands?.units;
+        const setFloor = layered?.floor;
+        const clear = keepInClearView({
+          ...faces,
+          // The people watching before the camera stand low enough to be
+          // seen over, and are never faded: one they hide steps aside.
+          keep: (id) => id.startsWith('fg-au'),
+          shots: clearShots,
+          fades: mended.fades,
+          floorThings: (layered?.floorThings ?? []).map(({ id, box, feet }) => {
+            const [x0, y0] = on.toStage(box[0], box[1]);
+            const [x1, y1] = on.toStage(box[0] + box[2], box[1] + box[3]);
+            return {
+              id,
+              box: { x: x0, y: y0, w: x1 - x0, h: y1 - y0 },
+              feet: on.toStage(0, feet)[1],
+            };
+          }),
+          floor: setFloor
+            ? [
+                on.toStage(0, setFloor.back)[1],
+                on.toStage(0, setFloor.front)[1],
+              ]
+            : null,
+          animal: (id) => {
+            const dto = drawnAs(id);
+            return Boolean(dto && !dto.rig && units(id) !== undefined);
+          },
+          small: (id) => (units(id) ?? Infinity) < SMALL_STANDING,
+          face: (id) => drawnAs(id)?.rig === true,
+        });
+        out.fades.push(...clear.fades);
+        if (staging === 'wide') out.notes.push(...clear.notes);
       }
     }
+    // A shot that could not be taken clear is not taken.
+    for (let i = effects.length - 1; i >= 0; i -= 1)
+      if (effects[i].do === 'zoom' && !clearShots.includes(effects[i]))
+        effects.splice(i, 1);
     return out;
   };
+  /**
+   * Whether this scene is about the crowd before the camera (someone speaks
+   * to them, or they watch the main action): only then are its rows there,
+   * and then only in the wide shot. People talking among themselves have
+   * no one before the camera watching them.
+   */
+  const addressed = crowdAddressed(
+    script.beats.map((beat) => {
+      const to = beat.to ? castById.get(beat.to) : undefined;
+      return {
+        ...(beat.kind ? { kind: beat.kind } : {}),
+        say: beat.say,
+        toCrowd: to?.kind === 'character' && to.group === true,
+      };
+    }),
+  );
   const layouts = { box: layoutsOf('box'), wide: layoutsOf('wide') };
+  // A thing held as it opens is in the hand toward whoever it is first
+  // handed to, else toward the others there (the frame's right, "r", when
+  // they are to the right): so a hand-over is made with the near hand, and
+  // the hands can meet between the two.
+  for (const prop of props) {
+    const held = prop.held;
+    if (!held || held.in === 'mouth' || prop.hangs) continue;
+    const k = steps.findIndex((step) => step.show.includes(held.by));
+    const where = layouts.wide[Math.max(0, k)] ?? {};
+    const mine = where[held.by];
+    if (!mine) continue;
+    const mid = (one: Place) => one.x + one.w / 2;
+    const give = prop.does.find(
+      ([, who, does, to]) =>
+        who === held.by && does === 'give' && to && where[to],
+    );
+    const others = give
+      ? [where[give[3]!]]
+      : Object.entries(where).flatMap(([id, one]) =>
+          id !== held.by && castById.get(id)?.kind === 'character' ? [one] : [],
+        );
+    if (!others.length) continue;
+    const toward =
+      others.reduce((sum, one) => sum + mid(one), 0) / others.length >=
+      mid(mine)
+        ? 'r'
+        : 'l';
+    // A hand already full keeps what it has.
+    const taken = props.some(
+      (other) =>
+        other !== prop &&
+        other.held?.by === held.by &&
+        other.held.in === toward &&
+        !other.hangs,
+    );
+    if (held.in !== toward && !taken) prop.held = { ...held, in: toward };
+  }
+  // A Studio film's shots, by the shot grammar (studio-views-plan §3.2):
+  // where everyone stands on the wide stage, as the film plays it.
+  if (grammar) {
+    const stepAt = (t: number) => {
+      let k = 0;
+      steps.forEach((step, i) => {
+        if (step.atMs <= t) k = i;
+      });
+      return k;
+    };
+    const person = (id: string) => {
+      const thing = castById.get(id);
+      return thing?.kind === 'character' || thing?.kind === 'person';
+    };
+    const onAt = (t: number) => steps[stepAt(t)]?.show.filter(person) ?? [];
+    const placeAt = (id: string, t: number) => {
+      const k = stepAt(t);
+      return steps[k]?.show.includes(id)
+        ? (layouts.wide[k]?.[id] ?? null)
+        : null;
+    };
+    const movesOf = (id: string) => acting[id]?.moves ?? [];
+    const faceAt = (id: string, t: number) =>
+      [...effects]
+        .reverse()
+        .find(
+          (e) =>
+            e.target === id &&
+            e.do === 'show' &&
+            e.atMs <= t &&
+            e.part !== null &&
+            (FACES as readonly string[]).includes(e.part),
+        )?.part ?? null;
+    const lines = script.beats.flatMap((beat, i) => {
+      const t = beats[i];
+      if (beat.kind !== 'line' || !beat.speaker || beat.from || !t) return [];
+      const face = faceAt(beat.speaker, t.startMs + 400);
+      const to = beat.to ? castById.get(beat.to) : undefined;
+      const sobs = movesOf(beat.speaker).some(
+        ([at, move, ms]) =>
+          move === 'sob' && at < t.endMs && at + ms > t.startMs,
+      );
+      return [
+        {
+          beat: i,
+          speaker: beat.speaker,
+          to: beat.to ?? null,
+          startMs: t.startMs,
+          endMs: t.endMs,
+          strong:
+            beat.pace === 'whisper' ||
+            beat.pace === 'shout' ||
+            STRONG_FACES.has(face ?? '') ||
+            sobs,
+          sad: face === 'sad' || sobs,
+          toCrowd:
+            (to?.kind === 'character' && to.group === true) ||
+            crowdAddressed([{ kind: 'line', say: beat.say }]),
+          // What it does (scene-performance): the camera's own choices.
+          ...grammarRead(beat.say, beat.aim),
+        },
+      ];
+    });
+    const units = (id: string) => geometry.get(id)?.stands?.units;
+    const camera = grammarCamera({
+      lines,
+      onAt,
+      placeAt,
+      standing: (id, t) => {
+        const k = stepAt(t);
+        if (/^(?:behind|under|in|on|up):/.test(stationsAt[k]?.[id] ?? ''))
+          return false;
+        return !movesOf(id).some(
+          ([at, move, ms]) =>
+            (HELD_MOVES as readonly string[]).includes(move) &&
+            at <= t &&
+            // Held there until they next get up.
+            !movesOf(id).some(
+              ([up, again]) => again === 'stand' && up > at && up <= t,
+            ) &&
+            ms > 0,
+        );
+      },
+      small: (id) => (units(id) ?? Infinity) < SMALL_STANDING,
+      // A bird or a kitten is never cheated near the camera, giant.
+      tiny: (id) => (units(id) ?? Infinity) < SMALL_STANDING / 2,
+      addressed,
+      ...(script.energy ? { energy: script.energy } : {}),
+      heroes: Object.entries(acting).flatMap(([who, one]) =>
+        (one.moves ?? []).flatMap(([at, move, ms]) =>
+          move === 'hero' ? [{ who, atMs: at, ms }] : [],
+        ),
+      ),
+      W: STAGINGS.wide.w,
+      asked: script.camera ?? [],
+      // Shot and reverse shot where the place has another side, on the
+      // same floor (studio-views-plan §4.2); the crowd's view the other way
+      // where the people watching are seen on it.
+      reverse: reverseSide !== null,
+      reverseCrowd:
+        reverseSide !== null &&
+        reverseSide.layers.some((layer) =>
+          layer.svg.includes('data-audience="rows"'),
+        ),
+    });
+    // A big action move, and physical comedy, are seen on the whole stage:
+    // no shot hides them.
+    const big: Doing[] = Object.values(acting).flatMap((one) =>
+      (one.moves ?? []).flatMap(([at, move, ms]) =>
+        (BIG_MOVES.has(move) || PHYSICAL_MOVES.has(move)) && move !== 'hero'
+          ? [{ who: '@wide', fromMs: at, toMs: at + ms }]
+          : [],
+      ),
+    );
+    effects.push(
+      ...directedShots({ ...script, camera }, beats, steps, durationMs, {
+        momentMs,
+        doings: [...doingsSeen(), ...big],
+      }),
+    );
+    effects.sort((a, b) => a.atMs - b.atMs);
+  }
   // Every speaker's face seen as they speak, in every shot: mended where
   // it is hidden, and said.
   const facesSeen = stationed ? facesKept() : { fades: [], notes: [] };
+  // Everyone on the ground at every step, whatever moved them (scene-
+  // grounding): put right silently, and said.
+  if (stationed)
+    for (const staging of ['box', 'wide'] as const) {
+      const floor = floors[staging];
+      if (!floor) continue;
+      const notes = keepGrounded({
+        staging,
+        H: STAGINGS[staging].h,
+        steps,
+        places: layouts[staging],
+        stations: stationsAt,
+        stands: (id) => geometry.get(id)?.stands !== undefined,
+        features: new Map(
+          [...featurePlaces[staging]].map(([id, f]) => [
+            id,
+            {
+              ground: f.feet,
+              perch: f.up.perch,
+              x: standOf(id, f).x - standOf(id, f).w / 2,
+              w: standOf(id, f).w,
+              ...(SOLID_BESIDE.has(kindOf.get(id) ?? '')
+                ? { solid: true }
+                : {}),
+            },
+          ]),
+        ),
+        floor,
+        name: (id) => nameOf(castById.get(id)) ?? id,
+      });
+      // A film plays wide: its notes are its wide staging's.
+      if (staging === 'wide' || !film) facesSeen.notes.push(...notes);
+    }
   // A thing thrown or kicked to a feature comes down on the ground before
   // it, wherever each staging stands it: the player finds it there. One
   // the stage has not got goes on ahead, toward the middle.
@@ -3060,12 +3933,20 @@ export function composeScene(input: ComposeInput): {
       // whose ink is not known, whole.
       const inks = inksOf(laidOut, geometry);
       const inked = new Set(inks.map((ink) => ink.owner));
+      // On a build's board, every thing whole, not only its ink: a board
+      // has the room, and nothing there is set on a thing at all.
       const solid = [
         ...wordsOf(laidOut, byId, {}, []).map((w) => w.box),
-        ...inks.flatMap((ink) => ink.boxes),
-        ...Object.entries(laidOut)
-          .filter(([id]) => byId.get(id)?.kind === 'drawing' && !inked.has(id))
-          .map(([, at]) => extentOf(at)),
+        ...(script.board
+          ? Object.values(laidOut).map((at) => rectOf(at))
+          : [
+              ...inks.flatMap((ink) => ink.boxes),
+              ...Object.entries(laidOut)
+                .filter(
+                  ([id]) => byId.get(id)?.kind === 'drawing' && !inked.has(id),
+                )
+                .map(([, at]) => extentOf(at)),
+            ]),
       ];
       // Each arrow's label on its arrow, clear of the things and of one another.
       const stepPills: Record<string, ScenePillDto | null> = {};
@@ -3082,6 +3963,10 @@ export function composeScene(input: ComposeInput): {
               .flatMap((other) => segmentsOf(other.path)),
           },
           stage,
+          // On a board: at its arrow's middle, well clear of captions and things, or none.
+          ...(script.board
+            ? { strict: { pad: BOARD_CLEAR, inset: stage.margin } }
+            : {}),
         });
         stepPills[arrow.id] = pill;
         if (pill) pillBoxes.push(pillBox(path, pill));
@@ -3214,6 +4099,29 @@ export function composeScene(input: ComposeInput): {
       };
       const standing = wordsOf(laidOut, byId, stepPills, arrows);
       const found = auditStep({ words: standing, ...seen });
+      // A build's board, strictly: nothing on anything at all, nor a
+      // lifted label's tie across anything but its own label.
+      if (script.board) {
+        const items = boardItems(laidOut, standing);
+        found.push(
+          ...boardOverlaps(items).map((clash): Collision => {
+            const [a, b] = clash.split(' / ');
+            return { kind: 'board-overlap', a, b };
+          }),
+        );
+        for (const { arrow, path } of arrows) {
+          const pill = stepPills[arrow.id];
+          if (!pill?.lift) continue;
+          const tie = tieOf(path, pill);
+          for (const item of items)
+            if (item.owner !== arrow.id && crosses(tie, item.box))
+              found.push({
+                kind: 'board-overlap',
+                a: `${arrow.id} tie`,
+                b: `${item.owner} ${item.what}`,
+              });
+        }
+      }
       // A bubble is on the stage with everything else, but never with the
       // bubble before it: each is checked against the step alone.
       for (const bubble of spoken) {
@@ -3243,6 +4151,47 @@ export function composeScene(input: ComposeInput): {
   };
   const box = place('box');
   const wide = place('wide');
+  /** Where a build's camera looks at each step, on a staging (scene-board frameBox): never cutting through a thing, which the audit checks. */
+  const boardViews = (
+    staging: StagingName,
+    placed: {
+      places: Record<string, ScenePlaceDto>[];
+      pills: Record<string, ScenePillDto | null>[];
+    },
+    audit: Collision[][],
+  ): BoardBox[] => {
+    const { w, h, margin } = STAGINGS[staging];
+    return steps.map((step, k) => {
+      const frame = boardsAt.get(step)?.frame ?? 'whole';
+      // The things, which a view takes whole or leaves out; the arrows'
+      // labels too where that costs little; at a pull-out, all of them.
+      const extents = boardExtents(placed.places[k] ?? {});
+      const withLabels = boardExtents(
+        placed.places[k] ?? {},
+        step.arrows,
+        placed.pills[k] ?? {},
+        STAGINGS[staging],
+      );
+      const labels = [...withLabels]
+        .filter(([id]) => id.startsWith('pill:'))
+        .map(([, box]) => box);
+      const view = frameBox(
+        frame,
+        frame === 'whole' ? withLabels : extents,
+        w,
+        h,
+        margin,
+        labels,
+      );
+      const seen = { x: view[0], y: view[1], w: view[2], h: view[3] };
+      for (const [id, extent] of extents)
+        if (slices(seen, extent))
+          (audit[k] ??= []).push({ kind: 'view-cuts', a: 'view', b: id });
+      return view;
+    });
+  };
+  const boxViews = script.board ? boardViews('box', box, box.audit) : null;
+  const wideViews = script.board ? boardViews('wide', wide, wide.audit) : null;
   // A directed scene's shots with no jump cut: judged where the wide stage
   // stands everyone, as the film shows it.
   if (cameraDirected) {
@@ -3258,22 +4207,67 @@ export function composeScene(input: ComposeInput): {
       props,
       setting: { features: featuresDto() },
     };
-    const kept = withoutJumps(
+    const walked = walksOf({ ...paced, steps: film ? hurried(paced) : steps });
+    const jumpless = withoutJumps(
       shotsBesideWalks(
         effects.filter((e) => e.do === 'zoom'),
-        walksOf({ ...paced, steps: film ? hurried(paced) : steps }),
+        walked,
         STAGINGS.wide.w,
       ),
       steps,
-      { ...STAGINGS.wide, places: wide.places },
+      {
+        ...STAGINGS.wide,
+        places: wide.places,
+        // On a wide set, the wide shot is where the action is (§6.3).
+        room: setRoomFor(STAGINGS.wide.w, STAGINGS.wide.h),
+      },
       durationMs,
     );
+    // And the 180° rule (studio-views-plan §3.3): a shot of two on the
+    // other sides of the frame from the last, with no whole stage between
+    // and no one seen crossing, is not taken.
+    // The inserts (studio-screenwriting K5): a thing alone, close, as it
+    // is handled or named; cut in between words, the shots of two keeping
+    // their sides across it.
+    const inserts = grammar
+      ? insertShots({
+          script,
+          beats,
+          steps,
+          places: wide.places,
+          props,
+          features: featurePlaces.wide,
+          drawing: (id) => {
+            const one = byId.get(id);
+            return one?.kind === 'drawing' ? one : undefined;
+          },
+          momentMs,
+          endMs: durationMs - HOLD_LAST_MS,
+        })
+      : [];
+    const cut = inserts.length
+      ? withInserts(jumpless, inserts, SHOT_LEAST_MS)
+      : jumpless;
+    const kept = grammar ? keepTheLine(cut, steps, wide.places, walked) : cut;
     effects.splice(
       0,
       effects.length,
-      ...[...effects.filter((e) => e.do !== 'zoom'), ...kept].sort(
-        (a, b) => a.atMs - b.atMs,
-      ),
+      ...[
+        ...effects.filter((e) => e.do !== 'zoom'),
+        // A style with little camera movement (a sitcom's) never pushes in.
+        ...((script.energy?.push ?? 1) >= 0.5
+          ? pushedOnFeeling(kept, acting)
+          : kept),
+      ].sort((a, b) => a.atMs - b.atMs),
+    );
+    // What was cheated out of a shot, out of the shots as now taken.
+    facesSeen.fades = fitCheatsToShots(
+      facesSeen.fades,
+      effects.filter((e) => e.do === 'zoom'),
+      steps,
+      durationMs,
+      // Over the crowd, the people watching are the shot's own.
+      (id, shot) => id.startsWith('fg-au') && shot.shot?.kind === 'crowd',
     );
   }
   // A crowd before the camera in the set (studio-scenery-plan §5.5),
@@ -3288,7 +4282,27 @@ export function composeScene(input: ComposeInput): {
             layer.svg.includes('data-audience="rows"'),
         )
       : undefined;
-  if (watching) {
+  // Nor, in a scene not about them, are they seen facing the camera from
+  // the place's other side.
+  if (!addressed && setDto?.kind === 'drawing')
+    for (const layer of setDto.reverse?.layers ?? [])
+      if (layer.svg.includes('data-audience="rows"'))
+        layer.svg = withoutAudience(layer.svg);
+  if (watching && !addressed) watching.svg = withoutAudience(watching.svg);
+  else if (watching) {
+    // Seen only in the wide shot, as the crowd sees the one they watch:
+    // out of every close, two and pushed shot on someone, eased, for its
+    // length.
+    facesSeen.fades.push(
+      ...audienceOutOfShots(
+        (setDrawing?.layered?.fore ?? [])
+          .map(({ id }) => id)
+          .filter((id) => id.startsWith('fg-au')),
+        effects,
+        steps,
+        durationMs,
+      ),
+    );
     const on = setFrameOn(setFrame, STAGINGS.wide);
     const turns = script.beats.flatMap((beat, i): AudienceTurn[] => {
       const t = beats[i];
@@ -3366,6 +4380,10 @@ export function composeScene(input: ComposeInput): {
           words: b.words,
           ...(delivery && delivery !== 'explain' ? { delivery } : {}),
           ...(who ? { who } : {}),
+          // A question's answers, for the player to pause on (scene-checkpoint).
+          ...(beat?.choices?.length
+            ? { choices: beat.choices.map((c) => ({ ...c })) }
+            : {}),
         };
       }),
       things: things.filter(
@@ -3384,6 +4402,7 @@ export function composeScene(input: ComposeInput): {
           places: box.places,
           pills: box.pills,
           ...(says.length ? { bubbles: box.bubbles } : {}),
+          ...(boxViews ? { views: boxViews } : {}),
         },
         wide: {
           w: STAGINGS.wide.w,
@@ -3391,13 +4410,30 @@ export function composeScene(input: ComposeInput): {
           places: wide.places,
           pills: wide.pills,
           ...(says.length ? { bubbles: wide.bubbles } : {}),
+          ...(wideViews ? { views: wideViews } : {}),
         },
       },
+      // A scene of a build: what it carries on from the scene before.
+      ...(script.board ? { board: { carried: [...carriedOn] } } : {}),
     },
     filled,
     audit: { box: box.audit, wide: wide.audit },
     staging: facesSeen.notes,
   };
+  // What people do with the set's things, timed into their steps: the
+  // doors swung with them, the lights switched (studio-interactions-plan).
+  composed.scene = withInteractions(composed.scene, interactions);
+  // Up the stairs on their treads, never floating (scene-grounding).
+  composed.staging.push(...climbsGrounded(composed.scene));
+  // How far apart people stand, as made: in each other's bodies, or
+  // talking too far apart or too close (scene-spacing), said.
+  if (stationed)
+    composed.staging.push(
+      ...describeSpacing(
+        spacingFaults(composed.scene),
+        (id) => nameOf(castById.get(id)) ?? id,
+      ),
+    );
   // A film's walks as long as the time they have, hurried where they are
   // not; and when all it plans has finished, which may be after its
   // voice: the film's edit holds on it until then.
@@ -3405,6 +4441,9 @@ export function composeScene(input: ComposeInput): {
     composed.scene.steps = hurried(composed.scene);
     composed.scene.settledMs = settledOf(composed.scene);
   }
+  // Which view of each one drawn from every side the camera sees, and
+  // when (studio-views-plan §2): from where they walk and whom they face.
+  composed.scene = withViews(composed.scene);
   return composed;
 }
 
@@ -3420,6 +4459,78 @@ function textBox(
 ): Rect {
   const w = Math.max(0, ...lines.map((l) => measureText(l, size, weight)));
   return { x: centreX - w / 2, y: top, w, h: lines.length * size * line };
+}
+
+/** How far an arrow's label on a build's board keeps from every caption, label and thing. */
+const BOARD_CLEAR = 8;
+
+const rectOf = (at: Rect): Rect => ({ x: at.x, y: at.y, w: at.w, h: at.h });
+
+/** A caption's words as set: as wide as they are, not as their room. */
+const captionBox = (at: ScenePlaceDto): Rect | null =>
+  at.caption
+    ? textBox(
+        at.caption.lines,
+        at.caption.size,
+        at.caption.x + at.caption.w / 2,
+        at.caption.y,
+      )
+    : null;
+
+/**
+ * Everything on a build's board at one step the eye reads or sees whole:
+ * each thing, and the words on the stage (its captions, labels and the
+ * arrows' labels), for the strict check (scene-board boardOverlaps).
+ */
+function boardItems(
+  places: Record<string, Place>,
+  words: readonly Words[],
+): BoardItem[] {
+  return [
+    ...Object.entries(places).map(([id, at]): BoardItem => ({
+      owner: id,
+      what: 'thing',
+      box: rectOf(at),
+    })),
+    ...words.map((w): BoardItem => ({
+      owner: w.owner,
+      what:
+        w.what === 'caption' ? 'caption' : w.what === 'pill' ? 'pill' : 'label',
+      box: w.box,
+    })),
+  ];
+}
+
+/**
+ * What on a build's board a view must take whole or leave out: each thing
+ * with its caption as set and its labels, under its id; and each arrow's
+ * label, under "pill:" and the arrow's id.
+ */
+export function boardExtents(
+  places: Record<string, ScenePlaceDto>,
+  arrows: readonly SceneArrowDto[] = [],
+  pills: Record<string, ScenePillDto | null> = {},
+  stage: { w: number; h: number } = { w: 0, h: 0 },
+): Map<string, Rect> {
+  const out = new Map<string, Rect>(
+    Object.entries(places).map(([id, at]) => {
+      const caption = captionBox(at);
+      const boxes = [at, ...(caption ? [caption] : []), ...(at.labels ?? [])];
+      const x0 = Math.min(...boxes.map((b) => b.x));
+      const y0 = Math.min(...boxes.map((b) => b.y));
+      const x1 = Math.max(...boxes.map((b) => b.x + b.w));
+      const y1 = Math.max(...boxes.map((b) => b.y + b.h));
+      return [id, { x: x0, y: y0, w: x1 - x0, h: y1 - y0 }];
+    }),
+  );
+  for (const arrow of arrows) {
+    const pill = pills[arrow.id];
+    const a = places[arrow.from];
+    const b = places[arrow.to];
+    if (pill && a && b)
+      out.set(`pill:${arrow.id}`, pillBox(arrowPath(a, b, false, stage), pill));
+  }
+  return out;
 }
 
 /** Every run of words on the stage at one step, with whose it is. */
@@ -3602,15 +4713,21 @@ const escape = (text: string) =>
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
 
-/** The stage colours, matching the player's. */
-export const STAGE_PAINT = {
-  ground: '#FBF7EF',
-  ink: '#1F2A37',
-  muted: '#5B6675',
-  accent: '#E0663A',
-  card: '#FFFFFF',
-  cardEdge: '#E4DCCB',
-} as const;
+/** The stage colours of a theme, as the player paints them (scene-themes). */
+export const stagePaint = (theme: ExplainerTheme = PAPER) =>
+  ({
+    ground: theme.paper,
+    ink: theme.ink,
+    muted: theme.muted,
+    line: theme.line,
+    accent: theme.accent,
+    card: theme.card,
+    cardInk: theme.cardInk,
+    cardEdge: theme.paperEdge,
+  }) as const;
+
+/** The paper theme's stage colours. */
+export const STAGE_PAINT = stagePaint(PAPER);
 
 /**
  * One still of the page for its card, as SVG: the fullest step in the
@@ -3621,7 +4738,7 @@ export function thumbSvg(
   scene: SceneDto,
   pngs: ReadonlyMap<string, Buffer>,
 ): string {
-  return stepSvg(scene, pngs, 'box', fullestStep(scene));
+  return stepSvg(scene, pngs, 'box', fullestStep(scene), themeOf(scene.theme));
 }
 
 /**
@@ -3634,7 +4751,10 @@ export function stepSvg(
   pngs: ReadonlyMap<string, Buffer>,
   stagingName: StagingName,
   index: number,
+  /** The look it is shown in: its drawings' PNGs already recoloured for it (themedSvg). */
+  theme: ExplainerTheme = PAPER,
 ): string {
+  const STAGE_PAINT = stagePaint(theme);
   const staging = scene.stagings[stagingName];
   const step = scene.steps[index];
   if (!step)
@@ -3690,7 +4810,7 @@ export function stepSvg(
     const b = places[arrow.to];
     if (!a || !b) continue;
     parts.push(
-      `<line x1="${a.x + a.w / 2}" y1="${a.y + a.h / 2}" x2="${b.x + b.w / 2}" y2="${b.y + b.h / 2}" stroke="${STAGE_PAINT.muted}" stroke-width="6" stroke-linecap="round" stroke-dasharray="18 14"/>`,
+      `<line x1="${a.x + a.w / 2}" y1="${a.y + a.h / 2}" x2="${b.x + b.w / 2}" y2="${b.y + b.h / 2}" stroke="${STAGE_PAINT.line}" stroke-width="6" stroke-linecap="round" stroke-dasharray="18 14"/>`,
     );
   }
   for (const id of step.show) {
@@ -3719,7 +4839,7 @@ export function stepSvg(
         if (label.leader) {
           const [x1, y1, x2, y2] = label.leader;
           parts.push(
-            `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${STAGE_PAINT.muted}" stroke-width="3" stroke-linecap="round"/><circle cx="${x2}" cy="${y2}" r="5" fill="${STAGE_PAINT.muted}"/>`,
+            `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${STAGE_PAINT.line}" stroke-width="3" stroke-linecap="round"/><circle cx="${x2}" cy="${y2}" r="5" fill="${STAGE_PAINT.line}"/>`,
           );
         }
         label.lines.forEach((line, i) =>
@@ -3745,7 +4865,12 @@ export function stepSvg(
         parts.push(
           `<rect x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" rx="${Math.min(p.h / 2, 28)}" fill="${STAGE_PAINT.card}" stroke="${STAGE_PAINT.cardEdge}" stroke-width="3"/>`,
         );
-      parts.push(caption(p));
+      parts.push(
+        caption(
+          p,
+          thing.style === 'title' ? STAGE_PAINT.ink : STAGE_PAINT.cardInk,
+        ),
+      );
     }
   }
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${staging.w} ${staging.h}"><rect width="${staging.w}" height="${staging.h}" fill="${STAGE_PAINT.ground}"/>${parts.join('')}</svg>`;

@@ -19,6 +19,10 @@ export class StudioShowModel extends BaseModel {
   @Column({ type: DataType.TEXT('medium'), allowNull: true })
   declare bible: string | null;
 
+  /** The document given to it in the chat, if any: the Studio's own. */
+  @Column({ type: DataType.UUID, allowNull: true })
+  declare documentId: string | null;
+
   @Column({ type: DataType.DATE, allowNull: true })
   declare deletedAt: Date | null;
 
@@ -64,6 +68,14 @@ export class StudioEpisodeModel extends BaseModel {
 
   @Column({ type: DataType.STRING(512), allowNull: true })
   declare thumbKey: string | null;
+
+  /** What is happening to it now, as JSON (studio-progress). */
+  @Column({ type: DataType.TEXT, allowNull: true })
+  declare activity: string | null;
+
+  /** The pages of the show's document it teaches, as JSON (studio-document). */
+  @Column({ type: DataType.TEXT, allowNull: true })
+  declare pages: string | null;
 
   declare createdAt: Date;
   declare updatedAt: Date;
@@ -113,6 +125,10 @@ export class StudioSceneModel extends BaseModel {
 
   @Column({ type: DataType.INTEGER, allowNull: true })
   declare durationMs: number | null;
+
+  /** What is happening to it now, as JSON (studio-progress). */
+  @Column({ type: DataType.TEXT, allowNull: true })
+  declare activity: string | null;
 
   declare createdAt: Date;
   declare updatedAt: Date;

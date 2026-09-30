@@ -18,6 +18,7 @@ import {
   type FigureFace,
   type FigureSpec,
 } from '../scene-figure';
+import { drawnInViews } from '../scene-figure-views';
 
 /** What to draw for a face: one drawn only when asked for is asked for. */
 const asking = (face: FigureFace) =>
@@ -63,4 +64,22 @@ export function figurePreview(
   face: FigureFace = 'happy',
 ): string {
   return wearing(drawFigure(spec, seed, asking(face)), face);
+}
+
+/**
+ * A person drawn by the kit with a face of moving parts (scene-face-rig),
+ * seen from the front, the kit's own faces taken out: a player that marks
+ * the drawing `.rigged` moves the face channel by channel (a show's host,
+ * studio-host). Null where the kit draws no views (a group, someone lying).
+ */
+export function figureRigged(spec: FigureSpec, seed: string): string | null {
+  const drawn = drawnInViews(spec, seed, { faceRig: true });
+  if (!drawn) return null;
+  const doc = parseDocument(drawn.svg, { xmlMode: true });
+  const root = elements(doc.children)[0];
+  for (const id of Object.values(drawn.states)) {
+    const group = byId(root, id);
+    if (group) removeNode(group);
+  }
+  return render(doc, { xmlMode: true });
 }

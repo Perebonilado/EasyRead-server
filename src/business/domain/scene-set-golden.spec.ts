@@ -178,7 +178,9 @@ const GOLDEN: Record<string, [string, string]> = {
   'backdrop none': ['1d859314190add2c', '50c6ebdc16007118'],
   'plain room': ['c6e246e61c0e00f0', '10863a57c5ba1c9b'],
   bedroom: ['55205515662c0694', '19eb57e3e0d636aa'],
-  'vessel bus': ['c82ab9a78aa2885d', '591ad7294dd5c5c0'],
+  // A bus with no colour of its own is a plain blue, no longer one
+  // region's yellow (the global-product fix, D9): changed on purpose.
+  'vessel bus': ['7b4de326f48cb446', '6b7b36a58d319e9b'],
   'vessel train': ['b74ed7bc0b83939e', '4dcece0399d8d365'],
   'vessel plane': ['816a1db36be133b6', '637dc87e1961750e'],
   'vessel boat': ['bb572e2b79823a79', '0902c062582564fe'],
@@ -190,9 +192,16 @@ const GOLDEN: Record<string, [string, string]> = {
 describe('a layout written before the style packs', () => {
   it('is drawn byte for byte as it was, flat and as layers', () => {
     const got = Object.fromEntries(
-      cases().map(([name, layout, where]) => {
+      cases().map(([name, parsed, where]) => {
+        // As it was kept: a layout written before the camera panned (L4)
+        // says no width, and is drawn one frame wide.
+        const layout = { ...parsed };
+        delete layout.width;
         const built = buildSet(layout, where);
-        return [name, [hash(built.svg), hash(JSON.stringify(built.layered))]];
+        // The front as it was; its other side is new (studio-views-plan V3).
+        const { reverse, ...front } = built.layered;
+        void reverse;
+        return [name, [hash(built.svg), hash(JSON.stringify(front))]];
       }),
     );
     expect(got).toEqual(GOLDEN);

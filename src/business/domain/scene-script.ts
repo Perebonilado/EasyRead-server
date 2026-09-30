@@ -11,6 +11,7 @@
  * counted, so no miscount can move a picture off its words.
  */
 
+import type { SceneInteraction } from '../../contracts';
 import { MAX_BARS, numbersIn, type ChartSpec } from './scene-chart';
 import type {
   ActedMove,
@@ -293,12 +294,66 @@ export interface SceneBeat {
   from?: Exclude<LineFrom, 'here'>;
   /** How a line is said. */
   pace?: LinePace;
+  /**
+   * A line's aim, as its writer gave it (the Studio's sheet): what it does
+   * to the one it is said to, acted as that whatever its words would be
+   * read as (scene-performance's aimNamed: a lie is played as a dodge).
+   */
+  aim?: string;
+  /** The face a line is said with, and the one felt beneath it, as the rigged face's recipes: where its writer gave them. */
+  said?: string;
+  felt?: string;
   /** Seconds of quiet after it, for what happens without words: a hug, someone walking off. */
   holdS?: number;
   /** The music from this sentence on; absent, it carries on as it was. */
   music?: SceneMusic;
   /** The music runs high from here: a chase, a rush, danger close. */
   energy?: 'high';
+  /**
+   * A question's answers (scene-checkpoint): two or three short ones,
+   * one right, said by the sentence after. The player may pause on it and
+   * show them. Only on a question; absent, it plays as it is said.
+   */
+  choices?: SceneChoice[];
+}
+
+/**
+ * A shot a scene asks for from a sentence on (the Studio's): the whole
+ * stage, one person close, two framed together; and the shot grammar
+ * (studio-views-plan §3): over the shoulder of `with` onto `on` ("ots"),
+ * the two face to face in profile ("profile"), `on` near the camera with
+ * the others behind ("deep"), over the crowd onto `on` ("crowd"), one
+ * seen from low ("low", a hero) or from high ("high", small or sad).
+ */
+/** An insert asked for: the thing, on spoken beat `beat` (where its words name it, else just after), or at a moment `after` seconds into the quiet after it (-1, the one the scene opens with). */
+export interface SceneInsertAsk {
+  beat: number;
+  after?: number;
+  thing: string;
+}
+
+export interface SceneCameraAsk {
+  beat: number;
+  shot:
+    | 'wide'
+    | 'close'
+    | 'two'
+    | 'ots'
+    | 'profile'
+    | 'low'
+    | 'high'
+    | 'deep'
+    | 'crowd';
+  on: string | null;
+  with: string | null;
+  /** On something done in a quiet: this many seconds into the quiet after spoken beat `beat` (-1, the one the scene opens with). */
+  after?: number;
+  /** Code's own choice at a moment of its own, in the scene's time (a hero's pose): instead of `beat`'s quiet. */
+  atMs?: number;
+  /** Code's own: a close seen from high or low. */
+  angle?: 'low' | 'high';
+  /** Code's own (studio-views-plan §4.2): taken from the place's other side, on its reverse. */
+  reverse?: true;
 }
 
 export interface DrawingThing {
@@ -602,6 +657,11 @@ export interface SceneStage {
   depth?: Record<string, number>;
   /** How those who go at this step go: at a run; off or on by a side, through a feature, squeezing under it. */
   going?: Record<string, SceneGoing>;
+  /**
+   * A stage of a continuous build (scene-board.ts): each thing's cell of
+   * the board, what has receded, what the camera frames. Set by code.
+   */
+  board?: BoardStage;
 }
 
 /** How someone goes on, off or across at a step. */
@@ -612,6 +672,10 @@ export interface SceneGoing {
   via?: string;
   /** Under or through it, bent low: they are gone once past it. */
   squeeze?: true;
+  /** Gone through it by an interaction of theirs (a door's go-through): it carries them, not a walk to its way. */
+  through?: true;
+  /** Whom they go over to, by id: they stop beside them, near enough to talk, never on them (scene-spacing). */
+  toward?: string;
 }
 
 /** A fixed thing of a Studio scene's set, as the stage stands it. */
@@ -664,6 +728,25 @@ export interface SceneStep {
   /** Null: the stage stays as it is and only the effects happen. */
   stage: SceneStage | null;
   effects: SceneEffect[];
+  /**
+   * What someone does with a thing of the set from this step's moment
+   * (studio-interactions-plan §1.3): timed into its steps by compose
+   * (scene-interact). One that carries them (through a door, up the
+   * stairs) is this step's change of place.
+   */
+  interact?: SceneStepInteraction[];
+}
+
+/** An interaction as the stager asks it: who, what, with which feature, and how long it has. */
+export interface SceneStepInteraction {
+  who: string;
+  does: SceneInteraction;
+  feature: string;
+  /** How long it has, in seconds. */
+  s: number;
+  side?: -1 | 1;
+  part?: string;
+  to?: 'behind' | 'next-set';
 }
 
 export interface SceneScript {
@@ -707,14 +790,14 @@ export interface SceneScript {
    * Studio's): the whole stage, one person close, or two framed together.
    * Absent, the camera is cut as a film cuts it (storyShots).
    */
-  camera?: {
-    beat: number;
-    shot: 'wide' | 'close' | 'two';
-    on: string | null;
-    with: string | null;
-    /** On something done in a quiet: this many seconds into the quiet after spoken beat `beat` (-1, the one the scene opens with). */
-    after?: number;
-  }[];
+  camera?: SceneCameraAsk[];
+  /**
+   * Inserts the scene asks for (the Studio's, studio-screenwriting K5): a
+   * close shot on a thing alone, a thing of `props` or a feature of the
+   * set ("f:<id>"), as it is handled or named. Absent, none but what
+   * code finds (a line that shows or reveals a thing it names).
+   */
+  inserts?: SceneInsertAsk[];
   /**
    * A Studio story's stage: its people at fixed stations (SceneStage.at),
    * and its set's features stood among them; a book's page lays its people
@@ -732,6 +815,25 @@ export interface SceneScript {
     /** The page's place: out of doors, a room or a vessel, which the crowd stands in accordingly; absent, out of doors. */
     place?: PlaceKind | null;
   };
+  /**
+   * A Studio story told by one of its cast (studio-story-plan §2): their
+   * id, whose voice says the narration. Absent, the narrator's own.
+   */
+  narrator?: string;
+  /**
+   * The camera's energy for the maker's style and pace (studio-style.ts):
+   * how long it waits to go in close again, as a share of its usual, and
+   * how much it pushes in on a feeling (0 never). Absent, as usual.
+   */
+  energy?: { cut: number; push: number };
+  /**
+   * A scene of a continuous build (scene-board.ts): its stages laid out on
+   * one board, and the things the scene before left there, on the stage
+   * from its first moment with no entrance; and the rows of the board
+   * its whole section uses, which the stage spreads down the frame alike
+   * in every scene of it. Set by code.
+   */
+  board?: { carried: string[]; rows?: [number, number] };
 }
 
 /**
@@ -753,6 +855,8 @@ export interface SceneScriptDraft {
     /** The music from this sentence on, or null to carry on. */
     music?: SceneMusic | null;
     energy?: 'low' | 'high' | null;
+    /** A question's answers, two or three, one right; null on any other sentence. */
+    choices?: { text: string; right: boolean }[] | null;
   }[];
   cast: {
     id: string;
@@ -837,6 +941,8 @@ export function wordsOf(text: string): string[] {
 }
 
 import { groupId, idKey, wordKey } from './scene-ids';
+import { choicesOf, type SceneChoice } from './scene-checkpoint';
+import type { BoardStage } from './scene-board';
 export { groupId, idKey, wordKey };
 export { quotedSpans };
 
@@ -957,6 +1063,15 @@ export function musicOf(
       ? { energy: 'high' as const }
       : {}),
   };
+}
+
+/** A question's answers kept, when sound and a sentence after it says which is right. */
+function choicesKept(
+  beat: Pick<SceneScriptDraft['beats'][number], 'choices' | 'delivery'>,
+  answered: boolean,
+): { choices?: SceneChoice[] } {
+  const choices = answered ? choicesOf(beat.choices, beat.delivery) : undefined;
+  return choices ? { choices } : {};
 }
 
 export interface MendedScript {
@@ -1510,6 +1625,7 @@ export function mendScript(
       ? beat.delivery
       : ('explain' as const),
     ...musicOf(beat, kept[index + 1], !!options.characters?.length),
+    ...choicesKept(beat, index < kept.length - 1),
   }));
 
   // The cast: every thing made sound, and every way the writer might refer to one.
@@ -2676,10 +2792,11 @@ function effectOf(
 /** How many spoken words pass between one change on the stage and the next: the writer's cadence, before any audio. */
 /**
  * Spoken words with nothing new to see that send a lesson's draft back on
- * their own, about sixteen seconds: a picture that sits still that long
- * has lost the learner.
+ * their own, about twelve seconds: a picture that sits still that long
+ * has lost the learner. The writer's prompt says the same number
+ * ("never thirty words with nothing new"), and so does WORDS_A_STAGE.
  */
-export const STILL_WORDS = 40;
+export const STILL_WORDS = 30;
 
 export function quietStretches(script: SceneScript, limit = 30): string[] {
   const positions: number[] = [];
@@ -2819,7 +2936,13 @@ export function listsIn(sentence: string): SpokenItem[][] {
         .replace(/^\s*(?:and|or)\s+/iu, '')
         .split(/\s+(?:and|or)\s+/iu)[0];
       const n = Math.min(3, Math.max(1, wordsOf(next).length));
-      const tail = head.text.trimEnd().split(/\s+/).slice(-n).join(' ');
+      // Never a little word it hangs from ("the risk of STIs" → "STIs").
+      const tail = head.text
+        .trimEnd()
+        .split(/\s+/)
+        .slice(-n)
+        .join(' ')
+        .replace(/^(?:(?:of|to|for|in|on|with|from|by|about)\s+)+/iu, '');
       if (short(tail) && short(next)) {
         firstText = tail;
         firstAt = head.at + head.text.trimEnd().length - tail.length;
@@ -2841,8 +2964,19 @@ export function listsIn(sentence: string): SpokenItem[][] {
         closed = true;
         break;
       }
-      // "memory and cache": the last two joined without a comma.
+      // "memory and cache": the last two joined without a comma. But one
+      // the list goes on past ("Home, Education or Employment, Activities,
+      // … and Safety") is a single item of it, said with its "or".
       const pair = /^([^.;:!?]+?)\s+(?:and|or)\s+([^.;:!?]+)/iu.exec(piece);
+      const goesOn =
+        j + 1 < parts.length &&
+        !/[.;:!?]\s*$/u.test(piece) &&
+        short(parts[j + 1].text.replace(/^\s*(?:and|or)\s+/iu, ''));
+      if (pair && goesOn && short(piece)) {
+        run.push({ text: piece, at: parts[j].at });
+        j += 1;
+        continue;
+      }
       if (pair && short(pair[1]) && short(pair[2])) {
         run.push({ text: pair[1], at: parts[j].at + piece.indexOf(pair[1]) });
         run.push({
@@ -2881,7 +3015,14 @@ const LIST_MOST = 4;
  * item by item as it is said: a card for each, beside the one thing the
  * stage was showing, until the stage next changes. What was on the stage
  * comes back where the page goes on to point at something the list took
- * the place of.
+ * the place of, and then the list is done: its cards never come back
+ * after it, so the stage never flips between the two (the HEADSSS
+ * checklist and its own items as cards, back and forth every half
+ * second).
+ *
+ * A list is already on the stage when most of its items are things there
+ * or the named parts of one (a checklist's rows, a diagram's labels), or
+ * the page points at them one by one: it is never shown twice.
  */
 function showSpokenLists(
   beats: SceneBeat[],
@@ -2891,9 +3032,15 @@ function showSpokenLists(
 ): void {
   const before = (a: SceneStep, beat: number, word: number) =>
     a.at.beat < beat || (a.at.beat === beat && a.word <= word);
+  const later = (a: SceneStep, b: SceneStep) =>
+    a.at.beat - b.at.beat || a.word - b.word;
+  // The stage as it stands at a word: the latest change at or before it,
+  // in the order of the words (steps are added out of order below).
   const stageAt = (beat: number, word: number) =>
-    [...steps].reverse().find((step) => step.stage && before(step, beat, word))
-      ?.stage ?? null;
+    steps
+      .filter((step) => step.stage && before(step, beat, word))
+      .sort(later)
+      .pop()?.stage ?? null;
   const byId = new Map(cast.map((thing) => [thing.id, thing]));
   const nameOf = (id: string) => {
     const thing = byId.get(id);
@@ -2901,21 +3048,35 @@ function showSpokenLists(
     if (thing.kind === 'words') return thing.text;
     return 'name' in thing && typeof thing.name === 'string' ? thing.name : id;
   };
+  /** A thing's name and the names of its parts: what it shows in words. */
+  const namesOf = (id: string) => {
+    const thing = byId.get(id);
+    return thing ? [nameOf(id), ...partNames(thing)] : [];
+  };
   const keys = (text: string) =>
     wordsOf(text.toLowerCase())
       .map((word) => word.replace(/[^\p{L}\p{N}]/gu, ''))
       .filter((word) => word.length >= 3);
   const taken = new Set(cast.map((thing) => thing.id));
+  /** The ids of the cards each list brought on, in order. */
+  const runs: string[][] = [];
   beats.forEach((beat, k) => {
     for (const list of listsIn(beat.say)) {
       const items = list.slice(0, 6);
-      // Shown already: the writer put most of them on the stage by now.
+      // Shown already: the writer put most of them on the stage by now,
+      // as things or as the parts of one, or points at them.
       const shown = steps
         .filter((step) => step.stage && step.at.beat <= k + 1)
-        .flatMap((step) => step.stage!.show.map(nameOf));
+        .flatMap((step) => step.stage!.show.flatMap(namesOf));
+      const pointed = steps
+        .filter((step) => step.at.beat === k)
+        .flatMap((step) =>
+          step.effects.flatMap((e) => (e.part ? [e.part] : [])),
+        );
+      const named = [...shown, ...pointed];
       const onStage = items.filter((item) =>
         keys(item.text).some((key) =>
-          shown.some((name) => keys(name).includes(key)),
+          named.some((name) => keys(name).includes(key)),
         ),
       ).length;
       if (onStage * 2 >= items.length) continue;
@@ -2923,9 +3084,19 @@ function showSpokenLists(
       if (stage?.show.some((id) => ROOMY.has(byId.get(id)?.kind ?? '')))
         continue;
       // What the list is about stays, two things at most; the rest make
-      // room.
+      // room. What the page does something to while the list is said
+      // stays first; where that is more than two things, the page is
+      // using the stage for this sentence, and the list is left to it.
+      const acted = new Set(
+        steps
+          .filter((step) => step.at.beat === k && step.word >= items[0].word)
+          .flatMap((step) => step.effects.map((e) => e.target))
+          .filter((id) => stage?.show.includes(id)),
+      );
+      if (acted.size > 2) continue;
       const base = (stage?.show ?? [])
         .filter((id) => !id.startsWith('item-'))
+        .sort((a, b) => Number(acted.has(b)) - Number(acted.has(a)))
         .slice(0, 2);
       const cards = items.map((item) => {
         let id = `item-${groupId(item.text).slice(0, 24)}`;
@@ -2943,6 +3114,7 @@ function showSpokenLists(
         byId.set(id, card);
         return { id, word: item.word, text: item.text };
       });
+      runs.push(cards.map((card) => card.id));
       cards.forEach((card, n) => {
         const upTo = cards
           .slice(0, n + 1)
@@ -2965,26 +3137,47 @@ function showSpokenLists(
       );
     }
   });
-  steps.sort((a, b) => a.at.beat - b.at.beat || a.word - b.word);
+  steps.sort(later);
   // Where the page goes on to point at something a list took the place
-  // of, what was on the stage comes back.
+  // of, what was on the stage comes back, and that list is over: the
+  // cards of it still to come are left out rather than swapped back in.
+  const runOf = (stage: SceneStage) =>
+    runs.find((run) => stage.show.some((id) => run.includes(id))) ?? null;
+  const over = new Set<string[]>();
   let current: SceneStage | null = null;
   let lastWriters: SceneStage | null = null;
-  for (const step of steps) {
+  for (let i = 0; i < steps.length; i += 1) {
+    const step = steps[i];
     if (step.stage) {
-      current = step.stage;
-      if (!step.stage.show.some((id) => id.startsWith('item-')))
-        lastWriters = step.stage;
-      continue;
+      const run = runOf(step.stage);
+      if (run && over.has(run)) {
+        if (step.effects.length) step.stage = null;
+        else {
+          steps.splice(i, 1);
+          i -= 1;
+          continue;
+        }
+      } else {
+        current = step.stage;
+        if (!run) lastWriters = step.stage;
+        continue;
+      }
     }
     const missing = step.effects.some(
       (effect) => current && !current.show.includes(effect.target),
     );
     if (missing && lastWriters) {
+      const run = current ? runOf(current) : null;
+      if (run) over.add(run);
       step.stage = { ...lastWriters };
       current = lastWriters;
     }
   }
+  // A list left out whole takes its cards with it.
+  const used = new Set(steps.flatMap((step) => step.stage?.show ?? []));
+  for (let i = cast.length - 1; i >= 0; i -= 1)
+    if (cast[i].id.startsWith('item-') && !used.has(cast[i].id))
+      cast.splice(i, 1);
 }
 
 /** Layouts read in order, where an arrow should run forward: left to right, or down. */

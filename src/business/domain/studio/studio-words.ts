@@ -4,12 +4,23 @@
  * maker can see. The same words both ways, so the producer never talks of
  * a scene the writer was never told of.
  */
+import { describeDocument } from './studio-document';
 import { describeAnimal } from '../scene-animal';
 import { describeCreature } from '../scene-creature';
 import { describeFigure } from '../scene-figure';
 import { DRAWN } from '../scene-own';
 import { STAGE_NAMES, STAGE_RECIPES, type LearningStage } from '../scene-stage';
-import { WORDS_A_SECOND } from './studio';
+import { FULLEST, WORDS_A_SECOND } from './studio';
+import {
+  BAND_STAGE,
+  describeAudience,
+  describeRecipe,
+  whoLine,
+  type AudienceRecipe,
+} from './studio-audience';
+import { narratorWords } from './studio-narrator';
+import { describePersona } from './studio-story';
+import { controlWords, safetyWords } from './studio-style';
 import {
   AUDIENCE_STAGE,
   briefMissing,
@@ -18,6 +29,7 @@ import {
   type SceneSheet,
   type StudioBible,
   type StudioBrief,
+  type StudioCharacter,
   type StudioOutline,
 } from './studio';
 
@@ -26,16 +38,48 @@ export function describeBrief(brief: StudioBrief): string {
   const lines = [
     `Format: ${brief.format ?? 'not decided'}`,
     `Idea: ${brief.idea || 'not said yet'}`,
-    `Audience: ${brief.audience ? `${brief.audience} (${STAGE_NAMES[AUDIENCE_STAGE[brief.audience]]})` : 'not said yet'}`,
+    `Audience: ${
+      brief.who
+        ? `${brief.audience ?? 'as said'} (${STAGE_NAMES[BAND_STAGE[brief.who.band]]}): ${whoLine(brief.who)}`
+        : brief.audience
+          ? `${brief.audience} (${STAGE_NAMES[AUDIENCE_STAGE[brief.audience]]})`
+          : 'not said yet'
+    }`,
     `Length of an episode: ${brief.minutes ? `${brief.minutes} minute${brief.minutes === 1 ? '' : 's'}` : 'not said yet'}`,
     `Tone: ${brief.tone ?? 'not said yet'}`,
   ];
   if (brief.setting) lines.push(`Setting: ${brief.setting}`);
   if (brief.characters) lines.push(`Characters: ${brief.characters}`);
   if (brief.include) lines.push(`To include: ${brief.include}`);
+  // Whom an explainer teaches, and how, as its recipe has it.
+  if (brief.format === 'explainer' && brief.who)
+    lines.push(`Teaching them:\n${describeAudience(brief.who)}`);
+  // The maker's own controls, where they chose them; and what is safe for
+  // this audience and genre.
+  if (brief.format !== 'explainer') {
+    const narrator = narratorWords(brief);
+    if (narrator) lines.push(narrator);
+    lines.push(...controlWords(brief));
+    const safe = safetyWords(brief);
+    if (safe) lines.push(`Safety: ${safe}`);
+  }
   if (brief.source)
     lines.push(`The maker's own text, to make it from:\n${brief.source}`);
+  if (brief.document) lines.push(describeDocument(brief.document));
   return lines.join('\n');
+}
+
+/** How a character looks, in words: as the kit draws them, else as the bible says. */
+export function looksOf(
+  c: Pick<StudioCharacter, 'kind' | 'figure' | 'animal' | 'creature' | 'look'>,
+): string {
+  return c.kind === 'person' && c.figure
+    ? describeFigure(c.figure)
+    : c.animal
+      ? describeAnimal(c.animal)
+      : c.creature
+        ? describeCreature(c.creature)
+        : c.look;
 }
 
 /** The cast and the places, with their ids, or an explainer's subject and pictures. */
@@ -53,19 +97,16 @@ export function describeBible(
             .map((p) => `- ${p.name}: ${p.is}. Draw: ${p.draw}`)
             .join('\n')}`
         : '',
+      describeClipCast(bible),
     ]
       .filter(Boolean)
       .join('\n');
+  const names = new Map(bible.characters.map((c) => [c.id, c.name]));
   const people = bible.characters.map((c) => {
-    const looks =
-      c.kind === 'person' && c.figure
-        ? describeFigure(c.figure)
-        : c.animal
-          ? describeAnimal(c.animal)
-          : c.creature
-            ? describeCreature(c.creature)
-            : c.look;
-    return `- ${c.id}: ${c.name}, ${c.role}, ${c.kind}${c.size ? ` (${c.size})` : ''}; ${c.traits.join(', ') || 'no traits given'}; looks: ${looks}; voice: ${c.voice}${c.carries ? `; carries a ${c.carries}` : ''}`;
+    const looks = looksOf(c);
+    // Who they are, where a story was developed with them: their sheet.
+    const persona = describePersona(c, names);
+    return `- ${c.id}: ${c.name}, ${c.role}, ${c.kind}${c.size ? ` (${c.size})` : ''}; ${c.traits.join(', ') || 'no traits given'}; looks: ${looks}; voice: ${c.voice}${c.carries ? `; carries a ${c.carries}` : ''}${persona ? `\n  who they are: ${persona}` : ''}`;
   });
   const places = bible.sets.map(
     (s) =>
@@ -98,11 +139,29 @@ export function describeBible(
 }
 
 /** One scene of the outline, as the writer and the producer are told it. */
+/** An explainer's people and places for its story clips (studio-clip), for the outline's writer and the clip's; empty with none. */
+export function describeClipCast(
+  bible: Pick<StudioBible, 'characters' | 'sets'>,
+): string {
+  if (!bible.characters.length || !bible.sets.length) return '';
+  return [
+    'For story clips only, the same every time (never new people or places):',
+    ...bible.characters.map(
+      (c) =>
+        `- ${c.id}: ${c.name}, ${c.kind}${c.traits.length ? `, ${c.traits.join(', ')}` : ''}; looks: ${looksOf(c)}${c.host ? "; the show's host, who opens each film and may act in a clip" : ''}`,
+    ),
+    ...bible.sets.map((s) => `- place ${s.id}: ${s.name}: ${s.look}`),
+  ].join('\n');
+}
+
 export function describeOutlineScene(
   scene: OutlineScene,
   k: number,
   story: boolean,
 ): string {
+  // An explainer's story clip (studio-clip): its place, its people and what it shows.
+  if (!story && scene.kind === 'clip')
+    return `Scene ${k + 1}, "${scene.title}", a story clip of about ${scene.seconds} seconds in ${scene.set ?? 'no place'} with ${scene.cast.join(', ') || 'no one'}: ${scene.teach ?? scene.summary}`;
   return story
     ? `Scene ${k + 1}, "${scene.title}", about ${scene.seconds} seconds, in ${scene.set ?? 'no place'} with ${scene.cast.join(', ') || 'no one'}: ${scene.summary}`
     : `Scene ${k + 1}, "${scene.title}", about ${scene.seconds} seconds: ${scene.summary}${scene.points.length ? ` Small ideas: ${scene.points.join('; ')}.` : ''}`;
@@ -166,6 +225,10 @@ export function describeForProducer(input: {
       ? `Still missing: ${missing.join(', ')}.`
       : 'The brief is complete.',
   ];
+  if (input.outline?.story && input.phase !== 'brief')
+    parts.push(
+      `The story: ${input.outline.story.premise.logline}${input.outline.story.premise.theme ? ` (really about ${input.outline.story.premise.theme})` : ''}`,
+    );
   if (input.outline && input.phase !== 'brief')
     parts.push(`The outline:\n${describeOutline(input.outline, story)}`);
   if (input.bible && story && input.phase === 'cast')
@@ -219,9 +282,24 @@ export function describeEarlier(
 export function describeScene(
   stage: LearningStage | null,
   seconds: number,
+  /** Whom it teaches, as the audience's recipe has it, and whether this scene asks them a question. */
+  audience: {
+    recipe: AudienceRecipe;
+    check: boolean;
+    said?: string;
+  } | null = null,
 ): string {
   const words = Math.max(20, Math.round(seconds * WORDS_A_SECOND));
-  const budget = `This scene is spoken in about ${seconds} seconds: about ${words} spoken words in all, and never more than ${Math.round(words * 1.25)}. Say only what this scene teaches, in that many words; the scenes around it say the rest.`;
+  const budget = `This scene is spoken in about ${seconds} seconds: about ${words} spoken words in all, and never more than ${Math.round(words * FULLEST)}. Say only what this scene teaches, in that many words; the scenes around it say the rest.`;
+  if (audience)
+    return [
+      describeRecipe(audience.recipe, {
+        seconds,
+        check: audience.check,
+        ...(audience.said ? { said: audience.said } : {}),
+      }),
+      budget,
+    ].join('\n');
   if (!stage) return budget;
   const r = STAGE_RECIPES[stage];
   return [

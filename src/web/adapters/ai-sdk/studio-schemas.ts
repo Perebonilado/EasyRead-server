@@ -25,6 +25,7 @@ import {
   STUDIO_TONES,
   STUDIO_VOICES,
   TRANSITIONS,
+  OUTLINE_KINDS,
 } from '../../../business/domain/studio/studio';
 import {
   DOING_IDS,
@@ -416,6 +417,9 @@ export const studioOutlineSchema = z.object({
       // An explainer made from a document: the pages it teaches, [first, last].
       pages: z.array(z.number()).nullable().catch(null),
       into: z.string().nullable(),
+      // An explainer's story clip (studio-clip), and the lesson line after it that points back.
+      kind: z.enum(OUTLINE_KINDS).catch('lesson'),
+      hook: z.string().nullable().catch(null),
     }),
   ),
 });

@@ -876,6 +876,8 @@ export interface LlmGatewayPort {
       scene: string;
       /** How the scene before it left the stage. */
       before: string;
+      /** A story clip inside an explainer (studio-clip): written without thinking, quick and cheap. */
+      quick?: boolean;
     } & StudioRevision,
   ): Promise<LlmResult<Record<string, unknown>>>;
 

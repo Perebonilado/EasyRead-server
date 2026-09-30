@@ -97,6 +97,7 @@ export function describeBible(
             .map((p) => `- ${p.name}: ${p.is}. Draw: ${p.draw}`)
             .join('\n')}`
         : '',
+      describeClipCast(bible),
     ]
       .filter(Boolean)
       .join('\n');
@@ -138,11 +139,29 @@ export function describeBible(
 }
 
 /** One scene of the outline, as the writer and the producer are told it. */
+/** An explainer's people and places for its story clips (studio-clip), for the outline's writer and the clip's; empty with none. */
+export function describeClipCast(
+  bible: Pick<StudioBible, 'characters' | 'sets'>,
+): string {
+  if (!bible.characters.length || !bible.sets.length) return '';
+  return [
+    'For story clips only, the same every time (never new people or places):',
+    ...bible.characters.map(
+      (c) =>
+        `- ${c.id}: ${c.name}, ${c.kind}${c.traits.length ? `, ${c.traits.join(', ')}` : ''}; looks: ${looksOf(c)}`,
+    ),
+    ...bible.sets.map((s) => `- place ${s.id}: ${s.name}: ${s.look}`),
+  ].join('\n');
+}
+
 export function describeOutlineScene(
   scene: OutlineScene,
   k: number,
   story: boolean,
 ): string {
+  // An explainer's story clip (studio-clip): its place, its people and what it shows.
+  if (!story && scene.kind === 'clip')
+    return `Scene ${k + 1}, "${scene.title}", a story clip of about ${scene.seconds} seconds in ${scene.set ?? 'no place'} with ${scene.cast.join(', ') || 'no one'}: ${scene.teach ?? scene.summary}`;
   return story
     ? `Scene ${k + 1}, "${scene.title}", about ${scene.seconds} seconds, in ${scene.set ?? 'no place'} with ${scene.cast.join(', ') || 'no one'}: ${scene.summary}`
     : `Scene ${k + 1}, "${scene.title}", about ${scene.seconds} seconds: ${scene.summary}${scene.points.length ? ` Small ideas: ${scene.points.join('; ')}.` : ''}`;

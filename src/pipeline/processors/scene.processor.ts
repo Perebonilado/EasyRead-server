@@ -753,6 +753,10 @@ export class SceneProcessor {
      * its stage's, and not stored: the player finds the same from the stage.
      */
     reading?: SceneReading | null;
+    /** Drawings code made for it already, by thing id (a Studio lesson's card of the clip before it): not drawn again. */
+    reuse?: ReadonlyMap<string, GatedDrawing>;
+    /** The scene as composed, finished before it is stored (a Studio clip's freeze, a lesson's card told its still). */
+    finish?: (scene: SceneDto) => SceneDto;
   }): Promise<
     | { fit: 'poor'; reason: string }
     | {
@@ -829,7 +833,9 @@ export class SceneProcessor {
           who,
           stop.signal,
           story,
-          carried.reuse,
+          input.reuse?.size
+            ? new Map([...carried.reuse, ...input.reuse])
+            : carried.reuse,
         ),
         this.drawOwn(script, story, documentId, who, stop.signal),
       ]).then(async ([made, own]) => {
@@ -935,10 +941,11 @@ export class SceneProcessor {
     }
     // Paper is every scene's look unless it says otherwise.
     if (input.theme && input.theme !== 'paper') scene.theme = input.theme;
-    const { sceneKey, thumbKey } = await this.store(base, scene, who);
+    const finished = input.finish ? input.finish(scene) : scene;
+    const { sceneKey, thumbKey } = await this.store(base, finished, who);
     return {
       fit: 'good',
-      scene,
+      scene: finished,
       sceneKey,
       thumbKey,
       voice,

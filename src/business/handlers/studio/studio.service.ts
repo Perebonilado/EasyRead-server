@@ -78,6 +78,7 @@ import {
   type DrawingFailure,
 } from '../../domain/drawing-failures';
 import { joinFor } from '../../domain/studio/studio-edit';
+import { clipJoin } from '../../domain/studio/studio-clip';
 import { storyBibleFor } from '../../domain/studio/studio-stage';
 import {
   describeForProducer,
@@ -2030,8 +2031,17 @@ export class StudioService {
           sheet: one.sheet,
           scene: episode.outline?.scenes[one.position] ?? null,
         });
+        // Into and out of an explainer's story clip (studio-clip): a
+        // dissolve or an iris in, and out of it the clip shrinks into its
+        // card on the next lesson's stage.
         const joined = i
-          ? joinFor(side(made[i - 1]), side(s), show.bible?.pictures ?? [])
+          ? (clipJoin(
+              made[i - 1].sheet,
+              s.sheet,
+              show.brief.format,
+              showTheme(show.brief, show.bible),
+            ) ??
+            joinFor(side(made[i - 1]), side(s), show.bible?.pictures ?? []))
           : { join: 'dip' as const };
         return {
           id: s.id,
@@ -2134,7 +2144,8 @@ export class StudioService {
   async sharedFile(
     token: string,
     sceneId: string,
-    what: 'scene' | 'audio',
+    /** A thumb: a story clip's still, the card of it the next lesson shows. */
+    what: 'scene' | 'audio' | 'thumb',
   ): Promise<string> {
     const { episode } = await this.shared(token);
     const scene = await this.studio.findScene(sceneId);

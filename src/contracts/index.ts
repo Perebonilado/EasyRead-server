@@ -1247,6 +1247,13 @@ export type SceneThingDto =
       stride?: { length: number; gait: SceneGait };
       /** What it offers the people who use it (a show's own feature, guessed from its kind): absent, nothing. */
       affordances?: SceneAffordancesDto;
+      /**
+       * A card of another scene (studio-clip, Ask 5): the story clip before
+       * it, as a still of its last frame. The player lays the still over
+       * the card's drawing (its frame), and a match join shrinks the clip
+       * into it. Absent on every other drawing.
+       */
+      still?: SceneStillDto;
     }
   | { id: string; kind: 'stat'; value: string; caption: string }
   | {
@@ -1980,6 +1987,19 @@ export interface SceneReadingDto {
   motion: number;
 }
 
+/** A clip's freeze at its idea: when, for how long, and the words set then. */
+export interface SceneFreezeDto {
+  atMs: number;
+  ms: number;
+  label: string;
+}
+
+/** A still of another scene of the film, as a thing on this one's stage: which scene, and when in it (null, its end). */
+export interface SceneStillDto {
+  sceneId: string;
+  atMs: number | null;
+}
+
 export interface SceneDto {
   /** 4 adds the sound; a 3 plays the same, in silence but for the voice. */
   version: 3 | 4;
@@ -2008,6 +2028,13 @@ export interface SceneDto {
    * grown-up's (1). Absent, from its `stage`, else a grown-up's.
    */
   reading?: SceneReadingDto;
+  /**
+   * A story clip inside an explainer (studio-clip, Ask 5): the picture
+   * holds still for `ms` at `atMs`, its idea's moment, and the idea is set
+   * on the stage in the look's type (`label`) from then on. Absent on
+   * every other scene.
+   */
+  freeze?: SceneFreezeDto;
   /**
    * One per spoken sentence; one word entry per whitespace word of `text`:
    * [charStart, charEnd, startMs, endMs]. `delivery` when it is not plain
@@ -3510,13 +3537,17 @@ export type StudioJoinName =
   | 'morph'
   | 'zoom-through'
   | 'push'
-  | 'continue';
+  | 'continue'
+  // Into a story clip on a Sunny or Chalkboard look: a circle opens on it (studio-clip).
+  | 'iris';
 
 /** A join's things: `from` in the scene before, `to` in this one, `part` of `from` a zoom goes into. */
 export interface StudioJoinWithDto {
   from?: string;
   to?: string;
   part?: string;
+  /** A match from the whole picture of the scene before (a story clip) into `to`, its card (studio-clip). */
+  whole?: true;
 }
 
 /** An episode as a player plays it: its scenes in order, each fetched on its own. */

@@ -289,6 +289,14 @@ export interface StoryPlace {
     kind: AnyFeatureKind;
     spot: string;
   }[];
+  /**
+   * A layout code already has for it (a Studio clip's common place: a
+   * clinic room, a classroom, studio-clip presetLayout): built from it with
+   * no model asked and nothing judged. Absent, the painter writes one.
+   */
+  layout?: Record<string, unknown>;
+  /** Painted by the painter in one take, not judged (a Studio clip's place with no layout of code's). */
+  once?: true;
 }
 
 export interface StoryPage {

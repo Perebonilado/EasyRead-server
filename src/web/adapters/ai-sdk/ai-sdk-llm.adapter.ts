@@ -2358,6 +2358,8 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     system: string,
     parts: string[],
     revision: StudioRevision,
+    /** Thinking off whatever STUDIO_WRITE_THINKING says: a story clip's sheet (studio-clip). */
+    quick = false,
   ): Promise<LlmResult<Record<string, unknown>>> {
     const started = Date.now();
     const { generateObject } = await this.registry.modules();
@@ -2387,7 +2389,9 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
         system,
         prompt,
         maxRetries: this.maxRetries(),
-        ...this.writerThinking(ref, 'STUDIO_WRITE_THINKING', 'on'),
+        ...(quick
+          ? this.writerThinking(ref, 'STUDIO_CLIP_THINKING', 'off')
+          : this.writerThinking(ref, 'STUDIO_WRITE_THINKING', 'on')),
       }),
     );
     return {
@@ -2487,6 +2491,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
       outline: string;
       scene: string;
       before: string;
+      quick?: boolean;
     } & StudioRevision,
   ): Promise<LlmResult<Record<string, unknown>>> {
     return this.studioWrite(
@@ -2500,6 +2505,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
         input.before,
       ],
       input,
+      input.quick === true,
     );
   }
 

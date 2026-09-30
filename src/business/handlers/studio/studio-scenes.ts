@@ -169,6 +169,13 @@ export async function writeStorySheet(
     notes?: string[];
     record?: (usage: LlmUsage) => Promise<void> | void;
     log?: (line: string) => void;
+    /**
+     * A story clip inside an explainer (studio-clip): written from its own
+     * words (the clip profile and where it sits in the lesson) in place of
+     * a story's plan, first-scene rule and craft checklist, without
+     * thinking. Absent, a story's scene.
+     */
+    clip?: { scene: string; outline: string };
   },
 ): Promise<WrittenSheet> {
   const { bible, outline, k, before, planned } = input;
@@ -177,11 +184,14 @@ export async function writeStorySheet(
   const record = input.record ?? (() => undefined);
   const log = input.log ?? (() => undefined);
   const narrator = narratorRuleOf(input.brief, bible);
+  const clip = input.clip ?? null;
   const ask = {
     brief: describeBrief(input.brief),
     bible: describeBible(bible, true),
-    outline: describeOutline(outline, true),
-    scene: outline.scenes[k]
+    outline: clip ? clip.outline : describeOutline(outline, true),
+    scene: clip
+      ? clip.scene
+      : outline.scenes[k]
       ? [
           describeOutlineScene(outline.scenes[k], k, true),
           planOf(outline, k),
@@ -201,6 +211,7 @@ export async function writeStorySheet(
           .join('\n')
       : `Scene ${k + 1}: the scene the maker asked for.`,
     before: input.beforeWords || describeEnd(before, bible),
+    ...(clip ? { quick: true } : {}),
   };
   const notes = input.notes?.length && old ? input.notes : null;
   const first = await llm.studioScene({

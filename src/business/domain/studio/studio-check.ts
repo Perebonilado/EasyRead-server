@@ -3213,6 +3213,8 @@ export function checkOutline(
       );
   } else
     outline.scenes.forEach((scene, k) => {
+      // A story clip shows its idea in a line; its limits are code's (studio-clip gateClips).
+      if (scene.kind === 'clip') return;
       const said = scene.teach ? words(scene.teach) : 0;
       // What the scene teaches is written a little fuller than the
       // narrator says it (TEACH_WORDS_A_SECOND): more than FULLEST over

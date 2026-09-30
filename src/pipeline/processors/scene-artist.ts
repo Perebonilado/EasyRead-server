@@ -620,9 +620,15 @@ export class SceneArtist {
   ): Promise<SetSheet | null> {
     const thing = setThing(place, bookTitle, world);
     const brief = layoutBrief(place, bookTitle, world);
-    const takes = Math.max(1, options.takes ?? TAKES.set);
-    const see = options.see ?? true;
-    const revisions = Math.max(0, options.revisions ?? REVISIONS);
+    // A layout code has for it (a Studio clip's common place) is built
+    // from, no model asked; one to paint once is one take, unjudged.
+    const preset = place.layout ?? null;
+    const quick = Boolean(preset || place.once);
+    const takes = quick ? 1 : Math.max(1, options.takes ?? TAKES.set);
+    const see = quick ? false : (options.see ?? true);
+    const revisions = quick
+      ? 0
+      : Math.max(0, options.revisions ?? REVISIONS);
     const [low, high] = HORIZON[place.kind ?? 'outdoor'];
     // Each thing the kit has no piece for, drawn once however many takes
     // and rounds ask for it.
@@ -714,6 +720,7 @@ export class SceneArtist {
         this.take<Built>(
           `${who}: ${place.name}${takes > 1 ? ` (take ${k + 1})` : ''}`,
           async ({ notes, previous }) => {
+            if (preset) return JSON.stringify(preset);
             const made = await this.llm.setLayout({
               brief,
               notes,

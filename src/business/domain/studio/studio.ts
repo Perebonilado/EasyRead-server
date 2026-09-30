@@ -963,7 +963,23 @@ export interface OutlineScene {
    * and dissolves where it cannot. Absent or null, none said.
    */
   into?: string | null;
+  /**
+   * An explainer's scene that is a story clip (studio-clip, Ask 5): a
+   * short acted moment in `set` with `cast`, showing what `teach` says in
+   * one line, written as a story's scene is. Absent, a lesson scene (and a
+   * story's scene in a story).
+   */
+  kind?: OutlineKind;
+  /** A clip's: the narrator's line in the lesson after it that points back to it. Absent otherwise. */
+  hook?: string;
 }
+
+/** What an explainer's scene is: a lesson page, or a short acted story clip. */
+export const OUTLINE_KINDS = ['lesson', 'clip'] as const;
+export type OutlineKind = (typeof OUTLINE_KINDS)[number];
+
+/** How long a story clip runs, least and most, in seconds (studio-clip gates it). */
+export const CLIP_SECONDS = [6, 20] as const;
 
 export interface StudioOutline {
   title: string;
@@ -999,6 +1015,9 @@ export function outlineOf(raw: unknown): StudioOutline {
         const summary = text(s.summary, 500);
         if (!title && !summary) return [];
         const seconds = Number(s.seconds);
+        // A story clip is short: it may run below a lesson scene's least.
+        const clip = s.kind === 'clip';
+        const least = clip ? CLIP_SECONDS[0] : SCENE_SECONDS[0];
         const pages = Array.isArray(s.pages)
           ? s.pages.map(Number).filter((n) => Number.isFinite(n) && n >= 1)
           : [];
@@ -1013,12 +1032,11 @@ export function outlineOf(raw: unknown): StudioOutline {
               .slice(0, 6),
             seconds: Number.isFinite(seconds)
               ? Math.round(
-                  Math.min(
-                    SCENE_SECONDS[1],
-                    Math.max(SCENE_SECONDS[0], seconds),
-                  ),
+                  Math.min(SCENE_SECONDS[1], Math.max(least, seconds)),
                 )
-              : 30,
+              : clip
+                ? CLIP_SECONDS[1]
+                : 30,
             teach: textOrNull(s.teach, 2000),
             points: (Array.isArray(s.points) ? s.points : [])
               .map((p) => text(p, 240))
@@ -1033,6 +1051,11 @@ export function outlineOf(raw: unknown): StudioOutline {
                 }
               : {}),
             ...(textOrNull(s.into, 60) ? { into: textOrNull(s.into, 60) } : {}),
+            // Kept only for a clip, so a lesson's outline reads as it was.
+            ...(clip ? { kind: 'clip' as const } : {}),
+            ...(clip && textOrNull(s.hook, 300)
+              ? { hook: textOrNull(s.hook, 300)! }
+              : {}),
           },
         ];
       }),

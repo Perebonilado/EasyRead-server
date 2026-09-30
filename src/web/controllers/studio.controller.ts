@@ -559,6 +559,21 @@ export class StudioController {
     );
   }
 
+  /** A scene's still, of a shared film: a story clip's last frame, which the next lesson's card shows (studio-clip). */
+  @Public()
+  @Get('shared/:token/scenes/:sceneId/thumb')
+  async sharedThumb(
+    @Param('token') token: string,
+    @Param('sceneId') sceneId: string,
+    @Res() response: Response,
+  ): Promise<void> {
+    await this.pipe(
+      await this.studio.sharedFile(token, sceneId, 'thumb'),
+      'image/png',
+      response,
+    );
+  }
+
   /** A scene's audio, checked each time against the file it is made from now. */
   private async audioOf(
     key: string,

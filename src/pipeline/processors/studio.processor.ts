@@ -191,6 +191,22 @@ import {
 } from '../../business/domain/scene-picture-check';
 import { rasterise } from '../../business/domain/scene-raster';
 import { renderStill } from '../../business/domain/scene-still';
+import {
+  CLIP_CARD,
+  clipBible,
+  clipBrief,
+  clipCardDrawing,
+  clipFreeze,
+  clipLook,
+  gateClips,
+  hookFirst,
+  hookOf,
+  isClip,
+  withClipCard,
+  withPresets,
+  withStill,
+} from '../../business/domain/studio/studio-clip';
+import { writeClipSheet } from '../../business/handlers/studio/studio-clip-writer';
 import { showTheme } from '../../business/domain/studio/studio-look';
 import { studioReading } from '../../business/domain/studio/studio-motion';
 
@@ -254,6 +270,9 @@ export function studioMakeOf(
   gestures: ReadonlySet<string> = new Set(),
 ): Omit<Parameters<SceneProcessor['make']>[0], 'base' | 'who'> {
   const story = row.sheet?.kind === 'story';
+  // A story's scene in an explainer is one of its story clips (studio-clip):
+  // staged as a story is, with a light narrator in the lesson's voice.
+  const clip = story && show.brief.format === 'explainer';
   const stage = stageOf(show.brief);
   const lesson = {
     teach: episode.outline?.scenes[row.position]?.teach ?? null,
@@ -266,7 +285,10 @@ export function studioMakeOf(
   // always one the stage can play: carrying on from how the scene before
   // left things, on its set with every feature its words name.
   const before = endBefore(rows, row.position, bible);
-  const narrator = narratorRuleOf(show.brief, bible);
+  const narrator = narratorRuleOf(
+    clip ? clipBrief(show.brief) : show.brief,
+    bible,
+  );
   const sheet = story
     ? repairSheet(row.sheet as StorySheet, bible, before, narrator)
     : null;
@@ -289,16 +311,33 @@ export function studioMakeOf(
       : {}),
     ...(energy ? { energy: { cut: energy.cut, push: energy.push } } : {}),
   });
-  const look = story ? setLookOf(show.brief) : null;
+  // A clip's set in the explainer's look; a story's in its style.
+  const look = clip
+    ? clipLook(showTheme(show.brief, bible))
+    : story
+      ? setLookOf(show.brief)
+      : null;
   const staged = sheet
     ? withFound(bible, sheet.set, mendSheet(sheet, bible, before))
     : bible;
-  const script = sheet
-    ? styled(stageStory(sheet, staged, { before, painted, gestures }))
+  // The lesson after a clip opens on it as a card (studio-clip): the
+  // clip's last frame, shrunk onto its stage, the diagram built round it.
+  const clipBefore = !story
+    ? rows.find(
+        (r) => r.position === row.position - 1 && r.sheet?.kind === 'story',
+      )
+    : undefined;
+  const lessonScript = sheet
+    ? null
     : checkExplainer(
         repairExplainer(row.sheet as ExplainerSheet, lesson),
         lesson,
       ).script;
+  const script = sheet
+    ? styled(stageStory(sheet, staged, { before, painted, gestures }))
+    : clipBefore
+      ? withClipCard(lessonScript!, clipBefore.sheet!.title)
+      : lessonScript!;
   // Made, each action, thing handled and reaction is looked for in the
   // film: one that shows nothing is played again by its fallback, and
   // what does not show as its words say is logged for us, never the maker.
@@ -379,7 +418,10 @@ export function studioMakeOf(
     profile,
     story: story
       ? {
-          bible: storyBibleFor(bible, sheets, show.title),
+          // A clip's places from code's layouts where it has them.
+          bible: clip
+            ? withPresets(storyBibleFor(bible, sheets, show.title))
+            : storyBibleFor(bible, sheets, show.title),
           page: row.position + 1,
           castKey: studioCastKey(show.id),
           setsKey: studioSetsKey(show.id),
@@ -393,6 +435,22 @@ export function studioMakeOf(
     ...(recheck ? { recheck } : {}),
     // An explainer's voice at its audience's rate and the maker's pace.
     ...(story ? {} : { pace: studioPaceBrief(show.brief) }),
+    // A clip holds still at its idea, its label set; the lesson after it
+    // has its card, drawn by code, told which scene it is a still of.
+    ...(clip && sheet
+      ? {
+          finish: (scene: SceneDto) => {
+            const freeze = clipFreeze(scene, sheet.title);
+            return freeze ? { ...scene, freeze } : scene;
+          },
+        }
+      : {}),
+    ...(clipBefore
+      ? {
+          reuse: new Map([[CLIP_CARD, clipCardDrawing()]]),
+          finish: (scene: SceneDto) => withStill(scene, clipBefore.id),
+        }
+      : {}),
   };
 }
 
@@ -815,6 +873,16 @@ export class StudioProcessor {
         gone,
       );
       if (checkBible(second, story).length <= problems.length) bible = second;
+    }
+    // An explainer's people and places are its story clips' (studio-clip):
+    // three the kits draw at most, two places, one painted.
+    if (!story) {
+      const held = clipBible(bible);
+      if (held.dropped.length)
+        this.logger.log(
+          `studio ${episode.id}: clips' cast held: ${held.dropped.join(', ')} left out`,
+        );
+      bible = held.bible;
     }
     // Which drawing the maker chose of anyone still as they were, kept;
     // and whoever the artist drew is drawn so until the maker chooses a
@@ -1343,6 +1411,16 @@ export class StudioProcessor {
       );
       if (left.length <= problems.length) [outline, problems] = [second, left];
     }
+    // An explainer's story clips held to their limits, silently: one too
+    // many is a lesson scene (studio-clip).
+    if (!story) {
+      const gated = gateClips(outline, bible);
+      if (gated.fixed.length)
+        this.logger.log(
+          `studio ${episode.id}: clips put right: ${gated.fixed.join('; ')}`,
+        );
+      outline = gated.outline;
+    }
     if (kept) outline = { ...outline, story: kept };
     // Each scene tied to the pages it teaches.
     if (pages) {
@@ -1603,8 +1681,12 @@ export class StudioProcessor {
       outline.scenes.length,
     );
     if (show.brief.format === 'explainer')
+      // Each scene as what it is: a lesson page, or a story clip.
       await inBatches(rows, WRITERS, async (row, k) => {
-        await this.writeExplainerScene(show, episode, outline, bible, row, k);
+        if (isClip(outline.scenes[k]))
+          await this.writeClipScene(show, episode, outline, bible, row, k);
+        else
+          await this.writeExplainerScene(show, episode, outline, bible, row, k);
       });
     else {
       const settings = this.scriptSettings();
@@ -1827,15 +1909,25 @@ export class StudioProcessor {
       let title: string | undefined;
       if (show.brief.format === 'explainer')
         title = (
-          await this.writeExplainerScene(
-            show,
-            episode,
-            outline,
-            bible,
-            row,
-            k,
-            request,
-          )
+          isClip(outline.scenes[k])
+            ? await this.writeClipScene(
+                show,
+                episode,
+                outline,
+                bible,
+                row,
+                k,
+                request,
+              )
+            : await this.writeExplainerScene(
+                show,
+                episode,
+                outline,
+                bible,
+                row,
+                k,
+                request,
+              )
         ).title;
       else {
         const rows = await this.studio.listScenes(episode.id);
@@ -2095,6 +2187,51 @@ export class StudioProcessor {
   }
 
   /**
+   * One story clip of an explainer (studio-clip): written as a story's
+   * scene with the clip profile (no thinking, no table read), held to the
+   * profile by code, and kept on its row. Its call is the Studio writer's
+   * (studio_write), as a story's scene is.
+   */
+  private async writeClipScene(
+    show: StudioShowRecord,
+    episode: StudioEpisodeRecord,
+    outline: StudioOutline,
+    bible: StudioBible,
+    row: StudioSceneRecord,
+    k: number,
+    request?: string,
+  ): Promise<StorySheet> {
+    const old = row.sheet?.kind === 'story' ? row.sheet : null;
+    const best = await writeClipSheet(this.llm, {
+      brief: show.brief,
+      bible,
+      outline,
+      k,
+      old,
+      ...(request ? { request } : {}),
+      record: (usage) => this.record(episode.id, usage, 'studio_write'),
+      log: (line) => this.logger.log(`studio ${episode.id} s${k + 1}: ${line}`),
+    });
+    // A feature its words name joins its set for good, as a story's does.
+    const found = mendSheet(best.sheet, bible, null);
+    if (found.features.length || found.things.length) {
+      const grown = withFound(bible, best.sheet.set, found);
+      await this.studio.updateShow(show.id, { bible: grown });
+      bible.sets.splice(0, bible.sets.length, ...grown.sets);
+      if (grown.things) bible.things = grown.things;
+    }
+    await this.studio.updateScene(row.id, {
+      sheet: best.sheet,
+      sheetHash: sceneFingerprint(best.sheet, bible, show.brief, []),
+      problems: best.problems,
+      ...(request && old ? { previousSheet: old } : {}),
+      status: 'ready',
+      error: null,
+    });
+    return best.sheet;
+  }
+
+  /**
    * One explainer scene: its narration and storyboard written as a
    * lesson's page is, from what the outline says it teaches, held to the
    * lesson checks and sent back once.
@@ -2132,13 +2269,21 @@ export class StudioProcessor {
     const fuller =
       teach.split(/\s+/).length >
       (scene?.seconds ?? 30) * TEACH_WORDS_A_SECOND * FULLEST;
+    // A story clip either side (studio-clip): what it shows, and after
+    // one, the line that points back to it first.
+    const prior = outline.scenes[k - 1];
+    const following = outline.scenes[k + 1];
     const around = [
-      outline.scenes[k - 1]
-        ? `The scene before taught: ${outline.scenes[k - 1].summary}`
-        : 'It is the first scene: open with a hook.',
-      outline.scenes[k + 1]
-        ? `The scene after will teach: ${outline.scenes[k + 1].summary}`
-        : 'It is the last scene: end with a short recap.',
+      prior && isClip(prior)
+        ? `The scene before is a short acted story clip showing: ${prior.teach ?? prior.summary} This scene explains it: open with this line, or one very like it, pointing back to what was just seen: "${hookOf(prior)}"`
+        : prior
+          ? `The scene before taught: ${prior.summary}`
+          : 'It is the first scene: open with a hook.',
+      following && isClip(following)
+        ? `The scene after is a short acted story clip showing: ${following.teach ?? following.summary}`
+        : following
+          ? `The scene after will teach: ${following.summary}`
+          : 'It is the last scene: end with a short recap.',
     ].join(' ');
     const ask = {
       documentTitle: show.title,
@@ -2236,6 +2381,17 @@ export class StudioProcessor {
     if (errorsIn(problems).length) {
       sheet = repairExplainer(sheet, options);
       problems = checkExplainer(sheet, options).problems;
+    }
+    // After a clip, its first line points back to it: said first if not.
+    if (prior && isClip(prior)) {
+      const hooked = hookFirst(sheet, hookOf(prior));
+      if (hooked.fixed) {
+        this.logger.log(
+          `studio ${episode.id} s${k + 1}: opens on the clip's hook, by code`,
+        );
+        sheet = hooked.sheet;
+        problems = checkExplainer(sheet, options).problems;
+      }
     }
     await this.studio.updateScene(row.id, {
       sheet,
@@ -2347,14 +2503,21 @@ export class StudioProcessor {
         .map((r) => r.sheet)
         .filter((s): s is StorySheet => s?.kind === 'story');
       const places = new Set(made.map((s) => s.set));
+      // An explainer's are its story clips' (studio-clip): their places
+      // from code's layouts where it has them, in the explainer's look.
+      const clips = show.brief.format === 'explainer';
+      const look = clips ? clipLook(showTheme(show.brief, bible)) : null;
       await this.scenes.prepareStory(
         {
-          bible: storyBibleFor(bible, sheets, show.title),
+          bible: clips
+            ? withPresets(storyBibleFor(bible, sheets, show.title))
+            : storyBibleFor(bible, sheets, show.title),
           page: 1,
           castKey: studioCastKey(show.id),
           setsKey: studioSetsKey(show.id),
           ownKey: studioOwnKey(show.id),
           bookTitle: show.title,
+          ...(look ? { look } : {}),
         },
         episode.id,
         `studio ${episode.id} (cast)`,
@@ -2386,6 +2549,26 @@ export class StudioProcessor {
         ...(ask ? { ask } : {}),
       })),
     );
+  }
+
+  /**
+   * A story clip's still made its last frame, as it settles (studio-clip):
+   * the next lesson's card shows it. Kept as it was when it cannot be.
+   */
+  private async clipStill(
+    scene: SceneDto,
+    thumbKey: string,
+    who: string,
+  ): Promise<void> {
+    try {
+      const t = Math.max(0, (scene.settledMs ?? scene.durationMs) - 40);
+      const { png } = await renderStill(scene, t, rasterise, STILL_PX);
+      await this.storage.put({ key: thumbKey, body: png, mimeType: 'image/png' });
+    } catch (error) {
+      this.logger.log(
+        `${who}: its last frame was not kept as its still (${(error as Error).message})`,
+      );
+    }
   }
 
   /** Those of the show's cast the artist drew whose rigs turn their arms and nod: none when the cast cannot be read. */
@@ -2512,6 +2695,9 @@ export class StudioProcessor {
       madeHash: fingerprint,
       durationMs: voice.durationMs,
     });
+    // A clip's still is its last frame: the card the next lesson opens on.
+    if (row.sheet.kind === 'story' && show.brief.format === 'explainer')
+      await this.clipStill(scene, thumbKey, who);
     // The files it was made from before are no one's now.
     for (const key of [row.sceneKey, row.audioKey, row.thumbKey])
       if (key && ![sceneKey, voice.audioKey, thumbKey].includes(key))

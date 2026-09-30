@@ -106,14 +106,36 @@ export const SET_FRAMES: Readonly<Record<FilmShape, SetFrame>> = {
   tall: {
     w: 900,
     h: 1600,
-    feet: 1390,
+    // Just above the platforms' own bottom band (0.8 of the height), so a
+    // grown-up where people stand has their face above the subtitles
+    // (0.69) at the kit's own size: the floor before them runs under the
+    // platforms' captions, and nothing that matters is there.
+    feet: 1300,
     floorLine: { outdoor: 0.47, indoor: 0.52, vessel: 0.55 },
-    // TODO(V3, studio-vertical-plan §3.2): raise the tall frame's eye by
-    // this share, so far heads sit higher than near ones. Carried here,
-    // not yet applied: the tall set is built with the wide frame's eye rule.
+    // The eye raised this share of the frame above a grown-up's crown
+    // where people stand (raisedEye): a slightly high camera, so heads
+    // stacked in depth part, the far ones higher (§3.2).
     eyeLift: 0.18,
   },
 };
+
+/** A grown-up's crown above their feet, in the kit's units (scene-figure rigOf('adult').top). */
+export const CROWN_UNITS = 192;
+
+/**
+ * The eye line of a frame whose eye is raised (a tall one's, §3.2): its
+ * `eyeLift` of its height above the crown of a grown-up standing at
+ * `feet`, `unit` of the frame's units to one of the kit's there. Null for
+ * a frame with none (wide, whose eye is its set's own rule).
+ */
+export function raisedEye(
+  frame: SetFrame,
+  unit: number,
+  feet: number = frame.feet,
+): number | null {
+  if (!frame.eyeLift) return null;
+  return feet - CROWN_UNITS * unit - frame.eyeLift * frame.h;
+}
 
 /** The set frame a stage of this size shows: a tall stage a tall frame, anything else (the box, wide) the wide one. */
 export const setFrameFor = (W: number, H: number): SetFrame =>
@@ -156,6 +178,140 @@ export function setWidthFor(shape: FilmShape, layoutWidth = 1): number {
   const at = SET_WIDTHS.wide.indexOf(layoutWidth);
   return SET_WIDTHS.tall[at < 0 ? 0 : at];
 }
+
+// ── Blocking a tall stage (§3.2) ─────────────────────────────────────────
+
+/** The five spots a sheet names. */
+export type SpotName =
+  'left' | 'centre-left' | 'centre' | 'centre-right' | 'right';
+
+/**
+ * Where each spot a sheet names stands across a tall stage, as a share of
+ * its width (§3.2): nearer the middle than on a wide one, since people
+ * stand in depth and on diagonals rather than in a row (how deep each
+ * stands is the group's, TALL_DEPTHS). The sheet's own spots, unchanged.
+ */
+export const TALL_SPOTS: Readonly<Record<SpotName, number>> = {
+  left: 0.24,
+  'centre-left': 0.35,
+  centre: 0.5,
+  'centre-right': 0.65,
+  right: 0.76,
+};
+
+/**
+ * How big a piece of the set the stage stands (a table, a well, a stall)
+ * is on a tall stage beside the people where they stand: a step back of
+ * them (about d 0.2 on the floor), so a thing on the floor runs away from
+ * the camera and two on a diagonal stand before it, never in it (§3.1).
+ */
+export const TALL_PIECE_K = 0.82;
+
+/**
+ * How deep each of a group stands on a tall stage when nothing says, by
+ * their order across (left to right) and how many they are: two on a
+ * diagonal (the one who speaks first near), talking distance apart on the
+ * floor; three a triangle, one near in the middle and two behind either
+ * side; four to six in two rows, zigzagged so no head is behind another.
+ */
+export const TALL_DEPTHS: Readonly<Record<number, readonly number[]>> = {
+  1: [0.5],
+  2: [0.66, 0.38],
+  3: [0.4, 0.7, 0.36],
+  4: [0.66, 0.34, 0.64, 0.36],
+  5: [0.68, 0.36, 0.7, 0.34, 0.66],
+  6: [0.68, 0.36, 0.7, 0.34, 0.66, 0.38],
+};
+
+/** The depth someone at `i` of `n` across (left to right) stands at on a tall stage, when nothing says. */
+export function tallDepth(i: number, n: number): number {
+  const row = TALL_DEPTHS[Math.min(6, Math.max(1, n))];
+  return row[i % row.length];
+}
+
+/**
+ * How many of the largest group stand side by side on a tall stage: the
+ * rest stand behind them. The scale fits that many across (§3.2).
+ */
+export const tallAcross = (largest: number): number =>
+  Math.max(1, Math.ceil(largest / 2));
+
+// ── The camera in a tall frame (§3.3) ────────────────────────────────────
+
+/**
+ * No far-off shots in a tall film (Richard's decision, 2026-09-30): no
+ * wide, long, extreme-wide or establishing shot, and no move that ends far
+ * off. A set is often not detailed enough to hold one, and far figures
+ * read poorly on a phone. So in every shot of a tall film the key
+ * character's figure, crown to feet, fills at least this share of the
+ * frame's height: roughly a medium, or closer. The camera's floor, which
+ * every tall framing keeps and the tall shot check (scene-safe) holds it to.
+ */
+export const TALL_FIGURE_LEAST = 0.45;
+
+/**
+ * Where the kit's parts are in the box a stage places someone in, as
+ * shares of it down from its top (a grown-up's frame is 234 of the kit's
+ * units, its top 224 above the feet): the crown (192 up), the eyes (149),
+ * the chin (the head's 40 about 152), and the feet. Across, the head is
+ * the box's middle half.
+ */
+export const IN_BOX = {
+  crown: 32 / 234,
+  eyes: 75 / 234,
+  chin: 112 / 234,
+  feet: 224 / 234,
+  headLeft: 0.25,
+  headRight: 0.75,
+} as const;
+
+/** A person's figure, crown to feet, as a share of their box's height. */
+export const FIGURE_OF_BOX = IN_BOX.feet - IN_BOX.crown;
+
+/**
+ * How a tall film's camera frames people (§3.3), each as the share of the
+ * frame's height the key character's figure fills (never below
+ * TALL_FIGURE_LEAST): the camera's rest on whoever matters when no shot
+ * is asked (`medium`), one alone on a line (`close`, a medium close), the
+ * one speaking over a shoulder (`ots`), a hero from low (`low`), one
+ * speaking over the crowd (`crowd`); two together (`two`), both faces
+ * within `twoFaces` of the width, else the one it is on alone at `medium`.
+ * Eyes on the upper third (`eyes`), faces in the middle of the phone's
+ * safe box across (`across`, clear of the platforms' button column),
+ * never closer than `most`. Over a
+ * shoulder the one it is on is `otsOffset` of the width off the middle,
+ * away from the one near, who is cheated low in a lower corner (`near`:
+ * their box this tall a share of the height on the screen, their middle
+ * this far in from the edge, its top this far down); in deep staging the
+ * one near speaks, big and low (`deep`), the others framed above them.
+ */
+export const TALL_SHOT = {
+  medium: 0.6,
+  close: 0.8,
+  ots: 0.7,
+  low: 0.7,
+  crowd: 0.55,
+  two: 0.5,
+  twoFaces: 0.76,
+  eyes: 0.34,
+  across: 0.47,
+  most: 3.4,
+  otsOffset: 0.1,
+  near: { tall: 0.62, edge: 0.1, top: 0.5 },
+  deep: { tall: 0.72, edge: 0.24, top: 0.3 },
+  deepMost: 2.2,
+} as const;
+
+/** How close the camera is to frame someone `h` tall (their box) with their figure `share` of the frame's height, `H`. */
+export const tallScale = (h: number, share: number, H: number): number =>
+  Math.min(
+    TALL_SHOT.most,
+    Math.max(1, (share * H) / Math.max(1, h * FIGURE_OF_BOX)),
+  );
+
+/** The share of the frame's height someone `h` tall (their box) fills, crown to feet, seen at scale `s` on a frame `H` high. */
+export const figureShare = (h: number, s: number, H: number): number =>
+  (h * FIGURE_OF_BOX * s) / H;
 
 // ── Where the frame is covered ───────────────────────────────────────────
 

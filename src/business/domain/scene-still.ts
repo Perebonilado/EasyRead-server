@@ -49,6 +49,7 @@ import {
   reflectPlace,
   reflectRoom,
   roomOf,
+  restOn,
   viewOf,
   type SetRoom,
   type View,
@@ -169,6 +170,7 @@ export function viewAtMoment(scene: SceneDto, t: number, room: SetRoom): View {
     W,
     H,
     room,
+    restOn(scene, k),
   );
 }
 

@@ -201,8 +201,10 @@ import {
 } from './scene-set-audience';
 import { PAPER, themeOf, type ExplainerTheme } from './scene-themes';
 import { walkRound } from './scene-paths';
+import { SET_UNIT_SHARE } from './scene-ink';
 import {
   SET_FRAMES,
+  raisedEye,
   setViewBoxOf,
   stagingsOf,
   walkReach,
@@ -211,6 +213,7 @@ import {
 import { TALL_AREA, withTextOf } from './scene-lesson-shape';
 import { pagedForTall } from './scene-lesson-pages';
 import { describeSpace, spaceFaults } from './scene-space';
+import { describeTallShots, tallShotFaults } from './scene-safe';
 import { anchorMs, quietGaps, spaced, type TimedBeat } from './scene-timing';
 import { numberWords } from './spoken';
 
@@ -3105,6 +3108,17 @@ function composeShaped(input: ComposeInput): {
     const on = setFrameOn(setFrame, stage);
     const [, vy, , vh] = setFrame;
     const own = setDrawing?.layered?.floor.eye;
+    // A tall stage's eye is raised above its people's heads (§3.2), as its
+    // sets are built: where its set does not say its own.
+    const raised =
+      own === undefined
+        ? raisedEye(
+            SET_FRAMES[shape],
+            SET_UNIT_SHARE * SET_FRAMES.wide.h,
+            floor,
+          )
+        : null;
+    if (raised !== null) return Math.min(raised, floor - 60);
     const horizon = setDrawing?.ground
       ? on.toStage(0, vy + setDrawing.ground.horizon * vh)[1]
       : stage.h * SET_FRAMES[shape].floorLine.outdoor;
@@ -3232,7 +3246,22 @@ function composeShaped(input: ComposeInput): {
       });
       return layoutStations({
         near: nearAt,
-        shares: stationShares(largest),
+        shares: stationShares(largest, shape),
+        // On a tall stage, who opens each step's talk stands the nearer of two.
+        ...(shape === 'tall'
+          ? {
+              opens: steps.map(
+                (step, k) =>
+                  spoken.find(
+                    (line) =>
+                      !line.from &&
+                      line.startMs >= step.atMs &&
+                      line.startMs < (steps[k + 1]?.atMs ?? durationMs) &&
+                      step.show.includes(line.speaker),
+                  )?.speaker ?? null,
+              ),
+            }
+          : {}),
         steps: steps.map((step, k) => ({
           show: step.show,
           at: stationsAt[k],
@@ -3455,6 +3484,17 @@ function composeShaped(input: ComposeInput): {
         atDepth: atDepthOn(staging),
         name: (id) => nameOf(castById.get(id)) ?? id,
         durationMs,
+        // A tall film's camera rests on the step's focus at a medium, never the whole stage.
+        ...(shape === 'tall'
+          ? {
+              restOn: (k: number) => {
+                const focus = steps[k]?.focus;
+                return focus && castById.get(focus)?.kind === 'character'
+                  ? focus
+                  : null;
+              },
+            }
+          : {}),
         // One at a spot of their own on the open floor: by a thing, they
         // are where it has them.
         inThing: (place, k, id) =>
@@ -3669,6 +3709,7 @@ function composeShaped(input: ComposeInput): {
         ),
       ),
       W: stagings.wide.w,
+      ...(shape === 'tall' ? { tall: true } : {}),
       asked: script.camera ?? [],
       // Shot and reverse shot where the place has another side, on the
       // same floor (studio-views-plan §4.2); the crowd's view the other way
@@ -4642,6 +4683,16 @@ function composeShaped(input: ComposeInput): {
     composed.staging.push(
       ...describeSpace(
         spaceFaults(composed.scene),
+        (id) => nameOf(castById.get(id)) ?? id,
+      ),
+    );
+  // A tall film's shots as the phone shows them (scene-safe): never far
+  // off, faces in the safe box and above the subtitles, no head cut and no
+  // one cut in half at the frame's side; said, for the picture check.
+  if (stationed && film && shape === 'tall')
+    composed.staging.push(
+      ...describeTallShots(
+        tallShotFaults(composed.scene),
         (id) => nameOf(castById.get(id)) ?? id,
       ),
     );

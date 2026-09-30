@@ -14,7 +14,11 @@
 import type { SceneDto } from '../../contracts';
 import { FEATURE_WORDS, type FeatureKind } from './scene-doings';
 import { fullestStep } from './scene-compose';
-import { shotAtMoment, stepAtMoment } from './scene-still';
+import { shotAtMoment, stepAtMoment, viewAtMoment } from './scene-still';
+import { nearOf, roomOf } from './scene-film';
+import { onScreen } from './scene-faces-seen';
+import { headOf } from './scene-safe';
+import { shapeOf } from './scene-shape';
 import { interactClaims } from './scene-interact';
 
 /** A moment of a scene to look at: when, and why that one. */
@@ -162,7 +166,16 @@ export interface PictureClaims {
   doing?: string[];
   /** How the shot then frames them, when it is one of the shot grammar's (studio-views-plan §3). */
   shot?: string;
+  /**
+   * A tall film's still (studio-vertical-plan §6.5): a phone's frame, its
+   * camera never further out than a medium, so `onStage` is only who is
+   * in the frame then, not everyone on the stage.
+   */
+  tall?: true;
 }
+
+/** How much of someone's face must be in a tall still's frame for them to be claimed in it. */
+const TALL_IN_FRAME = 0.6;
 
 /**
  * What a still at `t` should show, from the scene and its sheet's cast:
@@ -176,14 +189,60 @@ export function pictureClaims(
   cast: readonly CastClaim[],
   asked: string | null = null,
 ): PictureClaims {
-  const step = scene.steps[stepAtMoment(scene, t)];
+  const k = stepAtMoment(scene, t);
+  const step = scene.steps[k];
   const byId = new Map(cast.map((one) => [one.id, one]));
-  const onStage = (step?.show ?? []).flatMap((id) => {
+  const tall = shapeOf(scene) === 'tall';
+  // A tall still is a medium or closer: only who is in its frame.
+  const inFrame = (id: string): boolean => {
+    if (!tall || !step) return true;
+    const { w: W, h: H, places } = scene.stagings.wide;
+    const set = step.backdrop
+      ? scene.things.find((one) => one.id === step.backdrop)
+      : undefined;
+    const room = roomOf(set?.kind === 'drawing' ? set : null, W, H);
+    const view = viewAtMoment(scene, t, room);
+    const near = nearOf(
+      shotAtMoment(scene, t),
+      step.show,
+      places[k] ?? {},
+      W,
+      H,
+      room,
+    );
+    const place = near?.id === id ? near.place : places[k]?.[id];
+    if (!place) return false;
+    const head = onScreen(headOf(place), view, 1, W, H, room.span);
+    const w = Math.min(W, head.x + head.w) - Math.max(0, head.x);
+    const h = Math.min(H, head.y + head.h) - Math.max(0, head.y);
+    return w > 0 && h > 0 && (w * h) / (head.w * head.h) >= TALL_IN_FRAME;
+  };
+  /** Whether a thing of the place is mostly in a tall still's frame. */
+  function boxInFrame(box: { x: number; y: number; w: number; h: number }) {
+    if (!step) return true;
+    const { w: W, h: H } = scene.stagings.wide;
+    const set = step.backdrop
+      ? scene.things.find((one) => one.id === step.backdrop)
+      : undefined;
+    const room = roomOf(set?.kind === 'drawing' ? set : null, W, H);
+    const seen = onScreen(
+      box,
+      viewAtMoment(scene, t, room),
+      1,
+      W,
+      H,
+      room.span,
+    );
+    const w = Math.min(W, seen.x + seen.w) - Math.max(0, seen.x);
+    const h = Math.min(H, seen.y + seen.h) - Math.max(0, seen.y);
+    return w > 0 && h > 0 && (w * h) / Math.max(1, seen.w * seen.h) >= 0.5;
+  }
+  const onStage = (step?.show ?? []).filter(inFrame).flatMap((id) => {
     const one = byId.get(id);
     return one ? [`${one.name}${one.look ? ` (${one.look})` : ''}`] : [];
   });
   const things = (scene.setting?.features ?? [])
-    .filter((f) => f.svg && f.at.wide.w > 0)
+    .filter((f) => f.svg && f.at.wide.w > 0 && (!tall || boxInFrame(f.at.wide)))
     .map((f) => f.name);
   const doing = interactClaims(scene, t, (id) => byId.get(id)?.name ?? id);
   const shot = shotAtMoment(scene, t);
@@ -210,6 +269,7 @@ export function pictureClaims(
     asked,
     ...(doing.length ? { doing } : {}),
     ...(framing ? { shot: framing } : {}),
+    ...(tall ? { tall: true as const } : {}),
   };
 }
 
@@ -217,7 +277,9 @@ export function pictureClaims(
 export function claimsText(claims: PictureClaims, why: string): string {
   return [
     `This still is ${why} of the scene.`,
-    `On the stage, each seen whole and big enough to know: ${claims.onStage.length ? claims.onStage.join('; ') : 'no one'}.`,
+    claims.tall
+      ? `It is a phone's tall frame, full height, shot at a medium or closer, so people may be cut at the waist or the knees and others on the stage may be out of it. In the frame, each face seen and big enough to know: ${claims.onStage.length ? claims.onStage.join('; ') : 'no one'}. Say if anyone's face is in the bottom quarter or at the right edge, or if anyone is cut in half at the frame's side.`
+      : `On the stage, each seen whole and big enough to know: ${claims.onStage.length ? claims.onStage.join('; ') : 'no one'}.`,
     claims.shot ?? '',
     claims.onStage.length
       ? claims.shot

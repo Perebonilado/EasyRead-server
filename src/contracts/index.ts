@@ -68,6 +68,18 @@ export interface VoiceOptionDto {
    * signed in (Cartesia's samples ask for the key, so the server fetches them).
    */
   previewUrl: string | null;
+  /** How it was made, where the engine says: premade, cloned, generated (designed), professional. */
+  category?: string;
+  /** Something to know before casting it: "A cloned voice: it may sound different on v4. Listen again". */
+  note?: string;
+}
+
+/** A voice in ElevenLabs' Voice Library, found by the admin's search. */
+export interface LibraryVoiceDto extends VoiceOptionDto {
+  /** Its owner's public id: with its id, what adding it to the account takes. */
+  ownerId: string;
+  /** In the account already. */
+  added: boolean;
 }
 
 /** Which engine voices Visualize, and which could. */
@@ -87,6 +99,26 @@ export interface SceneVoiceStatusDto {
     voice: string;
   }[];
   /**
+   * ElevenLabs' model (v4 or v3) and its spending caps, where ElevenLabs
+   * is set up; null where it is not.
+   */
+  models?: {
+    engine: 'elevenlabs';
+    /** The admin's model; null keeps the default. */
+    chosen: string | null;
+    /** What the next ElevenLabs page is voiced with. */
+    current: string;
+    /** The model when none is chosen. */
+    default: string;
+    options: { value: string; label: string }[];
+    /** Dollars: a film's cap and a day's (null for none), and today's spend (null when the ledger cannot say). */
+    caps: {
+      filmUsd: number | null;
+      dayUsd: number | null;
+      todayUsd: number | null;
+    };
+  } | null;
+  /**
    * The voices the narrator and each kind of character speak in, on an
    * engine with a list to choose from (ElevenLabs, Cartesia): the one
    * speaking, else the first set up; null where there is none set up.
@@ -100,6 +132,10 @@ export interface SceneVoiceStatusDto {
       chosen: string | null;
       /** The voice it speaks in when none is chosen. */
       default: string;
+      /** The default's name, when it is a Voice Library voice the account may not have yet. */
+      defaultName?: string;
+      /** The premade voice that says its lines until that library voice is added. */
+      standIn?: string | null;
     }[];
   } | null;
   changedAt: string | null;

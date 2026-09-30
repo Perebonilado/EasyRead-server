@@ -25,6 +25,13 @@ export class AppSettingsModel extends BaseModel {
   @Column({ type: DataType.TEXT, allowNull: true })
   declare voiceRates: string | null;
 
+  /**
+   * The model each engine with more than one speaks with, as JSON
+   * ({"elevenlabs":"eleven_v3"}); null keeps each engine's own.
+   */
+  @Column({ type: DataType.TEXT, allowNull: true })
+  declare voiceModels: string | null;
+
   /** What the worker can speak with, as JSON, as it said at its last start. */
   @Column({ type: DataType.TEXT, allowNull: true })
   declare workerVoices: string | null;

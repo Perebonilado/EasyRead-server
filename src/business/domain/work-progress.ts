@@ -49,6 +49,13 @@ export interface RetryNotice {
   waiting?: boolean;
   /** No more tries of this call. */
   final?: boolean;
+  /**
+   * The trouble in the service's own plain words, where it knows them
+   * better than its status says ("ElevenLabs is out of credit", "A voice
+   * in the cast is not in the ElevenLabs account"): said instead of the
+   * trouble read from the error.
+   */
+  reason?: string;
 }
 
 export interface WorkFollower {
@@ -151,7 +158,7 @@ export function troubleOf(
   const said = `${parts.said} ${body ?? ''}`;
   if (
     code === 402 ||
-    /insufficient[_ ]balance|out of credit|credit balance|billing|prepay|payment required/i.test(
+    /insufficient[_ ](?:balance|credits?)|quota_exceeded|out of credit|credit balance|billing|prepay|payment required/i.test(
       said,
     )
   )

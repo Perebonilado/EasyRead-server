@@ -4,17 +4,31 @@ import {
   Get,
   Param,
   Patch,
+  Post,
+  Query,
   Res,
   UseGuards,
 } from '@nestjs/common';
 import type { Response } from 'express';
-import { IsIn, IsOptional, IsString, Matches } from 'class-validator';
-import type { SceneVoiceStatusDto, VoiceOptionDto } from '../../contracts';
+import {
+  IsIn,
+  IsOptional,
+  IsString,
+  Matches,
+  MaxLength,
+} from 'class-validator';
+import type {
+  LibraryVoiceDto,
+  SceneVoiceStatusDto,
+  VoiceOptionDto,
+} from '../../contracts';
 import { SceneVoiceService } from '../../business/handlers/admin/scene-voice.service';
 import {
+  ELEVENLABS_MODELS,
   LISTED_ENGINES,
   SCENE_VOICE_ENGINES,
   VOICE_ROLES,
+  type ElevenLabsModel,
   type ListedEngine,
   type SceneVoiceEngine,
   type VoiceRole,
@@ -44,6 +58,29 @@ class SetVoiceCastDto {
   @IsOptional()
   @IsIn([...LISTED_ENGINES])
   engine?: ListedEngine;
+}
+
+class SetVoiceModelDto {
+  /** ElevenLabs' model, or null for the default. */
+  @IsOptional()
+  @IsIn(ELEVENLABS_MODELS.map((model) => model.value))
+  model?: ElevenLabsModel | null;
+}
+
+class AddLibraryVoiceDto {
+  /** The library voice's owner, as the search gave it. */
+  @IsString()
+  @Matches(/^[A-Za-z0-9]{8,80}$/)
+  ownerId!: string;
+
+  @IsString()
+  @Matches(/^[A-Za-z0-9]{12,40}$/)
+  voiceId!: string;
+
+  /** The name it is kept under in the account. */
+  @IsString()
+  @MaxLength(100)
+  name!: string;
 }
 
 /** What the admin switches while the app runs: Visualize's voice. */
@@ -100,6 +137,31 @@ export class AdminSettingsController {
     response.setHeader('Content-Length', audio.length);
     response.setHeader('Cache-Control', 'private, max-age=3600');
     response.end(audio);
+  }
+
+  /** ElevenLabs' model, v4 or v3; null for the default. Takes effect on the next page. */
+  @Patch('voice/model')
+  async setModel(
+    @CurrentUser('id') userId: string,
+    @Body() body: SetVoiceModelDto,
+  ): Promise<SceneVoiceStatusDto> {
+    return this.voices.chooseModel(body.model ?? null, userId);
+  }
+
+  /** ElevenLabs' Voice Library searched, for a voice the account does not have. */
+  @Get('voice/elevenlabs-library')
+  async elevenLabsLibrary(
+    @Query('search') search?: string,
+  ): Promise<{ voices: LibraryVoiceDto[] }> {
+    return { voices: await this.voices.library(search ?? '') };
+  }
+
+  /** A library voice added to the ElevenLabs account: one of its voice slots. */
+  @Post('voice/elevenlabs-library')
+  async addElevenLabsVoice(
+    @Body() body: AddLibraryVoiceDto,
+  ): Promise<{ voices: VoiceOptionDto[] }> {
+    return this.voices.addLibraryVoice(body.ownerId, body.voiceId, body.name);
   }
 
   /** The narrator's or a kind of character's voice on ElevenLabs or Cartesia; null for the default. */

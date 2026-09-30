@@ -244,8 +244,75 @@ export const ELEVENLABS_PREMADE = {
 /** The narrator's voice on ElevenLabs when none is set: George, a storyteller. */
 export const ELEVENLABS_NARRATOR = ELEVENLABS_PREMADE.George;
 
+/**
+ * ElevenLabs' models a Studio page can be voiced with: both speak Text to
+ * Dialogue with timestamps (v4 checked on 2026-09-30 with a real request).
+ * v4 is the default; the admin page can go back to v3.
+ */
+export const ELEVENLABS_MODELS = [
+  { value: 'eleven_v4', label: 'Eleven v4' },
+  { value: 'eleven_v3', label: 'Eleven v3' },
+] as const;
+export type ElevenLabsModel = (typeof ELEVENLABS_MODELS)[number]['value'];
+export const ELEVENLABS_DEFAULT_MODEL: ElevenLabsModel = 'eleven_v4';
+
+export const isElevenLabsModel = (value: unknown): value is ElevenLabsModel =>
+  ELEVENLABS_MODELS.some((model) => model.value === value);
+
+/** Whether a model is of the v4 family: stacked tags, continuity between requests. */
+export const isV4Model = (model: string): boolean => /^eleven_v4/.test(model);
+
+/**
+ * Voices from ElevenLabs' Voice Library for the kinds its premade voices
+ * lack (children, old people, creatures, a voice from above), by their
+ * fixed ids: among the most used of their kind, open to every plan, none
+ * under live moderation, found with the library's search on 2026-09-30. A
+ * library voice speaks only once it is added to the account (a voice
+ * slot each, on the admin page or ElevenLabs' own); until then the
+ * premade voice under `standIn` says its lines, so a film never fails for
+ * a voice not added.
+ */
+export const ELEVENLABS_LIBRARY = {
+  Emmaline: { id: 'nDJIICjR9zfJExIFeSCN', standIn: 'Jessica' }, // a young girl, British
+  Candy: { id: 'Nggzl2QAXh3OijoXD116', standIn: 'Laura' }, // young, sweet, high, American
+  Piku: { id: 'EeQEodFZVtBkjtgK3HBc', standIn: 'Sarah' }, // a kid character, Indian
+  Teddy: { id: 'XjGYkUkzth8BPs29fmcV', standIn: 'Liam' }, // a little boy, American
+  Valf: { id: 'loY1uopAz31XyhAEhNSa', standIn: 'Charlie' }, // a very young, playful voice, American
+  Omar: { id: 'S7IsvAvEoDfui6GSZK3A', standIn: 'Will' }, // a very young storyteller, Indian
+  GrandmaOxley: { id: 'vFLqXa8bgbofGarf6fZh', standIn: 'Lily' }, // a sweet, caring grandmother
+  Carol: { id: '5u41aNhyCU6hXOcjPPv0', standIn: 'Matilda' }, // a real, likeable grandmother
+  Morganna: { id: '7NsaqHdLuKNFvEfjpUno', standIn: 'Alice' }, // an old, wise seer
+  Spuds: { id: 'NOpBlnGInO9m6vDvFkFC', standIn: 'Bill' }, // a gentle grandfather, a storyteller
+  MichaelMoody: { id: 'PerZoH0r6nxBZXCoIPpv', standIn: 'Daniel' }, // grandfatherly, warm, deep
+  Toby: { id: 'Z7RrOqZFTyLpIlzCgfsp', standIn: 'Callum' }, // a little goblin, high, raspy
+  Dante: { id: 'wXvR48IpOq9HACltTmt7', standIn: 'Harry' }, // a growly, menacing monster
+  Nathan: { id: 'mGYySblCQdgQw8L0mOq3', standIn: 'Daniel' }, // serene, ethereal, calm
+  Elariel: { id: 'ksryVoNAGZT8GxWCTiVm', standIn: 'Alice' }, // ethereal, epic, wise
+} as const satisfies Record<
+  string,
+  { id: string; standIn: keyof typeof ELEVENLABS_PREMADE }
+>;
+
+/** A library voice's premade stand-in by its id, while it is not in the account; null for any other voice. */
+export function elevenLabsStandIn(id: string): string | null {
+  const found = Object.values(ELEVENLABS_LIBRARY).find((v) => v.id === id);
+  return found ? ELEVENLABS_PREMADE[found.standIn] : null;
+}
+
+/** A library voice's name by its id, for the admin page before the account has it. */
+export function elevenLabsLibraryName(id: string): string | null {
+  const found = Object.entries(ELEVENLABS_LIBRARY).find(([, v]) => v.id === id);
+  return found ? found[0].replace(/([a-z])([A-Z])/g, '$1 $2') : null;
+}
+
+/** Whether an id is one of ElevenLabs' premade voices: in every account, never checked. */
+export const isElevenLabsPremade = (id: string): boolean =>
+  (Object.values(ELEVENLABS_PREMADE) as string[]).includes(id);
+
 const el = (...names: (keyof typeof ELEVENLABS_PREMADE)[]) =>
   names.map((name) => ELEVENLABS_PREMADE[name]);
+const lib = (...names: (keyof typeof ELEVENLABS_LIBRARY)[]) =>
+  names.map((name) => ELEVENLABS_LIBRARY[name].id);
 
 /**
  * Cartesia's own voices, by the name its library gives them now, and their
@@ -328,17 +395,19 @@ export const CHARACTER_VOICES: Record<
     divine: ['Algieba', 'Sadaltager', 'Achird'],
     crowd: ['Zephyr', 'Autonoe', 'Pulcherrima'],
   },
-  // Voice ids: ElevenLabs has no blends, so God's is the deepest and
-  // calmest, and a crowd's the plainest.
+  // Voice ids: children, old people and creatures from the Voice Library
+  // (each with a premade stand-in until it is added to the account).
+  // ElevenLabs has no blends, so God's is the deepest and calmest, then
+  // two serene, ethereal ones; a crowd's is the plainest.
   elevenlabs: {
-    girl: el('Jessica', 'Laura', 'Sarah'),
-    boy: el('Liam', 'Will', 'Charlie'),
+    girl: lib('Emmaline', 'Candy', 'Piku'),
+    boy: lib('Teddy', 'Valf', 'Omar'),
     woman: el('Matilda', 'Bella', 'Alice'),
     man: el('Eric', 'Chris', 'Harry'),
-    'old woman': el('Lily', 'Alice', 'Matilda'),
-    'old man': el('Bill', 'Daniel', 'Roger'),
-    creature: el('Callum', 'Harry', 'River'),
-    divine: el('Brian', 'Daniel', 'Bill'),
+    'old woman': lib('GrandmaOxley', 'Carol', 'Morganna'),
+    'old man': [...lib('Spuds', 'MichaelMoody'), ...el('Bill')],
+    creature: [...lib('Toby', 'Dante'), ...el('Callum')],
+    divine: [...el('Brian'), ...lib('Nathan', 'Elariel')],
     crowd: el('River', 'Roger', 'Chris'),
   },
   // Voice ids from Cartesia's library: no blends either, so God's is the

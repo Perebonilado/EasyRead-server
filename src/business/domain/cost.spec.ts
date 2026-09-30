@@ -1,6 +1,9 @@
 import {
+  ELEVENLABS_PRICES,
   catalogueSpeechCost,
   costOf,
+  elevenLabsRate,
+  elevenLabsSpeechCost,
   estimatePrepare,
   voiceSessionCost,
   geminiSpeechCost,
@@ -214,5 +217,62 @@ describe('voiceSessionCost', () => {
   it('gives no price for an unknown line or no time', () => {
     expect(voiceSessionCost('other', 600, rates)).toBeNull();
     expect(voiceSessionCost('livekit', 0, rates)).toBeNull();
+  });
+});
+
+describe('the ElevenLabs voice', () => {
+  const day = (iso: string) => new Date(`${iso}T12:00:00Z`);
+
+  it('prices v4 and v3 alike at $0.08 a thousand characters, v4 at its launch price only while it lasts', () => {
+    expect(elevenLabsRate('eleven_v3', day('2026-10-01'))).toBe(0.08);
+    expect(elevenLabsRate('elevenlabs:eleven_v4', day('2026-09-30'))).toBe(
+      0.022,
+    );
+    expect(elevenLabsRate('eleven_v4', day('2026-10-11'))).toBe(0.022);
+    // The offer is gone as 12 October starts.
+    expect(elevenLabsRate('eleven_v4', new Date('2026-10-12T00:00:00Z'))).toBe(
+      0.08,
+    );
+    expect(elevenLabsRate('eleven_v4', day('2026-09-27'))).toBe(0.08);
+    expect(elevenLabsRate('eleven_v4_turbo', day('2026-11-01'))).toBe(0.04);
+    // A model the list does not know: the list price.
+    expect(elevenLabsRate('eleven_v9', day('2026-11-01'))).toBe(0.08);
+    // The offer is a dated entry, not the price.
+    expect(ELEVENLABS_PRICES.eleven_v4[0]).toEqual({ usd: 0.08 });
+    expect(ELEVENLABS_PRICES.eleven_v4[1]).toMatchObject({
+      until: '2026-10-12',
+    });
+  });
+
+  it('prices a page by the characters sent at the day’s price, or the deployment’s own', () => {
+    expect(
+      elevenLabsSpeechCost({
+        model: 'elevenlabs:eleven_v4',
+        characters: 2000,
+        at: day('2026-10-20'),
+      }),
+    ).toBe(0.16);
+    expect(
+      elevenLabsSpeechCost({
+        model: 'elevenlabs:eleven_v4',
+        characters: 2000,
+        at: day('2026-10-02'),
+      }),
+    ).toBe(0.044);
+    expect(
+      elevenLabsSpeechCost({
+        model: 'elevenlabs:eleven_v3',
+        characters: 2000,
+        usdPer1kChars: 0.1,
+      }),
+    ).toBe(0.2);
+    expect(
+      elevenLabsSpeechCost({
+        model: 'elevenlabs:eleven_v3',
+        characters: 2000,
+        usdPer1kChars: Number.NaN,
+        at: day('2026-10-20'),
+      }),
+    ).toBe(0.16);
   });
 });

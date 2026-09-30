@@ -6,6 +6,7 @@ import { wordTimesFromAligned } from '../../business/domain/board';
 import {
   catalogueSpeechCost,
   characterSpeechCost,
+  elevenLabsSpeechCost,
   geminiSpeechCost,
 } from '../../business/domain/cost';
 import { NotFoundError } from '../../business/domain/errors/errors';
@@ -2039,14 +2040,19 @@ export class SceneProcessor {
     // A new term lands: a little weight where it is first said, and a
     // moment after the sentence for it to sink in.
     const first = firstSaid(script.beats, terms);
-    // Whichever engine the admin has Visualize speak in now.
+    // Whichever engine the admin has Visualize speak in now: ElevenLabs
+    // only within its spending caps, told about what this page says (its
+    // words and a few tags a sentence).
     const {
       speech,
       voice,
       engine: speaking,
       cast,
       rates,
-    } = await this.voices.current();
+    } = await this.voices.current({
+      documentId,
+      characters: forms.reduce((n, form) => n + form.text.length + 15, 0),
+    });
     // A lesson (every sentence the narrator's own) is said at a target
     // rate a sentence, for whom it is for and what it holds, its pauses
     // shaped within a budget; the voice is asked for it by its own
@@ -2173,6 +2179,23 @@ export class SceneProcessor {
         ? TONE_OF[beat.pace ?? 'calm']
         : undefined;
     };
+    /**
+     * How a piece is acted, for a voice that takes it as tags (ElevenLabs
+     * v4): a lesson sentence's delivery; a character's line's aim and the
+     * faces it is said and felt with.
+     */
+    const directionOf = (piece: (typeof pieces)[number]) => {
+      const beat = script.beats[piece.beat];
+      if (!beat) return undefined;
+      const acted = piece.voice && beat.kind === 'line';
+      const direction = {
+        ...(!beat.kind && beat.delivery ? { delivery: beat.delivery } : {}),
+        ...(acted && beat.aim ? { aim: beat.aim } : {}),
+        ...(acted && beat.said ? { said: beat.said } : {}),
+        ...(acted && beat.felt ? { felt: beat.felt } : {}),
+      };
+      return Object.keys(direction).length ? direction : undefined;
+    };
     const result = await speech.synthesize({
       text: spoken.text,
       voice,
@@ -2180,6 +2203,7 @@ export class SceneProcessor {
       timestamps: true,
       pieces: pieces.map((piece) => {
         const tone = toneOf(piece);
+        const direction = directionOf(piece);
         return {
           text: piece.text,
           speed: piece.speed,
@@ -2187,6 +2211,7 @@ export class SceneProcessor {
           ...(piece.style ? { style: piece.style } : {}),
           ...(piece.voice ? { voice: piece.voice } : {}),
           ...(tone ? { tone } : {}),
+          ...(direction ? { direction } : {}),
         };
       }),
       ...(leadS > 0 ? { lead: leadS } : {}),
@@ -2235,15 +2260,19 @@ export class SceneProcessor {
                 ),
               )
             : result.model.startsWith('elevenlabs:')
-              ? characterSpeechCost(
-                  result.characters ?? spoken.text.length,
-                  Number(
-                    this.config.get<string>(
-                      'ELEVENLABS_USD_PER_1K_CHARS',
-                      '0.1',
-                    ),
-                  ),
-                )
+              ? // At the model's price that day (v4's launch price while
+                // it lasts), or the deployment's own.
+                elevenLabsSpeechCost({
+                  model: result.model,
+                  characters: result.characters ?? spoken.text.length,
+                  usdPer1kChars: this.config.get<string>(
+                    'ELEVENLABS_USD_PER_1K_CHARS',
+                  )
+                    ? Number(
+                        this.config.get<string>('ELEVENLABS_USD_PER_1K_CHARS'),
+                      )
+                    : null,
+                })
               : result.model.startsWith('cartesia:')
                 ? characterSpeechCost(
                     result.characters ?? spoken.text.length,

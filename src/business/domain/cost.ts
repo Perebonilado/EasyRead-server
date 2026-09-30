@@ -87,9 +87,8 @@ export function catalogueSpeechCost(
 }
 
 /**
- * A voice billed by the character (ElevenLabs: $0.10 a thousand on Eleven
- * v3, pay as you go or on a plan, September 2026; Cartesia: a credit a
- * character, $0.05 a thousand on Pro), at its rate.
+ * A voice billed by the character (ElevenLabs: see ELEVENLABS_PRICES;
+ * Cartesia: a credit a character, $0.05 a thousand on Pro), at its rate.
  */
 export function characterSpeechCost(
   characters: number,
@@ -97,6 +96,71 @@ export function characterSpeechCost(
 ): number {
   if (!(characters > 0) || !(usdPer1kChars >= 0)) return 0;
   return Math.round((characters / 1000) * usdPer1kChars * 1e6) / 1e6;
+}
+
+/**
+ * ElevenLabs' API price a thousand characters, by model, from its price
+ * list of 30 September 2026: v4 and v3 alike at $0.08 (the $0.10 of
+ * before v4 is gone), v4 Turbo $0.04. A price for a while only (v4's
+ * launch price, 72% off) carries the day it starts and the day it ends,
+ * the end not included: v4's is taken to end as 12 October starts, so no
+ * call on the 12th is priced at it.
+ */
+export const ELEVENLABS_PRICES: Record<
+  string,
+  { usd: number; from?: string; until?: string; why?: string }[]
+> = {
+  eleven_v4: [
+    { usd: 0.08 },
+    {
+      usd: 0.022,
+      from: '2026-09-28',
+      until: '2026-10-12',
+      why: 'v4 launch price',
+    },
+  ],
+  eleven_v4_turbo: [
+    { usd: 0.04 },
+    {
+      usd: 0.011,
+      from: '2026-09-28',
+      until: '2026-10-12',
+      why: 'v4 launch price',
+    },
+  ],
+  eleven_v3: [{ usd: 0.08 }],
+};
+
+/** A model's price a thousand characters on a day: the last entry that holds then; $0.08 for one the list does not know. */
+export function elevenLabsRate(model: string, at: Date = new Date()): number {
+  const id = model.replace(/^elevenlabs:/, '');
+  const day = at.toISOString().slice(0, 10);
+  const holds = (ELEVENLABS_PRICES[id] ?? []).filter(
+    (price) =>
+      (!price.from || price.from <= day) && (!price.until || day < price.until),
+  );
+  return holds[holds.length - 1]?.usd ?? 0.08;
+}
+
+/**
+ * A page voiced by ElevenLabs: the characters sent (its tags counted:
+ * ElevenLabs bills them) at the model's price that day, or at
+ * ELEVENLABS_USD_PER_1K_CHARS where a deployment sets one of its own.
+ */
+export function elevenLabsSpeechCost(input: {
+  model: string;
+  characters: number;
+  at?: Date;
+  /** A deployment's own price, which wins over the list. */
+  usdPer1kChars?: number | null;
+}): number {
+  const own = input.usdPer1kChars;
+  return characterSpeechCost(
+    input.characters,
+    own !== null && own !== undefined && Number.isFinite(own) && own >= 0
+      ? own
+      : elevenLabsRate(input.model, input.at),
+  );
 }
 
 /**

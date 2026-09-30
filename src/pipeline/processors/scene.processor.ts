@@ -157,6 +157,7 @@ import type { SetPiece } from '../../business/domain/scene-set-pieces';
 import { buildSet, reverseSet } from '../../business/domain/scene-set-layout';
 import { RIG_VERSION, rigSheet } from '../../business/domain/scene-sheet-rig';
 import { withMouths } from '../../business/domain/studio/studio-audit';
+import { turnsCheck, turnsLine } from '../../business/domain/scene-turns-check';
 import { withFace } from '../../business/domain/scene-sheet-face';
 import {
   EMPTY_STORY,
@@ -974,6 +975,10 @@ export class SceneProcessor {
           : 'no words on words or things'
       }`,
     );
+    // The turn check: how often people drawn from every side turn, and any
+    // turn undone at once, held too briefly, or to the camera for nothing.
+    if (Object.values(scene.acting ?? {}).some((one) => one.view?.length))
+      this.logger.log(`${who}: turn check: ${turnsLine(turnsCheck(scene))}`);
     // Paper is every scene's look unless it says otherwise.
     if (input.theme && input.theme !== 'paper') scene.theme = input.theme;
     const finished = input.finish ? input.finish(scene) : scene;

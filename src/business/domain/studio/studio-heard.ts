@@ -6,7 +6,12 @@
  * as the idea so it is never asked for twice. The producer (a model)
  * reads the maker first; this is what code holds it to.
  */
-import type { StudioBrief, StudioGenre, StudioTone } from './studio';
+import type {
+  StudioBrief,
+  StudioGenre,
+  StudioShape,
+  StudioTone,
+} from './studio';
 
 /** Words that take back the word after them: "funny, not serious", "nothing too dark". */
 const NEGATED =
@@ -95,6 +100,43 @@ const GENRE_WORDS: [StudioGenre, RegExp][] = [
 export function genreNamed(words: string): StudioGenre | null {
   const heard = heardOf(words);
   return GENRE_WORDS.find(([, pattern]) => pattern.test(heard))?.[0] ?? null;
+}
+
+/**
+ * The words for a film for phones (studio-vertical-plan §1.1): a platform
+ * whose films are vertical, or the shape said with what it is of ("a
+ * vertical video", "portrait mode", "for my phone"). Never a word alone
+ * that says something else in a story: "a portrait painter", "shorts and
+ * a t-shirt", "a fishing reel".
+ */
+const TALL_WORDS =
+  /\b(?:tik\s?toks?|(?:youtube|yt)\s+shorts?|(?:for|as|to)\s+(?:a\s+)?shorts\b(?!\s+and\b)|(?:instagram|insta|ig|facebook)\s+reels?|(?:for|as|on|to)\s+(?:a\s+)?reels?\b|snapchat|vertical(?:ly)?(?=\s+(?:video|film|movie|version|format|shape|mode|ratio|orientation|screen|one))|(?:make|keep|do|shoot|film|go|want|have|put)\s+(?:it|them|this|the\s+film|the\s+video|everything)?\s*(?:in\s+)?vertical(?:ly)?|(?:in|as)\s+vertical\b|portrait\s+(?:mode|format|orientation|video|ratio|shape|version)|in\s+portrait\b|9\s*[:x×]\s*16|nine\s+by\s+sixteen|(?:for|on|fits?)\s+(?:my|a|the|your|our|their)?\s*(?:mobile\s+)?(?:phones?|smartphones?|mobiles?)(?:\s+screens?)?|(?:phone|mobile)\s+screens?)/;
+
+/** The words for a wide film: YouTube (not its Shorts), widescreen, landscape as a shape. */
+const WIDE_WORDS =
+  /\b(?:youtube(?!\s+shorts?)(?:\s+channel|\s+video)?\b|widescreen|wide[\s-]?screen|landscape\s+(?:mode|format|orientation|video|ratio|shape|version)|in\s+landscape\b|horizontal(?:ly)?(?=\s+(?:video|film|version|format|shape|mode|ratio|orientation))|16\s*[:x×]\s*9|sixteen\s+by\s+nine|(?:for|on)\s+(?:the\s+|a\s+)?(?:tv|television|big\s+screen|desktop|laptop))/;
+
+/** Both shapes said at once. */
+const BOTH_WORDS =
+  /\b(?:(?:wide|landscape|horizontal)\s+(?:and|&|\+|or)\s+(?:vertical|portrait|tall)|(?:vertical|portrait|tall)\s+(?:and|&|\+|or)\s+(?:wide|landscape|horizontal)|both\s+(?:shapes|formats|ways|versions|sizes|orientations|ratios)|(?:shapes|formats|versions|orientations)\s*[,:]?\s*both|(?:one|a\s+version)\s+for\s+each)\b/;
+
+/**
+ * The shape the maker's words ask for, or null when they name none: TikTok,
+ * Shorts, Reels, vertical, portrait or a phone are tall; YouTube,
+ * widescreen or landscape wide; both at once ("for YouTube and TikTok",
+ * "wide and vertical"), both. A tap of a shape chip is its word alone.
+ */
+export function shapeNamed(words: string): StudioShape | null {
+  const heard = heardOf(words).trim();
+  // A chip tapped: the word alone.
+  const chip = heard.replace(/[.!]+$/, '').replace(/\s+please$/, '');
+  if (/^(?:vertical|portrait|tall)$/.test(chip)) return 'tall';
+  if (/^(?:wide|landscape|horizontal)$/.test(chip)) return 'wide';
+  if (/^both(?:\s+shapes)?$/.test(chip)) return null;
+  const tall = TALL_WORDS.test(heard);
+  const wide = WIDE_WORDS.test(heard);
+  if (BOTH_WORDS.test(heard) || (tall && wide)) return 'both';
+  return tall ? 'tall' : wide ? 'wide' : null;
 }
 
 /** Whether the maker left it to the Studio: "you pick", "surprise me", "up to you". */
@@ -209,5 +251,10 @@ export function heardBrief(input: {
     (leavesItToUs(words) || named || (said.setting && !before.setting))
   )
     patch.idea = ideaFrom({ ...said, ...patch });
+
+  // The shape they named, at any step: their words win over what the
+  // producer took (its own field is the second source); never asked for.
+  const shape = shapeNamed(words);
+  if (shape && shape !== (said.shape ?? 'wide')) patch.shape = shape;
   return patch;
 }

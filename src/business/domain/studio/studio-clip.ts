@@ -88,7 +88,9 @@ const lowerFirst = (text: string) =>
   text ? `${text.charAt(0).toLowerCase()}${text.slice(1)}` : text;
 
 /** The line the lesson after a clip opens with, pointing back to it: the writer's, else one made from what it shows. */
-export function hookOf(scene: Pick<OutlineScene, 'hook' | 'teach' | 'summary'>): string {
+export function hookOf(
+  scene: Pick<OutlineScene, 'hook' | 'teach' | 'summary'>,
+): string {
   const said = scene.hook?.trim();
   if (said) return said;
   const shows = (scene.teach || scene.summary || '').trim().replace(/\.+$/, '');
@@ -167,7 +169,9 @@ export function gateClips(
       const fresh = cast.filter((id) => !met.has(id));
       if (fresh.length > 1) {
         cast = cast.filter((id) => met.has(id) || id === fresh[0]);
-        fixed.push(`clip ${n} keeps one new face: ${fresh.slice(1).join(', ')} left out`);
+        fixed.push(
+          `clip ${n} keeps one new face: ${fresh.slice(1).join(', ')} left out`,
+        );
       }
     }
     const before = scenes[scenes.length - 1];
@@ -283,7 +287,8 @@ const PRESETS: {
   layout: Record<string, unknown>;
 }[] = [
   {
-    words: /\b(?:clinic|surgery|doctor'?s?|nurse'?s?|hospital|ward|sick ?bay|health (?:centre|center)|pharmacy)\b/u,
+    words:
+      /\b(?:clinic|surgery|doctor'?s?|nurse'?s?|hospital|ward|sick ?bay|health (?:centre|center)|pharmacy)\b/u,
     layout: {
       sky: 'day',
       ground: 'tiles',
@@ -328,7 +333,8 @@ const PRESETS: {
     },
   },
   {
-    words: /\b(?:living ?room|lounge|bedroom|sitting room|home|house|flat|apartment)\b/u,
+    words:
+      /\b(?:living ?room|lounge|bedroom|sitting room|home|house|flat|apartment)\b/u,
     layout: {
       sky: 'day',
       ground: 'carpet',
@@ -449,7 +455,9 @@ export function clipContext(outline: StudioOutline, k: number): string {
       ? `The lesson scene before it teaches: ${before.teach ?? before.summary}`
       : 'It opens the film: the lesson after it explains what it shows.',
     `This clip shows: ${scene?.teach ?? scene?.summary ?? ''}`,
-    after ? `The lesson scene after it teaches: ${after.teach ?? after.summary}` : '',
+    after
+      ? `The lesson scene after it teaches: ${after.teach ?? after.summary}`
+      : '',
   ]
     .filter(Boolean)
     .join('\n');
@@ -546,7 +554,9 @@ export function mendClip(
   if (told.length > 1) {
     const keep = told[0] === 0 ? 0 : told[told.length - 1];
     for (const k of [...told].reverse()) if (k !== keep) drop(k);
-    fixed.push(`${told.length - 1} narration${told.length > 2 ? 's' : ''} taken out`);
+    fixed.push(
+      `${told.length - 1} narration${told.length > 2 ? 's' : ''} taken out`,
+    );
   }
   // Lines short.
   beats = beats.map((b) => {
@@ -569,8 +579,7 @@ export function mendClip(
   }
   // One insert, on the key thing at the idea.
   const beat = beats[idea];
-  const thing =
-    beat?.thing ?? beat?.prop ?? sheet.props[0]?.prop ?? null;
+  const thing = beat?.thing ?? beat?.prop ?? sheet.props[0]?.prop ?? null;
   const own = inserts.find((one) => one.beat === idea) ?? inserts[0];
   const insert = own ?? (thing ? { beat: idea, thing } : null);
   if (!own && insert) fixed.push(`an insert on the ${insert.thing}`);
@@ -644,7 +653,12 @@ export function clipCardDrawing(): GatedDrawing {
 /** A layout that has room for one more thing, the card first. */
 function roomFor(layout: SceneLayout, count: number): SceneLayout {
   if (count <= 1) return 'one';
-  if (layout === 'one' || layout === 'compare' || layout === 'hub' || layout === 'cycle')
+  if (
+    layout === 'one' ||
+    layout === 'compare' ||
+    layout === 'hub' ||
+    layout === 'cycle'
+  )
     return count <= 3 ? 'row' : 'grid';
   return layout;
 }
@@ -730,7 +744,11 @@ const keyWords = (text: string) =>
 
 /** Whether a sentence points back to a clip: it says so, or shares two of its hook's words. */
 function pointsBack(say: string, hook: string): boolean {
-  if (/\b(?:just saw|we saw|you saw|just watched|remember|in that clip|did you see|did you notice)\b/iu.test(say))
+  if (
+    /\b(?:just saw|we saw|you saw|just watched|remember|in that clip|did you see|did you notice)\b/iu.test(
+      say,
+    )
+  )
     return true;
   const mine = keyWords(say);
   return [...keyWords(hook)].filter((w) => mine.has(w)).length >= 2;

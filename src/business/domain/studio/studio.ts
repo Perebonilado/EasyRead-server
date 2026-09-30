@@ -1031,9 +1031,7 @@ export function outlineOf(raw: unknown): StudioOutline {
               .filter(Boolean)
               .slice(0, 6),
             seconds: Number.isFinite(seconds)
-              ? Math.round(
-                  Math.min(SCENE_SECONDS[1], Math.max(least, seconds)),
-                )
+              ? Math.round(Math.min(SCENE_SECONDS[1], Math.max(least, seconds)))
               : clip
                 ? CLIP_SECONDS[1]
                 : 30,

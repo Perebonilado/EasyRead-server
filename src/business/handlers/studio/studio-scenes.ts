@@ -192,24 +192,24 @@ export async function writeStorySheet(
     scene: clip
       ? clip.scene
       : outline.scenes[k]
-      ? [
-          describeOutlineScene(outline.scenes[k], k, true),
-          planOf(outline, k),
-          // The film's first scene sets the story up where it is seen.
-          k === 0 ? FIRST_SCENE_RULE : '',
-          // What code will hold it to, so the first draft keeps it.
-          craftChecklist({
-            brief: input.brief,
-            bible,
-            outline,
-            k,
-            narrator,
-            by: openingBy(minutesOf(outline)),
-          }),
-        ]
-          .filter(Boolean)
-          .join('\n')
-      : `Scene ${k + 1}: the scene the maker asked for.`,
+        ? [
+            describeOutlineScene(outline.scenes[k], k, true),
+            planOf(outline, k),
+            // The film's first scene sets the story up where it is seen.
+            k === 0 ? FIRST_SCENE_RULE : '',
+            // What code will hold it to, so the first draft keeps it.
+            craftChecklist({
+              brief: input.brief,
+              bible,
+              outline,
+              k,
+              narrator,
+              by: openingBy(minutesOf(outline)),
+            }),
+          ]
+            .filter(Boolean)
+            .join('\n')
+        : `Scene ${k + 1}: the scene the maker asked for.`,
     before: input.beforeWords || describeEnd(before, bible),
     ...(clip ? { quick: true } : {}),
   };

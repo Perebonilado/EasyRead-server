@@ -2563,7 +2563,11 @@ export class StudioProcessor {
     try {
       const t = Math.max(0, (scene.settledMs ?? scene.durationMs) - 40);
       const { png } = await renderStill(scene, t, rasterise, STILL_PX);
-      await this.storage.put({ key: thumbKey, body: png, mimeType: 'image/png' });
+      await this.storage.put({
+        key: thumbKey,
+        body: png,
+        mimeType: 'image/png',
+      });
     } catch (error) {
       this.logger.log(
         `${who}: its last frame was not kept as its still (${(error as Error).message})`,

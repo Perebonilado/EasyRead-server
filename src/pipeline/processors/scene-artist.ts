@@ -626,9 +626,7 @@ export class SceneArtist {
     const quick = Boolean(preset || place.once);
     const takes = quick ? 1 : Math.max(1, options.takes ?? TAKES.set);
     const see = quick ? false : (options.see ?? true);
-    const revisions = quick
-      ? 0
-      : Math.max(0, options.revisions ?? REVISIONS);
+    const revisions = quick ? 0 : Math.max(0, options.revisions ?? REVISIONS);
     const [low, high] = HORIZON[place.kind ?? 'outdoor'];
     // Each thing the kit has no piece for, drawn once however many takes
     // and rounds ask for it.

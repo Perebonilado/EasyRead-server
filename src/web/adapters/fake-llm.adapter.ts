@@ -1843,13 +1843,67 @@ export class FakeLlmAdapter implements LlmGatewayPort {
   }): Promise<LlmResult<Record<string, unknown>>> {
     const started = Date.now();
     const explainer = /format: explainer/i.test(input.brief);
+    // An explainer about people (a fever): a nurse and a child for its
+    // story clips (studio-clip), in a clinic room.
+    const people = explainer && /\b(?:fever|nurse|clinic)\b/i.test(input.brief);
     return {
       value: explainer
         ? {
-            characters: [],
-            sets: [],
+            characters: people
+              ? [
+                  {
+                    id: 'amara',
+                    name: 'Nurse Amara',
+                    kind: 'person',
+                    role: 'main',
+                    look: 'a nurse in a blue uniform',
+                    figure: {
+                      age: 'adult',
+                      top: 'uniform',
+                      topColour: 'blue',
+                      skin: 5,
+                    },
+                    size: null,
+                    voice: 'woman',
+                    voicePick: 0,
+                    traits: ['calm'],
+                    carries: null,
+                  },
+                  {
+                    id: 'sam',
+                    name: 'Sam',
+                    kind: 'person',
+                    role: 'supporting',
+                    look: 'a boy in a green t-shirt',
+                    figure: {
+                      age: 'child',
+                      top: 't-shirt',
+                      topColour: 'green',
+                      skin: 2,
+                    },
+                    size: null,
+                    voice: 'boy',
+                    voicePick: 0,
+                    traits: ['worried'],
+                    carries: null,
+                  },
+                ]
+              : [],
+            sets: people
+              ? [
+                  {
+                    id: 'clinic',
+                    name: 'The clinic room',
+                    look: 'a bright clinic room with a cupboard and a clock',
+                    kind: 'indoor',
+                    stand: 'on',
+                    front: null,
+                    sound: null,
+                  },
+                ]
+              : [],
             world: null,
-            subject: 'a lesson',
+            subject: people ? 'health: fever' : 'a lesson',
             maths: false,
             pictures: [],
           }
@@ -1940,6 +1994,52 @@ export class FakeLlmAdapter implements LlmGatewayPort {
               marked[marked.length - 1],
             ]
         : null;
+    // With people for clips (studio-clip): watch, then understand.
+    const clips = explainer && /For story clips only/.test(input.bible);
+    if (clips) {
+      const lesson = (n: number, teach: string) => ({
+        title: `Part ${n}`,
+        summary: `The lesson, part ${n}.`,
+        set: null,
+        cast: [],
+        seconds: 30,
+        teach,
+        points: ['a thermometer', 'a body warming up'],
+        kind: 'lesson',
+        hook: null,
+        into: null,
+      });
+      return {
+        value: {
+          title: 'What is a fever?',
+          logline: 'Why a body gets hot when it fights a germ.',
+          scenes: [
+            lesson(
+              1,
+              'Your body likes to stay at about thirty-seven degrees. When germs get in, your body turns up its own heat to fight them. That extra heat is called a fever, and it is a sign your body is working hard.',
+            ),
+            {
+              title: 'At the clinic',
+              summary: 'Nurse Amara takes Sam’s temperature.',
+              set: 'clinic',
+              cast: ['amara', 'sam'],
+              seconds: 12,
+              teach:
+                'The nurse reads the thermometer: thirty-nine degrees is a fever.',
+              points: [],
+              kind: 'clip',
+              hook: 'Did you see the number on the thermometer?',
+              into: null,
+            },
+            lesson(
+              3,
+              'A thermometer measures how hot your body is. Thirty-nine degrees is more than your usual thirty-seven, so Sam has a fever. Rest, water and time help the body win, and a grown-up checks it again later.',
+            ),
+          ],
+        },
+        usage: this.usage(started, input.brief.length / 4, 200),
+      };
+    }
     const scenes = [1, 2].map((n) =>
       explainer
         ? {
@@ -2171,6 +2271,88 @@ export class FakeLlmAdapter implements LlmGatewayPort {
     scene: string;
   }): Promise<LlmResult<Record<string, unknown>>> {
     const started = Date.now();
+    // A story clip inside an explainer (studio-clip): the nurse reads the thermometer.
+    const clip = /story clip inside an animated lesson/.test(input.scene)
+      ? /about \d+ seconds, in (\S+) with ([^:]+):/.exec(input.scene)
+      : null;
+    if (clip) {
+      const [nurse, child] = clip[2].split(/,\s*/);
+      const beat = (over: Record<string, unknown>) => ({
+        who: null,
+        to: null,
+        say: '',
+        feeling: null,
+        sign: null,
+        do: null,
+        thing: null,
+        target: null,
+        prop: null,
+        spot: null,
+        from: null,
+        pace: null,
+        seconds: null,
+        ...over,
+      });
+      return {
+        value: {
+          title: '39 degrees is a fever',
+          set: clip[1],
+          time: 'day',
+          weather: 'clear',
+          crowd: 'none',
+          mood: 'calm',
+          music: 'calm',
+          transition: 'cut',
+          onStage: [
+            {
+              who: nurse,
+              spot: 'centre-left',
+              pose: 'standing',
+              face: 'neutral',
+              holding: 'thermometer',
+            },
+            {
+              who: child ?? nurse,
+              spot: 'centre-right',
+              pose: 'standing',
+              face: 'sad',
+              holding: null,
+            },
+          ],
+          props: [],
+          beats: [
+            beat({
+              kind: 'line',
+              who: child,
+              to: nurse,
+              say: 'My head feels so hot.',
+              feeling: 'sad',
+              from: 'here',
+              aim: 'begs',
+            }),
+            beat({
+              kind: 'business',
+              who: nurse,
+              say: 'Nurse Amara reads the thermometer.',
+              do: 'use',
+              thing: 'thermometer',
+            }),
+            beat({
+              kind: 'line',
+              who: nurse,
+              to: child,
+              say: 'Thirty-nine degrees. That is a fever, Sam.',
+              feeling: 'neutral',
+              from: 'here',
+              aim: 'reveals',
+            }),
+            beat({ kind: 'reaction', who: child, feeling: 'surprised' }),
+          ],
+          camera: [],
+        },
+        usage: this.usage(started, input.scene.length / 4, 200),
+      };
+    }
     const line = (
       who: string,
       to: string,

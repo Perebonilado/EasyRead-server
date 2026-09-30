@@ -185,6 +185,7 @@ import {
 } from '../../business/domain/scene-picture-check';
 import { rasterise } from '../../business/domain/scene-raster';
 import { renderStill } from '../../business/domain/scene-still';
+import { showTheme } from '../../business/domain/studio/studio-look';
 
 /** A kit's spec for a character: a person's, an animal's, or a creature's. */
 type KitSpec = FigureSpec | AnimalSpec | CreatureSpec;
@@ -2374,6 +2375,11 @@ export class StudioProcessor {
             who,
             keepAs: `studio-${row.id}`,
             step: (step) => this.studio.updateScene(row.id, { step }),
+            // An explainer's look, for its still: the player shows the
+            // show's look now, whatever it was when this was made.
+            ...(row.sheet.kind === 'explainer'
+              ? { theme: showTheme(show.brief, bible) ?? undefined }
+              : {}),
           });
     if (made.fit === 'poor') throw new Error(made.reason);
     const { scene, sceneKey, thumbKey, voice } = made;

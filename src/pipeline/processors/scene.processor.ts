@@ -73,6 +73,11 @@ import { rasterise } from '../../business/domain/scene-raster';
 import { pictureMoments } from '../../business/domain/scene-picture-check';
 import { renderStill } from '../../business/domain/scene-still';
 import {
+  themeOf,
+  themedSvg,
+  type ThemeId,
+} from '../../business/domain/scene-themes';
+import {
   SCENE_GENERATOR_VERSION,
   isCodeThing,
   mendScript,
@@ -731,6 +736,8 @@ export class SceneProcessor {
     };
     /** A lesson's audience and the maker's pace, for its voice; the stage's when absent. */
     pace?: PaceBrief | null;
+    /** The look it is made in (a Studio explainer's): its still is shown in it. Absent, paper. */
+    theme?: ThemeId;
   }): Promise<
     | { fit: 'poor'; reason: string }
     | {
@@ -894,6 +901,8 @@ export class SceneProcessor {
     });
     this.logAudit(who, audit);
     for (const note of composed.staging) this.logger.log(`${who}: ${note}`);
+    // Paper is every scene's look unless it says otherwise.
+    if (input.theme && input.theme !== 'paper') scene.theme = input.theme;
     const { sceneKey, thumbKey } = await this.store(base, scene, who);
     return {
       fit: 'good',
@@ -2405,9 +2414,11 @@ export class SceneProcessor {
       const hide = hidden.length
         ? `<style>${hidden.map((h) => `[id="${h.replace(/"/g, '')}"]`).join(',')}{display:none}</style>`
         : '';
+      // In the scene's look, as the player shows it.
+      const themed = themedSvg(thing, themeOf(scene.theme));
       const svg = hide
-        ? thing.svg.replace(/(<svg\b[^>]*>)/i, `$1${hide}`)
-        : thing.svg;
+        ? themed.replace(/(<svg\b[^>]*>)/i, `$1${hide}`)
+        : themed;
       try {
         pngs.set(
           id,

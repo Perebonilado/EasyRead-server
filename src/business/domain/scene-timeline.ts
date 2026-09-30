@@ -8,6 +8,7 @@
  */
 import { measureText } from './scene-font';
 import { groupId } from './scene-ids';
+import { PAPER } from './scene-themes';
 
 export interface TimelineSpec {
   events: { when: string; name: string }[];
@@ -28,10 +29,12 @@ const NAME_SIZE = 25;
 const LINE = 1.2;
 /** How far a label stands from the axis. */
 const STEM = 34;
-const INK = '#1F2A37';
-const MUTED = '#5B6675';
-const ACCENT = '#E0663A';
-const DOT = '#3D8FD1';
+// Drawn in the paper theme's tokens: the player recolours them for any other theme (scene-themes).
+const INK = PAPER.ink;
+const MUTED = PAPER.muted;
+const ACCENT = PAPER.accent;
+const DOT = PAPER.accent2;
+const HALO = PAPER.card;
 
 const escape = (text: string) =>
   text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -213,7 +216,7 @@ export function renderTimeline(spec: TimelineSpec): {
     out.push(
       `<g id="${id}"><g class="${above ? 'up' : 'down'}" style="animation-delay:${(0.5 + i * 0.35).toFixed(2)}s">` +
         `<line x1="${x}" y1="${AXIS_Y}" x2="${x}" y2="${stemTo}" stroke="${MUTED}" stroke-width="3" stroke-linecap="round"/>` +
-        `<circle cx="${x}" cy="${AXIS_Y}" r="13" fill="${DOT}" stroke="#FFFFFF" stroke-width="4"/>` +
+        `<circle cx="${x}" cy="${AXIS_Y}" r="13" fill="${DOT}" stroke="${HALO}" stroke-width="4"/>` +
         texts.join('') +
         `</g></g>`,
     );

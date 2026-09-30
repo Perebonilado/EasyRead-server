@@ -10,6 +10,7 @@
 import { measureText } from './scene-font';
 import { groupId } from './scene-ids';
 import { ticks } from './scene-plot';
+import { PAPER } from './scene-themes';
 
 export interface ChartSpec {
   kind: 'bar' | 'line';
@@ -24,11 +25,14 @@ export const MAX_BARS = 8;
 const W = 1000;
 const H = 620;
 const AREA = { x0: 110, x1: 960, y0: 70, y1: 470 };
-const INK = '#1F2A37';
-const MUTED = '#5B6675';
-const GRID = '#E9E1D1';
-const BAR = '#3D8FD1';
-const LINE_COLOUR = '#E0663A';
+// Drawn in the paper theme's tokens: the player recolours them for any other theme (scene-themes).
+const INK = PAPER.ink;
+const MUTED = PAPER.muted;
+const GRID = PAPER.grid;
+/** Each bar its own colour of the chart palette, in order (Okabe–Ito's, seen by colour-blind viewers too). */
+const barColour = (i: number) => PAPER.chart[i % PAPER.chart.length];
+const LINE_COLOUR = PAPER.accent;
+const HALO = PAPER.card;
 const VALUE_SIZE = 28;
 const LABEL_SIZE = 24;
 
@@ -148,7 +152,7 @@ export function renderChart(spec: ChartSpec): {
       const [x, y] = points[i];
       out.push(
         `<g id="${id}"><g class="pop" style="animation-delay:${(0.3 + (1.3 * i) / bars.length).toFixed(2)}s">` +
-          `<circle cx="${r(x)}" cy="${r(y)}" r="12" fill="${LINE_COLOUR}" stroke="#FFFFFF" stroke-width="4"/>` +
+          `<circle cx="${r(x)}" cy="${r(y)}" r="12" fill="${LINE_COLOUR}" stroke="${HALO}" stroke-width="4"/>` +
           valueLabel(bar, x, y) +
           `</g></g>`,
       );
@@ -170,7 +174,7 @@ export function renderChart(spec: ChartSpec): {
       const delay = 0.3 + i * 0.22;
       out.push(
         `<g id="${id}">` +
-          `<rect class="grow ${bar.value >= 0 ? 'up' : 'down'}" style="animation-delay:${delay.toFixed(2)}s" x="${r(cx(i) - width / 2)}" y="${r(top)}" width="${r(width)}" height="${r(height)}" rx="8" fill="${BAR}"/>` +
+          `<rect class="grow ${bar.value >= 0 ? 'up' : 'down'}" style="animation-delay:${delay.toFixed(2)}s" x="${r(cx(i) - width / 2)}" y="${r(top)}" width="${r(width)}" height="${r(height)}" rx="8" fill="${barColour(i)}"/>` +
           `<g class="show" style="animation-delay:${(delay + 0.5).toFixed(2)}s">${valueLabel(bar, cx(i), py(bar.value))}</g>` +
           `</g>`,
       );

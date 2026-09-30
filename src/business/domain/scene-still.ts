@@ -63,6 +63,7 @@ import {
 } from './scene-face-draw';
 import type { SceneEffectDto, SceneThingDto, SceneView } from '../../contracts';
 import { HEAD } from './scene-figure';
+import { PAPER as PAPER_THEME } from './scene-themes';
 
 export { FLOOR_BACK_F, FLOOR_FRONT_F, floorFactor };
 
@@ -1248,8 +1249,8 @@ export function insertReading(
   };
 }
 
-/** The still's paper, under everything: the stage's ground. */
-const PAPER = '#FBF7EF';
+/** The still's paper, under everything: the stage's ground (a film's set covers it). */
+const PAPER = PAPER_THEME.paper;
 /** How soft one cheated near the camera is, in the stage's units (the player's NEAR_SOFT_PX). */
 const SOFT_PX = 2.5;
 /** How soft everyone is behind an insert's thing, in the stage's units, and how much of them shows over what is behind: the player's INSERT_SOFT_PX and INSERT_KEEP. */

@@ -1963,6 +1963,14 @@ export interface ScenePillDto {
 }
 
 /** A page as an animated video: the voice's sentences, the things, and when each happens. */
+/**
+ * An explainer's look: paper (the warm page every scene had before), clean
+ * lab, sunny, and three dark ones (chalkboard, blueprint, night sky). Its
+ * colours are the server's scene-themes table; the player keeps a copy.
+ */
+export type SceneThemeName =
+  'paper' | 'cleanlab' | 'sunny' | 'chalkboard' | 'blueprint' | 'nightsky';
+
 export interface SceneDto {
   /** 4 adds the sound; a 3 plays the same, in silence but for the voice. */
   version: 3 | 4;
@@ -1982,6 +1990,8 @@ export interface SceneDto {
   voicePace?: number;
   /** Whom the document is taught for, read from it; absent when it could not be told, or on an older page. */
   stage?: 'early' | 'middle' | 'higher' | 'professional';
+  /** The look it was made in (studio-explainer-plan, Ask 2); absent, paper, as every scene before themes. */
+  theme?: SceneThemeName;
   /**
    * One per spoken sentence; one word entry per whitespace word of `text`:
    * [charStart, charEnd, startMs, endMs]. `delivery` when it is not plain
@@ -2869,6 +2879,8 @@ export interface StudioBriefDto {
   ending?: 'happy' | 'bittersweet' | 'twist' | 'open' | 'moral';
   pace?: 'gentle' | 'lively' | 'snappy';
   style?: 'picture-book' | 'bold-cartoon' | 'sitcom' | 'adventure' | 'cosy';
+  /** An explainer's look, as the maker chose it; absent, chosen by code from the subject and the audience. */
+  look?: SceneThemeName;
 }
 
 /** The age bands of an audience, youngest first, then the grown-ups. */
@@ -3366,6 +3378,8 @@ export interface StudioShowDto {
   /** What the brief still needs before an outline can be written. */
   briefMissing: string[];
   bible: StudioBibleDto | null;
+  /** The look an explainer plays in: the maker's, or the one code chose; absent for a story. */
+  theme?: SceneThemeName;
   episodes: {
     id: string;
     number: number;
@@ -3406,6 +3420,8 @@ export interface StudioPlayDto {
   /** Free-plan film carries the Studio's name on its end card. */
   watermark: boolean;
   madeWith: string;
+  /** The look an explainer plays in (its scenes are recoloured for it as they are shown); absent, each scene's own. */
+  theme?: SceneThemeName;
   scenes: {
     id: string;
     title: string;

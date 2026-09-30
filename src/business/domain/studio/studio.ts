@@ -102,6 +102,7 @@ import {
   type StoryWorld,
 } from '../scene-story';
 import { genreNamed, toneNamed } from './studio-heard';
+import { THEME_IDS, type ThemeId } from '../scene-themes';
 import {
   AUDIENCE_BAND,
   BAND_AUDIENCE,
@@ -241,6 +242,8 @@ export interface StudioBrief {
    * at 1.
    */
   voicePace?: number;
+  /** An explainer's look (scene-themes); absent, chosen by code (studio-look's themeFor). */
+  look?: ThemeId;
 }
 
 /** The maker's controls of a brief, each present only when chosen. */
@@ -251,6 +254,7 @@ export const BRIEF_CONTROLS = [
   'ending',
   'pace',
   'style',
+  'look',
 ] as const;
 
 export const EMPTY_BRIEF: StudioBrief = {
@@ -368,6 +372,9 @@ export function briefOf(
     nudge <= 1.2
       ? Math.round(nudge * 1000) / 1000
       : base.voicePace;
+  const look = has('look')
+    ? (oneOf(THEME_IDS)(said.look) ?? base.look)
+    : base.look;
   return {
     ...out,
     ...(who ? { who } : {}),
@@ -378,6 +385,7 @@ export function briefOf(
     ...(pace ? { pace } : {}),
     ...(style ? { style } : {}),
     ...(voicePace && voicePace !== 1 ? { voicePace } : {}),
+    ...(look ? { look } : {}),
   };
 }
 

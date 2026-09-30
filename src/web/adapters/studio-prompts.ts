@@ -70,6 +70,7 @@ import {
 import { FIGURE_GUIDE } from './prompts';
 import { BEAT_ROLES } from '../../business/domain/studio/studio-story';
 import { BAR, RUBRIC } from '../../business/domain/studio/studio-script';
+import { LOOK_NAMES } from '../../business/domain/studio/studio-look';
 
 const quoted = (list: readonly string[]) =>
   list.map((x) => `"${x}"`).join(', ');
@@ -267,6 +268,16 @@ export const STUDIO_PROMPTS = {
       'if they are ready for the outline; when they say yes, or asked you to',
       'go ahead, action is "outline". Someone who arrives saying all of it',
       'at once gets the outline straight away.',
+    ].join(' '),
+    [
+      `An explainer has a look, how its stage is coloured: look one of ${LOOK_NAMES};`,
+      '"chalkboard", "blueprint" and "nightsky" are dark. Set it only when',
+      'they ask for a look, at any phase ("use a chalkboard look" is',
+      '"chalkboard"; "make it dark" is the dark look of what it has now, which',
+      'the Studio works out, so leave look null for that), and never ask',
+      'about it: the Studio chooses one from the subject and the audience. A',
+      'new look plays at once, with nothing made again, so the action stays',
+      '"none" and you say it is done.',
     ].join(' '),
     [
       '"outline": they see the story (its premise, who everyone is and its',

@@ -176,6 +176,7 @@ import {
   withoutAudience,
   type AudienceTurn,
 } from './scene-set-audience';
+import { PAPER, themeOf, type ExplainerTheme } from './scene-themes';
 import { anchorMs, quietGaps, spaced, type TimedBeat } from './scene-timing';
 import { numberWords } from './spoken';
 
@@ -4507,15 +4508,21 @@ const escape = (text: string) =>
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
 
-/** The stage colours, matching the player's. */
-export const STAGE_PAINT = {
-  ground: '#FBF7EF',
-  ink: '#1F2A37',
-  muted: '#5B6675',
-  accent: '#E0663A',
-  card: '#FFFFFF',
-  cardEdge: '#E4DCCB',
-} as const;
+/** The stage colours of a theme, as the player paints them (scene-themes). */
+export const stagePaint = (theme: ExplainerTheme = PAPER) =>
+  ({
+    ground: theme.paper,
+    ink: theme.ink,
+    muted: theme.muted,
+    line: theme.line,
+    accent: theme.accent,
+    card: theme.card,
+    cardInk: theme.cardInk,
+    cardEdge: theme.paperEdge,
+  }) as const;
+
+/** The paper theme's stage colours. */
+export const STAGE_PAINT = stagePaint(PAPER);
 
 /**
  * One still of the page for its card, as SVG: the fullest step in the
@@ -4526,7 +4533,7 @@ export function thumbSvg(
   scene: SceneDto,
   pngs: ReadonlyMap<string, Buffer>,
 ): string {
-  return stepSvg(scene, pngs, 'box', fullestStep(scene));
+  return stepSvg(scene, pngs, 'box', fullestStep(scene), themeOf(scene.theme));
 }
 
 /**
@@ -4539,7 +4546,10 @@ export function stepSvg(
   pngs: ReadonlyMap<string, Buffer>,
   stagingName: StagingName,
   index: number,
+  /** The look it is shown in: its drawings' PNGs already recoloured for it (themedSvg). */
+  theme: ExplainerTheme = PAPER,
 ): string {
+  const STAGE_PAINT = stagePaint(theme);
   const staging = scene.stagings[stagingName];
   const step = scene.steps[index];
   if (!step)
@@ -4595,7 +4605,7 @@ export function stepSvg(
     const b = places[arrow.to];
     if (!a || !b) continue;
     parts.push(
-      `<line x1="${a.x + a.w / 2}" y1="${a.y + a.h / 2}" x2="${b.x + b.w / 2}" y2="${b.y + b.h / 2}" stroke="${STAGE_PAINT.muted}" stroke-width="6" stroke-linecap="round" stroke-dasharray="18 14"/>`,
+      `<line x1="${a.x + a.w / 2}" y1="${a.y + a.h / 2}" x2="${b.x + b.w / 2}" y2="${b.y + b.h / 2}" stroke="${STAGE_PAINT.line}" stroke-width="6" stroke-linecap="round" stroke-dasharray="18 14"/>`,
     );
   }
   for (const id of step.show) {
@@ -4624,7 +4634,7 @@ export function stepSvg(
         if (label.leader) {
           const [x1, y1, x2, y2] = label.leader;
           parts.push(
-            `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${STAGE_PAINT.muted}" stroke-width="3" stroke-linecap="round"/><circle cx="${x2}" cy="${y2}" r="5" fill="${STAGE_PAINT.muted}"/>`,
+            `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${STAGE_PAINT.line}" stroke-width="3" stroke-linecap="round"/><circle cx="${x2}" cy="${y2}" r="5" fill="${STAGE_PAINT.line}"/>`,
           );
         }
         label.lines.forEach((line, i) =>
@@ -4650,7 +4660,12 @@ export function stepSvg(
         parts.push(
           `<rect x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" rx="${Math.min(p.h / 2, 28)}" fill="${STAGE_PAINT.card}" stroke="${STAGE_PAINT.cardEdge}" stroke-width="3"/>`,
         );
-      parts.push(caption(p));
+      parts.push(
+        caption(
+          p,
+          thing.style === 'title' ? STAGE_PAINT.ink : STAGE_PAINT.cardInk,
+        ),
+      );
     }
   }
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${staging.w} ${staging.h}"><rect width="${staging.w}" height="${staging.h}" fill="${STAGE_PAINT.ground}"/>${parts.join('')}</svg>`;

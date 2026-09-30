@@ -423,6 +423,15 @@ export const studioOutlineSchema = z.object({
       build: z.enum(['start', 'continue']).nullable().catch(null),
     }),
   ),
+  // An explainer's "What next?" (studio-end): 2-3 follow-up questions, each a next episode.
+  next: z.array(z.string()).catch([]),
+});
+
+/** "Now you explain it" (studio-end): the points got and missing, by number, and a kind reply. */
+export const studioTeachBackSchema = z.object({
+  got: z.array(z.number().int()).catch([]),
+  missing: z.array(z.number().int()).catch([]),
+  reply: z.string(),
 });
 
 /** Story development: the premise (studio-story.ts). */

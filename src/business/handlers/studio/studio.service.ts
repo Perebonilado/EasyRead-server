@@ -21,6 +21,7 @@ import type {
   StudioMessageDto,
   StudioMessagePageDto,
   StudioPlayDto,
+  StudioTeachBackDto,
   StudioSceneDto,
   StudioShowCardDto,
   StudioShowDto,
@@ -114,6 +115,7 @@ import {
 import { SceneVoiceService } from '../admin/scene-voice.service';
 import { EntitlementsService } from '../documents/entitlements.service';
 import { StudioCastService, optionPreview } from './studio-cast.service';
+import { explainerPlay, teachBack } from './studio-engage';
 import { StudioDocumentsService } from './studio-documents.service';
 import { EVENT_LINES, historyOf, logEvent } from './studio-log';
 import {
@@ -2023,6 +2025,12 @@ export class StudioService {
       madeWith: MADE_WITH,
       ...themeOfShow(show),
       ...(score ? { score } : {}),
+      // An explainer's checkpoints, host, recap, "What next?" and teach-back (Ask 9).
+      ...explainerPlay(
+        show,
+        episode.outline,
+        made.map((s) => s.sheet),
+      ),
       scenes: made.map((s, i) => {
         // From the scene the film shows before it, by code (an explainer's
         // may carry a thing across, go into a part or push on); the first
@@ -2148,6 +2156,47 @@ export class StudioService {
     return this.playOf(show, episode, scenes, watermarked);
   }
 
+  /**
+   * "Now you explain it" on an explainer's end card: the viewer's words
+   * checked against its points (studio-engage), by its maker or, on a
+   * shared film, by anyone with its link.
+   */
+  async teachBack(
+    userId: string,
+    episodeId: string,
+    answer: unknown,
+  ): Promise<StudioTeachBackDto> {
+    const { show, episode } = await this.requireEpisode(userId, episodeId);
+    return this.checkTeachBack(show, episode, answer);
+  }
+
+  async teachBackShared(
+    token: string,
+    answer: unknown,
+  ): Promise<StudioTeachBackDto> {
+    const { show, episode } = await this.shared(token);
+    return this.checkTeachBack(show, episode, answer);
+  }
+
+  private async checkTeachBack(
+    show: StudioShowRecord,
+    episode: StudioEpisodeRecord,
+    answer: unknown,
+  ): Promise<StudioTeachBackDto> {
+    const checked = await teachBack(
+      this.llm,
+      (usage) => this.record(episode.id, 'studio_teach_back', usage),
+      show,
+      episode.outline,
+      answer,
+    );
+    if (!checked)
+      throw new ValidationError(
+        'Write a sentence or two explaining what the film taught.',
+      );
+    return checked;
+  }
+
   async sharedFile(
     token: string,
     sceneId: string,
@@ -2163,7 +2212,7 @@ export class StudioService {
 
   private async record(
     episodeId: string,
-    task: 'studio_chat' | 'studio_write',
+    task: 'studio_chat' | 'studio_write' | 'studio_teach_back',
     usage: LlmUsage,
   ): Promise<void> {
     await this.calls

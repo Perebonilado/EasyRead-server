@@ -158,6 +158,7 @@ export function bibleDto(
       traits: c.traits,
       carries: c.carries,
       ...(c.persona ? { persona: c.persona } : {}),
+      ...(c.host ? { host: true as const } : {}),
       drawing: drawings.characters.get(c.id) ?? null,
       ...(drawings.drawing?.has(c.id) ? { drawingNow: true } : {}),
       ...(drawings.candidates?.get(c.id)?.options.length
@@ -361,6 +362,7 @@ function outlineDto(outline: StudioOutline): StudioOutlineDto {
     title: outline.title,
     logline: outline.logline,
     scenes: outline.scenes,
+    ...(outline.next?.length ? { next: outline.next } : {}),
   };
 }
 

@@ -102,6 +102,7 @@ import {
   type StoryWorld,
 } from '../scene-story';
 import { genreNamed, toneNamed } from './studio-heard';
+import { nextQuestionsOf } from './studio-end';
 import { THEME_IDS, type ThemeId } from '../scene-themes';
 import {
   briefDocumentOf,
@@ -254,6 +255,11 @@ export interface StudioBrief {
   voicePace?: number;
   /** An explainer's look (scene-themes); absent, chosen by code (studio-look's themeFor). */
   look?: ThemeId;
+  /**
+   * An explainer's host (studio-host), on or off, as the maker said;
+   * absent, on for children and off for grown-ups.
+   */
+  host?: boolean;
 }
 
 /** The maker's controls of a brief, each present only when chosen. */
@@ -388,6 +394,8 @@ export function briefOf(
   const look = has('look')
     ? (oneOf(THEME_IDS)(said.look) ?? base.look)
     : base.look;
+  const host =
+    has('host') && typeof said.host === 'boolean' ? said.host : base.host;
   return {
     ...out,
     ...(document ? { document } : {}),
@@ -400,6 +408,7 @@ export function briefOf(
     ...(style ? { style } : {}),
     ...(voicePace && voicePace !== 1 ? { voicePace } : {}),
     ...(look ? { look } : {}),
+    ...(typeof host === 'boolean' ? { host } : {}),
   };
 }
 
@@ -515,6 +524,8 @@ export interface StudioCharacter {
    * is developed with them.
    */
   persona?: Persona;
+  /** An explainer's host (studio-host): opens its films, asks their questions, may act in its clips. */
+  host?: true;
 }
 
 export interface StudioSet {
@@ -874,6 +885,7 @@ export function bibleOf(raw: unknown): StudioBible {
             ? { drawn: c.drawn }
             : {}),
           ...(personaOf(c.persona) ? { persona: personaOf(c.persona)! } : {}),
+          ...(c.host === true ? { host: true as const } : {}),
         },
       ];
     });
@@ -999,6 +1011,12 @@ export interface StudioOutline {
    * explainer, and for an outline written before story development.
    */
   story?: StudioStory;
+  /**
+   * An explainer's "What next?" (studio-end): two or three questions a
+   * curious viewer might ask after it, each a next episode. Written with
+   * the outline; absent for a story, or when none were.
+   */
+  next?: string[];
 }
 
 export const MAX_SCENES = 12;
@@ -1009,8 +1027,10 @@ export function outlineOf(raw: unknown): StudioOutline {
   const said =
     raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
   const story = storyOf(said.story);
+  const next = nextQuestionsOf(said.next, text(said.title, 80));
   return {
     ...(story ? { story } : {}),
+    ...(next.length ? { next } : {}),
     title: text(said.title, 80) || 'Untitled',
     logline: text(said.logline, 300),
     scenes: (Array.isArray(said.scenes) ? said.scenes : [])

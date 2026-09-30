@@ -148,7 +148,7 @@ export function describeClipCast(
     'For story clips only, the same every time (never new people or places):',
     ...bible.characters.map(
       (c) =>
-        `- ${c.id}: ${c.name}, ${c.kind}${c.traits.length ? `, ${c.traits.join(', ')}` : ''}; looks: ${looksOf(c)}`,
+        `- ${c.id}: ${c.name}, ${c.kind}${c.traits.length ? `, ${c.traits.join(', ')}` : ''}; looks: ${looksOf(c)}${c.host ? "; the show's host, who opens each film and may act in a clip" : ''}`,
     ),
     ...bible.sets.map((s) => `- place ${s.id}: ${s.name}: ${s.look}`),
   ].join('\n');

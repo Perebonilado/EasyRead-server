@@ -495,7 +495,8 @@ export function pickPages(
  * Whom a document is written for, by code, from its own words: a level
  * its title names as a maker would ("Biology for Grade 5"), else one its
  * pages name clearly (a class, a year, a course, an exam and the kind of
- * school). Never from a name or a place. Undefined when it names none.
+ * school), else one its opening lines name ("a study guide for Year 9").
+ * Never from a name or a place. Undefined when it names none.
  */
 export function audienceOfDocument(
   title: string,
@@ -505,7 +506,14 @@ export function audienceOfDocument(
   if (titled?.band)
     return { band: titled.band, ...(titled.said ? { said: titled.said } : {}) };
   const level = levelIn(`${title}\n${text.slice(0, 20_000)}`);
-  if (!level) return undefined;
+  if (!level) {
+    // What its opening says of whom it is for, as a maker would: "a study
+    // guide for Year 9 science". Only its first lines, never the whole.
+    const opening = audienceIn(text.trim().slice(0, 300));
+    return opening?.band
+      ? { band: opening.band, ...(opening.said ? { said: opening.said } : {}) }
+      : undefined;
+  }
   const words = level.words[0]?.replace(/\s+/g, ' ').trim() ?? '';
   const said = words ? words.charAt(0).toUpperCase() + words.slice(1) : '';
   return {

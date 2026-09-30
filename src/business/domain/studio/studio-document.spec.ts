@@ -352,6 +352,15 @@ describe('whom a document is for, from its own words', () => {
     expect(who?.band).toBe('university');
   });
 
+  it('reads a level its opening lines name', () => {
+    expect(
+      audienceOfDocument(
+        'Water in Living Things',
+        'A short study guide for Year 9 science.\nCells are small.',
+      )?.band,
+    ).toBe('secondary-lower');
+  });
+
   it('guesses nothing from a document that names no level', () => {
     expect(
       audienceOfDocument('Cells', 'Cells are small. Lagos is a city.'),

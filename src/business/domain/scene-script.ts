@@ -823,9 +823,11 @@ export interface SceneScript {
   /**
    * A scene of a continuous build (scene-board.ts): its stages laid out on
    * one board, and the things the scene before left there, on the stage
-   * from its first moment with no entrance. Set by code.
+   * from its first moment with no entrance; and the rows of the board
+   * its whole section uses, which the stage spreads down the frame alike
+   * in every scene of it. Set by code.
    */
-  board?: { carried: string[] };
+  board?: { carried: string[]; rows?: [number, number] };
 }
 
 /**

@@ -184,7 +184,7 @@ describe('a continuous build on its board (part C)', () => {
     ]);
     const second = boardOf(next, first.carry);
     // On the stage from its first moment, where they were.
-    expect(second.script.board).toEqual({ carried: ['sun', 'sea', 'vapour'] });
+    expect(second.script.board?.carried).toEqual(['sun', 'sea', 'vapour']);
     const stages = stagesOf(second.script);
     expect(stages[0].show).toEqual(['sun', 'sea', 'vapour']);
     for (const [id, cell] of Object.entries(first.carry.cells))

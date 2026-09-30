@@ -66,6 +66,8 @@ import {
   placeVoice,
   placeLabels,
   placePill,
+  tieOf,
+  crosses,
   segmentsOf,
   type Collision,
   type Ink,
@@ -94,8 +96,11 @@ import {
   type StagingName,
 } from './scene-layout';
 import {
+  boardOverlaps,
   cellBox,
   frameBox,
+  slices,
+  type BoardItem,
   type BoardStage,
   type Box as BoardBox,
 } from './scene-board';
@@ -3170,7 +3175,7 @@ export function composeScene(input: ComposeInput): {
           const thing = lookup.get(id);
           const cell = cells[id];
           if (!thing || !cell) continue;
-          const room = cellBox(cell, w, h, margin);
+          const room = cellBox(cell, w, h, margin, script.board?.rows);
           out[id] = { ...fitInSlot(thing, room), room };
         }
         return out;
@@ -3928,12 +3933,20 @@ export function composeScene(input: ComposeInput): {
       // whose ink is not known, whole.
       const inks = inksOf(laidOut, geometry);
       const inked = new Set(inks.map((ink) => ink.owner));
+      // On a build's board, every thing whole, not only its ink: a board
+      // has the room, and nothing there is set on a thing at all.
       const solid = [
         ...wordsOf(laidOut, byId, {}, []).map((w) => w.box),
-        ...inks.flatMap((ink) => ink.boxes),
-        ...Object.entries(laidOut)
-          .filter(([id]) => byId.get(id)?.kind === 'drawing' && !inked.has(id))
-          .map(([, at]) => extentOf(at)),
+        ...(script.board
+          ? Object.values(laidOut).map((at) => rectOf(at))
+          : [
+              ...inks.flatMap((ink) => ink.boxes),
+              ...Object.entries(laidOut)
+                .filter(
+                  ([id]) => byId.get(id)?.kind === 'drawing' && !inked.has(id),
+                )
+                .map(([, at]) => extentOf(at)),
+            ]),
       ];
       // Each arrow's label on its arrow, clear of the things and of one another.
       const stepPills: Record<string, ScenePillDto | null> = {};
@@ -3950,6 +3963,10 @@ export function composeScene(input: ComposeInput): {
               .flatMap((other) => segmentsOf(other.path)),
           },
           stage,
+          // On a board: at its arrow's middle, well clear of captions and things, or none.
+          ...(script.board
+            ? { strict: { pad: BOARD_CLEAR, inset: stage.margin } }
+            : {}),
         });
         stepPills[arrow.id] = pill;
         if (pill) pillBoxes.push(pillBox(path, pill));
@@ -4082,6 +4099,29 @@ export function composeScene(input: ComposeInput): {
       };
       const standing = wordsOf(laidOut, byId, stepPills, arrows);
       const found = auditStep({ words: standing, ...seen });
+      // A build's board, strictly: nothing on anything at all, nor a
+      // lifted label's tie across anything but its own label.
+      if (script.board) {
+        const items = boardItems(laidOut, standing);
+        found.push(
+          ...boardOverlaps(items).map((clash): Collision => {
+            const [a, b] = clash.split(' / ');
+            return { kind: 'board-overlap', a, b };
+          }),
+        );
+        for (const { arrow, path } of arrows) {
+          const pill = stepPills[arrow.id];
+          if (!pill?.lift) continue;
+          const tie = tieOf(path, pill);
+          for (const item of items)
+            if (item.owner !== arrow.id && crosses(tie, item.box))
+              found.push({
+                kind: 'board-overlap',
+                a: `${arrow.id} tie`,
+                b: `${item.owner} ${item.what}`,
+              });
+        }
+      }
       // A bubble is on the stage with everything else, but never with the
       // bubble before it: each is checked against the step alone.
       for (const bubble of spoken) {
@@ -4111,39 +4151,47 @@ export function composeScene(input: ComposeInput): {
   };
   const box = place('box');
   const wide = place('wide');
-  /** Where a build's camera looks at each step, on a staging (scene-board frameBox). */
+  /** Where a build's camera looks at each step, on a staging (scene-board frameBox): never cutting through a thing, which the audit checks. */
   const boardViews = (
     staging: StagingName,
-    places: Record<string, ScenePlaceDto>[],
+    placed: {
+      places: Record<string, ScenePlaceDto>[];
+      pills: Record<string, ScenePillDto | null>[];
+    },
+    audit: Collision[][],
   ): BoardBox[] => {
     const { w, h, margin } = STAGINGS[staging];
     return steps.map((step, k) => {
-      const extents = new Map(
-        Object.entries(places[k] ?? {}).map(([id, at]) => {
-          const c = at.caption;
-          const boxes = [
-            at,
-            ...(c
-              ? [{ x: c.x, y: c.y, w: c.w, h: c.lines.length * c.size * 1.2 }]
-              : []),
-            ...(at.labels ?? []),
-          ];
-          const x0 = Math.min(...boxes.map((b) => b.x));
-          const y0 = Math.min(...boxes.map((b) => b.y));
-          const x1 = Math.max(...boxes.map((b) => b.x + b.w));
-          const y1 = Math.max(...boxes.map((b) => b.y + b.h));
-          return [id, { x: x0, y: y0, w: x1 - x0, h: y1 - y0 }];
-        }),
+      const frame = boardsAt.get(step)?.frame ?? 'whole';
+      // The things, which a view takes whole or leaves out; the arrows'
+      // labels too where that costs little; at a pull-out, all of them.
+      const extents = boardExtents(placed.places[k] ?? {});
+      const withLabels = boardExtents(
+        placed.places[k] ?? {},
+        step.arrows,
+        placed.pills[k] ?? {},
+        STAGINGS[staging],
       );
-      return frameBox(
-        boardsAt.get(step)?.frame ?? 'whole',
-        extents,
+      const labels = [...withLabels]
+        .filter(([id]) => id.startsWith('pill:'))
+        .map(([, box]) => box);
+      const view = frameBox(
+        frame,
+        frame === 'whole' ? withLabels : extents,
         w,
         h,
         margin,
+        labels,
       );
+      const seen = { x: view[0], y: view[1], w: view[2], h: view[3] };
+      for (const [id, extent] of extents)
+        if (slices(seen, extent))
+          (audit[k] ??= []).push({ kind: 'view-cuts', a: 'view', b: id });
+      return view;
     });
   };
+  const boxViews = script.board ? boardViews('box', box, box.audit) : null;
+  const wideViews = script.board ? boardViews('wide', wide, wide.audit) : null;
   // A directed scene's shots with no jump cut: judged where the wide stage
   // stands everyone, as the film shows it.
   if (cameraDirected) {
@@ -4350,7 +4398,7 @@ export function composeScene(input: ComposeInput): {
           places: box.places,
           pills: box.pills,
           ...(says.length ? { bubbles: box.bubbles } : {}),
-          ...(script.board ? { views: boardViews('box', box.places) } : {}),
+          ...(boxViews ? { views: boxViews } : {}),
         },
         wide: {
           w: STAGINGS.wide.w,
@@ -4358,7 +4406,7 @@ export function composeScene(input: ComposeInput): {
           places: wide.places,
           pills: wide.pills,
           ...(says.length ? { bubbles: wide.bubbles } : {}),
-          ...(script.board ? { views: boardViews('wide', wide.places) } : {}),
+          ...(wideViews ? { views: wideViews } : {}),
         },
       },
       // A scene of a build: what it carries on from the scene before.
@@ -4407,6 +4455,78 @@ function textBox(
 ): Rect {
   const w = Math.max(0, ...lines.map((l) => measureText(l, size, weight)));
   return { x: centreX - w / 2, y: top, w, h: lines.length * size * line };
+}
+
+/** How far an arrow's label on a build's board keeps from every caption, label and thing. */
+const BOARD_CLEAR = 8;
+
+const rectOf = (at: Rect): Rect => ({ x: at.x, y: at.y, w: at.w, h: at.h });
+
+/** A caption's words as set: as wide as they are, not as their room. */
+const captionBox = (at: ScenePlaceDto): Rect | null =>
+  at.caption
+    ? textBox(
+        at.caption.lines,
+        at.caption.size,
+        at.caption.x + at.caption.w / 2,
+        at.caption.y,
+      )
+    : null;
+
+/**
+ * Everything on a build's board at one step the eye reads or sees whole:
+ * each thing, and the words on the stage (its captions, labels and the
+ * arrows' labels), for the strict check (scene-board boardOverlaps).
+ */
+function boardItems(
+  places: Record<string, Place>,
+  words: readonly Words[],
+): BoardItem[] {
+  return [
+    ...Object.entries(places).map(([id, at]): BoardItem => ({
+      owner: id,
+      what: 'thing',
+      box: rectOf(at),
+    })),
+    ...words.map((w): BoardItem => ({
+      owner: w.owner,
+      what:
+        w.what === 'caption' ? 'caption' : w.what === 'pill' ? 'pill' : 'label',
+      box: w.box,
+    })),
+  ];
+}
+
+/**
+ * What on a build's board a view must take whole or leave out: each thing
+ * with its caption as set and its labels, under its id; and each arrow's
+ * label, under "pill:" and the arrow's id.
+ */
+export function boardExtents(
+  places: Record<string, ScenePlaceDto>,
+  arrows: readonly SceneArrowDto[] = [],
+  pills: Record<string, ScenePillDto | null> = {},
+  stage: { w: number; h: number } = { w: 0, h: 0 },
+): Map<string, Rect> {
+  const out = new Map<string, Rect>(
+    Object.entries(places).map(([id, at]) => {
+      const caption = captionBox(at);
+      const boxes = [at, ...(caption ? [caption] : []), ...(at.labels ?? [])];
+      const x0 = Math.min(...boxes.map((b) => b.x));
+      const y0 = Math.min(...boxes.map((b) => b.y));
+      const x1 = Math.max(...boxes.map((b) => b.x + b.w));
+      const y1 = Math.max(...boxes.map((b) => b.y + b.h));
+      return [id, { x: x0, y: y0, w: x1 - x0, h: y1 - y0 }];
+    }),
+  );
+  for (const arrow of arrows) {
+    const pill = pills[arrow.id];
+    const a = places[arrow.from];
+    const b = places[arrow.to];
+    if (pill && a && b)
+      out.set(`pill:${arrow.id}`, pillBox(arrowPath(a, b, false, stage), pill));
+  }
+  return out;
 }
 
 /** Every run of words on the stage at one step, with whose it is. */

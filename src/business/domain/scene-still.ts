@@ -45,6 +45,12 @@ import {
   type View,
 } from './scene-film';
 import { viewOnly } from './scene-figure-views';
+import {
+  faceGroupsOf,
+  faceInScene,
+  hasRigFace,
+  withRigFace,
+} from './scene-face-draw';
 import type { SceneEffectDto, SceneView } from '../../contracts';
 
 export { FLOOR_BACK_F, FLOOR_FRONT_F, floorFactor };
@@ -552,6 +558,10 @@ export function stillPlan(
     if (seen) svg = viewOnly(svg, seen.view);
     // One with no views, from the other side, is seen the other way round.
     const mirrored = seen ? seen.mirror === -1 : turned;
+    // A face of moving parts: as the player has it then (scene-face-draw),
+    // the kit's swapped faces hidden in every view.
+    if (hasRigFace(svg))
+      svg = withRigFace(svg, faceInScene(scene, id, t), faceGroupsOf(thing));
     if (thing.rig) {
       const pose = stillPose(scene, id, t);
       svg = posedRig(

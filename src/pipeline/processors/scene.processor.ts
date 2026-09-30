@@ -1502,6 +1502,8 @@ export class SceneProcessor {
           old: oldWorld(story?.bible.world?.era),
           // Drawn new for the page, with what swings and from every side: rig 3.
           rig: VIEW_RIG,
+          // And a face of moving parts (scene-face-rig).
+          faceRig: true,
         }).catch((error: unknown) => {
           this.logger.warn(
             `${who}: "${thing.id}" (a person) is set as a card: ${(error as Error).message}`,
@@ -1564,6 +1566,7 @@ export class SceneProcessor {
             // Drawn new for the page, with what swings and from every
             // side: rig 3. A sheet the book keeps is as it was drawn.
             rig: VIEW_RIG,
+            faceRig: true,
           })
         : kitAnimal
           ? await animalDrawing(kitAnimal, thing.ref, {

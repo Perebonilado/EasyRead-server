@@ -27,6 +27,14 @@
  */
 import type { SceneDto } from '../../contracts';
 import type { FigureFace } from './scene-figure';
+import {
+  GLAD_RECIPES,
+  LOW_RECIPES,
+  RECIPE_OF_FACE,
+  hash01,
+  type FaceHow,
+  type FaceRecipe,
+} from './scene-face-rig';
 
 /** What a line does to the one it is said to (W2), and the physical ones: handing, taking, showing a thing. */
 export const LINE_AIMS = [
@@ -709,6 +717,265 @@ export function feltEffects<
   }
   return out;
 }
+
+// ── Faces of moving parts: what a line is said with, and felt ──────────────
+
+/** The face a line's aim is said with, in someone's temper (the rigged face's recipes): null where the line does nothing to a face. */
+export function recipeOfAim(aim: LineAim, temper: Temper): FaceRecipe | null {
+  switch (aim) {
+    case 'asks':
+      return temper.proud ? 'sceptical' : 'curious';
+    case 'refuses':
+      return temper.shy ? 'worried' : temper.proud ? 'annoyed' : 'determined';
+    case 'warns':
+      return 'worried';
+    case 'threatens':
+      return temper.lively ? 'furious' : 'angry';
+    case 'accuses':
+      return temper.shy ? 'annoyed' : 'angry';
+    case 'begs':
+      return 'pleading';
+    case 'confesses':
+      return temper.proud ? 'embarrassed' : 'guilty';
+    case 'comforts':
+    case 'gives':
+      return 'tender';
+    case 'praises':
+      return temper.lively ? 'delight' : 'joy';
+    case 'teases':
+      return temper.lively && !temper.proud ? 'amused' : 'smug';
+    case 'jokes':
+      return 'amused';
+    case 'bargains':
+      return 'smug';
+    case 'dodges':
+      return 'amused';
+    case 'reveals':
+      return temper.lively ? 'delight' : 'surprise';
+    case 'shows':
+      return temper.proud ? 'smug' : 'curious';
+    case 'greets':
+    case 'takes':
+      return 'joy';
+    case 'agrees':
+      return 'relieved';
+    case 'orders':
+      return 'determined';
+    default:
+      return null;
+  }
+}
+
+/** Faces that are a low face sharpened, not a mask over it: said over sadness or anger as they are. */
+const KEEPS_LOW: ReadonlySet<string> = new Set([
+  'determined',
+  'pleading',
+  'sceptical',
+  'suspicious',
+  'exasperated',
+]);
+
+/** How a line is said and felt: the recipe on the face, the one beneath it, and how it comes on. */
+export interface LineFace {
+  said: FaceRecipe;
+  felt: FaceRecipe | null;
+  how: FaceHow;
+  /** A lie: a flash of what is felt just before it, and the eyes dart. */
+  lie: boolean;
+}
+
+/**
+ * The face a line is said with and what is felt under it (studio-story-
+ * plan §3B): what the line does, in the speaker's temper; the face they
+ * wear (the sheet's) felt beneath it where the two part ways, so "It's
+ * fine" said over sadness smiles with sad eyes, and a warning given in
+ * fear is a brave face over frightened eyes. A dodge is a lie: an
+ * innocent smile over guilt (a shy one's, fear). A threat or an
+ * accusation burns slowly over the line. `said` and `felt`: the sheet's
+ * own words for them, where it gave them.
+ */
+export function lineFace(
+  read: Pick<LineRead, 'aim'>,
+  temper: Temper,
+  worn: string | null,
+  own: { said?: string | null; felt?: string | null } = {},
+): LineFace | null {
+  const wornRecipe = worn ? (RECIPE_OF_FACE[worn] ?? null) : null;
+  const aimed = recipeOfAim(read.aim, temper);
+  const said = (own.said as FaceRecipe | undefined) ?? aimed ?? wornRecipe;
+  if (!said || said === 'neutral') return null;
+  const how: FaceHow =
+    read.aim === 'threatens' || read.aim === 'accuses' ? 'slow' : 'ease';
+  if (own.felt)
+    return {
+      said,
+      felt: own.felt as FaceRecipe,
+      how,
+      lie: GLAD_RECIPES.has(said) && LOW_RECIPES.has(own.felt),
+    };
+  if (read.aim === 'dodges')
+    return { said, felt: temper.shy ? 'fear' : 'guilty', how, lie: true };
+  // The face they wear beneath, where what they say is its opposite.
+  const masks =
+    wornRecipe &&
+    wornRecipe !== said &&
+    ((GLAD_RECIPES.has(said) && LOW_RECIPES.has(wornRecipe)) ||
+      (said === 'determined' &&
+        (wornRecipe === 'fear' || wornRecipe === 'sad')));
+  // Said as it is felt: the sheet's low face, where the aim's face is no
+  // sharper form of it (an angry "Who ate my cake?" is asked angrily).
+  if (
+    !masks &&
+    wornRecipe &&
+    LOW_RECIPES.has(wornRecipe) &&
+    !LOW_RECIPES.has(said) &&
+    !KEEPS_LOW.has(said)
+  )
+    return { said: wornRecipe, felt: null, how, lie: false };
+  return { said, felt: masks ? wornRecipe : null, how, lie: false };
+}
+
+/** How someone hearing a line takes it, on the rigged face: a recipe, where their eyes go a moment, and how it comes on. */
+export interface ReactionFace {
+  recipe: FaceRecipe;
+  glance?: '@up' | '@down';
+  how: FaceHow;
+}
+
+/** For each aim, the faces a listener may take it with, by temper: picked among so no one pulls the same face twice running. */
+const TAKEN: Partial<
+  Record<
+    LineAim,
+    {
+      proud?: ReactionFace[];
+      shy?: ReactionFace[];
+      lively?: ReactionFace[];
+      any: ReactionFace[];
+    }
+  >
+> = (() => {
+  const f = (
+    recipe: FaceRecipe,
+    how: FaceHow = 'ease',
+    glance?: '@up' | '@down',
+  ): ReactionFace => (glance ? { recipe, how, glance } : { recipe, how });
+  return {
+    jokes: {
+      proud: [f('exasperated', 'ease', '@up'), f('bored'), f('sceptical')],
+      shy: [f('amused'), f('shy', 'ease', '@down')],
+      lively: [f('delight', 'take'), f('amused')],
+      any: [f('amused'), f('joy'), f('delight')],
+    },
+    teases: {
+      proud: [
+        f('annoyed', 'slow'),
+        f('exasperated', 'ease', '@up'),
+        f('sceptical'),
+      ],
+      shy: [
+        f('embarrassed', 'take', '@down'),
+        f('shy', 'ease', '@down'),
+        f('sad'),
+      ],
+      any: [f('annoyed', 'take'), f('sceptical'), f('smug')],
+    },
+    threatens: {
+      proud: [f('sceptical'), f('determined'), f('annoyed')],
+      shy: [f('terror', 'take'), f('fear', 'take')],
+      any: [f('fear', 'take'), f('worried'), f('shock', 'take')],
+    },
+    warns: {
+      proud: [f('sceptical'), f('annoyed')],
+      any: [f('worried', 'take'), f('fear', 'take'), f('surprise', 'take')],
+    },
+    accuses: {
+      proud: [f('furious', 'take'), f('annoyed', 'take'), f('shock', 'take')],
+      shy: [
+        f('guilty', 'take', '@down'),
+        f('embarrassed', 'take', '@down'),
+        f('fear', 'take'),
+      ],
+      any: [
+        f('shock', 'take'),
+        f('surprise', 'take'),
+        f('guilty', 'take', '@down'),
+      ],
+    },
+    refuses: {
+      proud: [f('annoyed', 'take'), f('sceptical'), f('furious', 'slow')],
+      shy: [f('heartbroken', 'ease', '@down'), f('sad', 'ease', '@down')],
+      any: [f('sad', 'take'), f('annoyed', 'take'), f('pleading')],
+    },
+    confesses: {
+      proud: [f('furious', 'take'), f('annoyed', 'take'), f('sceptical')],
+      any: [f('shock', 'take'), f('sad'), f('annoyed', 'take')],
+    },
+    reveals: {
+      any: [f('shock', 'take'), f('surprise', 'take'), f('delight', 'take')],
+    },
+    begs: {
+      proud: [f('sceptical'), f('smug'), f('thinking')],
+      shy: [f('worried'), f('tender')],
+      any: [f('thinking'), f('tender'), f('sceptical')],
+    },
+    comforts: {
+      shy: [f('shy', 'ease', '@down'), f('relieved')],
+      any: [f('relieved'), f('tender'), f('joy')],
+    },
+    praises: {
+      proud: [f('proud'), f('smug')],
+      shy: [f('shy', 'ease', '@down'), f('embarrassed', 'ease', '@down')],
+      lively: [f('delight', 'take'), f('joy')],
+      any: [f('joy'), f('proud'), f('tender')],
+    },
+    greets: { any: [f('joy'), f('delight'), f('tender')] },
+    gives: { any: [f('delight', 'take'), f('joy'), f('tender')] },
+    asks: {
+      proud: [f('sceptical'), f('smug')],
+      any: [f('thinking'), f('confused'), f('curious')],
+    },
+    bargains: {
+      proud: [f('sceptical'), f('smug')],
+      any: [f('thinking'), f('suspicious'), f('curious')],
+    },
+    shows: { any: [f('surprise', 'take'), f('curious'), f('delight', 'take')] },
+    dodges: { any: [f('suspicious'), f('sceptical'), f('annoyed')] },
+    orders: {
+      proud: [f('annoyed'), f('exasperated', 'ease', '@up')],
+      any: [f('determined'), f('worried')],
+    },
+  };
+})();
+
+/**
+ * The face someone takes a line with, in character, varied: of the faces
+ * their temper takes that aim with, one picked by `pick` (0 to 1, stable
+ * for the line and the listener), never `last` (the face they took the
+ * line before with) when there is another. So a proud one rolls their
+ * eyes at one joke and looks bored at the next. Null where a line leaves
+ * the face be.
+ */
+export function reactionFace(
+  aim: LineAim,
+  temper: Temper,
+  pick: number,
+  last: string | null = null,
+): ReactionFace | null {
+  const one = TAKEN[aim];
+  if (!one) return null;
+  const list =
+    (temper.proud && one.proud) ||
+    (temper.shy && one.shy) ||
+    (temper.lively && one.lively) ||
+    one.any;
+  const open = list.filter((r) => r.recipe !== last);
+  const from = open.length ? open : list;
+  return from[Math.min(from.length - 1, Math.floor(pick * from.length))];
+}
+
+/** A stable pick for a listener and a line: which of their faces they take it with. */
+export const reactionPick = (who: string, line: number) =>
+  hash01(`react:${who}`, line);
 
 // ── The check: which acting each line got ──────────────────────────────────
 

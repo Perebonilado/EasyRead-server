@@ -53,6 +53,8 @@ export function sceneFingerprint(
       subject: bible?.subject ?? '',
       maths: bible?.maths ?? false,
       audience: brief.audience,
+      // Whom it teaches, where the maker said more than the four words.
+      ...(brief.who ? { who: brief.who } : {}),
     });
   const who = new Set([
     ...sheet.onStage.map((p) => p.who),
@@ -104,6 +106,7 @@ export function briefDto(brief: StudioBrief): StudioBriefDto {
     characters: brief.characters,
     include: brief.include,
     sourceChars: brief.source?.length ?? 0,
+    ...(brief.who ? { who: { ...brief.who } } : {}),
     ...Object.fromEntries(
       BRIEF_CONTROLS.flatMap((key) => (brief[key] ? [[key, brief[key]]] : [])),
     ),
@@ -404,6 +407,7 @@ export function messageDto(message: StudioMessageRecord): StudioMessageDto {
       : null,
     content: message.content,
     choices: message.meta?.choices ?? [],
+    ...(message.meta?.also?.length ? { also: message.meta.also } : {}),
     refused: Boolean(message.meta?.refused),
     createdAt: message.createdAt.toISOString(),
   };

@@ -50,6 +50,12 @@ export type MakerPace = 'relaxed' | 'natural' | 'brisk';
 /** Everything the voice's pace follows from. */
 export interface PaceBrief {
   band: AudienceBand;
+  /**
+   * The audience's own narration rate, what the viewer knows and their
+   * English already in it (the audience profile's recipe); in place of
+   * BASE_WPM, `prior` and `language` when given.
+   */
+  baseWpm?: number;
   prior?: PriorKnowledge;
   maker?: MakerPace;
   /** A viewer learning the film's language is spoken to more slowly. */
@@ -174,13 +180,17 @@ export function densityOf(
   return Math.max(DENSITY_FLOOR, rate);
 }
 
-/** The rate a sentence's whole brief comes to, before what it holds. */
-export function briefRate(brief: PaceBrief): number {
+/**
+ * Whom it is for, in words a minute: the audience recipe's rate where
+ * there is one, else the band's, slower for a viewer new to it or
+ * learning the language, quicker when revising.
+ */
+export function audienceWpm(brief: PaceBrief): number {
+  if (brief.baseWpm && brief.baseWpm > 0) return brief.baseWpm;
   return (
+    BASE_WPM[brief.band] *
     PRIOR_RATE[brief.prior ?? 'some'] *
-    MAKER_RATE[brief.maker ?? 'natural'] *
-    (brief.language === 'learning' ? LEARNING_RATE : 1) *
-    clamp(brief.nudge ?? 1, NUDGE_RANGE[0], NUDGE_RANGE[1])
+    (brief.language === 'learning' ? LEARNING_RATE : 1)
   );
 }
 
@@ -210,8 +220,8 @@ export function targetWpm(
   terms: readonly string[] = [],
 ): number {
   return Math.round(
-    BASE_WPM[brief.band] *
-      briefRate(brief) *
+    audienceWpm(brief) *
+      makerRate(brief) *
       densityOf(sentence.say, { terms, band: brief.band }) *
       (DELIVERY_RATE[sentence.delivery] ?? 1),
   );

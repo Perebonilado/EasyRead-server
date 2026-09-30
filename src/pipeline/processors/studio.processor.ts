@@ -3,7 +3,16 @@ import { ConfigService } from '@nestjs/config';
 import type { DocumentProfile } from '../../business/domain/scene-profile';
 import { progressNow } from '../../business/domain/work-progress';
 import {
-  AUDIENCE_STAGE,
+  checksAt,
+  profileOf,
+  recipeFor,
+  stageOf,
+} from '../../business/domain/studio/studio-audience';
+import {
+  plainExplainer,
+  rideAlong,
+} from '../../business/domain/studio/studio-plain';
+import {
   bibleOf,
   explainerSheetOf,
   outlineOf,
@@ -237,9 +246,7 @@ export function studioMakeOf(
   gestures: ReadonlySet<string> = new Set(),
 ): Omit<Parameters<SceneProcessor['make']>[0], 'base' | 'who'> {
   const story = row.sheet?.kind === 'story';
-  const stage = show.brief.audience
-    ? AUDIENCE_STAGE[show.brief.audience]
-    : null;
+  const stage = stageOf(show.brief);
   const lesson = {
     teach: episode.outline?.scenes[row.position]?.teach ?? null,
     source: show.brief.source,
@@ -1998,9 +2005,14 @@ export class StudioProcessor {
     request?: string,
   ): Promise<ExplainerSheet> {
     const scene = outline.scenes[k];
-    const stage = show.brief.audience
-      ? AUDIENCE_STAGE[show.brief.audience]
-      : null;
+    const stage = stageOf(show.brief);
+    // Whom it teaches, as their recipe has it, and whether this scene is
+    // one that asks them a question.
+    const who = profileOf(show.brief);
+    const recipe = who ? recipeFor(who) : null;
+    const check = recipe
+      ? (checksAt(outline.scenes, recipe, who)[k] ?? false)
+      : false;
     const teach = scene?.teach ?? scene?.summary ?? show.brief.idea;
     // A page fuller than the seconds can say: the writer keeps to its main
     // ideas, and does not run long to say them all.
@@ -2021,7 +2033,13 @@ export class StudioProcessor {
       material: teach,
       context: `This is scene ${k + 1} of ${outline.scenes.length} of the animated lesson "${outline.title}": "${scene?.title ?? ''}", about ${scene?.seconds ?? 30} seconds. ${around} Teach only what this scene says; the scenes either side teach the rest.${fuller ? ` The page is fuller than ${scene?.seconds ?? 30} seconds can say: keep to its main ideas and leave out the detail.` : ''}`,
       profile: [
-        describeScene(stage, scene?.seconds ?? 30),
+        describeScene(
+          stage,
+          scene?.seconds ?? 30,
+          recipe
+            ? { recipe, check, ...(who?.said ? { said: who.said } : {}) }
+            : null,
+        ),
         `Subject: ${bible.subject || show.brief.idea}. Tone: ${show.brief.tone ?? 'calm'}.`,
       ]
         .filter(Boolean)
@@ -2056,16 +2074,29 @@ export class StudioProcessor {
       maths: bible.maths,
       planned: scene?.seconds ?? null,
     };
-    const sheetFrom = (draft: unknown): ExplainerSheet =>
-      explainerSheetOf({
+    // Its words held to its audience by code: too-long sentences split and
+    // stiff words made plain; what is still too hard rides along on the
+    // one send-back, if there is one, and is otherwise only logged.
+    const plainOf = (draft: unknown) => {
+      const written = explainerSheetOf({
         kind: 'explainer',
         title: scene?.title,
         transition: 'cut',
         draft,
       });
-    let sheet = sheetFrom(first.value);
+      return recipe
+        ? plainExplainer(written, {
+            recipe,
+            material: teach,
+            terms: bible.pictures.map((p) => p.name),
+            check,
+          })
+        : { sheet: written, fixes: [], problems: [], measure: null };
+    };
+    let plain = plainOf(first.value);
+    let sheet = plain.sheet;
     let problems: SheetProblem[] = checkExplainer(sheet, options).problems;
-    const reasons = sentBackFor(problems);
+    const reasons = rideAlong(sentBackFor(problems), plain.problems);
     if (reasons.length) {
       this.logger.log(
         `studio ${episode.id} s${k + 1}: goes back: ${reasons.map((p) => p.message).join(' ')}`,
@@ -2076,10 +2107,15 @@ export class StudioProcessor {
         problems: reasons.map((p) => p.message),
       });
       await this.record(episode.id, again.usage, 'scene_write');
-      const second = sheetFrom(again.value);
-      const left = checkExplainer(second, options).problems;
-      if (worse(left, problems) <= 0) [sheet, problems] = [second, left];
+      const next = plainOf(again.value);
+      const left = checkExplainer(next.sheet, options).problems;
+      if (worse(left, problems) <= 0)
+        [sheet, problems, plain] = [next.sheet, left, next];
     }
+    if (plain.measure && (plain.fixes.length || plain.problems.length))
+      this.logger.log(
+        `studio ${episode.id} s${k + 1}: plain words: grade ${plain.measure.grade} (bar ${recipe?.grade}), longest ${plain.measure.longest}${plain.fixes.length ? `; fixed: ${plain.fixes.join('; ')}` : ''}${plain.problems.length ? `; left: ${plain.problems.map((p) => p.message).join(' ')}` : ''}`,
+      );
     // A picture the writer still got wrong is set in type, not handed to
     // the maker to put right.
     if (errorsIn(problems).length) {

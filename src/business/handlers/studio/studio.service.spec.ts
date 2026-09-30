@@ -1429,3 +1429,174 @@ describe('the producer gathers the brief, held to the maker’s own words', () =
     );
   });
 });
+
+describe('the producer asks whom an explainer is for, and code hears it (Ask 8)', () => {
+  /** A new explainer at its brief, the producer mocked: no model is called. */
+  function explainer(so: Record<string, unknown> = {}) {
+    const studio = studioInMemory();
+    studio.shows.set('s1', {
+      ...studio.shows.get('s1')!,
+      format: 'explainer',
+      brief: briefOf(so),
+      bible: null,
+    });
+    studio.episodes.set('e0', {
+      ...studio.episodes.get('e0')!,
+      phase: 'brief',
+      outline: null,
+    });
+    studio.scenes.clear();
+    const say = async (message: string, answer: Record<string, unknown>) => {
+      for (const key of Object.keys(studio.answer)) delete studio.answer[key];
+      Object.assign(studio.answer, {
+        reply: 'Lovely.',
+        choices: [],
+        action: 'none',
+        ...answer,
+      });
+      const done = await studio.service.turn(
+        'u1',
+        's1',
+        { episodeId: 'e0', message },
+        () => undefined,
+      );
+      return {
+        message: done.message,
+        brief: studio.shows.get('s1')!.brief,
+        dto: done.show.brief,
+      };
+    };
+    return { studio, say };
+  }
+
+  it('asks with one row of chips, and what they know as a second, when the audience is what is missing', async () => {
+    const { say } = explainer();
+    const { message } = await say('Explain the water cycle', {
+      reply: 'Great topic! Who is it for?',
+      choices: ['Children', 'Adults'],
+      brief: { format: 'explainer', idea: 'The water cycle' },
+    });
+    expect(message.choices).toEqual([
+      'Young kids (4–7)',
+      'Kids (8–11)',
+      'Teens',
+      'University',
+      'Work',
+      'Anyone curious',
+    ]);
+    expect(message.also).toEqual(['New to it', 'Knows a bit', 'Revising']);
+  });
+
+  it('takes a chip tapped with its second row as the profile, and the four words from it', async () => {
+    const { say } = explainer({
+      format: 'explainer',
+      idea: 'The water cycle',
+    });
+    // The producer took "Kids" as young children; the chip says 8 to 11.
+    const { brief, dto, message } = await say('Kids (8–11) · New to it', {
+      reply: 'How long should it be?',
+      choices: ['1 minute', '2 minutes'],
+      brief: { audience: 'young children' },
+    });
+    expect(brief.who).toEqual({
+      band: 'primary-upper',
+      said: 'Kids (8–11)',
+      prior: 'new',
+    });
+    expect(brief.audience).toBe('children');
+    expect(dto.who).toEqual(brief.who);
+    // The next question is the producer's own.
+    expect(message.choices).toEqual(['1 minute', '2 minutes']);
+    expect(message.also).toBeUndefined();
+  });
+
+  it('hears a grade, a year or a course said in words, and never asks what they know when they said it', async () => {
+    const { say } = explainer();
+    const grade = await say(
+      'An explainer on photosynthesis for my Year 9 class, they are revising for a test next week',
+      {
+        brief: {
+          format: 'explainer',
+          idea: 'Photosynthesis',
+          audience: 'teens',
+        },
+      },
+    );
+    expect(grade.brief.who).toEqual({
+      band: 'secondary-lower',
+      said: 'Year 9',
+      prior: 'revising',
+      goal: 'exam',
+    });
+    const nursing = explainer();
+    const { brief } = await nursing.say(
+      'Blood pressure for first-year nursing students who need hand-holding',
+      {
+        brief: {
+          format: 'explainer',
+          idea: 'Blood pressure',
+          audience: 'adults',
+        },
+      },
+    );
+    expect(brief.who).toMatchObject({
+      band: 'university',
+      prior: 'new',
+      support: 'extra',
+    });
+    expect(brief.audience).toBe('adults');
+  });
+
+  it('asks the second row only when nothing said what they know', async () => {
+    const { say } = explainer();
+    const { message } = await say(
+      'Explain budgets to someone brand new to money',
+      {
+        brief: { format: 'explainer', idea: 'Budgets' },
+      },
+    );
+    expect(message.choices).toContain('Kids (8–11)');
+    expect(message.also).toBeUndefined();
+  });
+
+  it('takes the level the maker’s own pasted text names, never a loose word in it', async () => {
+    const { say } = explainer({ format: 'explainer', idea: 'Enzymes' });
+    const notes = `BCH 201 lecture notes: enzymes. 200 Level, first semester. ${'Enzymes speed up reactions in children and adults alike. '.repeat(20)}`;
+    const { brief } = await say(notes, { brief: {} });
+    expect(brief.who).toMatchObject({ band: 'university', said: '200 Level' });
+    expect(brief.audience).toBe('adults');
+  });
+
+  it('keeps the producer’s own chips for a story', async () => {
+    const { say } = explainer();
+    const { message } = await say('A story about a lost kite', {
+      choices: ['Children', 'Adults'],
+      brief: { format: 'story', idea: 'A lost kite' },
+    });
+    expect(message.choices).toEqual(['Children', 'Adults']);
+    expect(message.also).toBeUndefined();
+  });
+
+  it('changes the profile by hand from the brief card, and takes it back', async () => {
+    const { studio } = explainer({
+      format: 'explainer',
+      idea: 'Tax',
+      who: { band: 'primary-upper', said: 'Grade 5' },
+    });
+    const work = await studio.service.updateBrief('u1', 's1', {
+      who: { band: 'professional' },
+    });
+    expect(work.brief).toMatchObject({
+      audience: 'adults',
+      who: { band: 'professional' },
+    });
+    expect(work.brief.who?.said).toBeUndefined();
+    const knows = await studio.service.updateBrief('u1', 's1', {
+      who: { prior: 'some' },
+    });
+    expect(knows.brief.who).toEqual({ band: 'professional', prior: 'some' });
+    const gone = await studio.service.updateBrief('u1', 's1', { who: null });
+    expect(gone.brief.who).toBeUndefined();
+    expect(gone.brief.audience).toBe('adults');
+  });
+});

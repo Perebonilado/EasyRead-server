@@ -1,0 +1,39 @@
+{
+  "id": "nursing-blood-pressure",
+  "said": "Blood pressure for a first-year nursing student who is new to it",
+  "expect": { "band": "university", "prior": "new" },
+  "pictures": ["artery", "blood pressure cuff"],
+  "scenes": [
+    {
+      "seconds": 40,
+      "teach": "Blood pressure is the force of blood pushing against the walls of the arteries. It is written as two numbers in millimetres of mercury (mmHg): the systolic pressure over the diastolic pressure, such as 120/80.",
+      "says": [
+        "Every beat of your heart pushes blood into your arteries.",
+        "Blood pressure is the force of that blood on the artery walls.",
+        "We write it as two numbers, like 120 over 80.",
+        "The unit is millimetres of mercury, or mmHg."
+      ]
+    },
+    {
+      "seconds": 40,
+      "teach": "The systolic pressure is the peak pressure when the heart contracts. The diastolic pressure is the lowest pressure, when the heart relaxes between beats.",
+      "says": [
+        "The top number is the systolic pressure.",
+        "It is the highest point, when the heart squeezes.",
+        "The bottom number is the diastolic pressure, when the heart relaxes.",
+        "So which number is higher, and why?",
+        "The systolic one, because the heart is pushing hardest."
+      ],
+      "question": 3
+    },
+    {
+      "seconds": 40,
+      "teach": "A reading at or above 130/80 on repeated checks is often classed as high blood pressure, or hypertension. Nurses record the reading, the arm used and the patient's position.",
+      "says": [
+        "A reading of 130 over 80 or more, again and again, may be hypertension.",
+        "That is the word for high blood pressure.",
+        "Always write down the reading, the arm you used and how the patient sat."
+      ]
+    }
+  ]
+}

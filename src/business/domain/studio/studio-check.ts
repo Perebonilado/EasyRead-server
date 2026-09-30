@@ -131,7 +131,9 @@ export interface SheetProblem {
     | 'empty'
     | 'continuity'
     | 'storyboard'
-    | 'kept';
+    | 'kept'
+    /** An explainer's words too hard for its audience (studio-plain): rides along on a send-back, never one alone. */
+    | 'plain';
   /** In plain words, for the writer. */
   message: string;
   /** The beat it is about, from 0; null for the whole scene. */

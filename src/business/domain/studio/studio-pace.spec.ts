@@ -1,8 +1,9 @@
 import { briefOf, EMPTY_BRIEF } from './studio';
+import type { AudienceBand as PaceBand } from '../scene-pace';
+import type { AudienceBand } from './studio-audience';
 import {
   NUDGE_MUCH,
   NUDGE_STEP,
-  bandOfBrief,
   nudged,
   paceAsked,
   studioMakerRate,
@@ -11,19 +12,44 @@ import {
 } from './studio-pace';
 
 describe("an explainer's voice pace from its brief", () => {
-  it('reads the audience as a band: a young child is spoken to more slowly than an adult', () => {
-    expect(bandOfBrief({ audience: 'young children' })).toBe('early-years');
-    expect(bandOfBrief({ audience: 'adults' })).toBe('general-adult');
-    expect(bandOfBrief({ audience: null })).toBe('general-adult');
+  it('shares its bands with the audience profile, both ways', () => {
+    const one: PaceBand = 'secondary-upper' as AudienceBand;
+    const other: AudienceBand = one as PaceBand;
+    expect(other).toBe('secondary-upper');
+  });
+
+  it('reads whom it is for from the audience profile, its rate from its recipe', () => {
+    expect(studioPaceBrief({ audience: 'young children' })).toEqual({
+      band: 'early-years',
+      baseWpm: 110,
+    });
+    expect(studioPaceBrief({ audience: null })).toEqual({
+      band: 'general-adult',
+    });
+    // Learning English: the recipe's rate is a tenth slower.
+    expect(
+      studioPaceBrief({
+        audience: 'adults',
+        who: {
+          band: 'university',
+          prior: 'some',
+          goal: 'understand',
+          language: 'learning',
+          support: 'normal',
+        },
+      }).baseWpm,
+    ).toBe(Math.round(155 * 0.9));
   });
 
   it('takes the Pace chips as the voice’s pace, and a nudge from the chat', () => {
     expect(studioPaceBrief({ audience: 'teens', pace: 'snappy' })).toEqual({
       band: 'secondary-lower',
+      baseWpm: 142,
       maker: 'brisk',
     });
     expect(studioPaceBrief({ audience: 'adults', voicePace: 1.06 })).toEqual({
       band: 'general-adult',
+      baseWpm: 155,
       nudge: 1.06,
     });
     expect(studioMakerRate({ audience: 'adults', pace: 'gentle' })).toBe(0.93);

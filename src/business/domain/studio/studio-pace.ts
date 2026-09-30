@@ -2,26 +2,18 @@
  * A Studio explainer's voice pace from its brief: whom it is for as a band
  * (scene-pace), the maker's Pace chips (gentle, lively, snappy) as the
  * voice's pace, and their "a bit faster" in the chat as a nudge
- * (studio-explainer-plan, Ask 1 §6). Kept in the Studio's own module: the
- * audience profile (Ask 8) replaces the band below with its own.
+ * (studio-explainer-plan, Ask 1 §6). Whom it is for is the audience
+ * profile's (studio-audience): its band and its recipe's rate.
  */
 import {
   NUDGE_RANGE,
   makerRate,
   motionFactor,
-  type AudienceBand,
   type MakerPace,
   type PaceBrief,
 } from '../scene-pace';
-import type { StudioAudience, StudioBrief, StudioPace } from './studio';
-
-/** The Studio's four audiences as bands, until the audience profile says more. */
-export const STUDIO_AUDIENCE_BAND: Record<StudioAudience, AudienceBand> = {
-  'young children': 'early-years',
-  children: 'primary-upper',
-  teens: 'secondary-lower',
-  adults: 'general-adult',
-};
+import type { StudioBrief, StudioPace } from './studio';
+import { profileOf, recipeFor } from './studio-audience';
 
 /** The brief's Pace chips as the voice's pace: one vocabulary for both. */
 export const STUDIO_PACE_MAKER: Record<StudioPace, MakerPace> = {
@@ -30,18 +22,20 @@ export const STUDIO_PACE_MAKER: Record<StudioPace, MakerPace> = {
   snappy: 'brisk',
 };
 
-/** The band a brief's audience comes to; a brief with none is for anyone grown up. */
-export const bandOfBrief = (
-  brief: Pick<StudioBrief, 'audience'>,
-): AudienceBand =>
-  brief.audience ? STUDIO_AUDIENCE_BAND[brief.audience] : 'general-adult';
+/** What of a brief an explainer's voice pace follows from. */
+type PacedBrief = Pick<StudioBrief, 'audience' | 'who' | 'pace' | 'voicePace'>;
 
-/** An explainer's voice pace, from its brief. */
-export function studioPaceBrief(
-  brief: Pick<StudioBrief, 'audience' | 'pace' | 'voicePace'>,
-): PaceBrief {
+/**
+ * An explainer's voice pace, from its brief: its audience's band and
+ * narration rate as the audience profile's recipe has them (what they
+ * know and their English already in it), the maker's Pace chip and any
+ * nudge from the chat. A brief with no audience is for anyone grown up.
+ */
+export function studioPaceBrief(brief: PacedBrief): PaceBrief {
+  const who = profileOf(brief);
   return {
-    band: bandOfBrief(brief),
+    band: who?.band ?? 'general-adult',
+    ...(who ? { baseWpm: recipeFor(who).wpm } : {}),
     ...(brief.pace ? { maker: STUDIO_PACE_MAKER[brief.pace] } : {}),
     ...(brief.voicePace && brief.voicePace !== 1
       ? { nudge: brief.voicePace }
@@ -50,18 +44,15 @@ export function studioPaceBrief(
 }
 
 /** The maker's share of the voice's pace a brief comes to (scene-pace makerRate). */
-export const studioMakerRate = (
-  brief: Pick<StudioBrief, 'audience' | 'pace' | 'voicePace'>,
-): number => makerRate(studioPaceBrief(brief));
+export const studioMakerRate = (brief: PacedBrief): number =>
+  makerRate(studioPaceBrief(brief));
 
 /**
  * How fast an explainer's picture moves, for whom and at the maker's pace
  * (studio-explainer-plan, Ask 3): read by the motion grammar once it is
  * built, 1 an adult's.
  */
-export const studioMotionFactor = (
-  brief: Pick<StudioBrief, 'audience' | 'pace' | 'voicePace'>,
-): number => {
+export const studioMotionFactor = (brief: PacedBrief): number => {
   const pace = studioPaceBrief(brief);
   return motionFactor(pace.band, pace.maker);
 };

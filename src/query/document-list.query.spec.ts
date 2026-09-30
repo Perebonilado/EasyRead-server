@@ -53,6 +53,18 @@ describe("a person's own documents", () => {
   });
 });
 
+describe("the Studio's own documents", () => {
+  it("are never listed, searched or counted among the reader's", async () => {
+    const { query, wheres } = build([{ documentId: 'd1' }]);
+    await query.execute('u1', { search: 'cells' });
+    await query.hasAny('u1');
+    await query.recentlyRead('u1', 1);
+    for (const where of wheres)
+      expect(where).toMatchObject({ origin: 'reader' });
+    expect(wheres).toHaveLength(3);
+  });
+});
+
 describe('recently read', () => {
   it("ranges over a person's own documents by default", async () => {
     const { query, wheres } = build([{ documentId: 'd1' }]);

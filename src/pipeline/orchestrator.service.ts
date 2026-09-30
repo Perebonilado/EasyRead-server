@@ -30,6 +30,13 @@ import type { SimplifiedPageRepository } from '../business/repositories/simplifi
  *   uploaded ─► convert ─► extract ─┬─► summarize ─► simplify(standard, per page)
  *                                   ├─► topics   (also needs summarize)
  *                                   └─► embed
+ *
+ * The Studio's own documents are read lightly (studio-explainer-plan,
+ * Ask 7): convert, extract, then straight to topics, so the maker has
+ * chapters to choose from in seconds. No summary, no simplified pages, no
+ * embeddings, and OCR only later, of the pages the maker chooses.
+ *
+ *   studio ─► convert ─► extract ─► topics ─► ready
  */
 @Injectable()
 export class PipelineOrchestrator {
@@ -77,6 +84,10 @@ export class PipelineOrchestrator {
     contentVersion: number,
   ): Promise<void> {
     const doc = await this.documents.findById(documentId);
+    if (doc?.props.origin === 'studio') {
+      await this.queue.enqueueStep('topics', { documentId, contentVersion });
+      return;
+    }
     const empty = await this.pages.countEmpty(documentId);
     // A maths page is read again from its image, unless its equations came
     // from the deck itself.
@@ -183,12 +194,10 @@ export class PipelineOrchestrator {
     if (!doc) return;
 
     if (doc.props.status !== 'ready') {
-      const required: PipelineStep[] = [
-        'convert',
-        'extract',
-        'summarize',
-        'simplify_standard',
-      ];
+      const required: PipelineStep[] =
+        doc.props.origin === 'studio'
+          ? ['convert', 'extract', 'topics']
+          : ['convert', 'extract', 'summarize', 'simplify_standard'];
       if (!(await this.runs.allDone(documentId, required))) return;
 
       doc.markReady();

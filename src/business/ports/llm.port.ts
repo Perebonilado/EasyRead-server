@@ -118,7 +118,8 @@ export interface StudioTurnDraft {
     | 'choose'
     | 'scene'
     | 'make'
-    | 'episode';
+    | 'episode'
+    | 'pages';
   /** For "redraw": the one character whose look is to change, by name or id; for "choose", whose new drawing is chosen. */
   character?: string | null;
   /** For "choose": which of the new drawings waiting, from 1; 0 to keep the one they have. */
@@ -127,7 +128,7 @@ export interface StudioTurnDraft {
   scene: number | null;
   /** For a change to several scenes: each one's number, from 1, the first first. Absent, only `scene`. */
   scenes?: number[];
-  /** The change asked for, in the maker's words. */
+  /** The change asked for, in the maker's words; for "pages", which part of their document, in their words. */
   request: string | null;
   /**
    * For "outline": the change is to the story itself (the plot, who

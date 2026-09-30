@@ -7,7 +7,7 @@ import {
 import { narratorRuleOf } from '../../domain/studio/studio-narrator';
 import { heardBrief } from '../../domain/studio/studio-heard';
 import { audienceChips, whoHeard } from '../../domain/studio/studio-audience';
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { randomBytes, randomUUID } from 'node:crypto';
 import type {
   SceneDto,
@@ -107,6 +107,7 @@ import {
 import { SceneVoiceService } from '../admin/scene-voice.service';
 import { EntitlementsService } from '../documents/entitlements.service';
 import { StudioCastService, optionPreview } from './studio-cast.service';
+import { StudioDocumentsService } from './studio-documents.service';
 import { EVENT_LINES, historyOf, logEvent } from './studio-log';
 import {
   bibleDto,
@@ -185,6 +186,8 @@ export class StudioService {
     private readonly entitlements: EntitlementsService,
     private readonly cast: StudioCastService,
     private readonly voices: SceneVoiceService,
+    /** The show's document, its pages chosen in words (studio-documents). */
+    @Optional() private readonly documents?: StudioDocumentsService,
   ) {}
 
   // ── Whose it is ─────────────────────────────────────────────────────────
@@ -644,9 +647,51 @@ export class StudioService {
     let note: string | null = null;
     /** What was set going on scenes, said in code's own words. */
     let tried: string | null = null;
+    /** The chips code asks the next thing with, in place of the producer's. */
+    let asked: { choices: string[]; also?: string[] } | null = null;
+    // Pages of the show's document chosen in words ("chapter 4", "pages
+    // 40–55"): heard by code first, whatever the producer took them for;
+    // a subject ("the part about osmosis") only when it took them so.
+    const pagesHeard =
+      !draft.refuse &&
+      this.documents &&
+      show.brief.document &&
+      (draft.action === 'pages' || draft.action === 'none')
+        ? await this.documents
+            .heard(
+              show,
+              draft.action === 'pages' && draft.request ? draft.request : said,
+            )
+            .catch(() => null)
+        : null;
+    if (pagesHeard && pagesHeard.how !== 'subject' && draft.action === 'none')
+      draft = { ...draft, action: 'pages' };
     try {
       if (!draft.refuse)
         switch (draft.action) {
+          case 'pages': {
+            if (!this.documents || !show.brief.document) {
+              note =
+                'Give me a document first: the paperclip beside the box adds one.';
+              break;
+            }
+            if (!pagesHeard) {
+              note =
+                'Which part of it? Tell me a chapter or the pages, or choose them on the card.';
+              break;
+            }
+            const chosen = await this.documents.chooseHeard(
+              show,
+              episode,
+              pagesHeard,
+            );
+            episode = chosen.episode;
+            tried =
+              chosen.ask?.content ??
+              `I'll plan it from ${chosen.line.replace(/^Using /, '')}.`;
+            asked = chosen.ask;
+            break;
+          }
           case 'outline':
             // A change to the story itself (the plot, who someone is, the
             // ending) develops the story again, as its card does; one to
@@ -816,15 +861,20 @@ export class StudioService {
       meta: {
         // An explainer's audience is asked with its own chips: one row,
         // and what they know as a second only when nothing said it yet.
-        ...(note || draft.refuse || draft.action !== 'none'
+        ...(asked
           ? {
-              choices: note
-                ? []
-                : draft.choices.slice(0, 5).map((c) => c.slice(0, 40)),
+              choices: asked.choices,
+              ...(asked.also ? { also: asked.also } : {}),
             }
-          : (audienceChips(brief, makerSaid) ?? {
-              choices: draft.choices.slice(0, 5).map((c) => c.slice(0, 40)),
-            })),
+          : note || draft.refuse || draft.action !== 'none'
+            ? {
+                choices: note
+                  ? []
+                  : draft.choices.slice(0, 5).map((c) => c.slice(0, 40)),
+              }
+            : (audienceChips(brief, makerSaid) ?? {
+                choices: draft.choices.slice(0, 5).map((c) => c.slice(0, 40)),
+              })),
         action: draft.action,
         refused: draft.refuse,
       },

@@ -3,7 +3,13 @@ import { ConfigService } from '@nestjs/config';
 import type { DocumentProfile } from '../../business/domain/scene-profile';
 import { progressNow } from '../../business/domain/work-progress';
 import {
+  pagesWords,
+  scenePages,
+} from '../../business/domain/studio/studio-document';
+import { StudioMaterialService } from './studio-material';
+import {
   checksAt,
+  describeAudience,
   profileOf,
   recipeFor,
   stageOf,
@@ -495,6 +501,8 @@ export class StudioProcessor {
     private readonly cast: StudioCastService,
     @Inject(JOB_QUEUE) private readonly queue: JobQueuePort,
     @Optional() private readonly config?: ConfigService,
+    /** An explainer made from a document: its pages, as notes or as they are (studio-material). */
+    @Optional() private readonly material?: StudioMaterialService,
   ) {}
 
   /** How a story's script is written and read (studio-script-writer): fast and cheap unless a setting says otherwise. */
@@ -1249,8 +1257,11 @@ export class StudioProcessor {
     const earlier = (await this.studio.listEpisodes(show.id)).filter(
       (e) => e.number < episode.number,
     );
+    // An explainer made from pages of a document: those pages, as their
+    // own text or as their teacher's notes, are what it is written from.
+    const pages = story ? null : await this.pagesFor(show, episode);
     const ask = {
-      brief: describeBrief(show.brief),
+      brief: pages?.brief ?? describeBrief(show.brief),
       bible: describeBible(bible, story),
       ...(earlier.length ? { before: describeEarlier(earlier) } : {}),
     };
@@ -1320,7 +1331,98 @@ export class StudioProcessor {
       if (left.length <= problems.length) [outline, problems] = [second, left];
     }
     if (kept) outline = { ...outline, story: kept };
+    // Each scene tied to the pages it teaches.
+    if (pages) {
+      const tied = scenePages(outline.scenes, pages.ranges);
+      outline = {
+        ...outline,
+        scenes: outline.scenes.map((scene, k) => ({
+          ...scene,
+          pages: tied[k],
+        })),
+      };
+    }
     await this.finishOutline(show, episode, outline, problems, revising, key);
+    if (pages) await this.nextOfSeries(show, episode);
+  }
+
+  /**
+   * The brief an explainer made from a document's pages is outlined from:
+   * the pages this episode teaches, and their text (short) or their
+   * teacher's notes (long). Null for an episode with no pages, or when
+   * they cannot be read: it is outlined from the brief alone.
+   */
+  private async pagesFor(
+    show: StudioShowRecord,
+    episode: StudioEpisodeRecord,
+  ): Promise<{ brief: string; ranges: [number, number][] } | null> {
+    const document = show.brief.document;
+    const pick = episode.pages;
+    if (!this.material || !document || !pick) return null;
+    try {
+      const who = profileOf(show.brief);
+      const material = await this.material.forOutline({
+        documentId: document.documentId,
+        pick,
+        minutes: show.brief.minutes ?? 2,
+        about: [
+          `A short animated explainer made from "${document.title}".`,
+          who ? `Whom it teaches:\n${describeAudience(who)}` : '',
+        ]
+          .filter(Boolean)
+          .join('\n'),
+        record: (usage) => this.record(episode.id, usage, 'scene_notes'),
+      });
+      if (!material) return null;
+      this.logger.log(
+        `studio ${episode.id}: outlined from ${pick.label} (${pagesWords(pick.ranges)}), ${material.condensed ? "as teacher's notes" : 'as its pages'}, ${material.text.length} characters`,
+      );
+      return {
+        brief: [
+          describeBrief({ ...show.brief, document: { ...document, ...pick } }),
+          `This episode teaches ${pick.label} (${pagesWords(pick.ranges)}).`,
+          material.condensed
+            ? `Teacher's notes on those pages, each page marked:\n${material.text}`
+            : `Those pages, as the document has them:\n${material.text}`,
+        ].join('\n\n'),
+        ranges: pick.ranges,
+      };
+    } catch (error) {
+      this.logger.warn(
+        `studio ${episode.id}: its pages could not be read; outlined from the brief: ${(error as Error).message}`,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * A series made from a document is outlined one episode after another:
+   * the next, waiting with its pages and no outline, is set writing.
+   */
+  private async nextOfSeries(
+    show: StudioShowRecord,
+    episode: StudioEpisodeRecord,
+  ): Promise<void> {
+    const next = (await this.studio.listEpisodes(show.id)).find(
+      (e) => e.number === episode.number + 1,
+    );
+    if (
+      !next ||
+      !next.pages ||
+      next.outline ||
+      next.busy ||
+      next.phase !== 'brief' ||
+      !(await this.studio.claimEpisode(next.id, 'outline'))
+    )
+      return;
+    await this.queue.enqueueStudio([
+      {
+        kind: 'outline',
+        showId: show.id,
+        episodeId: next.id,
+        userId: show.userId,
+      },
+    ]);
   }
 
   // ── The story ───────────────────────────────────────────────────────────
@@ -2003,6 +2105,15 @@ export class StudioProcessor {
       ? (checksAt(outline.scenes, recipe, who)[k] ?? false)
       : false;
     const teach = scene?.teach ?? scene?.summary ?? show.brief.idea;
+    // Made from a document: the scene's own pages, for its terms and
+    // examples exactly as the document has them.
+    const own =
+      scene?.pages && show.brief.document && this.material
+        ? await this.material.forScene(
+            show.brief.document.documentId,
+            scene.pages,
+          )
+        : '';
     // A page fuller than the seconds can say: the writer keeps to its main
     // ideas, and does not run long to say them all.
     const fuller =
@@ -2018,7 +2129,9 @@ export class StudioProcessor {
     const ask = {
       documentTitle: show.title,
       topicTitle: outline.title,
-      material: teach,
+      material: own
+        ? `${teach}\n\nThe document's own pages for this scene (${pagesWords([scene.pages!])}), to keep its terms, numbers and examples exact; teach only what the scene above says:\n${own}`
+        : teach,
       context: `This is scene ${k + 1} of ${outline.scenes.length} of the animated lesson "${outline.title}": "${scene?.title ?? ''}", about ${scene?.seconds ?? 30} seconds. ${around} Teach only what this scene says; the scenes either side teach the rest.${fuller ? ` The page is fuller than ${scene?.seconds ?? 30} seconds can say: keep to its main ideas and leave out the detail.` : ''}`,
       profile: [
         describeScene(

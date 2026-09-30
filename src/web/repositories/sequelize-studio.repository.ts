@@ -10,6 +10,7 @@ import {
   type StudioFormat,
 } from '../../business/domain/studio/studio';
 import type { SheetProblem } from '../../business/domain/studio/studio-check';
+import { pickOf } from '../../business/domain/studio/studio-document';
 import {
   EPISODE_PHASES,
   type EpisodeBusy,
@@ -75,6 +76,7 @@ export class SequelizeStudioRepository implements StudioRepository {
         : null,
       brief: briefOf(parsed(row.brief)),
       bible: bible ? bibleOf(bible) : null,
+      documentId: row.documentId ?? null,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };
@@ -99,6 +101,7 @@ export class SequelizeStudioRepository implements StudioRepository {
       durationMs: row.durationMs,
       thumbKey: row.thumbKey,
       activity: activityOf(row.activity),
+      pages: pickOf(parsed(row.pages)),
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };
@@ -175,9 +178,7 @@ export class SequelizeStudioRepository implements StudioRepository {
 
   async updateShow(
     id: string,
-    patch: Partial<
-      Pick<StudioShowRecord, 'title' | 'format' | 'brief' | 'bible'>
-    >,
+    patch: Parameters<StudioRepository['updateShow']>[1],
   ): Promise<void> {
     await this.shows.update(
       {
@@ -189,6 +190,9 @@ export class SequelizeStudioRepository implements StudioRepository {
           ? { brief: JSON.stringify(patch.brief) }
           : {}),
         ...(patch.bible !== undefined ? { bible: json(patch.bible) } : {}),
+        ...(patch.documentId !== undefined
+          ? { documentId: patch.documentId }
+          : {}),
       },
       { where: { id } },
     );
@@ -204,6 +208,7 @@ export class SequelizeStudioRepository implements StudioRepository {
     number: number;
     title: string;
     phase: EpisodePhase;
+    pages?: StudioEpisodeRecord['pages'];
   }): Promise<StudioEpisodeRecord> {
     const row = await this.episodes.create({
       id: newId(),
@@ -219,6 +224,7 @@ export class SequelizeStudioRepository implements StudioRepository {
       shareToken: null,
       durationMs: null,
       thumbKey: null,
+      pages: json(input.pages ?? null),
     } as never);
     return this.episode(row);
   }
@@ -247,12 +253,13 @@ export class SequelizeStudioRepository implements StudioRepository {
     id: string,
     patch: Parameters<StudioRepository['updateEpisode']>[1],
   ): Promise<void> {
-    const { outline, title, ...rest } = patch;
+    const { outline, title, pages, ...rest } = patch;
     await this.episodes.update(
       {
         ...rest,
         ...(title !== undefined ? { title: title.slice(0, 120) } : {}),
         ...(outline !== undefined ? { outline: json(outline) } : {}),
+        ...(pages !== undefined ? { pages: json(pages) } : {}),
       },
       { where: { id } },
     );

@@ -4,6 +4,7 @@
  * maker can see. The same words both ways, so the producer never talks of
  * a scene the writer was never told of.
  */
+import { describeDocument } from './studio-document';
 import { describeAnimal } from '../scene-animal';
 import { describeCreature } from '../scene-creature';
 import { describeFigure } from '../scene-figure';
@@ -64,6 +65,7 @@ export function describeBrief(brief: StudioBrief): string {
   }
   if (brief.source)
     lines.push(`The maker's own text, to make it from:\n${brief.source}`);
+  if (brief.document) lines.push(describeDocument(brief.document));
   return lines.join('\n');
 }
 

@@ -819,6 +819,9 @@ export type RecapDto = {
 /** Uploaded by the reader, written by the model, or imported from the web. */
 export type DocumentSource = 'uploaded' | 'generated' | 'imported' | 'starter';
 
+/** Whose a document is: the reader's library, or the Studio's own (never listed in the library). */
+export type DocumentOrigin = 'reader' | 'studio';
+
 export type LearnDepth = 'primer' | 'solid' | 'deep' | 'exhaustive';
 
 /**
@@ -2867,6 +2870,70 @@ export interface StudioBriefDto {
   ending?: 'happy' | 'bittersweet' | 'twist' | 'open' | 'moral';
   pace?: 'gentle' | 'lively' | 'snappy';
   style?: 'picture-book' | 'bold-cartoon' | 'sitcom' | 'adventure' | 'cosy';
+  /** The document given in the chat, and the pages last chosen of it; absent without one. */
+  document?: StudioBriefDocumentDto;
+}
+
+/** A run of pages, first and last, from 1. */
+export type StudioPageRange = [number, number];
+
+/** A document given to a show, and the pages last chosen of it (empty until chosen). */
+export interface StudioBriefDocumentDto {
+  documentId: string;
+  title: string;
+  pageCount: number;
+  ranges: StudioPageRange[];
+  topicIds: string[];
+  /** What was chosen, in words: "Chapter 4 · Cell membranes", "Pages 41–58". */
+  label: string;
+}
+
+/**
+ * A document given to the Studio, as its cards show it: how far it has
+ * been read, its chapters with their pages (from its bookmarks, its
+ * headings or a reading), and which chapters this show has used.
+ */
+export interface StudioDocumentDto {
+  id: string;
+  title: string;
+  fileName: string;
+  /** Null until it is read. */
+  pageCount: number | null;
+  /** "reading" while it is read, "ready" with its chapters (or none), "failed" with why. */
+  status: 'reading' | 'ready' | 'failed';
+  failure: string | null;
+  chapters: StudioChapterDto[];
+  /** Where the chapters came from; null with none. */
+  chaptersFrom: 'bookmarks' | 'headings' | 'reading' | null;
+  /** Chapters an episode of this show already teaches. */
+  used: string[];
+  createdAt: string;
+}
+
+export interface StudioChapterDto {
+  id: string;
+  title: string;
+  from: number;
+  to: number;
+}
+
+/** A document of the Studio's, to choose from again: newest first. */
+export interface StudioDocumentCardDto {
+  id: string;
+  title: string;
+  pageCount: number | null;
+  status: StudioDocumentDto['status'];
+  createdAt: string;
+}
+
+/** The pages chosen on the "Choose what to explain" card, as sent. */
+export interface StudioPagesRequest {
+  episodeId?: string | null;
+  documentId: string;
+  ranges: StudioPageRange[];
+  topicIds: string[];
+  /** One episode a chapter, at most twelve. */
+  series?: boolean;
 }
 
 /** The age bands of an audience, youngest first, then the grown-ups. */
@@ -3019,6 +3086,8 @@ export interface StudioOutlineSceneDto {
   seconds: number;
   teach: string | null;
   points: string[];
+  /** Made from a document: the pages it teaches. */
+  pages?: StudioPageRange;
 }
 
 export interface StudioOutlineDto {
@@ -3288,6 +3357,8 @@ export interface StudioEpisodeDto {
   hasThumb: boolean;
   /** What the work in hand is doing now, while there is some; null otherwise. */
   activity: StudioActivityDto | null;
+  /** The pages of the show's document it teaches; absent when none. */
+  pages?: { ranges: StudioPageRange[]; topicIds: string[]; label: string };
 }
 
 /**
@@ -3312,7 +3383,11 @@ export type StudioEventName =
   | 'episode'
   | 'failed'
   /** A scene made again as the maker asked, and looked at: whether what they asked for shows. */
-  | 'checked';
+  | 'checked'
+  /** A document given in the chat: its card, then the card to choose its pages. */
+  | 'document'
+  /** Pages of it chosen for an episode, or a series of them. */
+  | 'pages';
 
 export interface StudioEventDto {
   what: StudioEventName;
@@ -3321,6 +3396,8 @@ export interface StudioEventDto {
   sceneId?: string;
   /** The character it is about: their new drawings, to choose from in the thread while they wait. */
   characterId?: string;
+  /** The document it is about (a "document" or "pages" event). */
+  documentId?: string;
   /** Which writing of it this is, from 1: the outline's, the cast's or a scene's. */
   version?: number;
   /** What happened, in a line. */

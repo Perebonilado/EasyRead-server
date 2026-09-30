@@ -7,6 +7,7 @@ import {
   Table,
 } from 'sequelize-typescript';
 import type {
+  DocumentOrigin,
   DocumentSource,
   DocumentBrief,
   DocumentStatus,
@@ -51,6 +52,14 @@ export class DocumentModel extends BaseModel {
     defaultValue: 'uploaded',
   })
   declare source: DocumentSource;
+
+  /** The reader's, or the Studio's own (never listed in the library). */
+  @Column({
+    type: DataType.ENUM('reader', 'studio'),
+    allowNull: false,
+    defaultValue: 'reader',
+  })
+  declare origin: DocumentOrigin;
 
   @Column({ type: DataType.JSON, allowNull: true })
   declare brief: DocumentBrief | null;

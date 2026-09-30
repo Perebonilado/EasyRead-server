@@ -103,6 +103,11 @@ import {
 } from '../scene-story';
 import { genreNamed, toneNamed } from './studio-heard';
 import {
+  briefDocumentOf,
+  type BriefDocument,
+  type PageRange,
+} from './studio-document';
+import {
   AUDIENCE_BAND,
   BAND_AUDIENCE,
   whoOf,
@@ -225,6 +230,11 @@ export interface StudioBrief {
   /** Text they gave to make it from: notes, a syllabus, a story. */
   source: string | null;
   /**
+   * The document they gave in the chat (studio-document.ts), and the
+   * pages last chosen of it: an episode teaches its own pages, kept on it.
+   */
+  document?: BriefDocument;
+  /**
    * The maker's own controls (studio-story-plan §2), each absent until
    * they choose, when sensible ones follow from the idea and the audience.
    */
@@ -323,6 +333,9 @@ export function briefOf(
   };
   // Whom it is for: a profile said sets the four words; four words said
   // that are not the profile's take its band back to theirs.
+  const document = has('document')
+    ? (briefDocumentOf(said.document) ?? base.document)
+    : base.document;
   let who = has('who') ? whoOf(said.who, base.who) : base.who;
   if (who && has('who')) out.audience = BAND_AUDIENCE[who.band];
   else if (who && out.audience && BAND_AUDIENCE[who.band] !== out.audience)
@@ -356,6 +369,7 @@ export function briefOf(
     : base.style;
   return {
     ...out,
+    ...(document ? { document } : {}),
     ...(who ? { who } : {}),
     ...(narrator ? { narrator } : {}),
     ...(narratorCharacter ? { narratorCharacter } : {}),
@@ -902,6 +916,8 @@ export interface OutlineScene {
   teach: string | null;
   /** An explainer's scene: its small ideas, each with what to show for it. */
   points: string[];
+  /** An explainer made from a document: the pages it teaches, first and last. Absent otherwise. */
+  pages?: PageRange;
 }
 
 export interface StudioOutline {
@@ -938,6 +954,9 @@ export function outlineOf(raw: unknown): StudioOutline {
         const summary = text(s.summary, 500);
         if (!title && !summary) return [];
         const seconds = Number(s.seconds);
+        const pages = Array.isArray(s.pages)
+          ? s.pages.map(Number).filter((n) => Number.isFinite(n) && n >= 1)
+          : [];
         return [
           {
             title: title || summary.split(/[.!?]/)[0].slice(0, 60),
@@ -960,6 +979,14 @@ export function outlineOf(raw: unknown): StudioOutline {
               .map((p) => text(p, 240))
               .filter(Boolean)
               .slice(0, 6),
+            ...(pages.length
+              ? {
+                  pages: [
+                    Math.floor(Math.min(...pages.slice(0, 2))),
+                    Math.floor(Math.max(...pages.slice(0, 2))),
+                  ] as PageRange,
+                }
+              : {}),
           },
         ];
       }),

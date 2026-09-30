@@ -6,6 +6,7 @@ import type {
   StudioOutline,
 } from '../domain/studio/studio';
 import type { SheetProblem } from '../domain/studio/studio-check';
+import type { DocumentPick } from '../domain/studio/studio-document';
 
 /**
  * Where an episode has got to: its brief being talked through, its
@@ -64,6 +65,8 @@ export interface StudioShowRecord {
   format: StudioFormat | null;
   brief: StudioBrief;
   bible: StudioBible | null;
+  /** The document given to it in the chat, if any. */
+  documentId?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -84,6 +87,8 @@ export interface StudioEpisodeRecord {
   thumbKey: string | null;
   /** What is happening to it now (studio-progress); null when nothing is said. */
   activity?: StudioActivity | null;
+  /** The pages of the show's document it teaches (studio-document); absent or null for none. */
+  pages?: DocumentPick | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -125,12 +130,16 @@ export interface StudioEventRecord {
     | 'shared'
     | 'episode'
     | 'failed'
-    | 'checked';
+    | 'checked'
+    | 'document'
+    | 'pages';
   /** The step it belongs to: a phase, or the story's own step (the Story card), which no episode's phase is. */
   step: EpisodePhase | 'story';
   sceneId?: string;
   /** The character it is about: new drawings of them to choose from, in the thread. */
   characterId?: string;
+  /** The document it is about: its card, and the card to choose its pages. */
+  documentId?: string;
   version?: number;
   line: string;
 }
@@ -181,7 +190,10 @@ export interface StudioRepository {
   updateShow(
     id: string,
     patch: Partial<
-      Pick<StudioShowRecord, 'title' | 'format' | 'brief' | 'bible'>
+      Pick<
+        StudioShowRecord,
+        'title' | 'format' | 'brief' | 'bible' | 'documentId'
+      >
     >,
   ): Promise<void>;
   deleteShow(id: string, now: Date): Promise<void>;
@@ -192,6 +204,8 @@ export interface StudioRepository {
     number: number;
     title: string;
     phase: EpisodePhase;
+    /** The pages of the show's document it teaches. */
+    pages?: DocumentPick | null;
   }): Promise<StudioEpisodeRecord>;
   findEpisode(id: string): Promise<StudioEpisodeRecord | null>;
   findEpisodeByShareToken(token: string): Promise<StudioEpisodeRecord | null>;
@@ -210,6 +224,7 @@ export interface StudioRepository {
         | 'shareToken'
         | 'durationMs'
         | 'thumbKey'
+        | 'pages'
       >
     >,
   ): Promise<void>;

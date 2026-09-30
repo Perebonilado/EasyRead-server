@@ -1,5 +1,6 @@
 import type {
   DocumentBrief,
+  DocumentOrigin,
   DocumentSource,
   ImportManifest,
 } from '../../contracts';
@@ -13,6 +14,8 @@ export interface CreateDocumentInput {
   sizeBytes: number;
   /** Defaults to `uploaded`; the learn flow creates `generated` ones. */
   source?: DocumentSource;
+  /** Defaults to `reader`; a Studio upload is the Studio's own. */
+  origin?: DocumentOrigin;
   brief?: DocumentBrief | null;
   sourceUrl?: string | null;
   importManifest?: ImportManifest | null;

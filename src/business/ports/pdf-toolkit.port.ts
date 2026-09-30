@@ -21,6 +21,8 @@ export interface PageImage {
   height: number;
 }
 
+import type { Bookmark, PageHeading } from '../domain/chapters';
+
 /** Reading a PDF: page count, per-page text, and a first-page thumbnail. */
 export interface PdfToolkitPort {
   pageCount(pdf: Buffer): Promise<number>;
@@ -39,4 +41,16 @@ export interface PdfToolkitPort {
    * result — vector-only pages have nothing a vision model could read anyway.
    */
   pageImages(pdf: Buffer, pageNumbers: number[]): Promise<PageImage[]>;
+  /**
+   * The PDF's own outline (its bookmarks), each entry with the page it
+   * opens and how deep it sits; empty when it has none. Never throws: a
+   * broken outline is no outline.
+   */
+  bookmarks(pdf: Buffer): Promise<Bookmark[]>;
+  /**
+   * The lines set large near the top of each page, beside the size of the
+   * page's ordinary text: where a book's chapters are headed. Pages with
+   * none are left out. Never throws.
+   */
+  headings(pdf: Buffer): Promise<PageHeading[]>;
 }

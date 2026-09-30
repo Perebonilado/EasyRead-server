@@ -108,6 +108,7 @@ export const STUDIO_ACTIONS = [
   'scene',
   'make',
   'episode',
+  'pages',
 ] as const;
 
 /**
@@ -408,6 +409,8 @@ export const studioOutlineSchema = z.object({
       seconds: z.number(),
       teach: z.string().nullable(),
       points: z.array(z.string()),
+      // An explainer made from a document: the pages it teaches, [first, last].
+      pages: z.array(z.number()).nullable().catch(null),
     }),
   ),
 });

@@ -107,6 +107,17 @@ export function briefDto(brief: StudioBrief): StudioBriefDto {
     include: brief.include,
     sourceChars: brief.source?.length ?? 0,
     ...(brief.who ? { who: { ...brief.who } } : {}),
+    ...(brief.document
+      ? {
+          document: {
+            ...brief.document,
+            ranges: brief.document.ranges.map(
+              ([from, to]) => [from, to] as [number, number],
+            ),
+            topicIds: [...brief.document.topicIds],
+          },
+        }
+      : {}),
     ...Object.fromEntries(
       BRIEF_CONTROLS.flatMap((key) => (brief[key] ? [[key, brief[key]]] : [])),
     ),
@@ -383,6 +394,17 @@ export function episodeDto(
     blockers: blockersOf(episode, scenes, bible, brief),
     hasThumb: Boolean(episode.thumbKey),
     activity: activityDto(episode.activity, workingOn(episode, scenes)),
+    ...(episode.pages
+      ? {
+          pages: {
+            ranges: episode.pages.ranges.map(
+              ([from, to]) => [from, to] as [number, number],
+            ),
+            topicIds: [...episode.pages.topicIds],
+            label: episode.pages.label,
+          },
+        }
+      : {}),
   };
 }
 
@@ -401,6 +423,7 @@ export function messageDto(message: StudioMessageRecord): StudioMessageDto {
           step: event.step,
           ...(event.sceneId ? { sceneId: event.sceneId } : {}),
           ...(event.characterId ? { characterId: event.characterId } : {}),
+          ...(event.documentId ? { documentId: event.documentId } : {}),
           ...(event.version ? { version: event.version } : {}),
           line: event.line,
         }

@@ -70,7 +70,7 @@ export class SequelizeTopicRepository implements TopicRepository {
     topics: (Omit<TopicRecord, 'id'> & {
       prerequisites?: PrerequisiteDraft[];
     })[],
-    source: 'outline_pass' | 'page_tagging',
+    source: 'outline_pass' | 'page_tagging' | 'bookmarks' | 'headings',
   ): Promise<void> {
     await this.model.sequelize!.transaction(async (transaction) => {
       // Prerequisite rows cascade with their topics.
@@ -125,6 +125,7 @@ export class SequelizeTopicRepository implements TopicRepository {
       startPage: row.startPage,
       endPage: row.endPage,
       orderIndex: row.orderIndex,
+      source: row.source,
     }));
   }
 

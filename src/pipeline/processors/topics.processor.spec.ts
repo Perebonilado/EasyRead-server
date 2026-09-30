@@ -115,3 +115,188 @@ describe('TopicsProcessor.clamp', () => {
     expect(clamp([], 50)).toEqual([]);
   });
 });
+
+/**
+ * A document's own chapters come first: its bookmarks, then its headings,
+ * and only then the model's reading of a digest. A Studio document is
+ * read for no prerequisites, and is ready once its chapters are.
+ */
+describe('TopicsProcessor, its own chapters first', () => {
+  const build = (options: {
+    origin?: 'reader' | 'studio';
+    bookmarks?: { title: string; page: number | null; depth: number }[];
+    headings?: {
+      page: number;
+      body: number;
+      lines: { text: string; size: number }[];
+    }[];
+  }) => {
+    const saved: {
+      topics: { title: string; startPage: number }[];
+      source: string;
+    }[] = [];
+    const asked: string[] = [];
+    const ready: string[] = [];
+    const doc = {
+      id: 'd1',
+      contentVersion: 1,
+      props: {
+        pageCount: 30,
+        canonicalPdfRef: 'documents/d1/canonical.pdf',
+        origin: options.origin ?? 'reader',
+        source: 'uploaded',
+        importManifest: null,
+        deletedAt: null,
+      },
+    };
+    const processor = new TopicsProcessor(
+      { findById: () => Promise.resolve(doc) } as never,
+      {
+        claim: () => Promise.resolve(true),
+        complete: () => Promise.resolve(),
+        skip: () => Promise.resolve(),
+      } as never,
+      {
+        findRange: () =>
+          Promise.resolve([
+            {
+              pageNumber: 1,
+              text: 'Some text about cells.',
+              charCount: 22,
+              isEmpty: false,
+            },
+          ]),
+      } as never,
+      {
+        replaceAll: (
+          _id: string,
+          topics: { title: string; startPage: number }[],
+          source: string,
+        ) => {
+          saved.push({ topics, source });
+          return Promise.resolve();
+        },
+      } as never,
+      { find: () => Promise.resolve('A book about cells.') } as never,
+      { record: () => Promise.resolve() },
+      {
+        outlineTopics: () => {
+          asked.push('outline');
+          return Promise.resolve({
+            value: [
+              draft('Read by the model', 1, 15),
+              draft('And more', 16, 30),
+            ],
+            usage: { model: 'm', tokensIn: 1, tokensOut: 1, latencyMs: 1 },
+          });
+        },
+        outlinePrerequisites: () => {
+          asked.push('prerequisites');
+          return Promise.resolve({
+            value: [],
+            usage: { model: 'm', tokensIn: 1, tokensOut: 1, latencyMs: 1 },
+          });
+        },
+      } as never,
+      { publish: () => Promise.resolve() } as never,
+      {
+        markReadyIfComplete: (id: string) => {
+          ready.push(id);
+          return Promise.resolve();
+        },
+      } as never,
+      {
+        bookmarks: () => Promise.resolve(options.bookmarks ?? []),
+        headings: () => Promise.resolve(options.headings ?? []),
+      } as never,
+      { get: () => Promise.resolve(Buffer.from('%PDF')) } as never,
+    );
+    const job = { documentId: 'd1', contentVersion: 1 };
+    const context = { attemptsMade: 1, isFinalAttempt: true, jobId: 'j' };
+    return {
+      processor,
+      saved,
+      asked,
+      ready,
+      run: () => processor.process(job, context),
+    };
+  };
+
+  it('takes the bookmarks, and asks the model nothing but prerequisites', async () => {
+    const t = build({
+      bookmarks: [
+        { title: 'Cells', page: 1, depth: 0 },
+        { title: 'Membranes', page: 11, depth: 0 },
+        { title: 'Osmosis', page: 21, depth: 0 },
+      ],
+    });
+    await t.run();
+    expect(t.saved).toEqual([
+      {
+        source: 'bookmarks',
+        topics: [
+          expect.objectContaining({
+            title: 'Cells',
+            startPage: 1,
+            endPage: 10,
+          }),
+          expect.objectContaining({
+            title: 'Membranes',
+            startPage: 11,
+            endPage: 20,
+          }),
+          expect.objectContaining({
+            title: 'Osmosis',
+            startPage: 21,
+            endPage: 30,
+          }),
+        ],
+      },
+    ]);
+    expect(t.asked).toEqual(['prerequisites']);
+    expect(t.ready).toEqual(['d1']);
+  });
+
+  it('takes the headings when there are no bookmarks', async () => {
+    const t = build({
+      headings: [
+        { page: 2, body: 11, lines: [{ text: 'Chapter 1: Cells', size: 22 }] },
+        {
+          page: 16,
+          body: 11,
+          lines: [{ text: 'Chapter 2: Membranes', size: 22 }],
+        },
+      ],
+    });
+    await t.run();
+    expect(t.saved[0].source).toBe('headings');
+    expect(t.saved[0].topics.map((c) => c.title)).toEqual([
+      'Chapter 1: Cells',
+      'Chapter 2: Membranes',
+    ]);
+    expect(t.asked).not.toContain('outline');
+  });
+
+  it("falls back on the model's reading when the document says nothing of its chapters", async () => {
+    const t = build({ bookmarks: [{ title: 'Only', page: 1, depth: 0 }] });
+    await t.run();
+    expect(t.asked).toEqual(['outline', 'prerequisites']);
+    expect(t.saved[0].source).toBe('outline_pass');
+  });
+
+  it('reads no prerequisites for a Studio document', async () => {
+    const t = build({
+      origin: 'studio',
+      bookmarks: [
+        { title: 'Cells', page: 1, depth: 0 },
+        { title: 'Membranes', page: 11, depth: 0 },
+      ],
+    });
+    await t.run();
+    expect(t.asked).toEqual([]);
+    expect(t.saved[0].source).toBe('bookmarks');
+    const model = build({ origin: 'studio' });
+    await model.run();
+    expect(model.asked).toEqual(['outline']);
+  });
+});

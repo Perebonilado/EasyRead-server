@@ -18,6 +18,8 @@ export interface TopicRecord {
   startPage: number;
   endPage: number;
   orderIndex: number;
+  /** Where it came from: a model's reading, or the document's own bookmarks or headings. Absent where not read. */
+  source?: 'outline_pass' | 'page_tagging' | 'bookmarks' | 'headings';
 }
 
 /** A prerequisite as the pipeline drafts it, before topic ids exist. */
@@ -35,7 +37,7 @@ export interface TopicRepository {
     topics: (Omit<TopicRecord, 'id'> & {
       prerequisites?: PrerequisiteDraft[];
     })[],
-    source: 'outline_pass' | 'page_tagging',
+    source: 'outline_pass' | 'page_tagging' | 'bookmarks' | 'headings',
   ): Promise<void>;
   listWithReadState(
     documentId: string,

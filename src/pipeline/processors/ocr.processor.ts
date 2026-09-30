@@ -146,6 +146,54 @@ export class OcrProcessor extends BasePipelineProcessor<BaseJobData> {
   }
 
   /**
+   * Only some pages read: those of a Studio document the maker chose
+   * (studio-explainer-plan, Ask 7), which was never read whole. Of them,
+   * the pages with no text, and maths read from a text layer. The pages
+   * read; none when there is nothing to read or it cannot be (never
+   * throws: an unread page is taught from what text it has).
+   */
+  async readSome(documentId: string, pageNumbers: number[]): Promise<number> {
+    try {
+      const doc = await this.documents.findById(documentId);
+      const ref = doc?.props.canonicalPdfRef;
+      if (!doc || !ref || !pageNumbers.length) return 0;
+      const wanted = new Set(pageNumbers);
+      const from = Math.min(...pageNumbers);
+      const to = Math.max(...pageNumbers);
+      const deck = doc.props.sourceMimeType === SLIDE_DECK;
+      const some = (await this.pages.findRange(doc.id, from, to)).filter(
+        (page) => wanted.has(page.pageNumber),
+      );
+      const targets = some
+        .filter(
+          (page) =>
+            page.isEmpty ||
+            (page.hasMaths && page.textSource === 'extracted' && !deck),
+        )
+        .map((page) => page.pageNumber);
+      if (!targets.length) return 0;
+      const layer = new Map(
+        some
+          .filter((page) => !page.isEmpty)
+          .map((page) => [page.pageNumber, page.charCount]),
+      );
+      const bytes = await this.storage.get(ref);
+      const read = this.engine.isConfigured()
+        ? await this.readWithEngine(doc.id, bytes, targets, layer)
+        : await this.readWithVision(doc.id, bytes, targets, layer);
+      this.logger.log(
+        `${doc.id}: OCR read ${read}/${targets.length} of the pages chosen`,
+      );
+      return read;
+    } catch (error) {
+      this.logger.warn(
+        `${documentId}: the pages chosen could not be read by OCR — ${(error as Error).message}`,
+      );
+      return 0;
+    }
+  }
+
+  /**
    * The fast path: the whole document in one Mistral call. A single failure
    * here fails the attempt (and BullMQ retries the step), because there is
    * nothing per-page to salvage from a dead batch call.

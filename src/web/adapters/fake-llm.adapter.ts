@@ -1926,9 +1926,24 @@ export class FakeLlmAdapter implements LlmGatewayPort {
   }): Promise<LlmResult<Record<string, unknown>>> {
     const started = Date.now();
     const explainer = /format: explainer/i.test(input.brief);
+    // Made from a document's pages: the scenes share them out, in order.
+    const marked = [...input.brief.matchAll(/\[page (\d+)\]/g)].map((m) =>
+      Number(m[1]),
+    );
+    const half = Math.ceil(marked.length / 2);
+    const pagesOf = (n: number) =>
+      marked.length
+        ? n === 1
+          ? [marked[0], marked[half - 1]]
+          : [
+              marked[Math.min(half, marked.length - 1)],
+              marked[marked.length - 1],
+            ]
+        : null;
     const scenes = [1, 2].map((n) =>
       explainer
         ? {
+            pages: pagesOf(n),
             title: `Part ${n}`,
             summary: `The lesson, part ${n}.`,
             set: null,

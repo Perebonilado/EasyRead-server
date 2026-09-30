@@ -26,6 +26,12 @@ export interface UploadIntentRequest {
   filename: string;
   mimeType: string;
   sizeBytes: number;
+  /**
+   * The Studio's own document (studio-documents.service): read lightly,
+   * never listed in the library, and not one of the library's documents
+   * of the month (the Studio keeps its own count).
+   */
+  origin?: 'reader' | 'studio';
 }
 
 /**
@@ -65,13 +71,15 @@ export class UploadIntentHandler extends AbstractRequestHandlerTemplate<
       });
     }
 
+    const studio = cmd.origin === 'studio';
     // Book the monthly slot before creating anything. If the plan gate throws,
     // the reservation is rolled back inside `consume`.
-    await this.entitlements.consume(
-      cmd.userId,
-      UsageMetric.DOCUMENTS_UPLOADED,
-      (e) => e.assertCanUpload(cmd.sizeBytes),
-    );
+    if (!studio)
+      await this.entitlements.consume(
+        cmd.userId,
+        UsageMetric.DOCUMENTS_UPLOADED,
+        (e) => e.assertCanUpload(cmd.sizeBytes),
+      );
 
     let document;
     try {
@@ -81,12 +89,14 @@ export class UploadIntentHandler extends AbstractRequestHandlerTemplate<
         fileName: cmd.filename,
         sourceMimeType: cmd.mimeType,
         sizeBytes: cmd.sizeBytes,
+        ...(studio ? { origin: 'studio' as const } : {}),
       });
     } catch (error) {
-      await this.entitlements.release(
-        cmd.userId,
-        UsageMetric.DOCUMENTS_UPLOADED,
-      );
+      if (!studio)
+        await this.entitlements.release(
+          cmd.userId,
+          UsageMetric.DOCUMENTS_UPLOADED,
+        );
       throw error;
     }
 

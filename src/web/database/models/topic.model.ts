@@ -35,8 +35,13 @@ export class TopicModel extends BaseModel {
   declare orderIndex: number;
 
   @Column({
-    type: DataType.ENUM('outline_pass', 'page_tagging'),
+    type: DataType.ENUM(
+      'outline_pass',
+      'page_tagging',
+      'bookmarks',
+      'headings',
+    ),
     allowNull: false,
   })
-  declare source: 'outline_pass' | 'page_tagging';
+  declare source: 'outline_pass' | 'page_tagging' | 'bookmarks' | 'headings';
 }

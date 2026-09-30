@@ -142,7 +142,11 @@ export function premiseOf(
     tools: words(said.tools, 6, 120),
     ...(gag ? { gag } : {}),
     ...(clues.length ? { clues } : {}),
-    hero: text(said.hero, 40).toLowerCase(),
+    // An id, even where the writer said more: "maya, a tired renter" is maya.
+    hero:
+      text(said.hero, 80)
+        .toLowerCase()
+        .split(/[\s,;:(]+/u)[0] ?? '',
     want: text(said.want, 200),
     obstacle: text(said.obstacle, 200),
     clock: /^(?:none|null|no|n\/a|no deadline|no clock)\.?$/iu.test(clock)
@@ -289,6 +293,17 @@ function checkPremiseParts(
       `The want "${premise.want}" is a feeling: make it a thing we will see them get or lose in one picture (the keys in hand, the kite in the air), never a feeling (respect, happiness, to be accepted).`,
     );
   if (!premise.obstacle) out.push('Say the obstacle: what is in the way.');
+  else if (
+    /;/u.test(premise.obstacle) ||
+    premise.obstacle.split(/\s+/u).length > 15
+  )
+    out.push(
+      `The obstacle ("${premise.obstacle}") is more than one thing: say the one main thing in the way, in a few words.`,
+    );
+  if (premise.want && premise.want.split(/\s+/u).length > 15)
+    out.push(
+      `The want ("${premise.want}") is long: say the one thing the hero wants in ten words or fewer.`,
+    );
   // P4: the ordinary day, and why today.
   if (!premise.normalDay)
     out.push(

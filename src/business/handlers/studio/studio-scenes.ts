@@ -99,19 +99,36 @@ export function craftOf(
   bible: StudioBible,
   outline: StudioOutline,
   k: number,
-): string[] {
+): { all: string[]; failing: string[] } {
   const story = outline.story ?? null;
   const minutes = minutesOf(outline);
-  return [
-    ...(k === 0 && story ? checkOpening(sheet, story, bible, minutes) : []),
-    ...lintTelling([sheet], bible).map((n) => n.message),
-    ...lintLines([sheet], bible, {
-      genre: story?.premise.genre ?? null,
-      ending: story?.premise.ending ?? null,
-      minutes,
-      from: k,
-    }).map((n) => n.message),
-  ];
+  const opening =
+    k === 0 && story ? checkOpening(sheet, story, bible, minutes) : [];
+  const telling = lintTelling([sheet], bible).map((n) => n.message);
+  const lines = lintLines([sheet], bible, {
+    genre: story?.premise.genre ?? null,
+    ending: story?.premise.ending ?? null,
+    minutes,
+    from: k,
+  });
+  return {
+    all: [...opening, ...telling, ...lines.map((n) => n.message)],
+    // What fails a scene, and sends it back to its writer at once: the
+    // opening not landed, lines that report, lines with no aim or no one
+    // to say them to, "as you know", feelings said outright, a hello to
+    // open on. The rest (a take, a long line) is the table read's.
+    failing: [
+      ...opening,
+      ...telling,
+      ...lines
+        .filter((n) =>
+          /^Lines (?:with no aim|said to no one)|already know|outright|opens on a hello|the deadline is first said/u.test(
+            n.message,
+          ),
+        )
+        .map((n) => n.message),
+    ],
+  };
 }
 
 /**
@@ -173,10 +190,12 @@ export async function writeStorySheet(
     : [];
   const judged = (raw: unknown) => {
     const mended = mendSheet(storySheetOf(raw), bible, before);
+    const craft = craftOf(mended.sheet, bible, outline, k);
     return {
       sheet: mended.sheet,
       mended: mended.mended,
-      craft: craftOf(mended.sheet, bible, outline, k),
+      craft: craft.all,
+      failing: craft.failing,
       // Held to the show as the words grew it: a thing they named is
       // there; and, written again as asked, to the lines it had.
       problems: [
@@ -193,16 +212,19 @@ export async function writeStorySheet(
   };
   let best = judged(first.value);
   const reasons = sentBackFor(best.problems);
-  if (reasons.length || best.craft.length) {
+  // Written again from the table read's notes, it goes back only for what
+  // the stage cannot play: the next read hears its lines.
+  const failing = notes ? [] : best.failing;
+  if (reasons.length || failing.length) {
     log(
-      `goes back: ${[...reasons.map((p) => p.message), ...best.craft].join(' ')}`,
+      `goes back: ${[...reasons.map((p) => p.message), ...failing].join(' ')}`,
     );
     const again = await llm.studioScene({
       ...ask,
       previous: first.value,
       problems: [
         ...reasons.map((p) => p.message),
-        ...best.craft,
+        ...failing,
         // The story's notes stay put right as the staging is.
         ...(notes
           ? ['Keep what the notes before asked for: only the above changes.']
@@ -216,7 +238,7 @@ export async function writeStorySheet(
     const staged = worse(second.problems, best.problems);
     if (
       staged < 0 ||
-      (staged === 0 && second.craft.length <= best.craft.length)
+      (staged === 0 && second.failing.length <= best.failing.length)
     )
       best = second;
   }

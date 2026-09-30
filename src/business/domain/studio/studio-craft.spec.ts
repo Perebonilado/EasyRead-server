@@ -178,7 +178,7 @@ const good = sheetOf([
   line(
     'petrov',
     'dara',
-    "Envelope under my door by midnight. The locksmith's booked for five past. He's already paid.",
+    "Envelope under my door by midnight, Dara. The locksmith's booked for five past.",
     'warns',
   ),
   line(
@@ -422,6 +422,21 @@ describe('the premise and its parts (P1–P8)', () => {
         bible,
       ).join(' '),
     ).toMatch(/Dara must \[a goal we can see achieved\]/);
+  });
+
+  it('reads the hero as an id where the writer said more, and sends back an obstacle of two things', () => {
+    expect(premiseOf({ ...rawPremise, hero: 'dara, a tired nurse' }).hero).toBe(
+      'dara',
+    );
+    expect(
+      checkPremise(
+        premiseOf({
+          ...rawPremise,
+          obstacle: 'the pigeon has her keys; the landlady wants her out',
+        }),
+        bible,
+      ).join(' '),
+    ).toMatch(/is more than one thing/);
   });
 
   it('sends back a want that is only a feeling (P3)', () => {
@@ -899,6 +914,12 @@ describe('the opening, timed (W1, S1)', () => {
     );
   });
 
+  it("flags a scene 1 in which no one says the hero's name", () => {
+    expect(checkOpening(bad, story, bible, 2).join(' ')).toMatch(
+      /No one says Dara's name in scene 1/,
+    );
+  });
+
   it('counts only what comes before the time: a want said a minute in is late', () => {
     const slow = sheetOf([
       ...Array.from({ length: 10 }, () =>
@@ -1008,6 +1029,31 @@ describe('the clarity sentence against the premise (T1, T3, T4)', () => {
         tableReadOf(critic, 2, viewer(), { misses: [], unsure: ['no clock'] }),
       ),
     ).toBe(false);
+  });
+
+  it('never asks who the hero is to the hero, and takes someone of the cast named as what is in the way', () => {
+    const judged = judgeColdRead(
+      viewer({
+        people: [
+          { who: 'Dara', is: 'could not tell' },
+          { who: 'UNNAMED 1', is: 'the protagonist herself' },
+        ],
+      }),
+      premise,
+      bible,
+    );
+    expect(judged.unsure).toEqual([]);
+    const rival = premiseOf({
+      ...rawPremise,
+      obstacle: 'Mrs. Petrov wants the flat for her nephew',
+    });
+    expect(
+      judgeColdRead(
+        viewer({ obstacle: 'Mrs. Petrov keeps blocking the door' }),
+        rival,
+        bible,
+      ).misses,
+    ).toEqual([]);
   });
 
   it('asks nothing of a premise developed before it had its parts', () => {

@@ -338,12 +338,19 @@ export function judgeColdRead(
       );
   }
   if (premise.obstacle) {
+    // Someone of the cast named as what is in the way, by the viewer too.
+    const inWay = bible.characters.filter(
+      (c) =>
+        c.id !== premise.hero &&
+        namesOf(c).some((n) => wordIn(n, premise.obstacle)),
+    );
     const got =
       !couldNot(viewer.obstacle) &&
-      (covered(
-        st(premise.obstacle),
-        st(`${viewer.obstacle} ${viewer.sentence}`),
-      ) >= 0.3 ||
+      (inWay.some((c) => namesOf(c).some((n) => wordIn(n, viewer.obstacle))) ||
+        covered(
+          st(premise.obstacle),
+          st(`${viewer.obstacle} ${viewer.sentence}`),
+        ) >= 0.3 ||
         covered(
           st(viewer.obstacle),
           st(`${premise.obstacle} ${premise.logline}`),
@@ -366,8 +373,15 @@ export function judgeColdRead(
         `did not get the impossible thing and its rule (${premise.oddity.what}: ${premise.oddity.rule})`,
       );
   }
+  // Who the others are to the hero: never the hero themselves.
+  const heroNames = hero ? namesOf(hero) : [];
   for (const p of viewer.people)
-    if (couldNot(p.is))
+    if (
+      couldNot(p.is) &&
+      p.who.trim().toLowerCase() !== viewer.who.trim().toLowerCase() &&
+      !heroNames.some((n) => wordIn(n, p.who)) &&
+      !/\b(?:hero|protagonist|herself|himself|themselves)\b/iu.test(p.is)
+    )
       unsure.push(`could not tell who ${p.who} is to the hero`);
   return { misses, unsure };
 }
@@ -1757,6 +1771,19 @@ export function checkOpening(
     },
   ];
   const out: string[] = [];
+  // The hero is called by their name in scene 1, so the viewer knows whose story it is.
+  const hero = bible.characters.find((c) => c.id === premise.hero);
+  if (
+    hero &&
+    !sheet.beats.some(
+      (b) =>
+        (b.kind === 'line' || b.kind === 'narration') &&
+        namesOf(hero).some((n) => wordIn(n, b.say)),
+    )
+  )
+    out.push(
+      `No one says ${hero.name}'s name in scene 1, so the viewer never learns whose story it is: let someone call ${hero.name} by name early on, in a line that does something to them.`,
+    );
   for (const { part, words } of parts) {
     if (!words) continue;
     const piece = plan?.setup.find((p) => p.part === part);
@@ -1978,7 +2005,31 @@ export function notesFor(
       : '';
   };
   const count = read.scenes.length;
+  // Code's notes, what most loses a viewer first, a few at most: a rewrite
+  // told too much at once loses what already worked.
+  const rank: ScriptNote['kind'][] = [
+    'opening',
+    'retell',
+    'telling',
+    'aim',
+    'plant',
+    'turn',
+    'comedy',
+    'lint',
+    'voice',
+  ];
+  const codes = code
+    .filter((n) => n.scene === k)
+    .sort((a, b) => rank.indexOf(a.kind) - rank.indexOf(b.kind))
+    .slice(0, 5)
+    .map((n) => n.message);
+  const clarity =
+    k === 0 && unclear(read)
+      ? clarityNotes(read.viewer, read.misses, read.unsure)
+      : [];
   return [
+    // What a first-time viewer missed comes first: nothing matters more.
+    ...clarity.slice(0, 1),
     ...(read.scenes[k]?.notes ?? []),
     ...read.voice
       .filter((v) => v.scene === k)
@@ -1986,10 +2037,8 @@ export function notesFor(
         (v) =>
           `"${v.line}" could be anyone's line${v.why ? ` (${v.why})` : ''}: say it as ${v.who || 'its speaker'} would${voiceOf(v.who)}.`,
       ),
-    ...code.filter((n) => n.scene === k).map((n) => n.message),
-    ...(k === 0 && unclear(read)
-      ? clarityNotes(read.viewer, read.misses, read.unsure)
-      : []),
+    ...codes,
+    ...clarity.slice(1),
     ...(k === 0 && (read.scores.hook ?? 10) < BAR.item
       ? [
           'Open with a hook: a joke, a mystery or a problem in the first seconds.',
@@ -1998,5 +2047,5 @@ export function notesFor(
     ...(k === count - 1 && (read.scores.button ?? 10) < BAR.item
       ? ['End on a button: a last laugh or a warm beat, never a summary.']
       : []),
-  ].slice(0, 14);
+  ].slice(0, 12);
 }

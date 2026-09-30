@@ -30,7 +30,16 @@
  *
  * All code, from the script alone, so each scene of a section works out
  * the same board for itself whenever it is made, in any order.
+ *
+ * In a tall film (studio-vertical-plan §4.4) the stage shows the same
+ * board turned: its columns are rows, 3 × 4, read top to bottom (the
+ * first thing top middle), paging up and off rather than to the left.
+ * The board is laid in the tall text area, so a pull-out to the whole is
+ * inside the safe zone and its words large enough to read; the camera
+ * frames a part of it by where the frame's text area falls, never more
+ * than FRAME_MOST of the board's height, never less than FRAME_LEAST.
  */
+import { TALL_AREA } from './scene-lesson-shape';
 import { sameSubject } from './scene-picture-label';
 import type {
   SceneArrow,
@@ -53,6 +62,13 @@ export const FRAME_MOST = 0.6;
 export const FRAME_LEAST = 0.5;
 /** Where the first thing goes: the left, halfway down, with room all round it. */
 export const BOARD_START: Cell = [0, 1];
+/** The board as each shape's stage shows it: a tall one's turned, its columns rows (§4.4). */
+export const BOARD_GRID = {
+  wide: { cols: BOARD_COLS, rows: BOARD_ROWS },
+  tall: { cols: BOARD_ROWS, rows: BOARD_COLS },
+} as const;
+/** The least an arrow's label or a caption may be, seen at a pull-out to the whole board, for the pull-out to be taken (§4.4). */
+export const PULL_OUT_LEAST = 32;
 
 /** A cell of the board: its column from the left, its row from the top. */
 export type Cell = [number, number];
@@ -602,7 +618,10 @@ export function cellBox(
   H: number,
   margin: number,
   rows: RowSpan = [0, BOARD_ROWS - 1],
+  /** A tall stage's board: turned, in its text area (tallCellBox). */
+  shape: 'wide' | 'tall' = 'wide',
 ): Rect {
+  if (shape === 'tall') return tallCellBox(cell, rows);
   const area = boardArea(W, H, margin);
   const w = (area.w - BOARD_GAP * (BOARD_COLS - 1)) / BOARD_COLS;
   const n = Math.max(1, rows[1] - rows[0] + 1);
@@ -621,6 +640,38 @@ export function cellBox(
     h: round(h),
   };
 }
+
+/**
+ * A cell's box on a tall stage (§4.4): the board turned, a cell's column
+ * its row down the tall text area and its row its column across, the
+ * columns the section uses (its rows, turned) spread across and centred,
+ * as a wide board spreads its rows down.
+ */
+export function tallCellBox(
+  cell: Cell,
+  rows: RowSpan = [0, BOARD_ROWS - 1],
+): Rect {
+  const area = TALL_AREA;
+  const { cols, rows: down } = BOARD_GRID.tall;
+  const n = Math.max(1, rows[1] - rows[0] + 1);
+  const usual = (area.w - BOARD_GAP * (cols - 1)) / cols;
+  const w = Math.min(
+    usual * (n < cols ? CELL_GROW : 1),
+    (area.w - BOARD_GAP * (n - 1)) / n,
+  );
+  const gap = n > 1 ? BOARD_GAP : 0;
+  const left = area.x + (area.w - (w * n + gap * (n - 1))) / 2;
+  const h = (area.h - TALL_ROW_GAP * (down - 1)) / down;
+  const round = (v: number) => Math.round(v * 10) / 10;
+  return {
+    x: round(left + (cell[1] - rows[0]) * (w + gap)),
+    y: round(area.y + cell[0] * (h + TALL_ROW_GAP)),
+    w: round(w),
+    h: round(h),
+  };
+}
+/** The room between a tall board's rows, for an arrow down and its label past a caption. */
+export const TALL_ROW_GAP = 72;
 
 /** How far a thing may reach past a view's edge and still count as out of it, or in it. */
 const HAIR = 1;
@@ -664,7 +715,9 @@ export function frameBox(
   margin: number,
   /** The arrows' labels on the board: kept whole in a view too, where that widens it by at most LABELS_WIDEN. */
   labels: readonly Rect[] = [],
+  shape: 'wide' | 'tall' = 'wide',
 ): Box {
+  if (shape === 'tall') return tallFrameBox(frame, extents, W, H, labels);
   const whole: Box = [0, 0, W, H];
   const round = (n: number) => Math.round(n * 10) / 10;
   const all = frame === 'whole';
@@ -720,6 +773,137 @@ export function frameBox(
         )
       : null) ?? unsliced(want, keep, [...extents.values()], { w: W, h: H })!;
   return [round(view.x), round(view.y), round(view.w), round(view.h)];
+}
+
+/**
+ * Where the camera looks at a stage of a tall build (§4.4): a view of the
+ * stage's shape whose text area (where the frame's words are safe from
+ * the platforms' own buttons and captions) holds what it frames, a little
+ * room round it; that text area never more than FRAME_MOST of the board's
+ * height and never less than FRAME_LEAST; on the newest where it cannot
+ * hold them all; moved or widened as little as it may be to cut through
+ * no thing. At a pull-out, the whole stage: the board is its text area.
+ */
+export function tallFrameBox(
+  frame: BoardFrame,
+  extents: ReadonlyMap<string, Rect>,
+  W: number,
+  H: number,
+  labels: readonly Rect[] = [],
+): Box {
+  const whole: Box = [0, 0, W, H];
+  const round = (n: number) => Math.round(n * 10) / 10;
+  const boxes =
+    frame === 'whole'
+      ? []
+      : frame.flatMap((id) => (extents.get(id) ? [extents.get(id)!] : []));
+  if (!boxes.length) return whole;
+  const area = TALL_AREA;
+  const aspect = W / H;
+  // The text area, as shares of a view.
+  const t = {
+    x0: area.x / W,
+    x1: (area.x + area.w) / W,
+    y0: area.y / H,
+    y1: (area.y + area.h) / H,
+  };
+  const x0 = Math.min(...boxes.map((b) => b.x));
+  const y0 = Math.min(...boxes.map((b) => b.y));
+  const x1 = Math.max(...boxes.map((b) => b.x + b.w));
+  const y1 = Math.max(...boxes.map((b) => b.y + b.h));
+  const room = 1.18;
+  /** The view's width whose text area holds a box so wide and so tall. */
+  const holds = (bw: number, bh: number) =>
+    Math.max(bw / (t.x1 - t.x0), (bh / (t.y1 - t.y0)) * aspect);
+  /** A view's width whose text area is this share of the board's height. */
+  const byShare = (share: number) =>
+    ((share * area.h) / (t.y1 - t.y0)) * aspect;
+  let w = holds((x1 - x0) * room, (y1 - y0) * room);
+  w = Math.min(W, byShare(FRAME_MOST), Math.max(byShare(FRAME_LEAST), w));
+  const h = w / aspect;
+  const fits = holds((x1 - x0) * room, (y1 - y0) * room) <= w + HAIR;
+  const newest = boxes[0];
+  const cx = fits ? (x0 + x1) / 2 : newest.x + newest.w / 2;
+  const cy = fits ? (y0 + y1) / 2 : newest.y + newest.h / 2;
+  // The middle of the text area on the middle of what it frames.
+  const want: Rect = {
+    x: Math.min(W - w, Math.max(0, cx - ((t.x0 + t.x1) / 2) * w)),
+    y: Math.min(H - h, Math.max(0, cy - ((t.y0 + t.y1) / 2) * h)),
+    w,
+    h,
+  };
+  // Everything on the board, and the arrows' labels: none seen in the
+  // frame but outside its text area (under the platforms' buttons, in the
+  // subtitles' band, or cut at its edge). The nearest view so, widened as
+  // little as may be; the whole stage always is (the board is its text area).
+  const all = [...extents.values(), ...labels];
+  const keep = fits ? boxes : [newest];
+  const faults = (v: Rect) => {
+    const safe = {
+      x: v.x + t.x0 * v.w,
+      y: v.y + t.y0 * v.h,
+      w: (t.x1 - t.x0) * v.w,
+      h: (t.y1 - t.y0) * v.h,
+    };
+    return all.filter((b) => {
+      const seen =
+        b.x < v.x + v.w - HAIR &&
+        b.x + b.w > v.x + HAIR &&
+        b.y < v.y + v.h - HAIR &&
+        b.y + b.h > v.y + HAIR;
+      return seen && !contains(safe, b);
+    }).length;
+  };
+  const holdsAll = (v: Rect) =>
+    keep.every((b) =>
+      contains(
+        {
+          x: v.x + t.x0 * v.w,
+          y: v.y + t.y0 * v.h,
+          w: (t.x1 - t.x0) * v.w,
+          h: (t.y1 - t.y0) * v.h,
+        },
+        b,
+      ),
+    );
+  let best = null as { view: Rect; cost: number } | null;
+  for (let grow = 1; grow <= W / want.w + 1e-6; grow *= 1.08) {
+    const vw = Math.min(W, want.w * grow);
+    const vh = vw / aspect;
+    const steps = 8;
+    for (let i = -steps; i <= steps; i += 1)
+      for (let j = -steps; j <= steps; j += 1) {
+        const v = {
+          x: Math.min(
+            W - vw,
+            Math.max(0, cx - ((t.x0 + t.x1) / 2) * vw + (i * vw) / (steps * 3)),
+          ),
+          y: Math.min(
+            H - vh,
+            Math.max(0, cy - ((t.y0 + t.y1) / 2) * vh + (j * vh) / (steps * 3)),
+          ),
+          w: vw,
+          h: vh,
+        };
+        if (faults(v) || !holdsAll(v)) continue;
+        // Widening dearer than moving, as unsliced has it.
+        const cost = Math.hypot(v.x - want.x, v.y - want.y) + (vw - want.w) * 3;
+        if (!best || cost < best.cost) best = { view: v, cost };
+      }
+    if (best) break;
+    if (vw >= W) break;
+  }
+  const view = best?.view ?? { x: 0, y: 0, w: W, h: H };
+  return [round(view.x), round(view.y), round(view.w), round(view.h)];
+}
+
+/**
+ * Whether a pull-out to the whole board may be taken (§4.4): every word on
+ * it, at the scale the whole is seen at, at least PULL_OUT_LEAST. Else the
+ * camera stays on what it framed last.
+ */
+export function pullOutReadable(sizes: readonly number[], scale = 1): boolean {
+  return sizes.every((size) => size * scale >= PULL_OUT_LEAST);
 }
 
 /**

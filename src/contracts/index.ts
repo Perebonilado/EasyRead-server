@@ -3710,6 +3710,8 @@ export type StudioJoinName =
   | 'morph'
   | 'zoom-through'
   | 'push'
+  // A tall film's push (studio-vertical-plan §4.6): the next slides up from below, as a phone's feed scrolls.
+  | 'push-up'
   | 'continue'
   // Into a story clip on a Sunny or Chalkboard look: a circle opens on it (studio-clip).
   | 'iris';

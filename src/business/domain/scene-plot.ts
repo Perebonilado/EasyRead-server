@@ -24,9 +24,11 @@ export interface PlotSpec {
   yLabel: string | null;
 }
 
-const W = 960;
-const H = 600;
-const AREA = { x0: 110, x1: 920, y0: 40, y1: 500 };
+/** A graph's canvas and plotting area: a wide film's; a tall film's is square (studio-vertical-plan §4.2). */
+const CANVASES = {
+  wide: { W: 960, H: 600, AREA: { x0: 110, x1: 920, y0: 40, y1: 500 } },
+  tall: { W: 800, H: 800, AREA: { x0: 120, x1: 760, y0: 40, y1: 680 } },
+} as const;
 // Drawn in the paper theme's tokens: the player recolours them for any other theme (scene-themes).
 const INK = PAPER.ink;
 const MUTED = PAPER.muted;
@@ -79,12 +81,16 @@ export function sample(
 }
 
 /** A graph, drawn: its SVG, the parts the voice can point at, and its points' labels for the stage to set. */
-export function renderPlot(spec: PlotSpec): {
+export function renderPlot(
+  spec: PlotSpec,
+  shape: 'wide' | 'tall' = 'wide',
+): {
   svg: string;
   viewBox: [number, number, number, number];
   parts: Record<string, string>;
   callouts: Callout[];
 } {
+  const { W, H, AREA } = CANVASES[shape];
   const [x0, x1] = spec.x[0] < spec.x[1] ? spec.x : [spec.x[1], spec.x[0]];
   if (!(x1 > x0)) throw new Error('the graph needs a stretch of x to show');
   const samples = sample(spec.fn, [x0, x1]);

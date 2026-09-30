@@ -2289,7 +2289,12 @@ export class StudioService {
               show.brief.format,
               showTheme(show.brief, show.bible),
             ) ??
-            joinFor(side(made[i - 1]), side(s), show.bible?.pictures ?? []))
+            joinFor(
+              side(made[i - 1]),
+              side(s),
+              show.bible?.pictures ?? [],
+              episodeShape(episode),
+            ))
           : { join: 'dip' as const };
         return {
           id: s.id,

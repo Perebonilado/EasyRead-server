@@ -159,6 +159,10 @@ import type { SetPiece } from '../../business/domain/scene-set-pieces';
 import { buildSet, reverseSet } from '../../business/domain/scene-set-layout';
 import { RIG_VERSION, rigSheet } from '../../business/domain/scene-sheet-rig';
 import { withMouths } from '../../business/domain/studio/studio-audit';
+import {
+  CLIP_CARD,
+  clipCardDrawing,
+} from '../../business/domain/studio/studio-clip';
 import { turnsCheck, turnsLine } from '../../business/domain/scene-turns-check';
 import {
   faceRhythm,
@@ -291,6 +295,7 @@ import {
 import { KIT_LINE } from '../../business/domain/scene-ink';
 import type { FilmShape } from '../../business/domain/scene-shape';
 import { setInShape } from '../../business/domain/scene-set-shape';
+import { drawingShapeFor } from '../../business/domain/scene-lesson-shape';
 import { partsKeyOf } from '../../business/handlers/studio/studio-twins';
 import { SceneVoiceService } from '../../business/handlers/admin/scene-voice.service';
 
@@ -907,6 +912,7 @@ export class SceneProcessor {
           stop.signal,
           story,
           new Map([...carried.reuse, ...(input.drawn ?? new Map())]),
+          input.shape ?? 'wide',
         ),
         this.drawOwn(script, story, documentId, who, stop.signal),
       ]).then(async ([made, own]) => {
@@ -1185,6 +1191,27 @@ export class SceneProcessor {
   }
 
   /**
+   * A tall film's charts and graphs drawn again for its frame, and a story
+   * clip's card as a frame of its shape (studio-vertical-plan §4.2, §4.7):
+   * code's own, so nothing is asked of a model. One that cannot be drawn
+   * so stays as it was.
+   */
+  private async codeInShape(
+    out: Map<string, GatedDrawing | null>,
+    script: SceneScript,
+    shape: FilmShape,
+    who: string,
+  ): Promise<void> {
+    for (const thing of script.cast.filter(isCodeThing)) {
+      if (thing.kind !== 'chart' && thing.kind !== 'plot') continue;
+      const drawn = await drawByCode(thing, shape).catch(() => null);
+      if (drawn) out.set(thing.id, drawn);
+      else this.logger.log(`${who}: "${thing.id}" kept as drawn wide`);
+    }
+    if (out.get(CLIP_CARD)) out.set(CLIP_CARD, clipCardDrawing(shape));
+  }
+
+  /**
    * A scene's drawings as a film of a shape sees them: a tall film's set
    * built again by code for its frame (scene-set-shape), once per place
    * and shape while the worker runs; everything else as drawn. A set that
@@ -1198,6 +1225,9 @@ export class SceneProcessor {
     who: string,
   ): Promise<Map<string, GatedDrawing | null>> {
     const out = new Map(drawings);
+    // What code draws, drawn again for the frame (a tall chart, a square
+    // graph), and a clip's card of its own shape (studio-vertical-plan §4).
+    if (shape !== 'wide') await this.codeInShape(out, script, shape, who);
     if (shape === 'wide' || !story) return out;
     const places = script.cast.filter(
       (thing): thing is PlaceThing => thing.kind === 'place',
@@ -1306,6 +1336,7 @@ export class SceneProcessor {
       new AbortController().signal,
       story,
       reuse,
+      input.shape,
     );
     const made = await this.composeStored({
       script,
@@ -1418,6 +1449,7 @@ export class SceneProcessor {
         new AbortController().signal,
         story,
         reuse,
+        shape,
       ),
       this.drawOwn(script, story, null, who),
     ]);
@@ -2008,10 +2040,27 @@ export class SceneProcessor {
     story: PageStory | null = null,
     /** Drawings the page before made, carried on: not drawn again. */
     reuse: ReadonlyMap<string, GatedDrawing> = new Map(),
+    /**
+     * The film's shape: a tall one's drawings asked for square rather
+     * than wide, its charts and graphs drawn for its frame (studio-
+     * vertical-plan §4.2). Absent, wide, as always.
+     */
+    shape: FilmShape = 'wide',
   ): Promise<Map<string, GatedDrawing | null>> {
-    const drawings = script.cast.filter(
-      (thing): thing is DrawingThing => thing.kind === 'drawing',
-    );
+    const drawings = script.cast
+      .filter((thing): thing is DrawingThing => thing.kind === 'drawing')
+      .map((thing) =>
+        shape === 'wide'
+          ? thing
+          : {
+              ...thing,
+              shape: drawingShapeFor(
+                thing.shape,
+                shape,
+                `${thing.name} ${thing.brief}`,
+              ),
+            },
+      );
     const characters = script.cast.filter(
       (thing): thing is CharacterThing => thing.kind === 'character',
     );
@@ -2039,7 +2088,7 @@ export class SceneProcessor {
     for (const thing of coded)
       out.set(
         thing.id,
-        await drawByCode(thing).catch((error: unknown) => {
+        await drawByCode(thing, shape).catch((error: unknown) => {
           this.logger.warn(
             `${who}: "${thing.id}" (${thing.kind}) is set as a card: ${(error as Error).message}`,
           );

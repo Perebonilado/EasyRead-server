@@ -35,12 +35,17 @@ import {
   angleLayer,
   anglePeople,
   floorFactor,
+  gripBox,
+  handOverAt,
   handsAt,
   holdPoint,
   holderOn,
   isReverse,
+  meetPoint,
   nearOf,
+  sideToward,
   thingBoxAt,
+  type Holder,
   type ThingsOnStage,
   reflectPlace,
   reflectRoom,
@@ -56,7 +61,8 @@ import {
   hasRigFace,
   withRigFace,
 } from './scene-face-draw';
-import type { SceneEffectDto, SceneView } from '../../contracts';
+import type { SceneEffectDto, SceneThingDto, SceneView } from '../../contracts';
+import { HEAD } from './scene-figure';
 
 export { FLOOR_BACK_F, FLOOR_FRONT_F, floorFactor };
 
@@ -312,23 +318,6 @@ export function posedRig(svg: string, pose: StillPose): string {
   return posedDangles(turned, 0);
 }
 
-/** The hands someone holds a thing in at `t` (a bag carried hanging is not held up). */
-function handsHolding(
-  stage: ThingsOnStage,
-  id: string,
-  t: number,
-): ('r' | 'l')[] {
-  const hands = handsAt(stage, t);
-  const out = new Set<'r' | 'l'>();
-  for (const prop of stage.props) {
-    if (prop.hangs) continue;
-    const has = hands.get(prop.id);
-    if (has?.by === id && has.hand !== 'mouth' && !has.gone && !has.flying)
-      out.add(has.hand);
-  }
-  return [...out];
-}
-
 /**
  * An arm bent so its hand reaches `to` (shoulder, elbow and hand as drawn,
  * on the stage): the turn of the arm about its shoulder and of the forearm
@@ -372,6 +361,104 @@ export function armTo(
   const arf = wrap(deg(ang(elbow, to) - ang(E, Hd)) - ar);
   return [Math.round(ar * 10) / 10, Math.round(arf * 10) / 10];
 }
+
+/** Each arm's shoulder, elbow and hand as drawn in `view`, as shares of the box; facing left, mirrored (the player's jointsIn). */
+export function jointsIn(
+  thing: Pick<
+    Extract<SceneThingDto, { kind: 'drawing' }>,
+    'joints' | 'viewJoints'
+  >,
+  view: SceneView,
+  mirror: 1 | -1,
+): Record<'r' | 'l', [number, number][]> | undefined {
+  const own =
+    thing.viewJoints?.[view] ??
+    (view === 'front' ? thing.joints : undefined) ??
+    thing.joints;
+  if (!own) return undefined;
+  if (mirror > 0 || !thing.viewJoints?.[view]) return own;
+  const flip = (arm: [number, number][]) =>
+    arm.map(([x, y]): [number, number] => [1 - x, y]);
+  return { r: flip(own.l), l: flip(own.r) };
+}
+
+/** `p` turned `deg` degrees about `c`, as SVG's rotate turns it (clockwise, y down). */
+const turnedAbout = (
+  p: readonly [number, number],
+  c: readonly [number, number],
+  deg: number,
+): [number, number] => {
+  const r = (deg * Math.PI) / 180;
+  const dx = p[0] - c[0];
+  const dy = p[1] - c[1];
+  return [
+    c[0] + dx * Math.cos(r) - dy * Math.sin(r),
+    c[1] + dx * Math.sin(r) + dy * Math.cos(r),
+  ];
+};
+
+/** An arm as posed: its shoulder, its elbow turned `upper` about it, its hand turned with it and then `fore` about the elbow (the player's handNow). */
+export function posedArm(
+  [S, E, Hd]: readonly (readonly [number, number])[],
+  upper: number,
+  fore: number,
+): [[number, number], [number, number], [number, number]] {
+  const E2 = turnedAbout(E, S, upper);
+  return [[S[0], S[1]], E2, turnedAbout(turnedAbout(Hd, S, upper), E2, fore)];
+}
+
+/** How far someone leans in for a hand-over they cannot reach, in degrees about their feet (the player's own). */
+const HAND_OVER_LEAN = 5;
+
+/** How far someone steps in for a hand-over they cannot reach from where they stand: to reach nine tenths of their arm, no more than takes them within three tenths of their width of the middle between them; null where they can reach it (the player's own, motion.ts: they lean in too). */
+function handOverStep(
+  me: Holder,
+  arm: readonly (readonly [number, number])[],
+  meet: readonly [number, number],
+  other: Holder,
+): number | null {
+  const [S, E, Hd] = arm;
+  const reach =
+    Math.hypot(E[0] - S[0], E[1] - S[1]) +
+    Math.hypot(Hd[0] - E[0], Hd[1] - E[1]);
+  const short = Math.hypot(meet[0] - S[0], meet[1] - S[1]) - reach * 0.9;
+  if (short <= 0) return null;
+  const gap = Math.abs(
+    other.place.x +
+      other.place.w * (other.head?.[0] ?? 0.5) -
+      (me.place.x + me.place.w * (me.head?.[0] ?? 0.5)),
+  );
+  return Math.min(short, Math.max(0, gap / 2 - me.place.w * 0.3));
+}
+
+/**
+ * How far someone leans in for a hand-over, in degrees: as far as it takes
+ * the shoulder `S` (stepped `shift` along) to bring the meeting point within
+ * nine tenths of their `reach`, their feet at `feetY`; no more than
+ * HAND_OVER_LEAN. The player's handOverLean.
+ */
+export function handOverLean(
+  S: readonly [number, number],
+  meet: readonly [number, number],
+  reach: number,
+  shift: number,
+  feetY: number,
+): number {
+  const left = Math.hypot(meet[0] - S[0] - shift, meet[1] - S[1]) - reach * 0.9;
+  const high = feetY - S[1];
+  if (left <= 0 || high <= 0) return 0;
+  return Math.min(
+    HAND_OVER_LEAN,
+    (Math.asin(Math.min(1, left / high)) * 180) / Math.PI,
+  );
+}
+
+/** A point of someone leaning `deg` about their feet (`about`), as the player leans them. */
+const leant = (
+  p: readonly [number, number],
+  about: readonly [number, number],
+  deg: number,
+): [number, number] => (deg ? turnedAbout(p, about, deg) : [p[0], p[1]]);
 
 /** The views other than the front, whose groups' ids end in their name. */
 const SIDE_VIEWS = ['3q', 'profile', 'back3q', 'back'] as const;
@@ -430,6 +517,29 @@ export interface StillPart {
   soft?: true;
   /** A person drawn from every side: the view the still shows. */
   view?: SceneView;
+  /** Out of focus: everyone but the thing an insert is on, a little soft. */
+  unfocused?: true;
+  /** Leant about their feet (in the frame), by so many degrees: in for a hand-over. */
+  lean?: { deg: number; x: number; y: number };
+}
+
+/** A shape of someone's body in the frame, for measuring what a shot shows: their head, body and legs, and each arm's parts. */
+export type BodyShape =
+  | { part: 'head'; cx: number; cy: number; rx: number; ry: number }
+  | { part: 'body' | 'legs'; points: [number, number][] }
+  | {
+      part: 'arm' | 'fore' | 'hand';
+      hand: 'r' | 'l';
+      a: [number, number];
+      b: [number, number];
+      r: number;
+    };
+
+/** Someone in a still, as shapes in the frame: what they hold in which hand. */
+export interface StillBody {
+  id: string;
+  shapes: BodyShape[];
+  holds: Partial<Record<'r' | 'l', string>>;
 }
 
 export interface StillPlan {
@@ -443,6 +553,12 @@ export interface StillPlan {
   parts: StillPart[];
   /** Who is on the stage then. */
   shows: string[];
+  /** Everyone on the floor as shapes in the frame, for measuring (insertReading). */
+  bodies: StillBody[];
+  /** The things drawn, where they are in the frame, and whose hand holds each. */
+  things: { id: string; box: Box; by: string | null; hand?: 'r' | 'l' }[];
+  /** The thing the insert on then is on, if one is. */
+  insert: string | null;
 }
 
 /**
@@ -607,13 +723,78 @@ export function stillPlan(
     },
     feature: (id) => scene.setting?.features?.find((f) => f.id === id)?.at.wide,
   };
+  const hands = handsAt(stage, t);
+  // An insert on a thing (studio-screenwriting K5): the hand that holds it
+  // holds it still where the shot frames it; whoever has it in hand then
+  // is as sharp as it, and everyone else a little soft.
+  const insert = shot?.shot?.kind === 'insert' ? shot.target : null;
+  const holdsIt = insert ? hands.get(insert) : undefined;
+  const inFocus = holdsIt?.by && !holdsIt.gone ? holdsIt.by : null;
+  // A thing handed over, its hands out together: where they meet, each
+  // stepping in as far as it takes to reach (the player's give).
+  const meets = new Map<
+    string,
+    { prop: string; hand: 'r' | 'l'; at: [number, number]; flip: boolean }
+  >();
+  const stepIn = new Map<string, { shift: number; lean: number }>();
+  for (const prop of scene.props ?? []) {
+    const give = handOverAt(stage.props, prop.id, t);
+    if (!give) continue;
+    const a = holderOn(stage, give.from, k);
+    const b = holderOn(stage, give.to, k);
+    if (!a || !b) continue;
+    const held = hands.get(prop.id);
+    const giving =
+      held?.by === give.from && (held.hand === 'r' || held.hand === 'l')
+        ? held.hand
+        : sideToward(a, b);
+    const at = meetPoint(a, b, giving);
+    for (const [me, other, hand] of [
+      [a, b, giving],
+      [b, a, sideToward(b, a)],
+    ] as const) {
+      const id = me === a ? give.from : give.to;
+      const d = stage.drawing(id);
+      const arm = d?.joints?.[hand];
+      // Drawn as the giver holds it until the hands part: never turned
+      // round as it changes hands.
+      meets.set(id, { prop: prop.id, hand, at, flip: giving === 'l' });
+      if (!arm) continue;
+      const joints = arm.map(([x, y]): [number, number] => [
+        me.place.x + me.place.w * x,
+        me.place.y + me.place.h * y,
+      ]);
+      const step = handOverStep(me, joints, at, other);
+      // Out of reach: a step in, and a lean for what it leaves short.
+      const way = sideToward(me, other) === 'r' ? 1 : -1;
+      const [S, E, Hd] = joints;
+      const reach =
+        Math.hypot(E[0] - S[0], E[1] - S[1]) +
+        Math.hypot(Hd[0] - E[0], Hd[1] - E[1]);
+      if (step !== null)
+        stepIn.set(id, {
+          shift: way * step,
+          lean:
+            way *
+            handOverLean(S, at, reach, way * step, me.place.y + me.place.h),
+        });
+    }
+  }
+  /** Where each hand is, on the stage, and each one's scale (stage units to the kit's) and depth, for the things they hold. */
+  const handAt = new Map<string, [number, number]>();
+  const held = new Map<string, { k: number; f: number; feet: number }>();
+  const bodies: StillBody[] = [];
   // The people, posed as they are then, their hidden parts hidden.
   const shows: string[] = [];
   for (const id of step?.show ?? []) {
     const thing = scene.things.find((one) => one.id === id);
     const cheated = near?.id === id ? near.place : null;
     const stood = at.places?.[id] ?? places[k]?.[id];
-    const place: ScenePlaceDto | undefined = cheated ?? (stood && side(stood));
+    const inFor = cheated || at.places?.[id] ? undefined : stepIn.get(id);
+    const stepped =
+      stood && inFor ? { ...stood, x: stood.x + inFor.shift } : stood;
+    const place: ScenePlaceDto | undefined =
+      cheated ?? (stepped && side(stepped));
     if (thing?.kind !== 'drawing' || !place || thing.backdrop) continue;
     if (place.w > W * 0.6 && !cheated) continue;
     shows.push(id);
@@ -639,44 +820,88 @@ export function stillPlan(
     // the kit's swapped faces hidden in every view.
     if (hasRigFace(svg))
       svg = withRigFace(svg, faceInScene(scene, id, t), faceGroupsOf(thing));
-    if (thing.rig) {
-      const pose = stillPose(scene, id, t);
+    const unitsTall = Number(
+      /viewBox="[^"]*?(-?[\d.]+)"/u.exec(thing.svg)?.[1] ?? Number.NaN,
+    );
+    const kit =
+      place.h /
+      (thing.rig && Number.isFinite(unitsTall) && unitsTall > 0
+        ? unitsTall
+        : (thing.units ?? 234));
+    const arms = thing.rig
+      ? jointsIn(
+          thing,
+          seen?.view ?? 'front',
+          seen?.mirror ?? (turned ? -1 : 1),
+        )
+      : undefined;
+    // Leaning in for a hand-over: about their feet.
+    const lean = inFor?.lean ?? 0;
+    const pivot: [number, number] = [place.x + place.w / 2, place.y + place.h];
+    /** An arm's joints on the stage, where they are drawn. */
+    const armOn = (hand: 'r' | 'l') =>
+      arms?.[hand]?.map(([x, y]): [number, number] =>
+        leant([place.x + place.w * x, place.y + place.h * y], pivot, lean),
+      );
+    const pose = thing.rig ? stillPose(scene, id, t) : { ...AT_REST };
+    if (thing.rig && !cheated) {
       // A hand holding a thing, and doing nothing else, holds it before
-      // them (seen from the front): the arm bent to where it is drawn.
-      if (
-        !cheated &&
-        !turned &&
-        (!seen || (seen.view === 'front' && seen.mirror === 1))
-      ) {
-        const holding = holderOn(stage, id, k);
-        for (const hand of handsHolding(stage, id, t)) {
-          const arm = thing.joints?.[hand];
-          if (
-            !arm ||
-            !holding ||
-            (hand === 'r' ? pose.ar || pose.arf : pose.al || pose.alf)
-          )
-            continue;
-          const bent = armTo(
-            arm.map(([x, y]) => [place.x + place.w * x, place.y + place.h * y]),
-            holdPoint(holding, hand),
-            hand,
-          );
-          if (bent && hand === 'r') [pose.ar, pose.arf] = bent;
-          else if (bent) [pose.al, pose.alf] = bent;
-        }
+      // them; a hand the acting moves takes it along, but not the hand
+      // holding the thing an insert is on, which holds it still. A hand
+      // out to hand a thing over, or take it, is where the hands meet.
+      const me: Holder = {
+        ...(holderOn(stage, id, k) ?? {}),
+        place,
+      };
+      const aims = new Map<'r' | 'l', [number, number]>();
+      for (const prop of scene.props ?? []) {
+        const has = hands.get(prop.id);
+        if (
+          prop.hangs ||
+          has?.by !== id ||
+          (has.hand !== 'r' && has.hand !== 'l') ||
+          has.gone ||
+          has.flying
+        )
+          continue;
+        const moved =
+          has.hand === 'r' ? pose.ar || pose.arf : pose.al || pose.alf;
+        if (!moved || insert === prop.id)
+          aims.set(has.hand, holdPoint(me, has.hand));
       }
+      const meet = meets.get(id);
+      if (meet) aims.set(meet.hand, meet.at);
+      for (const [hand, to] of aims) {
+        const arm = armOn(hand);
+        const bent = arm && armTo(arm, to, hand);
+        if (bent && hand === 'r') [pose.ar, pose.arf] = bent;
+        else if (bent) [pose.al, pose.alf] = bent;
+      }
+    }
+    if (thing.rig)
       svg = posedRig(
         svg,
         mirrored
           ? { ar: -pose.al, arf: -pose.alf, al: -pose.ar, alf: -pose.arf }
           : pose,
       );
+    // Where each hand is, as posed.
+    const posed: Partial<Record<'r' | 'l', [number, number][]>> = {};
+    for (const hand of ['r', 'l'] as const) {
+      const arm = armOn(hand);
+      if (!arm || arm.length < 3) continue;
+      posed[hand] = posedArm(
+        arm,
+        hand === 'r' ? pose.ar : pose.al,
+        hand === 'r' ? pose.arf : pose.alf,
+      );
+      handAt.set(`${id}|${hand}`, posed[hand][2]);
     }
     const feet = place.y + place.h;
     // One cheated near the camera stands where the shot puts them, before
     // the floor: moved as the people are.
     const f = cheated ? 1 : floorFactor(feet, floor);
+    held.set(id, { k: kit, f, feet: cheated ? H * 4 : feet });
     const grown = anglePeople(angle);
     const box = onScreen(camera, f, place);
     onFloor.push({
@@ -699,31 +924,92 @@ export function stillPlan(
       ...(mirrored ? { mirror: true as const } : {}),
       ...(cheated && near?.soft ? { soft: true as const } : {}),
       ...(seen ? { view: seen.view } : {}),
+      ...(insert && inFocus !== id ? { unfocused: true as const } : {}),
+      ...(lean
+        ? (() => {
+            const about = onScreen(camera, f, {
+              x: pivot[0],
+              y: pivot[1],
+              w: 0,
+              h: 0,
+            });
+            return { lean: { deg: lean, x: about.x, y: about.y } };
+          })()
+        : {}),
     });
+    if (thing.rig)
+      bodies.push({
+        id,
+        shapes: bodyShapes(
+          thing,
+          place,
+          kit,
+          posed,
+          mirrored,
+          (p) => {
+            const at = onScreen(camera, f, { x: p[0], y: p[1], w: 0, h: 0 });
+            return [at.x, at.y];
+          },
+          onScreen(camera, f, { x: 0, y: 0, w: 1, h: 1 }).w,
+          (p) => leant(p, pivot, lean),
+        ),
+        // Out to hand a thing over, or to take it, the hand has it too.
+        holds: meets.has(id)
+          ? { [meets.get(id)!.hand]: meets.get(id)!.prop }
+          : {},
+      });
   }
-  // The things held or resting before someone, where they are then (a
-  // thing in a hand at the hand, before whoever holds it); from the front
-  // only, and not in the air.
-  if (!turned)
-    for (const prop of scene.props ?? []) {
-      if (prop.in) continue;
-      const box = thingBoxAt(stage, prop.id, t);
+  // The things held or resting before someone, where they are then: a
+  // thing in a hand at that hand as it is posed, the other way round in a
+  // left hand, just before whoever holds it; one resting, before whoever
+  // it rests by; not in the air.
+  const things: StillPlan['things'] = [];
+  for (const prop of scene.props ?? []) {
+    if (prop.in) continue;
+    const has = hands.get(prop.id);
+    if (!has || has.gone || has.flying) continue;
+    const hand = has.hand === 'r' || has.hand === 'l' ? has.hand : undefined;
+    const inHand = has.by && hand ? handAt.get(`${has.by}|${hand}`) : undefined;
+    const by = has.by ? held.get(has.by) : undefined;
+    let box: Box | null;
+    let depth: number;
+    let feet: number;
+    const meeting = has.by ? meets.get(has.by) : undefined;
+    const flipped = meeting?.prop === prop.id ? meeting.flip : hand === 'l';
+    if (inHand && by && hand) {
+      box = gripBox(prop, prop.grip, inHand, by.k, flipped);
+      depth = by.f;
+      feet = by.feet + 1;
+    } else {
+      // From the other side, only what is in a hand.
+      if (turned) continue;
+      box = thingBoxAt(stage, prop.id, t);
       if (!box) continue;
-      const has = handsAt(stage, t).get(prop.id)!;
       const who = has.by ?? has.near;
       const them = who ? places[k]?.[who] : undefined;
-      const feet = them ? them.y + them.h + (has.by ? 1 : -1) : box.y + box.h;
-      const f = floorFactor(them ? them.y + them.h : feet, floor);
-      onFloor.push({
-        key: `prop:${prop.id}`,
-        kind: 'thing',
-        svg: prop.svg,
-        box: onScreen(camera, f, box),
-        width: Math.max(48, Math.round(box.w * camera.s * scale * 2)),
-        depth: f,
-        feet,
-      });
+      feet = them ? them.y + them.h + (has.by ? 1 : -1) : box.y + box.h;
+      depth = floorFactor(them ? them.y + them.h : feet, floor);
     }
+    const shown = onScreen(camera, depth, box);
+    onFloor.push({
+      key: `prop:${prop.id}`,
+      kind: 'thing',
+      svg: prop.svg,
+      box: shown,
+      width: Math.max(48, Math.round(box.w * camera.s * scale * 2)),
+      depth,
+      feet,
+      ...(inHand && flipped ? { mirror: true as const } : {}),
+    });
+    things.push({
+      id: prop.id,
+      box: shown,
+      by: inHand ? has.by : null,
+      ...(inHand && hand ? { hand } : {}),
+    });
+    const body = inHand ? bodies.find((one) => one.id === has.by) : undefined;
+    if (body && hand) body.holds[hand] = prop.id;
+  }
   // Back to front by their feet, as the player draws them: a feature the
   // stage draws is over only those farther off than it by more than a
   // tie (someone beside it stands before it).
@@ -741,6 +1027,224 @@ export function stillPlan(
     camera,
     parts: [...behind, ...onFloor, ...before],
     shows,
+    bodies,
+    things,
+    insert,
+  };
+}
+
+/**
+ * Someone the kit draws as shapes, for measuring what a shot shows: the
+ * head (with its hair) about where the drawing has it, the body from the
+ * shoulders to the hips, the legs to the feet, and each arm as posed
+ * (`posed`, on the stage), each as `toFrame` puts it, `across` frame units
+ * to a stage unit. In the kit's units, `kit` stage units to one.
+ */
+function bodyShapes(
+  thing: Extract<SceneThingDto, { kind: 'drawing' }>,
+  place: Box,
+  kit: number,
+  posed: Partial<Record<'r' | 'l', [number, number][]>>,
+  mirrored: boolean,
+  toFrame: (p: [number, number]) => [number, number],
+  across: number,
+  /** Where a point of them is, leaning: the arms (`posed`) are leant already. */
+  lean: (p: [number, number]) => [number, number] = (p) => p,
+): BodyShape[] {
+  const at = (x: number, y: number): [number, number] =>
+    toFrame(
+      lean([place.x + place.w * (mirrored ? 1 - x : x), place.y + place.h * y]),
+    );
+  const u = kit * across;
+  const head = thing.head ?? [0.5, 0.25];
+  const [hx, hy] = at(head[0], head[1]);
+  const shapes: BodyShape[] = [
+    // The hair stands a little over the head's own oval.
+    {
+      part: 'head',
+      cx: hx,
+      cy: hy - 2 * u,
+      rx: (HEAD.rx + 4) * u,
+      ry: (HEAD.ry + 6) * u,
+    },
+  ];
+  const joints = thing.joints;
+  const legs = thing.legs;
+  if (joints) {
+    const sy = Math.min(joints.r[0][1], joints.l[0][1]);
+    const sx0 = Math.min(joints.r[0][0], joints.l[0][0]);
+    const sx1 = Math.max(joints.r[0][0], joints.l[0][0]);
+    const hipY = legs
+      ? Math.min(legs.r[0][1], legs.l[0][1])
+      : sy + (1 - sy) * 0.45;
+    const hx0 = legs ? Math.min(legs.r[0][0], legs.l[0][0]) : sx0;
+    const hx1 = legs ? Math.max(legs.r[0][0], legs.l[0][0]) : sx1;
+    const top = at(0, sy)[1] - 12 * u;
+    const [l0] = at(sx0, sy);
+    const [r0] = at(sx1, sy);
+    const [lh, bottom] = at(hx0, hipY);
+    const [rh] = at(hx1, hipY);
+    const [a0, a1] = [Math.min(l0, r0), Math.max(l0, r0)];
+    const [b0, b1] = [Math.min(lh, rh), Math.max(lh, rh)];
+    shapes.push({
+      part: 'body',
+      points: [
+        [a0 - 8 * u, top],
+        [a1 + 8 * u, top],
+        [b1 + 26 * u, bottom],
+        [b0 - 26 * u, bottom],
+      ],
+    });
+    const foot = legs
+      ? Math.max(legs.r[legs.r.length - 1][1], legs.l[legs.l.length - 1][1])
+      : 1;
+    const low = at(0, foot)[1] + 8 * u;
+    shapes.push({
+      part: 'legs',
+      points: [
+        [b0 - 12 * u, bottom],
+        [b1 + 12 * u, bottom],
+        [b1 + 12 * u, low],
+        [b0 - 12 * u, low],
+      ],
+    });
+  }
+  for (const hand of ['r', 'l'] as const) {
+    const arm = posed[hand];
+    if (!arm) continue;
+    const [S, E, Hd] = arm.map(toFrame);
+    shapes.push(
+      { part: 'arm', hand, a: S, b: E, r: 10.5 * u },
+      { part: 'fore', hand, a: E, b: Hd, r: 10.5 * u },
+      { part: 'hand', hand, a: Hd, b: Hd, r: 11 * u },
+    );
+  }
+  return shapes;
+}
+
+/** Whether a point is in a body's shape. */
+function inShape(shape: BodyShape, x: number, y: number): boolean {
+  if (shape.part === 'head')
+    return (
+      ((x - shape.cx) / shape.rx) ** 2 + ((y - shape.cy) / shape.ry) ** 2 <= 1
+    );
+  if ('points' in shape) {
+    let inside = false;
+    const p = shape.points;
+    for (let i = 0, j = p.length - 1; i < p.length; j = i, i += 1)
+      if (
+        p[i][1] > y !== p[j][1] > y &&
+        x <
+          ((p[j][0] - p[i][0]) * (y - p[i][1])) / (p[j][1] - p[i][1]) + p[i][0]
+      )
+        inside = !inside;
+    return inside;
+  }
+  const [ax, ay] = shape.a;
+  const [bx, by] = shape.b;
+  const len = (bx - ax) ** 2 + (by - ay) ** 2;
+  const k = len
+    ? Math.max(
+        0,
+        Math.min(1, ((x - ax) * (bx - ax) + (y - ay) * (by - ay)) / len),
+      )
+    : 0;
+  return (
+    Math.hypot(x - (ax + k * (bx - ax)), y - (ay + k * (by - ay))) <= shape.r
+  );
+}
+
+/** What an insert shows, measured in its still (studio-screenwriting K5). */
+export interface InsertReading {
+  thing: string;
+  /** How far its middle is from the frame's, as shares of the frame's width and height; `off`, the larger. */
+  dx: number;
+  dy: number;
+  off: number;
+  /** How much of the frame's height, and width, its box fills. */
+  fill: number;
+  wide: number;
+  /** How much of the frame other bodies cover, outside the thing: anyone's, but the hand and wrist that hold it. */
+  bodies: number;
+  /** Whether it is in someone's hand (or hands, handed over). */
+  held: boolean;
+  /** How much of it faces cover. */
+  faces: number;
+}
+
+/**
+ * What an insert is to read as, checked by insertReading: its thing within
+ * a tenth of the frame's middle, filling about two fifths of its height;
+ * little of anyone else in it (a thing alone on the floor, a foot at most;
+ * one in a hand or handed over, the arms and the body behind it), and no
+ * more of a face than a sliver at an edge.
+ */
+export const INSERT_READS = {
+  off: 0.1,
+  fill: [0.33, 0.55] as const,
+  bodies: { alone: 0.25, held: 0.5 },
+  faces: 0.05,
+};
+
+/**
+ * What a still shows of the thing an insert is on (`thing`, else the
+ * plan's insert): where its middle is in the frame, how much of it it
+ * fills, and how much of the frame others' bodies and faces cover outside
+ * it (the hand and wrist holding it do not count), each by points on a
+ * grid across the frame. Null when the thing is not drawn.
+ */
+export function insertReading(
+  plan: StillPlan,
+  thing: string | null = plan.insert,
+): InsertReading | null {
+  if (!thing) return null;
+  const box = thing.startsWith('f:')
+    ? plan.parts.find((part) => part.key === `feature:${thing.slice(2)}`)?.box
+    : plan.things.find((one) => one.id === thing)?.box;
+  if (!box) return null;
+  const { W, H } = plan;
+  const dx = (box.x + box.w / 2 - W / 2) / W;
+  const dy = (box.y + box.h / 2 - H / 2) / H;
+  const clip = (a: number, b: number, lo: number, hi: number) =>
+    Math.max(0, Math.min(b, hi) - Math.max(a, lo));
+  const cols = 96;
+  const rows = 54;
+  let bodies = 0;
+  let faces = 0;
+  for (let i = 0; i < cols; i += 1)
+    for (let j = 0; j < rows; j += 1) {
+      const x = ((i + 0.5) / cols) * W;
+      const y = ((j + 0.5) / rows) * H;
+      if (x >= box.x && x <= box.x + box.w && y >= box.y && y <= box.y + box.h)
+        continue;
+      let body = false;
+      let face = false;
+      for (const one of plan.bodies)
+        for (const shape of one.shapes) {
+          // The hand and wrist holding it are fine.
+          if (
+            (shape.part === 'hand' || shape.part === 'fore') &&
+            one.holds[shape.hand] === thing
+          )
+            continue;
+          if (!inShape(shape, x, y)) continue;
+          body = true;
+          if (shape.part === 'head') face = true;
+        }
+      if (body) bodies += 1;
+      if (face) faces += 1;
+    }
+  const n = cols * rows;
+  return {
+    thing,
+    dx,
+    dy,
+    off: Math.max(Math.abs(dx), Math.abs(dy)),
+    fill: clip(box.y, box.y + box.h, 0, H) / H,
+    wide: clip(box.x, box.x + box.w, 0, W) / W,
+    bodies: bodies / n,
+    faces: faces / n,
+    held: plan.bodies.some((one) => Object.values(one.holds).includes(thing)),
   };
 }
 
@@ -748,6 +1252,9 @@ export function stillPlan(
 const PAPER = '#FBF7EF';
 /** How soft one cheated near the camera is, in the stage's units (the player's NEAR_SOFT_PX). */
 const SOFT_PX = 2.5;
+/** How soft everyone is behind an insert's thing, in the stage's units, and how much of them shows over what is behind: the player's INSERT_SOFT_PX and INSERT_KEEP. */
+const UNFOCUSED_PX = 4;
+const UNFOCUSED_KEEP = 0.85;
 
 /** A still as one SVG from its parts' PNGs (by key): each laid where the plan puts it. A part with no PNG is left out. */
 export function stillSvg(
@@ -766,17 +1273,33 @@ export function stillSvg(
         ? ' preserveAspectRatio="none"'
         : ' preserveAspectRatio="xMidYMax meet"';
     // Facing left: drawn the other way round about the middle of its box.
-    const turned = part.mirror
-      ? ` transform="translate(${r2(2 * x + w)} 0) scale(-1 1)"`
-      : '';
-    const soft = part.soft ? ' filter="url(#still-soft)"' : '';
+    const turned = [
+      part.lean
+        ? `rotate(${r2(part.lean.deg)} ${r2(part.lean.x)} ${r2(part.lean.y)})`
+        : '',
+      part.mirror ? `translate(${r2(2 * x + w)} 0) scale(-1 1)` : '',
+    ].filter(Boolean);
+    const transform = turned.length ? ` transform="${turned.join(' ')}"` : '';
+    const soft = part.soft
+      ? ' filter="url(#still-soft)"'
+      : part.unfocused
+        ? ` filter="url(#still-unfocused)" opacity="${UNFOCUSED_KEEP}"`
+        : '';
     return [
-      `<image x="${r2(x)}" y="${r2(y)}" width="${r2(w)}" height="${r2(h)}"${fit}${turned}${soft} href="data:image/png;base64,${png.toString('base64')}"/>`,
+      `<image x="${r2(x)}" y="${r2(y)}" width="${r2(w)}" height="${r2(h)}"${fit}${transform}${soft} href="data:image/png;base64,${png.toString('base64')}"/>`,
     ];
   });
-  const defs = plan.parts.some((part) => part.soft)
-    ? `<defs><filter id="still-soft" x="-5%" y="-5%" width="110%" height="110%"><feGaussianBlur stdDeviation="${r2(SOFT_PX * (plan.W / 1600))}"/></filter></defs>`
-    : '';
+  const filters = [
+    plan.parts.some((part) => part.soft)
+      ? `<filter id="still-soft" x="-5%" y="-5%" width="110%" height="110%"><feGaussianBlur stdDeviation="${r2(SOFT_PX * (plan.W / 1600))}"/></filter>`
+      : '',
+    // Out of focus behind an insert's thing: softer, and a little faded
+    // into what is behind, as a lens close on a thing leaves the rest.
+    plan.parts.some((part) => part.unfocused)
+      ? `<filter id="still-unfocused" x="-5%" y="-5%" width="110%" height="110%"><feGaussianBlur stdDeviation="${r2(UNFOCUSED_PX * (plan.W / 1600))}"/></filter>`
+      : '',
+  ].join('');
+  const defs = filters ? `<defs>${filters}</defs>` : '';
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${plan.W} ${plan.H}">${defs}<rect width="${plan.W}" height="${plan.H}" fill="${PAPER}"/>${images.join('')}</svg>`;
 }
 

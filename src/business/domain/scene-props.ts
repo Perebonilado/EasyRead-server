@@ -452,7 +452,8 @@ export function drawProp(prop: StageProp): PropDrawing {
             line('M-15,-19 L0,-8 L15,-19', FIGURE_INK, 2),
           [-17, -21, 34, 22],
         ),
-        grip: [-9, -10],
+        // Held by its end, the hand round its edge.
+        grip: [-13, -8],
         mouth: [0, -10],
         bite: [0, -10],
       };
@@ -622,16 +623,18 @@ export function drawProp(prop: StageProp): PropDrawing {
         bite: [0, -11],
       };
     case 'key':
+      // A broad bow and a shaft wide enough that its gold shows inside the
+      // outline, close up as well as in a hand across the stage.
       return {
         ...framed(
-          `<circle cx="-11" cy="-6" r="5.5" ${inked('#e0b84a')}/>` +
-            `<circle cx="-11" cy="-6" r="2" ${inked('#fbf7ee')}/>` +
-            `<rect x="-5.5" y="-7.5" width="19" height="3" ${inked('#e0b84a')}/>` +
-            `<rect x="8" y="-4.5" width="2.6" height="4" ${inked('#e0b84a')}/>` +
-            `<rect x="11.5" y="-4.5" width="2.6" height="3" ${inked('#e0b84a')}/>`,
-          [-17, -12, 32, 12],
+          `<rect x="-5" y="-8.3" width="19" height="4.6" rx="0.8" ${inked('#e0b84a')}/>` +
+            `<path d="M8,-3.7 L8,0.3 L11,0.3 L11,-1.7 L12.6,-1.7 L12.6,-0.6 L15.5,-0.6 L15.5,-3.7" ${inked('#e0b84a')}/>` +
+            `<circle cx="-10" cy="-6" r="6.6" ${inked('#e0b84a')}/>` +
+            `<circle cx="-10" cy="-6" r="2.3" ${inked('#fbf7ee')}/>`,
+          [-17, -13, 33, 14],
         ),
-        grip: [-11, -6],
+        // Held by its bow, the hand round its edge.
+        grip: [-13, -6],
         mouth: [0, -6],
         bite: [2, -6],
       };

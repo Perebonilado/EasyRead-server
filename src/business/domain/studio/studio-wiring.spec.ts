@@ -34,6 +34,11 @@ import {
 import { mendSheet, repairSheet, withFeatures } from './studio-check';
 import { stageStory } from './studio-stage';
 import { voiced } from './__fixtures__/voiced';
+import { figureDrawing } from '../scene-sheet';
+import { VIEW_RIG } from '../scene-figure-views';
+import { facesShown } from '../scene-script';
+import type { GatedDrawing } from '../scene-svg';
+import { INSERT_READS, insertReading, stillPlan } from '../scene-still';
 
 const figure = (over: Record<string, unknown>) => ({
   age: 'adult',
@@ -450,6 +455,97 @@ describe('an insert on a planted thing', () => {
     expect(inserts[1].atMs).toBeLessThanOrEqual(given);
     expect(inserts[1].untilMs).toBeGreaterThan(given);
     expect(lineCrossings(scene, walksOf(scene))).toEqual([]);
+  });
+
+  /** The scene with the kit's own people, rigged and drawn from every side, as the film draws them. */
+  const withKit = async () => {
+    const script = staged(RAW);
+    const drawn = new Map<string, GatedDrawing>();
+    for (const one of BIBLE.characters)
+      drawn.set(
+        one.id,
+        await figureDrawing(one.figure!, one.id, {
+          rig: VIEW_RIG,
+          faceRig: true,
+          faces: facesShown(script, one.id),
+        }),
+      );
+    return voiced(script, [], {}, {}, { drawn }).scene;
+  };
+
+  it('reads as a close-up in its stills: the thing centred, filling about two fifths of the frame, little else of anyone', async () => {
+    const scene = await withKit();
+    const inserts = scene.effects.filter(
+      (e) => e.do === 'zoom' && e.shot?.kind === 'insert',
+    );
+    expect(inserts.length).toBeGreaterThanOrEqual(2);
+    for (const e of inserts)
+      for (const at of [0.25, 0.5, 0.75]) {
+        const t = Math.round(e.atMs + (e.untilMs! - e.atMs) * at);
+        const read = insertReading(stillPlan(scene, t, 480), e.target);
+        const said = `${e.target} at ${t}: ${JSON.stringify(read)}`;
+        expect(read).not.toBeNull();
+        expect([said, read!.off <= INSERT_READS.off]).toEqual([said, true]);
+        expect([said, read!.fill >= INSERT_READS.fill[0]]).toEqual([
+          said,
+          true,
+        ]);
+        expect([said, read!.fill <= INSERT_READS.fill[1]]).toEqual([
+          said,
+          true,
+        ]);
+        expect([
+          said,
+          read!.bodies <= INSERT_READS.bodies[read!.held ? 'held' : 'alone'],
+        ]).toEqual([said, true]);
+        expect([said, read!.faces <= INSERT_READS.faces]).toEqual([said, true]);
+      }
+    // The letter set down is seen on the floor alone, where it lies: no
+    // hand it left, and no face.
+    const set = inserts.find((e) => e.target === 'letter')!;
+    const read = insertReading(
+      stillPlan(scene, Math.round((set.atMs + set.untilMs!) / 2), 480),
+    )!;
+    expect(read.thing).toBe('letter');
+    expect(read.faces).toBe(0);
+  });
+
+  it("draws a thing held in the hand, at the kit's size: a letter about A5", async () => {
+    const scene = await withKit();
+    // As the scene opens Mia has the letter, Dad the key.
+    const plan = stillPlan(scene, 1000, 960);
+    for (const [id, by] of [
+      ['letter', 'mia'],
+      ['key', 'dad'],
+    ] as const) {
+      const thing = plan.things.find((one) => one.id === id)!;
+      expect(thing.by).toBe(by);
+      const prop = scene.props!.find((p) => p.id === id)!;
+      const [vx, vy, vw, vh] = prop.viewBox;
+      // Its grip, the other way round in a left hand, is at the hand as posed.
+      const across = (prop.grip[0] - vx) / vw;
+      const grip = [
+        thing.box.x + thing.box.w * (thing.hand === 'l' ? 1 - across : across),
+        thing.box.y + (thing.box.h * (prop.grip[1] - vy)) / vh,
+      ];
+      const hand = plan.bodies
+        .find((one) => one.id === by)!
+        .shapes.find(
+          (shape) => shape.part === 'hand' && shape.hand === thing.hand,
+        ) as { a: [number, number]; r: number };
+      expect(Math.hypot(grip[0] - hand.a[0], grip[1] - hand.a[1])).toBeLessThan(
+        hand.r * 0.1,
+      );
+    }
+    // The letter's drawing (its viewBox less the room framed about it) at
+    // the kit's scale, a grown-up 224 of its units to 1.7 m: about A5
+    // (210 × 148 mm), neither a stamp nor a poster.
+    const letter = scene.props!.find((p) => p.id === 'letter')!;
+    const mm = (units: number) => (units * 1700) / 224;
+    expect(mm(letter.viewBox[2] - 6)).toBeGreaterThan(190);
+    expect(mm(letter.viewBox[2] - 6)).toBeLessThan(280);
+    expect(mm(letter.viewBox[3] - 6)).toBeGreaterThan(130);
+    expect(mm(letter.viewBox[3] - 6)).toBeLessThan(190);
   });
 });
 

@@ -646,6 +646,8 @@ export const INSERT_AGAIN_MS = 6000;
 export interface InsertAsk {
   thing: string;
   atMs: number;
+  /** How long it would best be on (a hand-over, as long as the hands are out together); INSERT_MS otherwise. */
+  ms?: number;
 }
 
 /** When an insert is on. */
@@ -693,6 +695,10 @@ export function insertWindows(
       Math.max(0, ask.atMs - INSERT_EARLY_MS, last ? last.untilMs : 0),
     );
     let taken: InsertWindow | null = null;
+    const best = Math.min(
+      INSERT_MOST_MS,
+      Math.max(INSERT_LEAST_MS, ask.ms ?? INSERT_MS),
+    );
     for (
       let tries = 0;
       tries < 12 && from <= ask.atMs + INSERT_LATE_MS;
@@ -700,9 +706,9 @@ export function insertWindows(
     ) {
       const lo = from + INSERT_LEAST_MS;
       const hi = Math.min(from + INSERT_MOST_MS, endMs);
-      // Where it may end: as near INSERT_MS as a gap between words lets it.
+      // Where it may end: as near its best length as a gap between words lets it.
       const ends = [
-        from + INSERT_MS,
+        from + best,
         lo,
         hi,
         ...said.flatMap((w) => [
@@ -713,8 +719,7 @@ export function insertWindows(
         ]),
       ].filter((t) => t >= lo && t <= hi && !inWord(t));
       const until = ends.sort(
-        (a, b) =>
-          Math.abs(a - (from + INSERT_MS)) - Math.abs(b - (from + INSERT_MS)),
+        (a, b) => Math.abs(a - (from + best)) - Math.abs(b - (from + best)),
       )[0];
       if (until !== undefined) {
         taken = {

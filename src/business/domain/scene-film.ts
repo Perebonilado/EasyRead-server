@@ -1323,22 +1323,38 @@ export function withoutJumps(
 
 type Box = Pick<ScenePlaceDto, 'x' | 'y' | 'w' | 'h'>;
 
-/** An insert frames its thing so it fills this share of the frame, padded about; no nearer than INSERT_LEAST, no closer than INSERT_MOST. The player's own (shots.ts). */
-export const INSERT_FILL = 0.4;
+/**
+ * An insert is a true close-up (studio-screenwriting K5): its thing's box
+ * fills INSERT_FILL of the frame's height, and no more than INSERT_WIDE of
+ * its width, its middle in the frame's middle; no nearer than
+ * INSERT_LEAST, no closer than INSERT_MOST. A letter held fills about two
+ * fifths of the frame, and a key handed over as much. The player's own
+ * (shots.ts).
+ */
+export const INSERT_FILL = 0.45;
+export const INSERT_WIDE = 0.6;
 export const INSERT_LEAST = 1.6;
-export const INSERT_MOST = 4;
+export const INSERT_MOST = 10;
 /** The kit's figure is drawn this tall in its own units, where its drawing does not say: what a thing in its hand is scaled by. The player's own. */
 export const KIT_FIGURE_H = 234;
 
-/** An insert on a thing where it is: close enough that it fills INSERT_FILL of the frame, its middle in the frame's middle. */
+/** An insert on a thing where it is: close enough that it fills INSERT_FILL of the frame's height (INSERT_WIDE of its width at most), its middle in the frame's middle. */
 export function insertView(
   box: Box,
   W: number,
   H: number,
   span: readonly [number, number] = [0, 0],
 ): View {
-  const big = Math.max(box.w / W, box.h / H, 1e-3);
-  const s = Math.min(INSERT_MOST, Math.max(INSERT_LEAST, INSERT_FILL / big));
+  const s = Math.min(
+    INSERT_MOST,
+    Math.max(
+      INSERT_LEAST,
+      Math.min(
+        (INSERT_FILL * H) / Math.max(box.h, 1e-3),
+        (INSERT_WIDE * W) / Math.max(box.w, 1e-3),
+      ),
+    ),
+  );
   return settle({ s, x: box.x + box.w / 2, y: box.y + box.h / 2 }, W, H, span);
 }
 
@@ -1373,10 +1389,25 @@ export function heldBox(
   const { place } = by;
   const at = holdPoint(by, hand);
   const k = place.h / (by.unitsTall ?? KIT_FIGURE_H);
-  const [vx, vy, vw, vh] = thing.viewBox;
   const grip = hand === 'mouth' ? (thing.mouth ?? thing.grip) : thing.grip;
+  return gripBox(thing, grip, at, k, hand === 'l');
+}
+
+/**
+ * A thing's box on the stage with its point `grip` (in its own units) at
+ * `at`, drawn `k` stage units to its one; `flipped`, the other way round
+ * about that point, as the player draws a thing in the left hand.
+ */
+export function gripBox(
+  thing: Pick<ThingDrawn, 'viewBox'>,
+  grip: readonly [number, number],
+  at: readonly [number, number],
+  k: number,
+  flipped = false,
+): Box {
+  const [vx, vy, vw, vh] = thing.viewBox;
   return {
-    x: at[0] - (grip[0] - vx) * k,
+    x: at[0] - (flipped ? vx + vw - grip[0] : grip[0] - vx) * k,
     y: at[1] - (grip[1] - vy) * k,
     w: vw * k,
     h: vh * k,
@@ -1397,42 +1428,57 @@ export function holdPoint(
   const shoulderY = joint ? place.y + place.h * joint[1] : hy + place.h * 0.22;
   return hand === 'mouth'
     ? [hx + place.w * 0.05, hy + place.h * 0.2]
-    : [hx + side * place.w * 0.17, shoulderY + place.h * 0.15];
+    : [hx + side * place.w * 0.17, shoulderY + place.h * HOLD_BELOW];
 }
 
-/** Where a thing handed from `a` to `b` is as it changes hands: where their hands meet, between their shoulders on the sides they face each other by (the player's "meet"), at the giver's scale. */
-export function handOverBox(thing: ThingDrawn, a: Holder, b: Holder): Box {
-  const toward = (one: Holder, other: Holder): 'r' | 'l' =>
-    other.place.x + other.place.w / 2 >= one.place.x + one.place.w / 2
-      ? 'r'
-      : 'l';
-  const shoulder = (one: Holder, hand: 'r' | 'l'): [number, number] => {
-    const joint = one.shoulder?.[hand];
-    const head = one.head ?? [0.5, 0.25];
-    return joint
-      ? [
-          one.place.x + one.place.w * joint[0],
-          one.place.y + one.place.h * joint[1],
-        ]
-      : [
-          one.place.x + one.place.w * (head[0] + (hand === 'r' ? 0.15 : -0.15)),
-          one.place.y + one.place.h * (head[1] + 0.22),
-        ];
-  };
-  const sa = shoulder(a, toward(a, b));
-  const sb = shoulder(b, toward(b, a));
-  const meet: [number, number] = [
+/** A thing held before someone is this far below their shoulder, as a share of their height, where a close shot of them still has it; hands meet to hand a thing over this far below each one's (the player's own). */
+export const HOLD_BELOW = 0.15;
+export const MEET_BELOW = 0.15;
+
+/** The side `other` stands on from `one`: their right hand ("r", the frame's right) or left. */
+export const sideToward = (one: Holder, other: Holder): 'r' | 'l' =>
+  other.place.x + other.place.w / 2 >= one.place.x + one.place.w / 2
+    ? 'r'
+    : 'l';
+
+/** Someone's shoulder on the stage: the kit's joint, else beside the head. */
+export function shoulderOf(one: Holder, hand: 'r' | 'l'): [number, number] {
+  const joint = one.shoulder?.[hand];
+  const head = one.head ?? [0.5, 0.25];
+  return joint
+    ? [
+        one.place.x + one.place.w * joint[0],
+        one.place.y + one.place.h * joint[1],
+      ]
+    : [
+        one.place.x + one.place.w * (head[0] + (hand === 'r' ? 0.15 : -0.15)),
+        one.place.y + one.place.h * (head[1] + 0.22),
+      ];
+}
+
+/** Where the hands of `a`, giving with `hand`, and `b` meet: midway between that shoulder and b's toward a, MEET_BELOW each one's shoulder, on the mean (the player's "meet", the same for both). */
+export function meetPoint(
+  a: Holder,
+  b: Holder,
+  hand: 'r' | 'l' = sideToward(a, b),
+): [number, number] {
+  const sa = shoulderOf(a, hand);
+  const sb = shoulderOf(b, sideToward(b, a));
+  return [
     (sa[0] + sb[0]) / 2,
-    (sa[1] + sb[1]) / 2 + a.place.h * 0.12,
+    (sa[1] + a.place.h * MEET_BELOW + sb[1] + b.place.h * MEET_BELOW) / 2,
   ];
+}
+
+/** Where a thing handed from `a` (in `hand`, the side toward b unless said) to `b` is as it changes hands: its grip where their hands meet (meetPoint), at the giver's scale, the other way round in a left hand. */
+export function handOverBox(
+  thing: ThingDrawn,
+  a: Holder,
+  b: Holder,
+  hand: 'r' | 'l' = sideToward(a, b),
+): Box {
   const k = a.place.h / (a.unitsTall ?? KIT_FIGURE_H);
-  const [vx, vy, vw, vh] = thing.viewBox;
-  return {
-    x: meet[0] - (thing.grip[0] - vx) * k,
-    y: meet[1] - (thing.grip[1] - vy) * k,
-    w: vw * k,
-    h: vh * k,
-  };
+  return gripBox(thing, thing.grip, meetPoint(a, b, hand), k, hand === 'l');
 }
 
 /** Where a thing resting before someone is: on the ground at their feet, toward the others (`toward`, 1 their right), at their scale. The player's restingBox. */
@@ -1538,45 +1584,103 @@ export function handsAt(
   return new Map(all.map(({ prop, has }) => [prop.id, has]));
 }
 
+/** How long before a hand-over the hands are out to meet, and after it they part: the player's give (business.ts: 1.6 s, the change 62% in, held out from 15% to 78%). */
+export const MEET_BEFORE_MS = 750;
+export const MEET_AFTER_MS = 250;
+
+/** A hand-over of `thing` whose hands are out together at `t`: when it changes hands, who gives it and to whom. */
+export function handOverAt(
+  props: readonly ScenePropDto[],
+  thing: string,
+  t: number,
+): { at: number; from: string; to: string } | null {
+  const give = props
+    .find((p) => p.id === thing)
+    ?.does.find(
+      ([at, , does, to]) =>
+        does === 'give' &&
+        Boolean(to) &&
+        !to!.startsWith('@') &&
+        t >= at - MEET_BEFORE_MS &&
+        t <= at + MEET_AFTER_MS,
+    );
+  return give ? { at: give[0], from: give[1], to: give[3]! } : null;
+}
+
 /**
- * Where an insert frames its thing, from `from` to `until`: where it is
- * as the shot begins and as it ends, both in the frame; a thing handed
- * over in it, where the two hands meet between the two (the player's
- * "meet"), at the giver's scale. Null when it is nowhere to be found.
+ * The moment an insert frames its thing at, from `from` to `until`: just
+ * after it is handled then (set down, it lies there; picked up, it is in
+ * the hand); a thing handed over, as the hands meet; else its middle.
+ */
+export function insertMoment(
+  props: readonly ScenePropDto[],
+  thing: string,
+  from: number,
+  until: number,
+): number {
+  const done = props
+    .find((p) => p.id === thing)
+    ?.does.find(([at]) => at >= from && at <= until);
+  if (!done) return Math.round((from + until) / 2);
+  if (done[2] === 'give') return Math.max(from + 1, done[0] - 1);
+  return Math.min(until - 1, done[0] + 1);
+}
+
+/**
+ * Where an insert frames its thing, from `from` to `until`: where it is at
+ * the moment it frames (insertMoment), one box, so the thing alone fills
+ * the frame; a thing handed over, where the two hands meet between the
+ * two (the player's "meet"), at the giver's scale, in the hand they hold
+ * it in. Null when it is nowhere to be found.
  */
 export function insertBoxOf(
   stage: ThingsOnStage,
   thing: string,
   from: number,
   until: number,
-): Box | null {
+): (Box & { held?: true }) | null {
+  const t = insertMoment(stage.props, thing, from, until);
   const prop = stage.props.find((p) => p.id === thing);
-  const give = prop?.does.find(
-    ([at, , does, to]) =>
-      does === 'give' && at >= from && at <= until && to && !to.startsWith('@'),
-  );
+  const give = prop ? handOverAt(stage.props, thing, t) : null;
   if (prop && give) {
     let k = 0;
     stage.steps.forEach((step, i) => {
-      if (step.atMs <= give[0]) k = i;
+      if (step.atMs <= give.at) k = i;
     });
-    const a = holderOn(stage, give[1], k);
-    const b = holderOn(stage, give[3]!, k);
-    if (a && b) return handOverBox(prop, a, b);
+    const a = holderOn(stage, give.from, k);
+    const b = holderOn(stage, give.to, k);
+    const hand = handsAt(stage, give.at - 1).get(thing)?.hand;
+    if (a && b)
+      return {
+        ...handOverBox(
+          prop,
+          a,
+          b,
+          hand === 'r' || hand === 'l' ? hand : undefined,
+        ),
+        held: true,
+      };
   }
-  const a = thingBoxAt(stage, thing, from + 1);
-  const b = thingBoxAt(stage, thing, until - 1);
-  if (a && b) {
-    const x = Math.min(a.x, b.x);
-    const y = Math.min(a.y, b.y);
-    return {
-      x,
-      y,
-      w: Math.max(a.x + a.w, b.x + b.w) - x,
-      h: Math.max(a.y + a.h, b.y + b.h) - y,
-    };
-  }
-  return a ?? b;
+  const box = thingBoxAt(stage, thing, t);
+  const has = prop ? handsAt(stage, t).get(thing) : undefined;
+  return box && has?.by ? { ...box, held: true } : box;
+}
+
+/** A thing in a hand is framed a little low, its middle this share of the frame's height above the frame's: the face of whoever holds it (always above it) kept out of the frame's top, the thing still well within a tenth of the middle. The player's own. */
+export const INSERT_LOW = 0.07;
+
+/** The box an insert's shot frames (insertView), where its thing is: a thing in a hand, a little lower, so the frame sits a little below it (INSERT_LOW). */
+export function insertFramed(
+  box: Box & { held?: true },
+  W: number,
+  H: number,
+): Box {
+  const framed = { x: box.x, y: box.y, w: box.w, h: box.h };
+  if (!box.held) return framed;
+  return {
+    ...framed,
+    y: box.y + (INSERT_LOW * H) / insertView(box, W, H).s,
+  };
 }
 
 /** Someone on the stage at step `k` as a thing's holder: where they stand, their head and shoulders, and their drawing's height. */

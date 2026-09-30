@@ -36,6 +36,7 @@ import { withViews } from './scene-views';
 import { guessAffordances } from './scene-affordances';
 import { withInteractions, type TimedInteraction } from './scene-interact';
 import {
+  INSERT_EARLY_MS,
   PHYSICAL_MOVES,
   grammarCamera,
   insertWindows,
@@ -150,7 +151,10 @@ import {
   againstScenery,
   hurried,
   settledOf,
+  MEET_AFTER_MS,
+  MEET_BEFORE_MS,
   insertBoxOf,
+  insertFramed,
   type ThingsOnStage,
   viewOf,
   walkEase,
@@ -1261,7 +1265,20 @@ function insertShots(input: {
           : moment
         : (namedAt(one.beat, one.thing) ??
           beats[one.beat].endMs + AFTER_WORDS_MS);
-    asks.push({ thing: one.thing, atMs });
+    // A thing handed over: while the hands are out together, from just
+    // after they reach out until they part, so it is seen where they meet.
+    const handed = props
+      .find((p) => p.id === one.thing)
+      ?.does.find(([at, , does]) => at === atMs && does === 'give');
+    asks.push(
+      handed
+        ? {
+            thing: one.thing,
+            atMs: atMs - MEET_BEFORE_MS + INSERT_EARLY_MS - 100,
+            ms: MEET_BEFORE_MS + MEET_AFTER_MS + 200,
+          }
+        : { thing: one.thing, atMs },
+    );
   }
   // A line that shows or reveals a thing it names, as the writer or its
   // words say: the thing, as it is named.
@@ -1288,10 +1305,11 @@ function insertShots(input: {
     feature: (id) => input.features.get(id),
   };
   return windows.flatMap((one): SceneEffectDto[] => {
-    // Where it is as the shot begins and as it ends, both in the frame; a
-    // thing handed over, where the hands meet.
-    const box = insertBoxOf(stage, one.thing, one.fromMs, one.untilMs);
-    if (!box) return [];
+    // Where it is at the moment the shot frames it: a thing handed over,
+    // where the hands meet; one in a hand, framed a little low.
+    const found = insertBoxOf(stage, one.thing, one.fromMs, one.untilMs);
+    if (!found) return [];
+    const box = insertFramed(found, STAGINGS.wide.w, STAGINGS.wide.h);
     return [
       {
         atMs: one.fromMs,
@@ -3344,6 +3362,43 @@ export function composeScene(input: ComposeInput): {
     }),
   );
   const layouts = { box: layoutsOf('box'), wide: layoutsOf('wide') };
+  // A thing held as it opens is in the hand toward whoever it is first
+  // handed to, else toward the others there (the frame's right, "r", when
+  // they are to the right): so a hand-over is made with the near hand, and
+  // the hands can meet between the two.
+  for (const prop of props) {
+    const held = prop.held;
+    if (!held || held.in === 'mouth' || prop.hangs) continue;
+    const k = steps.findIndex((step) => step.show.includes(held.by));
+    const where = layouts.wide[Math.max(0, k)] ?? {};
+    const mine = where[held.by];
+    if (!mine) continue;
+    const mid = (one: Place) => one.x + one.w / 2;
+    const give = prop.does.find(
+      ([, who, does, to]) =>
+        who === held.by && does === 'give' && to && where[to],
+    );
+    const others = give
+      ? [where[give[3]!]]
+      : Object.entries(where).flatMap(([id, one]) =>
+          id !== held.by && castById.get(id)?.kind === 'character' ? [one] : [],
+        );
+    if (!others.length) continue;
+    const toward =
+      others.reduce((sum, one) => sum + mid(one), 0) / others.length >=
+      mid(mine)
+        ? 'r'
+        : 'l';
+    // A hand already full keeps what it has.
+    const taken = props.some(
+      (other) =>
+        other !== prop &&
+        other.held?.by === held.by &&
+        other.held.in === toward &&
+        !other.hangs,
+    );
+    if (held.in !== toward && !taken) prop.held = { ...held, in: toward };
+  }
   // A Studio film's shots, by the shot grammar (studio-views-plan §3.2):
   // where everyone stands on the wide stage, as the film plays it.
   if (grammar) {

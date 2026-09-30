@@ -47,6 +47,7 @@ import type {
 } from '../studio';
 import { showTheme } from '../studio-look';
 import { studioReading } from '../studio-motion';
+import type { FilmShape } from '../../scene-shape';
 
 /** A drawing the artist made, as the film kept it. */
 interface KeptDrawing {
@@ -132,6 +133,8 @@ export interface ComposedScene extends ReturnType<typeof composeScene> {
 /** The film's scenes composed as the Studio composes them now, in order. */
 export async function composeAdolescentFilm(
   film: Film = ADOLESCENT_FILM,
+  /** The film's shape (studio-vertical-plan): tall, placed on its 900 × 1600 stage. */
+  shape: FilmShape = 'wide',
 ): Promise<ComposedScene[]> {
   const show = {
     id: 'film',
@@ -196,6 +199,7 @@ export async function composeAdolescentFilm(
       timing: kept.timing,
       generator: SCENE_GENERATOR_VERSION,
       profile: of.profile,
+      ...(shape !== 'wide' ? { shape } : {}),
     });
     made.scene.reading = { wpm: reading.wpm, motion: reading.motion };
     const pacing = textPacing(made.scene, reading);

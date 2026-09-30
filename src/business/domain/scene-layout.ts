@@ -27,10 +27,12 @@ import {
   type Spaced,
 } from './scene-spacing';
 import type { SceneLayout } from './scene-script';
+import { BOX_STAGE, STAGES, stageOf, type FilmShape } from './scene-shape';
 
+/** A wide scene's stagings: the reader's pane and the full screen (scene-shape's; a tall scene's are stagingsOf('tall')). */
 export const STAGINGS = {
-  box: { w: 1200, h: 900, margin: 44 },
-  wide: { w: 1600, h: 900, margin: 56 },
+  box: BOX_STAGE,
+  wide: STAGES.wide,
 } as const;
 export type StagingName = keyof typeof STAGINGS;
 
@@ -103,8 +105,8 @@ export type LaidThing =
   | { kind: 'stat'; value: string; caption: string }
   | { kind: 'words'; text: string; style: 'title' | 'keyword' | 'card' };
 
-const content = (staging: StagingName): Rect => {
-  const { w, h, margin } = STAGINGS[staging];
+const content = (staging: StagingName, shape: FilmShape = 'wide'): Rect => {
+  const { w, h, margin } = stageOf(staging, shape);
   return { x: margin, y: margin, w: w - margin * 2, h: h - margin * 2 };
 };
 
@@ -174,9 +176,16 @@ export function slotsFor(
   staging: StagingName,
   /** How much of a row's width each thing wants, by its proportions. */
   weights?: number[],
+  /**
+   * The film's shape. TODO(V2, studio-vertical-plan §4.1): a tall branch
+   * (a row as a column, compare top over bottom, focus big on top, a
+   * taller cycle) in the tall text area (scene-shape textAreaOf). Until
+   * then a tall stage lays out as the box does, on its own size.
+   */
+  shape: FilmShape = 'wide',
 ): Rect[] {
-  const area = content(staging);
-  const wide = staging === 'wide';
+  const area = content(staging, shape);
+  const wide = staging === 'wide' && shape === 'wide';
   const n = Math.max(1, count);
   switch (layout) {
     case 'one':
@@ -649,6 +658,7 @@ export function slotsOf(
   show: string[],
   things: ReadonlyMap<string, LaidThing>,
   staging: StagingName,
+  shape: FilmShape = 'wide',
 ): Rect[] {
   return slotsFor(
     layout,
@@ -663,6 +673,7 @@ export function slotsOf(
         return Math.min(1.5, Math.max(0.5, 1 / (thing.aspect || 1)));
       return thing?.kind === 'stat' ? 0.9 : 0.7;
     }),
+    shape,
   );
 }
 
@@ -672,8 +683,9 @@ export function layoutStep(
   show: string[],
   things: ReadonlyMap<string, LaidThing>,
   staging: StagingName,
+  shape: FilmShape = 'wide',
 ): Record<string, Place> {
-  const slots = slotsOf(layout, show, things, staging);
+  const slots = slotsOf(layout, show, things, staging, shape);
   const out: Record<string, Place> = {};
   show.forEach((id, i) => {
     const thing = things.get(id);
@@ -703,8 +715,9 @@ export function standTogether(
   show: string[],
   staging: StagingName,
   grounded: boolean,
+  shape: FilmShape = 'wide',
 ): void {
-  const area = content(staging);
+  const area = content(staging, shape);
   const cap = (area.h * TALLEST_ADULT) / figureFrame('adult')[3];
   const units = (id: string) => {
     const thing = things.get(id);
@@ -907,8 +920,10 @@ export function stationScale(
   things: readonly LaidThing[],
   largest: number,
   staging: StagingName,
+  /** TODO(V3, §3.2): tall fits ceil(largest / 2) across (two depth rows), a grown-up at most 0.42 of the height. */
+  shape: FilmShape = 'wide',
 ): StationScale {
-  const area = content(staging);
+  const area = content(staging, shape);
   const [slot] = line(area, Math.max(2, largest));
   const cap = (area.h * TALLEST_ADULT) / figureFrame('adult')[3];
   const units = things.flatMap((thing) =>
@@ -1011,6 +1026,8 @@ export function layoutStations(input: {
   }[];
   things: ReadonlyMap<string, LaidThing>;
   staging: StagingName;
+  /** The film's shape: its stage's size. TODO(V3, §3.2): tall spots in depth and on diagonals. */
+  shape?: FilmShape;
   scale: StationScale;
   features: ReadonlyMap<string, FeatureAcross>;
   /** The ways through (a gate, a door) standing on the people's ground, where they stand across it: kept clear of. */
@@ -1034,7 +1051,7 @@ export function layoutStations(input: {
    */
   near?: readonly (readonly NearPair[])[];
 }): Record<string, Place>[] {
-  const { w: W, margin } = STAGINGS[input.staging];
+  const { w: W, margin } = stageOf(input.staging, input.shape);
   const { unit, floor, slot } = input.scale;
   const depthed = input.floor;
   const round = (n: number) => Math.round(n * 10) / 10;
@@ -1325,7 +1342,7 @@ export function layoutStations(input: {
       const ground = beside
         ? (way.ground ?? way.y) -
           (station.startsWith('behind:') && way.ground !== undefined
-            ? STAGINGS[input.staging].h * BEHIND_BACK
+            ? stageOf(input.staging, input.shape).h * BEHIND_BACK
             : 0)
         : undefined;
       const k =
@@ -1503,6 +1520,8 @@ export const OWN_SEAT = 0.45;
  */
 export function placeFeature(input: {
   staging: StagingName;
+  /** The film's shape: its stage's size. */
+  shape?: FilmShape;
   spot: string;
   /** The stage's own drawing of it: its frame and its way through, in the kit's units. */
   piece?: {
@@ -1526,7 +1545,7 @@ export function placeFeature(input: {
   /** Where the spots stand, as the scene's largest group has them. */
   shares?: StationShares;
 }): FeaturePlace {
-  const { w: W, margin } = STAGINGS[input.staging];
+  const { w: W, margin } = stageOf(input.staging, input.shape);
   const round = (n: number) => Math.round(n * 10) / 10;
   const depth = (feet: number) =>
     Math.min(

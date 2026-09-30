@@ -17,6 +17,7 @@ import { DRAWN } from './scene-own';
 import { figureOf, type FigureProp, type FigureSpec } from './scene-figure';
 import { iconicOf } from './scene-iconic';
 import { setApart } from './scene-looks';
+import { SET_FRAMES } from './scene-shape';
 import { ACTED_PIECES, featureGroup } from './scene-set-pieces';
 import {
   SCENE_AMBIENCES,
@@ -486,8 +487,11 @@ export const castKey = (documentId: string, contentVersion: number) =>
 export const setsKey = (documentId: string, contentVersion: number) =>
   `documents/${documentId}/visuals/v${contentVersion}/sets.json`;
 
-/** A set's canvas: the wide stage's own shape, so it covers it whole. */
-export const SET_CANVAS = { w: 1600, h: 900 } as const;
+/** A set's canvas: the wide stage's own shape, so it covers it whole (scene-shape SET_FRAMES; a tall set's is SET_FRAMES.tall). */
+export const SET_CANVAS = {
+  w: SET_FRAMES.wide.w,
+  h: SET_FRAMES.wide.h,
+} as const;
 
 const oneOf =
   <T extends string>(list: readonly T[]) =>

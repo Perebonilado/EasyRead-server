@@ -39,6 +39,7 @@ import {
 import type { SetLook } from '../scene-set-layout';
 import type { StoryBible } from '../scene-story';
 import { THEMES, type ThemeId } from '../scene-themes';
+import { STAGES, type FilmShape } from '../scene-shape';
 import {
   CLIP_SECONDS,
   SCENE_SECONDS,
@@ -655,12 +656,17 @@ export function clipFreeze(
   };
 }
 
-/** The card's own drawing: a frame of the clip's shape, which the player lays the clip's still over. */
-export function clipCardDrawing(): GatedDrawing {
+/**
+ * The card's own drawing: a frame of the clip's shape (its stage's, wide
+ * or tall: studio-vertical-plan §4.7), which the player lays the clip's
+ * still over.
+ */
+export function clipCardDrawing(shape: FilmShape = 'wide'): GatedDrawing {
+  const { w, h } = STAGES[shape];
   return {
-    svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900"><rect x="10" y="10" width="1580" height="880" rx="44" fill="#FFFFFF" stroke="#1F2A37" stroke-width="14"/></svg>',
-    viewBox: [0, 0, 1600, 900],
-    aspect: 16 / 9,
+    svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}"><rect x="10" y="10" width="${w - 20}" height="${h - 20}" rx="44" fill="#FFFFFF" stroke="#1F2A37" stroke-width="14"/></svg>`,
+    viewBox: [0, 0, w, h],
+    aspect: w / h,
     parts: {},
     labels: {},
     states: {},

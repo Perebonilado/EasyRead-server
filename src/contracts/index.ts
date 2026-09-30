@@ -2088,17 +2088,28 @@ export interface SceneIdeaDto {
   label: string;
 }
 
+/**
+ * A film's shape (studio-vertical-plan §2.1): wide is 16:9, tall is 9:16
+ * for phones (Shorts, TikTok, Reels). Each is composed for its own frame;
+ * neither is a crop of the other.
+ */
+export type FilmShape = 'wide' | 'tall';
+
 export interface SceneDto {
   /** 4 adds the sound; a 3 plays the same, in silence but for the voice. */
   version: 3 | 4;
   generator: string;
   title: string;
+  /** The shape it was composed in; absent is wide (every scene made before shapes). A tall scene's `stagings.wide` is its 900 × 1600 stage. */
+  shape?: FilmShape;
   durationMs: number;
   /** When everything the scene plans has finished: its last line, its last walk and move. Can be after `durationMs`, where the voice has ended; absent on an older scene, and on a book's page. */
   settledMs?: number;
   /**
    * How long a walker takes to cross the whole stage, and the least and
-   * most a walk takes, in ms, as this scene was timed. Absent on a scene
+   * most a walk takes, in ms, as this scene was timed. "The whole stage"
+   * is its long side (walkReach): the same 1600 units of the world, wide
+   * or tall. Absent on a scene
    * made before walks were slowed: 4000, 1100 and 3400.
    */
   walk?: { stageMs: number; minMs: number; maxMs: number };
@@ -2165,7 +2176,11 @@ export interface SceneDto {
   props?: ScenePropDto[];
   /** A story page's setting: its set at full strength, its light and weather, a crowd; absent on a lesson's page, but for a Studio film's (`film` alone). */
   setting?: SceneSettingDto;
-  /** The same steps placed for the pane's box and the full screen's wide stage. */
+  /**
+   * The same steps placed for the pane's box and the full screen's stage.
+   * `wide` means the full-screen staging, of the scene's shape: 1600 × 900
+   * for a wide scene, 900 × 1600 for a tall one (whose `box` is the same).
+   */
   stagings: Record<
     'box' | 'wide',
     {
@@ -3035,7 +3050,16 @@ export interface StudioBriefDto {
   document?: StudioBriefDocumentDto;
   /** An explainer's host, on or off, as the maker said; absent, on for children and off for grown-ups. */
   host?: boolean;
+  /**
+   * The shape its films are made in (studio-vertical-plan §1): wide, tall
+   * (vertical, for phones), or both, each episode made in each shape as
+   * twins that share the script and the voice. Absent is wide.
+   */
+  shape?: StudioShapeChoice;
 }
+
+/** The maker's choice of shape on the brief: one shape, or both. */
+export type StudioShapeChoice = FilmShape | 'both';
 
 /** A run of pages, first and last, from 1. */
 export type StudioPageRange = [number, number];
@@ -3526,6 +3550,34 @@ export interface StudioEpisodeDto {
   activity: StudioActivityDto | null;
   /** The pages of the show's document it teaches; absent when none. */
   pages?: { ranges: StudioPageRange[]; topicIds: string[]; label: string };
+  /** The shape its film is made in: every episode has exactly one. */
+  shape: FilmShape;
+  /**
+   * The same film in the other shape, where it has one (studio-vertical-
+   * plan §1.4): a twin episode on the same script and voice, composed for
+   * its own frame. Played and shared on its own; its script is this one's.
+   */
+  twin: StudioTwinDto | null;
+  /** The episode this one is the twin of, when it is one: its script, scenes and voice are that one's. */
+  twinOf?: string | null;
+}
+
+/** An episode's twin in the other shape, as the film's Wide/Vertical switch shows it. */
+export interface StudioTwinDto {
+  id: string;
+  shape: FilmShape;
+  phase: StudioPhase;
+  /** Every scene of it made, and none changed since: it plays as this one does. */
+  made: boolean;
+  /** Scenes of it still to be made again since the script changed (or not made yet). */
+  stale: number;
+  durationMs: number | null;
+  hasThumb: boolean;
+  shareToken: string | null;
+  /** Being made now: its scenes composing. */
+  making: boolean;
+  /** What is being done to it now, while something is. */
+  activity: StudioActivityDto | null;
 }
 
 /**
@@ -3617,7 +3669,13 @@ export interface StudioShowDto {
     phase: StudioPhase;
     durationMs: number | null;
     hasThumb: boolean;
+    /** Its shape; absent is wide. A twin is not listed: it is its episode's, in the other shape. */
+    shape?: FilmShape;
+    /** The shape of its twin, when it has one. */
+    twinShape?: FilmShape;
   }[];
+  /** The shape the brief asks for: wide, tall or both (absent is wide). */
+  shape?: StudioShapeChoice;
   /** The latest of the thread, the oldest first. */
   messages: StudioMessageDto[];
   /** Whether the thread goes back further than `messages`. */
@@ -3639,6 +3697,8 @@ export interface StudioShowCardDto {
   /** The film the still stands for: how long its scenes run, and how many there are. */
   durationMs?: number | null;
   scenes?: number | null;
+  /** The shape of the film the still stands for; absent is wide. */
+  shape?: FilmShape;
 }
 
 /** How the film goes from one scene to the next (studio-explainer-plan, Ask 4 D; studio-edit.ts). */
@@ -3672,11 +3732,15 @@ export interface StudioPlayDto {
   /** Free-plan film carries the Studio's name on its end card. */
   watermark: boolean;
   madeWith: string;
+  /** Its shape, so the player sizes itself before any scene loads; absent is wide. */
+  shape?: FilmShape;
   /** The look an explainer plays in (its scenes are recoloured for it as they are shown); absent, each scene's own. */
   theme?: SceneThemeName;
   scenes: {
     id: string;
     title: string;
+    /** Its place in the episode, from 0: the same in either shape, so a twin's scene is its lead's chapter. Absent from an older server. */
+    position?: number;
     durationMs: number;
     transition: 'cut' | 'fade';
     /**

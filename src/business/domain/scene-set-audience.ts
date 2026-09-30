@@ -18,6 +18,7 @@ import { drawExtra, extraFor, type FigureSpec } from './scene-figure';
 import { reactionFrames } from './scene-crowd';
 import { FIGURE_INK, SET_UNIT_SHARE, setLine } from './scene-ink';
 import type { PlaceKind, StoryWorld } from './scene-story';
+import { worldHeightOf } from './scene-shape';
 
 const r1 = (n: number) => Math.round(n * 10) / 10;
 
@@ -112,7 +113,7 @@ const AUDIENCE_STYLE = [
  */
 export function drawAudience(input: AudienceInput): Audience {
   const { W, H } = input;
-  const unit = SET_UNIT_SHARE * H;
+  const unit = SET_UNIT_SHARE * worldHeightOf(W, H);
   const people: {
     spec: FigureSpec;
     x: number;
@@ -167,7 +168,7 @@ export function drawAudience(input: AudienceInput): Audience {
     const [bx, by, bw, bh] = drawn.viewBox;
     const quarter = Math.max(0, Math.min(3, Math.floor((p.x / W) * 4)));
     const turns = beatOf(`${input.seed}:${p.n}:turns`) < 0.45;
-    const width = r1(setLine(H) / p.s);
+    const width = r1(setLine(worldHeightOf(W, H)) / p.s);
     // Each arm ready to go up in a cheer, as the crowd's own do.
     let upper = drawn.upper;
     for (const side of ['r', 'l'] as const) {
@@ -260,7 +261,7 @@ export function drawFacingAudience(
       const drawn = drawExtra(spec, { detail: 1, id });
       const [bx, by, bw, bh] = drawn.viewBox;
       const feet = input.feet[inRow];
-      const width = r1(setLine(input.H) / s);
+      const width = r1(setLine(worldHeightOf(input.W, input.H)) / s);
       markup.push(
         `<g id="${id}" data-audience="${row}">` +
           `<svg x="${r1(at + bx * s)}" y="${r1(feet + by * s)}" width="${r1(bw * s)}" height="${r1(bh * s)}" viewBox="${bx} ${by} ${bw} ${bh}" overflow="visible">` +

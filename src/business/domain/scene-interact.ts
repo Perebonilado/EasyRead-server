@@ -30,6 +30,7 @@ import type {
 } from '../../contracts';
 import type { AnyFeatureKind, DoingId } from './scene-doings';
 import { walkBetween } from './scene-film';
+import { walkReach } from './scene-shape';
 
 /** Each interaction's steps in turn: which, the least it may take and all it wants, in ms. */
 export const INTERACT_STEPS: Record<
@@ -459,7 +460,8 @@ export function withInteractions<
   let states = [...(scene.setting?.featureStates ?? [])];
   const lights = [...(scene.setting?.lights ?? [])];
   const steps = scene.steps.map((step) => ({ ...step }));
-  const { places, w: W } = scene.stagings.wide;
+  const { places } = scene.stagings.wide;
+  const R = walkReach(scene.stagings.wide);
   const stepAt = (t: number) =>
     steps.reduce((k, step, i) => (step.atMs <= t + 1 ? i : k), 0);
   const isOpen = (id: string, t: number) =>
@@ -483,7 +485,7 @@ export function withInteractions<
       // Out of the doorway, then as far as they walk to where they stand.
       const target = places[k]?.[one.who];
       const walk = target
-        ? walkBetween(doorwayPlace(target, feature, 'wide'), target, W)
+        ? walkBetween(doorwayPlace(target, feature, 'wide'), target, R)
         : 0;
       fixed.walk = Math.round(walk);
     }

@@ -1115,7 +1115,18 @@ E0 replaces these with ledger figures.
 
 ---
 
-## Decisions for Richard
+## Decisions (Richard, 2026-09-30)
+
+- **Documents uploaded in Studio stay out of the reader's documents screen.** They are Studio-only (`origin: 'studio'`, hidden from the library).
+- **Story clips:** the model decides whether a scene becomes a story cutaway. There is no maker switch by default, and the code limits in Ask 5 still apply.
+- **Studio will become its own standalone app.** New explainer work keeps Studio code in Studio modules with clean boundaries: no new coupling to the reader, library or Teach Me beyond shared domain helpers, and shared helpers are imported, not reached into.
+- **Other open choices take the plan's recommendations:**
+  - Sunny for children;
+  - checkpoints on for children, off for adults;
+  - Studio speed 0.75–1.5;
+  - order E0 → (E1, E2, E3) → (E4, E7) → (E5, E6, E8) → E9.
+
+## Decisions for Richard (original questions)
 
 1. **The six themes and their names.** Is the default for children Sunny, or does everyone start on Paper?
 2. **Clips on by default ("auto"), or only when asked?** Recommended: auto, with at most 2 per episode.

@@ -1516,6 +1516,7 @@ export class StudioService {
         planned?.seconds ?? null,
         before,
         narratorRuleOf(show.brief, grown),
+        show.brief.audience,
       );
     } else {
       next = mendExplainerLines(scene.sheet, body);
@@ -1568,6 +1569,7 @@ export class StudioService {
               planned?.seconds ?? null,
               await this.endBefore(episode.id, scene.position, show.bible),
               narratorRuleOf(show.brief, show.bible),
+              show.brief.audience,
             )
           : []
         : checkExplainer(sheet, {

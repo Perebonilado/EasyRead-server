@@ -67,11 +67,12 @@ export const LINE_PACE_SPEED: Record<LinePace, number> = {
 /**
  * The longest silence a sentence may keep after it, for what happens in
  * it: a book's screenplay asks three seconds at most; a Studio scene up to
- * six (a chase, a look round), or ten with an action in it (a throw, a
- * jump, a thing handled: studio-stage's ACTION_MOST_S), carried by its
- * music.
+ * six (a look round), ten with an action in it (a throw, a jump, a thing
+ * handled: studio-stage's ACTION_MOST_S), or twenty for a physical
+ * sequence (a climb, a break-in, a chase: its SEQUENCE_MOST_S), carried by
+ * its music.
  */
-export const HOLD_LIMIT_S = 10;
+export const HOLD_LIMIT_S = 20;
 
 /** Each sentence's pace and the silence after it, in seconds. */
 /**

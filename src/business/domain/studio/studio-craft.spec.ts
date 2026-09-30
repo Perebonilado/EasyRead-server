@@ -922,6 +922,23 @@ describe('the opening, timed (W1, S1)', () => {
 
   it('counts only what comes before the time: a want said a minute in is late', () => {
     const slow = sheetOf([
+      ...Array.from({ length: 8 }, () =>
+        line(
+          'petrov',
+          'dara',
+          'Lovely evening for it, the stars are out over the park again.',
+          'teases',
+        ),
+      ),
+      ...good.beats,
+    ]);
+    expect(checkOpening(slow, story, bible, 2).join(' ')).toMatch(
+      /what the hero wants/,
+    );
+  });
+
+  it('times what happens between lines as the stage plays it: ten paces are not thirty seconds', () => {
+    const paced = sheetOf([
       ...Array.from({ length: 10 }, () =>
         act('action', 'dara', 'Dara paces the stoop.', {
           do: 'walk',
@@ -930,7 +947,7 @@ describe('the opening, timed (W1, S1)', () => {
       ),
       ...good.beats,
     ]);
-    expect(checkOpening(slow, story, bible, 2).join(' ')).toMatch(
+    expect(checkOpening(paced, story, bible, 2).join(' ')).not.toMatch(
       /what the hero wants/,
     );
   });
@@ -955,6 +972,7 @@ describe('the clarity sentence against the premise (T1, T3, T4)', () => {
     stakes: 'the lock is changed',
     clock: 'midnight',
     confused: [],
+    wondering: [],
     sure: 8,
     people: [{ who: 'the woman at the window', is: 'her landlady' }],
     impossible: 'the pigeon trades the keys for anything shinier',
@@ -965,6 +983,7 @@ describe('the clarity sentence against the premise (T1, T3, T4)', () => {
     expect(judgeColdRead(viewer(), premise, bible)).toEqual({
       misses: [],
       unsure: [],
+      confused: [],
     });
   });
 
@@ -974,6 +993,7 @@ describe('the clarity sentence against the premise (T1, T3, T4)', () => {
         who: 'Mrs. Petrov',
         wants: 'could not tell',
         obstacle: 'the traffic',
+        sentence: 'Mrs. Petrov wants could not tell, but the traffic.',
       }),
       premise,
       bible,
@@ -1066,6 +1086,7 @@ describe('the clarity sentence against the premise (T1, T3, T4)', () => {
     ).toEqual({
       misses: [],
       unsure: [],
+      confused: [],
     });
   });
 });

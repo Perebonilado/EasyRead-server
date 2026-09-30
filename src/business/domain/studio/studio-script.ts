@@ -44,6 +44,7 @@ import {
   type StudioStory,
   type TrackedPlant,
 } from './studio-story';
+import { quietItem, quietRuns, timeQuiet } from './studio-stage';
 import { looksOf } from './studio-words';
 
 // ── The rubric ────────────────────────────────────────────────────────────
@@ -188,6 +189,10 @@ export interface TableRead {
   misses: string[];
   /** What else they could not tell (who someone is, the clock, the impossible thing's rule): counted with their own confusions. */
   unsure: string[];
+  /** The viewer's confusions that count against it (countedConfusions); absent on a read made before they were told apart. */
+  confused?: string[];
+  /** Clarity as the critic scored it, before any floor code put under it; absent where it gave none. */
+  clarityGiven?: number;
 }
 
 /**
@@ -207,8 +212,10 @@ export interface ColdRead {
   stakes: string;
   /** By when, where there is a clock; empty for none seen. */
   clock: string;
-  /** What they did not understand. */
+  /** What they did not understand: what stopped them following who wants what, and why. */
   confused: string[];
+  /** What they want to find out: the questions the film means them to ask (what happens next, a mystery's answer, how a trick works). Never counted against it. */
+  wondering: string[];
   /** How sure they are of what it is about, 0 to 10. */
   sure: number;
   /** Who is who (T3): each person they saw, and what they are to the hero, or "could not tell". */
@@ -244,6 +251,10 @@ export function coldReadOf(raw: unknown): ColdRead | null {
       .map((c) => said(c, 200))
       .filter(Boolean)
       .slice(0, 6),
+    wondering: (Array.isArray(r.wondering) ? r.wondering : [])
+      .map((c) => said(c, 200))
+      .filter(Boolean)
+      .slice(0, 6),
     sure: score(r.sure) ?? 0,
     people: (Array.isArray(r.people) ? r.people : [])
       .flatMap((one: unknown) => {
@@ -268,6 +279,11 @@ export function describeColdRead(viewer: ColdRead): string {
     `At stake: ${viewer.stakes || 'could not tell'}`,
     `By when: ${viewer.clock || 'no clock seen'}`,
     `Confused by: ${viewer.confused.join('; ') || 'nothing'}`,
+    ...(viewer.wondering.length
+      ? [
+          `Wants to find out (the film's own questions, not confusion): ${viewer.wondering.join('; ')}`,
+        ]
+      : []),
     ...(viewer.people.length
       ? [
           `Who is who: ${viewer.people.map((p) => `${p.who}: ${p.is || 'could not tell'}`).join('; ')}`,
@@ -278,82 +294,361 @@ export function describeColdRead(viewer: ColdRead): string {
   ].join('\n');
 }
 
-/** A slot the viewer left open. */
+/** A slot the viewer left open, or words that only hedge. */
 const COULD_NOT =
   /could ?n[o']?t tell|cannot tell|can['’]t tell|not sure|unclear|unknown|don['’]?t know|no idea|nothing|^none\b|^n\/a$|^-$/iu;
-const couldNot = (said: string) => !said.trim() || COULD_NOT.test(said.trim());
+const COULD_NOT_ALL = new RegExp(COULD_NOT.source, 'giu');
+/** A guess, not an answer: "possibly a friend", "a rival or a friend". */
+const HEDGED =
+  /\b(?:possibly|maybe|perhaps|probably|might be|could be|seems? to be)\b[^,;)]*|\b[\p{L}-]+ or (?:an? )?[\p{L}-]+\b/giu;
+/**
+ * Whether the viewer left a slot open: nothing, or "could not tell" with
+ * nothing but a guess beside it. "Could not tell (the opponent in the
+ * bet)" is an answer; "a stranger or a friend, could not tell" is not.
+ */
+const couldNot = (said: string) => {
+  const t = said.trim();
+  if (!t) return true;
+  if (!COULD_NOT.test(t)) return false;
+  return !stemsOf(t.replace(COULD_NOT_ALL, ' ').replace(HEDGED, ' ')).length;
+};
 /** A name as a whole word in some words. */
 const wordIn = (name: string, said: string) =>
   new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'iu').test(
     said,
   );
 
+// ── Words alike: the gist of a want, an obstacle, a stake ─────────────────
+
+/** Stems every want or obstacle has, which say nothing of what this one is ("get back", "the table inside"). */
+const EVERYDAY = new Set([
+  'get',
+  'got',
+  'make',
+  'mak',
+  'take',
+  'tak',
+  'go',
+  'com',
+  'come',
+  'back',
+  'want',
+  'need',
+  'try',
+  'tri',
+  'keep',
+  'find',
+  'see',
+  'thing',
+  'way',
+  'place',
+  'time',
+  'day',
+  'table',
+  'inside',
+  'outside',
+  'whole',
+  'can',
+  'will',
+  'must',
+  'would',
+  'could',
+  'should',
+  'let',
+  'put',
+  'give',
+  'giv',
+  'even',
+  'more',
+  'own',
+  'still',
+  // A question's own words: "why", "whether", "exactly".
+  'why',
+  'whether',
+  'exact',
+  // What is left of "doesn't", "can't" once split.
+  'doesn',
+  'don',
+  'didn',
+  'isn',
+  'wasn',
+  'aren',
+  'won',
+  'couldn',
+  'wouldn',
+]);
+/** Words that say the same thing, as one ("eyesight" is "eye", "flat" is "home"). Stems as stemOf leaves them. */
+const SAME_AS: Record<string, string> = {
+  eyesight: 'eye',
+  sight: 'eye',
+  blind: 'eye',
+  vision: 'eye',
+  apartment: 'home',
+  flat: 'home',
+  house: 'home',
+  mum: 'mother',
+  mom: 'mother',
+  mama: 'mother',
+  mamita: 'mother',
+  mommy: 'mother',
+  dad: 'father',
+  daddy: 'father',
+  papa: 'father',
+  grandma: 'grandmother',
+  granny: 'grandmother',
+  gran: 'grandmother',
+  nana: 'grandmother',
+  grandpa: 'grandfather',
+  grandad: 'grandfather',
+  granddad: 'grandfather',
+  kid: 'child',
+  children: 'child',
+  afraid: 'fear',
+  frighten: 'fear',
+  error: 'mistake',
+  cash: 'money',
+  latch: 'lock',
+};
+/** Stems as their gist: the everyday ones left out, words that say the same made one. */
+const gistStems = (stems: readonly string[]): string[] => [
+  ...new Set(stems.filter((w) => !EVERYDAY.has(w)).map((w) => SAME_AS[w] ?? w)),
+];
+/** What some words are about, stemmed: never their little or everyday words, nor the names given. */
+export const gistOf = (said: string, names: ReadonlySet<string> = new Set()) =>
+  gistStems(stemsOf(said, names));
+/** A premise's part in its clauses: "his failing eyes and her fear of mistakes" is two. */
+const clausesOf = (text: string) =>
+  text
+    .split(/[;,:—–]|\b(?:and|or|but|who|which|when|before|until|so)\b/iu)
+    .map((c) => c.trim())
+    .filter(Boolean);
+
+/**
+ * Whether some words (their gist) give a premise's part in other words:
+ * enough of its gist (`least`), or most of one of its clauses. "Poor
+ * eyesight and inexperience" gives "his failing eyes and her fear of
+ * mistakes": one clause of it, said another way.
+ */
+export function conveys(
+  part: string,
+  said: readonly string[],
+  names: ReadonlySet<string> = new Set(),
+  least = 0.3,
+): boolean {
+  const whole = gistOf(part, names);
+  if (!whole.length) return false;
+  if (covered(whole, said) >= least) return true;
+  return clausesOf(part).some((clause) => {
+    const gist = gistOf(clause, names);
+    return gist.length >= 2 && covered(gist, said) >= 0.5;
+  });
+}
+
+/**
+ * The want's own nouns: its words the premise leans on again for why
+ * today, what is at stake, the clock or the title ("rent" in "the rent
+ * envelope on the table inside her locked apartment", when the rent is
+ * due tonight). Any one of them said or shown gives the want.
+ */
+export function wantWords(
+  premise: Pick<Premise, 'want' | 'whyToday' | 'stakes' | 'clock' | 'title'>,
+  names: ReadonlySet<string> = new Set(),
+): string[] {
+  const again = gistOf(
+    [premise.whyToday, premise.stakes, premise.clock, premise.title]
+      .filter(Boolean)
+      .join(' '),
+    names,
+  );
+  return gistOf(premise.want, names).filter((w) => covered([w], again) > 0);
+}
+
+// ── Who the viewer meant ──────────────────────────────────────────────────
+
+/** The cast as a first-time viewer met them in the scenes they watched: who was never named (and by what label), and who spoke. */
+export interface CastSeen {
+  /** Each character no one named, by id: the label the viewer knew them by ("UNNAMED 2"). */
+  labels: ReadonlyMap<string, string>;
+  /** Everyone who said a line, from the stage or from off it. */
+  speakers: ReadonlySet<string>;
+}
+
+/**
+ * Which of the cast the viewer means by some words: one named, or known by
+ * the label the film gave them ("UNNAMED 2"), else the one whose looks the
+ * words describe ("the girl with braids and a pink t-shirt"). Null for
+ * none, or for words that fit two alike.
+ */
+function castMeant(
+  said: string,
+  bible: Pick<StudioBible, 'characters'>,
+  seen?: CastSeen,
+  first?: string,
+): string | null {
+  const named = bible.characters.filter(
+    (c) =>
+      namesOf(c).some((n) => wordIn(n, said)) ||
+      (seen?.labels.get(c.id) && wordIn(seen.labels.get(c.id)!, said)),
+  );
+  if (named.length) return (named.find((c) => c.id === first) ?? named[0]).id;
+  const words = stemsOf(said.replace(/\bunnamed \d+\b/giu, ' '));
+  const fits = bible.characters
+    .map((c) => ({
+      id: c.id,
+      n: stemsOf(looksOf(c) ?? '').filter((w) => words.includes(w)).length,
+    }))
+    .sort((a, b) => b.n - a.n);
+  return fits[0] && fits[0].n >= 2 && (fits[1]?.n ?? 0) < fits[0].n
+    ? fits[0].id
+    : null;
+}
+
+/** A question about who someone is to someone: counted once, however many ways it is asked. */
+const WHO_IS_WHO =
+  /\brelationship\b|\brelated\b|\bknow each other\b|\bto (?:each other|one another|the others?|him|her|them)\b|\bwho (?:\S+ ){1,6}(?:is|are)\b|\bwhat (?:\S+ ){1,6}(?:is|are) to\b|\b(?:daughter|son|sister|brother|cousin|niece|nephew|friend|stranger|hired)\b/iu;
+/** A question the film means the viewer to ask: why, how, who did it, whether it will. */
+const STORY_QUESTION = /^\s*(?:why|how|who|whether)\b|\b(?:why|how)\b/iu;
+/** A question about the film's own telling, not its story: whose the voice-over is. */
+const ABOUT_TELLING = /\bvoice-?over\b|\bnarrator\b/iu;
+
+/**
+ * The viewer's confusions that count against the film (T5): what stopped
+ * them following it. Not a question the story means them to ask at this
+ * point (why or how the obstacle works, the mystery's answer, whether the
+ * hero will manage it: its words most of them the premise's own); not
+ * whose the voice-over is; and who is who asked once, however many ways,
+ * and not at all when the "who is who" answers already hold it.
+ */
+export function countedConfusions(
+  viewer: Pick<ColdRead, 'confused'>,
+  premise: Premise | null | undefined,
+  bible: Pick<StudioBible, 'characters'>,
+  whoUnsure = false,
+): string[] {
+  const names = new Set(
+    bible.characters.flatMap((c) => [c.id, ...stemsOf(c.name)]),
+  );
+  const story = premise
+    ? gistOf(
+        [
+          premise.want,
+          premise.obstacle,
+          premise.stakes,
+          premise.clock,
+          premise.logline,
+          premise.hook,
+          premise.oddity ? `${premise.oddity.what} ${premise.oddity.rule}` : '',
+        ]
+          .filter(Boolean)
+          .join(' '),
+        names,
+      )
+    : [];
+  let whoIsWho = whoUnsure;
+  const out: string[] = [];
+  for (const item of viewer.confused) {
+    if (ABOUT_TELLING.test(item)) continue;
+    if (WHO_IS_WHO.test(item)) {
+      if (!whoIsWho) out.push(item);
+      whoIsWho = true;
+      continue;
+    }
+    const gist = gistOf(item.replace(/\bunnamed \d+\b/giu, ' '), names);
+    const theStory =
+      STORY_QUESTION.test(item) &&
+      (/^\s*whether\b/iu.test(item) ||
+        (gist.length > 0 && covered(gist, story) >= 0.5));
+    if (!theStory) out.push(item);
+  }
+  return out;
+}
+
+/** An oddity a cartoon takes for granted: animals, toys or robots that talk. A viewer who saw nothing strange in it followed it. */
+const TALKING = /\b(?:talk|talks|talking|speak|speaks|speaking)\b/iu;
+
 /**
  * The clarity sentence checked by code against the premise (T1, T3, T4):
  * whose story the viewer took it for, what they said the hero wants and
  * what is in the way. Any of those wrong is a miss, and the film is
- * unclear whatever the model scored. What else they could not tell (who
- * someone is to the hero, the clock, the impossible thing's rule) is
- * unsure: counted with their own confusions. Nothing for a premise
- * developed before it had its parts.
+ * unclear whatever the model scored. Their words are held to the
+ * premise's gist, never its wording: "poor eyesight" is "failing eyes",
+ * and UNNAMED 2 is whoever the film showed as UNNAMED 2. What else they
+ * could not tell is unsure, counted with their own confusions: the clock;
+ * the impossible thing and its rule (never animals that talk, which any
+ * cartoon has); who someone the story turns on is to the hero, when they
+ * speak (T3). `confused` is their confusions that count (countedConfusions).
+ * Nothing for a premise developed before it had its parts.
  */
 export function judgeColdRead(
   viewer: ColdRead | null,
   premise: Premise | null | undefined,
   bible: Pick<StudioBible, 'characters'>,
-): { misses: string[]; unsure: string[] } {
+  seen?: CastSeen,
+): { misses: string[]; unsure: string[]; confused: string[] } {
   const misses: string[] = [];
   const unsure: string[] = [];
   if (!viewer || !premise || (!premise.want && !premise.obstacle))
-    return { misses, unsure };
+    return { misses, unsure, confused: viewer?.confused ?? [] };
   const names = new Set(
     bible.characters.flatMap((c) => [c.id, ...stemsOf(c.name)]),
   );
-  const st = (said: string) => stemsOf(said, names);
+  const gist = (said: string) =>
+    gistOf(said.replace(/\bunnamed \d+\b/giu, ' '), names);
+  const theirWant = gist(`${viewer.wants} ${viewer.sentence}`);
+  const gotWant =
+    !couldNot(viewer.wants) &&
+    (conveys(premise.want, theirWant, names) ||
+      covered(gist(viewer.wants), gist(`${premise.want} ${premise.logline}`)) >=
+        0.4);
   const hero = bible.characters.find((c) => c.id === premise.hero);
   if (hero) {
-    const named = namesOf(hero).some((n) => wordIn(n, viewer.who));
-    const others = bible.characters.filter(
-      (c) => c.id !== hero.id && namesOf(c).some((n) => wordIn(n, viewer.who)),
+    const meant = couldNot(viewer.who)
+      ? null
+      : castMeant(viewer.who, bible, seen, hero.id);
+    const other = bible.characters.find(
+      (c) => c.id === meant && c.id !== hero.id,
     );
     if (couldNot(viewer.who))
       misses.push(
         `they could not tell whose story it is (it is ${hero.name}'s)`,
       );
-    else if (!named && others.length)
+    // The same goal seen from the side of the one it is about ("Sigrid
+    // wants to mend the net", of "to see Sigrid mend the net alone"): a
+    // two-hander read another way, not a film they could not follow.
+    else if (
+      other &&
+      !(gotWant && namesOf(other).some((n) => wordIn(n, premise.want)))
+    )
       misses.push(
-        `they took it for ${others[0].name}'s story ("${viewer.who}"), not ${hero.name}'s`,
+        `they took it for ${other.name}'s story ("${viewer.who}"), not ${hero.name}'s`,
       );
   }
-  if (premise.want) {
-    const got =
-      !couldNot(viewer.wants) &&
-      (covered(st(premise.want), st(`${viewer.wants} ${viewer.sentence}`)) >=
-        0.3 ||
-        covered(st(viewer.wants), st(`${premise.want} ${premise.logline}`)) >=
-          0.4);
-    if (!got)
-      misses.push(
-        `they said the hero wants "${viewer.wants || 'could not tell'}"; the story's want is "${premise.want}"`,
-      );
-  }
+  if (premise.want && !gotWant)
+    misses.push(
+      `they said the hero wants "${viewer.wants || 'could not tell'}"; the story's want is "${premise.want}"`,
+    );
   if (premise.obstacle) {
-    // Someone of the cast named as what is in the way, by the viewer too.
+    // Someone of the cast named as what is in the way, by the viewer too
+    // (by name, or as the film showed them).
     const inWay = bible.characters.filter(
       (c) =>
         c.id !== premise.hero &&
         namesOf(c).some((n) => wordIn(n, premise.obstacle)),
     );
+    const theirs = couldNot(viewer.obstacle)
+      ? null
+      : castMeant(viewer.obstacle, bible, seen);
     const got =
       !couldNot(viewer.obstacle) &&
-      (inWay.some((c) => namesOf(c).some((n) => wordIn(n, viewer.obstacle))) ||
+      (inWay.some((c) => c.id === theirs) ||
+        conveys(
+          premise.obstacle,
+          gist(`${viewer.obstacle} ${viewer.sentence}`),
+          names,
+        ) ||
         covered(
-          st(premise.obstacle),
-          st(`${viewer.obstacle} ${viewer.sentence}`),
-        ) >= 0.3 ||
-        covered(
-          st(viewer.obstacle),
-          st(`${premise.obstacle} ${premise.logline}`),
+          gist(viewer.obstacle),
+          gist(`${premise.obstacle} ${premise.logline}`),
         ) >= 0.3);
     if (!got)
       misses.push(
@@ -363,27 +658,54 @@ export function judgeColdRead(
   if (premise.clock && couldNot(viewer.clock))
     unsure.push(`saw no deadline (the story's clock: ${premise.clock})`);
   if (premise.oddity) {
+    const st = (said: string) =>
+      stemsOf(said.replace(/\bunnamed \d+\b/giu, ' '), names);
     const rule = st(`${premise.oddity.what} ${premise.oddity.rule}`);
     const theirs = st(viewer.impossible);
+    const granted =
+      TALKING.test(premise.oddity.what) && couldNot(viewer.impossible);
     if (
-      couldNot(viewer.impossible) ||
-      Math.max(covered(theirs, rule), covered(rule, theirs)) < 0.25
+      !granted &&
+      (couldNot(viewer.impossible) ||
+        Math.max(covered(theirs, rule), covered(rule, theirs)) < 0.25)
     )
       unsure.push(
         `did not get the impossible thing and its rule (${premise.oddity.what}: ${premise.oddity.rule})`,
       );
   }
-  // Who the others are to the hero: never the hero themselves.
+  // Who the others are to the hero (T3): never the hero themselves, and
+  // only someone the story turns on (the premise names them) who speaks.
+  // Whom code cannot tell the viewer meant is asked about all the same.
+  const story = [
+    premise.want,
+    premise.obstacle,
+    premise.stakes,
+    premise.clock,
+    premise.logline,
+  ].join(' ');
   const heroNames = hero ? namesOf(hero) : [];
-  for (const p of viewer.people)
+  let whoUnsure = false;
+  for (const p of viewer.people) {
     if (
-      couldNot(p.is) &&
-      p.who.trim().toLowerCase() !== viewer.who.trim().toLowerCase() &&
-      !heroNames.some((n) => wordIn(n, p.who)) &&
-      !/\b(?:hero|protagonist|herself|himself|themselves)\b/iu.test(p.is)
+      !couldNot(p.is) ||
+      p.who.trim().toLowerCase() === viewer.who.trim().toLowerCase() ||
+      heroNames.some((n) => wordIn(n, p.who)) ||
+      /\b(?:hero|protagonist|herself|himself|themselves)\b/iu.test(p.is)
     )
-      unsure.push(`could not tell who ${p.who} is to the hero`);
-  return { misses, unsure };
+      continue;
+    const id = castMeant(p.who, bible, seen);
+    const c = id ? bible.characters.find((one) => one.id === id) : null;
+    if (c && c.id === premise.hero) continue;
+    if (c && !namesOf(c).some((n) => wordIn(n, story))) continue;
+    if (c && seen && !seen.speakers.has(c.id)) continue;
+    unsure.push(`could not tell who ${p.who} is to the hero`);
+    whoUnsure = true;
+  }
+  return {
+    misses,
+    unsure,
+    confused: countedConfusions(viewer, premise, bible, whoUnsure),
+  };
 }
 
 // ── The whole film, retold (T2) ────────────────────────────────────────────
@@ -488,7 +810,10 @@ export function tableReadOf(
   raw: unknown,
   count: number,
   viewer: ColdRead | null = null,
-  judged: { misses: string[]; unsure: string[] } = { misses: [], unsure: [] },
+  judged: { misses: string[]; unsure: string[]; confused?: string[] } = {
+    misses: [],
+    unsure: [],
+  },
 ): TableRead {
   const read =
     raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
@@ -501,12 +826,16 @@ export function tableReadOf(
     const n = score(given[key]);
     if (n !== null) scores[key] = n;
   }
+  // The critic's own clarity, before any floor: for the log and the bench.
+  const clarityGiven = scores.clarity;
   if (scores.clarity === undefined && viewer) scores.clarity = viewer.sure;
-  // Two things or more a first-time viewer could not follow: not clear,
-  // whatever the score.
+  // Two things or more a first-time viewer could not follow (their
+  // confusions that count, and what code found them unsure of): not
+  // clear, whatever the score.
+  const confused = viewer ? (judged.confused ?? viewer.confused) : [];
   if (
     viewer &&
-    viewer.confused.length + judged.unsure.length >= CONFUSED_MOST &&
+    confused.length + judged.unsure.length >= CONFUSED_MOST &&
     scores.clarity !== undefined
   )
     scores.clarity = Math.min(scores.clarity, BAR.clarity - 1);
@@ -562,6 +891,8 @@ export function tableReadOf(
     viewer,
     misses: judged.misses,
     unsure: judged.unsure,
+    confused,
+    ...(clarityGiven !== undefined ? { clarityGiven } : {}),
   };
 }
 
@@ -719,6 +1050,34 @@ export function filmAsSeen(
   bible: Pick<StudioBible, 'characters' | 'sets'>,
   upTo = 0,
 ): string {
+  return watch(sheets, bible, upTo).film;
+}
+
+/**
+ * The cast as a first-time viewer met them, up to scene `upTo` (from 0):
+ * the label each one no one named went by ("UNNAMED 2"), as filmAsSeen
+ * wrote it, and who spoke. What the viewer says of "UNNAMED 2" is said of
+ * them (judgeColdRead).
+ */
+export function castAsSeen(
+  sheets: readonly StorySheet[],
+  bible: Pick<StudioBible, 'characters' | 'sets'>,
+  upTo = 0,
+): CastSeen {
+  const { unnamed, speakers } = watch(sheets, bible, upTo);
+  return {
+    labels: new Map([...unnamed].map(([id, n]) => [id, `UNNAMED ${n}`])),
+    speakers,
+  };
+}
+
+/** The film as seen (filmAsSeen), with who went unnamed and who spoke. */
+function watch(
+  sheets: readonly StorySheet[],
+  bible: Pick<StudioBible, 'characters' | 'sets'>,
+  upTo: number,
+): { film: string; unnamed: Map<string, number>; speakers: Set<string> } {
+  const speakers = new Set<string>();
   const heard = new Set<string>();
   const unnamed = new Map<string, number>();
   const seen = new Set<string>();
@@ -768,7 +1127,7 @@ export function filmAsSeen(
     above: 'a voice from above',
     dream: 'in a dream or memory',
   };
-  return sheets
+  const film = sheets
     .slice(0, upTo + 1)
     .map((sheet, k) => {
       const set = bible.sets.find((one) => one.id === sheet.set);
@@ -783,6 +1142,7 @@ export function filmAsSeen(
           case 'line': {
             const who = label(b.who);
             const to = b.to ? label(b.to) : '';
+            if (b.who) speakers.add(b.who);
             spoken(b.say);
             const how = [to ? `to ${to}` : '', b.from ? FROM[b.from] : '']
               .filter(Boolean)
@@ -806,6 +1166,7 @@ export function filmAsSeen(
       ].join('\n');
     })
     .join('\n\n');
+  return { film, unnamed, speakers };
 }
 
 /** A scene's plan, from the story its outline was built from: by title, else by place. */
@@ -1162,6 +1523,61 @@ const same = (a: string, b: string) =>
   a === b ||
   (Math.min(a.length, b.length) >= 4 && (a.startsWith(b) || b.startsWith(a)));
 
+/** Aims that do something to the one a line is said to, whatever its verb: never a report of the picture. */
+const MOVES_ON: ReadonlySet<LineAim> = new Set<LineAim>([
+  'orders',
+  'warns',
+  'threatens',
+  'bargains',
+  'begs',
+  'pleads',
+  'asks',
+  'refuses',
+  'teases',
+  'accuses',
+]);
+
+/** Where a voice is heard from with no one on the stage to say it: from off, down a phone, from above. */
+const AWAY: ReadonlySet<string> = new Set(['off', 'phone', 'above']);
+
+/**
+ * Whether a line from the stage is said to someone off it: to one heard
+ * in the scene from off (through a door, on an intercom, down a phone),
+ * or to one of the cast it calls by name who is not there ("Mr. Sal, I
+ * only need—", "…come out, Mr. Sal."). The sheet can only say to whom a
+ * line is said among those on the stage (a line to anyone else is mended
+ * to no one), so this is how a conversation with a voice is known.
+ */
+export function saidAway(
+  sheet: StorySheet,
+  beat: SheetBeat,
+  here: ReadonlySet<string>,
+  bible: Pick<StudioBible, 'characters'>,
+): boolean {
+  if (
+    sheet.beats.some(
+      (b) =>
+        b.kind === 'line' &&
+        b.who &&
+        b.who !== beat.who &&
+        AWAY.has(b.from ?? 'here'),
+    )
+  )
+    return true;
+  return bible.characters.some(
+    (c) =>
+      c.id !== beat.who &&
+      !here.has(c.id) &&
+      namesOf(c).some((name) => {
+        const n = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        return new RegExp(
+          `(?:^|[.!?…]\\s+)${n}\\s*[,!?—–-]|,\\s*${n}\\s*(?:[.!?…—–-]|$)`,
+          'iu',
+        ).test(beat.say.trim());
+      }),
+  );
+}
+
 /**
  * The telling lint: lines that narrate what the viewer sees, the
  * narrator by another name. A short sentence that says again what a move
@@ -1222,7 +1638,8 @@ export function lintTelling(
       if (
         (beat.from ?? 'here') === 'here' &&
         !beat.to &&
-        [...here].every((id) => id === beat.who)
+        [...here].every((id) => id === beat.who) &&
+        !saidAway(sheet, beat, here, bible)
       ) {
         alone += 1;
         if (alone > 1 || !/[?!]\s*$/u.test(beat.say)) {
@@ -1280,7 +1697,10 @@ export function lintTelling(
         if (words > 5) continue;
         const stems = tellStems(sentence, names);
         if (!stems.length) continue;
+        // A move on someone ("One sip, and leave some.", ordered as the
+        // speaker sips) says a verb we see, and does something with it.
         const echoed = moves.find((b) => {
+          if (beat.to && beat.aim && MOVES_ON.has(beat.aim)) return false;
           const verb = shownVerb(b, bible);
           return verb !== null && stems.some((w) => same(w, verb));
         });
@@ -1552,7 +1972,13 @@ export function lintLines(
       }
       // Said to someone when anyone else is there.
       const others = [...here].filter((id) => id !== beat.who);
-      if (from === 'here' && !beat.to && others.length) toNoOne.push(at);
+      if (
+        from === 'here' &&
+        !beat.to &&
+        others.length &&
+        !saidAway(sheet, beat, here, bible)
+      )
+        toNoOne.push(at);
       // W4: the deadline, the first time, as a move between people.
       if (CLOCK_TIME.test(beat.say) && from !== 'letter') {
         if (!clockSaid && beat.aim && !CLOCK_AIMS.has(beat.aim))
@@ -1663,20 +2089,35 @@ export function openingBy(
       : { want: 45, obstacle: 45, stakes: 60, clock: 60, oddity: 75 };
 }
 
-/** About how long a beat plays, for timing an opening: lines at 2.5 words a second, a move about 3 s. */
-export function beatSeconds(beat: SheetBeat): number {
-  switch (beat.kind) {
-    case 'line':
-    case 'narration':
-      return Math.max(1, wordCount(beat.say) / 2.5);
-    case 'action':
-    case 'business':
-      return 3;
-    case 'reaction':
-      return 1;
-    default:
-      return beat.seconds ?? 1;
-  }
+/**
+ * When each beat of a scene starts, in seconds, as the stage plays it:
+ * lines at 2.5 words a second, and what happens between two lines timed
+ * as the stage times a quiet (at the same time where the stage runs them
+ * so, quickened to fit, a physical sequence held), never a flat three
+ * seconds a move.
+ */
+export function startsOf(sheet: StorySheet): number[] {
+  const at = sheet.beats.map(() => 0);
+  const runs = quietRuns(sheet);
+  let t = 0;
+  const quiet = (after: number) => {
+    const run = runs.get(after);
+    if (!run) return;
+    const timed = timeQuiet(run.map((j) => quietItem(sheet.beats[j])));
+    run.forEach((j, k) => (at[j] = t + timed.starts[k]));
+    t += timed.total;
+  };
+  quiet(-1);
+  let spoken = -1;
+  sheet.beats.forEach((beat, j) => {
+    if (beat.kind !== 'line' && beat.kind !== 'narration') return;
+    at[j] = t;
+    if (!beat.say.trim()) return;
+    t += Math.max(1, wordCount(beat.say) / 2.5);
+    spoken += 1;
+    quiet(spoken);
+  });
+  return at;
 }
 
 const PART_WORDS: Record<SetupPart, string> = {
@@ -1689,12 +2130,15 @@ const PART_WORDS: Record<SetupPart, string> = {
 
 /**
  * The opening, timed (W1, S1): scene 1 walked with a running clock (lines
- * at 2.5 words a second, moves about 3 s, pauses their own), and what is
+ * at 2.5 words a second, the quiets between them as the stage plays
+ * them: startsOf), and what is
  * said or handled by each point collected. The want, what is in the way,
  * the stakes, the clock and the impossible thing each land by their time
- * (by 25 s, 30 s and 40 s in a film of one to three minutes), in the
- * premise's words or the plan's for them. Each that does not is a note
- * for scene 1. Nothing for a premise developed before it had its parts.
+ * (by 25 s, 30 s and 40 s in a film of one to three minutes), in any
+ * words that give them (conveys: their gist, or one clause of it, said
+ * another way; the want by any of its own nouns, wantWords) or the plan's
+ * for them. Each that does not is a note for scene 1. Nothing for a
+ * premise developed before it had its parts.
  */
 export function checkOpening(
   sheet: StorySheet,
@@ -1724,8 +2168,8 @@ export function checkOpening(
     stems: string[];
     clock: boolean;
   }[] = [];
-  let t = 0;
-  for (const beat of sheet.beats) {
+  const starts = startsOf(sheet);
+  for (const [j, beat] of sheet.beats.entries()) {
     const words = [
       beat.say,
       beat.thing ?? '',
@@ -1733,7 +2177,7 @@ export function checkOpening(
       beat.doSaid ?? '',
     ].join(' ');
     timeline.push({
-      at: t,
+      at: starts[j],
       kind: beat.kind,
       who: beat.who,
       stems: st(words),
@@ -1741,7 +2185,6 @@ export function checkOpening(
         (beat.kind === 'line' || beat.kind === 'business') &&
         CLOCK_TIME.test(beat.say),
     });
-    t += beatSeconds(beat);
   }
   /** What is said or shown by a time: everything, or only a kind of beat by someone (the plan's line, or its action). */
   const heardBy = (
@@ -1771,6 +2214,7 @@ export function checkOpening(
         : '',
     },
   ];
+  const keyWords = wantWords(premise, names);
   const out: string[] = [];
   // The hero is called by their name in scene 1, so the viewer knows whose story it is.
   const hero = bible.characters.find((c) => c.id === premise.hero);
@@ -1798,9 +2242,17 @@ export function checkOpening(
           ? heardBy(by[part], { kinds: ['action', 'business'], by: piece.by })
           : heard
       : null;
+    // Given in any words: its gist, or one clause of it, said another
+    // way; the want, by any of its own nouns ("rent", of "the rent
+    // envelope on the table inside her locked apartment").
+    const said = gistStems(heard.stems);
     const got =
-      covered(st(words), heard.stems) >= 0.3 ||
+      conveys(words, said, names) ||
+      (part === 'want' && keyWords.some((w) => covered([w], said) > 0)) ||
       (means && piece ? covered(st(piece.what), means.stems) >= 0.5 : false) ||
+      // The plan's means played another way (its action as a line, or
+      // done by someone else): most of its words by then.
+      (piece?.what ? covered(st(piece.what), heard.stems) >= 0.6 : false) ||
       (part === 'clock' && heard.clock);
     if (got) continue;
     const how = piece
@@ -1947,6 +2399,7 @@ function clarityNotes(
   viewer: ColdRead | null,
   misses: readonly string[] = [],
   unsure: readonly string[] = [],
+  confused: readonly string[] = viewer?.confused ?? [],
 ): string[] {
   return [
     ...(misses.length || unsure.length
@@ -1956,7 +2409,7 @@ function clarityNotes(
       : []),
     ...(viewer
       ? [
-          `A first-time viewer, seeing and hearing only this scene, thought it was about: "${viewer.about}"${viewer.sentence ? `; in one sentence: "${viewer.sentence}"` : ''}; wants: "${viewer.wants || 'could not tell'}"; at stake: "${viewer.stakes || 'could not tell'}"; by when: "${viewer.clock || 'no clock seen'}"${viewer.confused.length ? `; confused by: ${viewer.confused.join('; ')}` : ''}.`,
+          `A first-time viewer, seeing and hearing only this scene, thought it was about: "${viewer.about}"${viewer.sentence ? `; in one sentence: "${viewer.sentence}"` : ''}; wants: "${viewer.wants || 'could not tell'}"; at stake: "${viewer.stakes || 'could not tell'}"; by when: "${viewer.clock || 'no clock seen'}"${confused.length ? `; confused by: ${confused.join('; ')}` : ''}.`,
         ]
       : []),
     FIRST_SCENE_RULE,
@@ -2026,12 +2479,20 @@ export function notesFor(
     .map((n) => n.message);
   const clarity =
     k === 0 && unclear(read)
-      ? clarityNotes(read.viewer, read.misses, read.unsure)
+      ? clarityNotes(read.viewer, read.misses, read.unsure, read.confused)
       : [];
+  // Scene 1 of a film a first-time viewer could not follow: what they
+  // got wrong and what they made of it lead, and the critic's own notes
+  // are fewer, so the list never cuts the viewer's read away. The rule
+  // itself goes last: the writer is given it with the scene as well.
+  const critic = (read.scenes[k]?.notes ?? []).slice(
+    0,
+    clarity.length ? 4 : undefined,
+  );
   return [
     // What a first-time viewer missed comes first: nothing matters more.
-    ...clarity.slice(0, 1),
-    ...(read.scenes[k]?.notes ?? []),
+    ...clarity.slice(0, -1),
+    ...critic,
     ...read.voice
       .filter((v) => v.scene === k)
       .map(
@@ -2039,7 +2500,7 @@ export function notesFor(
           `"${v.line}" could be anyone's line${v.why ? ` (${v.why})` : ''}: say it as ${v.who || 'its speaker'} would${voiceOf(v.who)}.`,
       ),
     ...codes,
-    ...clarity.slice(1),
+    ...clarity.slice(-1),
     ...(k === 0 && (read.scores.hook ?? 10) < BAR.item
       ? [
           'Open with a hook: a joke, a mystery or a problem in the first seconds.',

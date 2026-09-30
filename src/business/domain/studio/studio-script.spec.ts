@@ -553,6 +553,29 @@ describe('the telling lint: lines that narrate what we see', () => {
     expect(said).toMatch(/Dee says "Where did it go\?" to no one/);
   });
 
+  it('leaves an order that names what we see done: a move on someone, not a report', () => {
+    const notes = lintTelling(
+      [
+        flatSheet([
+          move('action', 'tessa', 'Tessa sips her coffee.', {
+            do: 'sip',
+          }),
+          {
+            ...line('tessa', 'One sip, and leave some.'),
+            to: 'dee',
+            aim: 'orders',
+          },
+          move('action', 'dee', 'Dee unlocks the door.', { do: 'open' }),
+          { ...line('dee', 'Unlocked.'), to: 'tessa', aim: 'reveals' },
+        ]),
+      ],
+      flat,
+    );
+    expect(notes.map((n) => n.message)).toEqual([
+      expect.stringMatching(/"Unlocked\." says what we have just seen/),
+    ]);
+  });
+
   it('leaves lines that do something to someone', () => {
     expect(
       lintTelling(

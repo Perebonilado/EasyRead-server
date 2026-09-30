@@ -84,6 +84,7 @@ import {
   type SceneSheet,
   type SheetBeat,
   type Spot,
+  type StudioAudience,
   type StudioBible,
   type StudioCharacter,
   type StudioFeature,
@@ -107,6 +108,8 @@ import {
   exitSideOf,
   placementsOf,
   quietItem,
+  CHILD_SEQUENCE_MOST_S,
+  SEQUENCE_MOST_S,
   quietRuns,
   timeQuiet,
 } from './studio-stage';
@@ -2596,6 +2599,8 @@ export function checkSheet(
   before: EndState | null = null,
   /** The maker's narrator, when they set one: its share of the words, and where it may speak. */
   narrator: NarratorRule | null = null,
+  /** Who the film is for: a physical sequence may run longer without a line for adults and teens than for children. */
+  audience: StudioAudience | null = null,
 ): SheetProblem[] {
   const problems: SheetProblem[] = [];
   const error = (
@@ -2838,10 +2843,15 @@ export function checkSheet(
     );
   // A quiet that holds more than the music carries: sent back once, to be
   // broken with a line; the stage quickens it to fit meanwhile. One with
-  // an action in it may hold longer (ACTION_MOST_S).
+  // an action in it may hold longer (ACTION_MOST_S), and a physical
+  // sequence (a climb, a break-in, a chase) longer still, less for
+  // children (SEQUENCE_MOST_S).
+  const grown = audience === 'adults' || audience === 'teens';
   for (const [after, run] of quietRuns(sheet)) {
     const { asked, limit } = timeQuiet(
       run.map((at) => quietItem(sheet.beats[at])),
+      undefined,
+      grown ? SEQUENCE_MOST_S : CHILD_SEQUENCE_MOST_S,
     );
     if (asked > limit + 0.05)
       warn(

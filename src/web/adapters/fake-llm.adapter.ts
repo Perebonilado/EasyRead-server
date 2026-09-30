@@ -2287,6 +2287,7 @@ export class FakeLlmAdapter implements LlmGatewayPort {
         stakes: 'what they could lose',
         clock: '',
         confused: [],
+        wondering: [],
         sure: 8,
         people: [],
         impossible: '',

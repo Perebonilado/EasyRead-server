@@ -266,6 +266,44 @@ describe('the table read', () => {
     expect(result.rounds[1].sheets[1]).toBe(sheets[1]);
   });
 
+  it('writes the next round again from the best script so far, never from one that read worse (Mumbai)', async () => {
+    let n = 0;
+    const { llm, calls } = llmWith(
+      [
+        { scores: scores(6), overall: 5.5, scenes: [{ scene: 2, score: 3 }] },
+        // The rewrite reads worse, and asks for scene 3 instead.
+        { scores: scores(5), overall: 4, scenes: [{ scene: 3, score: 3 }] },
+        { scores: scores(6), overall: 5, scenes: [{ scene: 2, score: 4 }] },
+      ],
+      (title) => raw(title, `Rewrite ${(n += 1)} of ${title}.`),
+    );
+    const sheets = await written();
+    const logged: string[] = [];
+    const result = await tableRead(llm, {
+      brief,
+      bible,
+      outline,
+      sheets,
+      rounds: 2,
+      log: (line) => logged.push(line),
+    });
+    // Both rounds rewrite scene 2 of the first script, as its read asked.
+    expect(result.rounds.map((r) => r.rewritten)).toEqual([[1], [1], []]);
+    expect(result.rounds.map((r) => r.from)).toEqual([0, 0, undefined]);
+    expect(calls.scenes.map((c) => /"([^"]+)"/.exec(c.scene)?.[1])).toEqual([
+      'Drought',
+      'Drought',
+    ]);
+    expect(result.rounds[2].sheets[1].beats[0].say).toBe(
+      'Rewrite 2 of Drought.',
+    );
+    expect(result.rounds[2].sheets[2]).toBe(sheets[2]);
+    expect(logged.join('\n')).toMatch(/from read 1, the best so far/);
+    // Still the best read: the first.
+    expect(result.best).toBe(0);
+    expect(result.sheets).toBe(sheets);
+  });
+
   it('never passes a film a first-time viewer cannot follow: scene 1 is written again with what they missed', async () => {
     const { llm, calls } = llmWith([
       // A high read that loses the viewer, then one they can follow.

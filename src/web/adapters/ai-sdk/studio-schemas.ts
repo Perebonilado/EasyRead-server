@@ -223,6 +223,8 @@ export const studioColdReadSchema = z.object({
   stakes: z.string().catch(''),
   clock: z.string().catch(''),
   confused: z.array(z.string()).catch([]),
+  // The questions the film means them to ask: never counted as confusion.
+  wondering: z.array(z.string()).catch([]),
   sure: z.number().catch(0),
   // Who is who: each person seen, and what they are to the hero.
   people: z

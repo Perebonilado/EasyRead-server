@@ -205,6 +205,7 @@ export async function writeStorySheet(
           planned,
           before,
           narrator,
+          input.brief.audience,
         ),
         ...(request && old ? linesKept(old, mended.sheet, request) : []),
       ],
@@ -225,9 +226,14 @@ export async function writeStorySheet(
       problems: [
         ...reasons.map((p) => p.message),
         ...failing,
-        // The story's notes stay put right as the staging is.
+        // The story's notes stay put right as the staging is: said again,
+        // since this answer is written from the last and nothing else,
+        // and a cut for length comes out of other beats, never theirs.
         ...(notes
-          ? ['Keep what the notes before asked for: only the above changes.']
+          ? [
+              'Keep everything these notes asked for; to fit the time, cut or tighten other beats, never what they asked for:',
+              ...notes,
+            ]
           : []),
       ],
       ...(request ? { request } : {}),
@@ -260,6 +266,7 @@ export async function writeStorySheet(
         planned,
         before,
         narrator,
+        input.brief.audience,
       ),
     };
   }

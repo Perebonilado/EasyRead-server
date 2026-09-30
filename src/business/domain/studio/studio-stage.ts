@@ -122,6 +122,22 @@ export const QUIET_MOST_S = 6;
  * its wind-up and settle lost. Longer, and the writer is asked to break it.
  */
 export const ACTION_MOST_S = 10;
+/**
+ * The most a quiet that is a physical sequence holds: a climb, a
+ * break-in, a chase, one goal carried through in moves (three actions or
+ * more, two in three of what it holds), which a line would only
+ * interrupt. For adults and teens; a children's film holds one up to
+ * CHILD_SEQUENCE_MOST_S. Longer, and the writer is asked to break it.
+ */
+export const SEQUENCE_MOST_S = 20;
+export const CHILD_SEQUENCE_MOST_S = 15;
+
+/** Whether a quiet is a physical sequence: three actions or more, and two in three of what it holds. */
+export function isSequence(items: readonly QuietItem[]): boolean {
+  const acting = items.filter((item) => item.acts).length;
+  const held = items.filter((item) => !item.pause).length;
+  return acting >= 3 && acting * 3 >= held * 2;
+}
 /** A face changing: how long it holds the eye before what comes next. */
 const REACTION_S = 0.6;
 /** What comes after someone else's doing starts this long after its moment. */
@@ -597,12 +613,14 @@ export function comesWith(
  * handled next, only once the one before is done; a pause waits for all.
  * A quiet longer than `most` is quickened to fit, none shorter than it
  * may be; but one with an action in it quickens the rest first, and is
- * then held longer, up to ACTION_MOST_S, rather than the action rushed.
- * `asked` is how long it would have run; `limit` is the most it may.
+ * then held longer, up to ACTION_MOST_S (a physical sequence up to
+ * `sequenceMost`), rather than the action rushed. `asked` is how long it
+ * would have run; `limit` is the most it may.
  */
 export function timeQuiet(
   items: readonly QuietItem[],
   most = QUIET_MOST_S,
+  sequenceMost = SEQUENCE_MOST_S,
 ): {
   starts: number[];
   lengths: number[];
@@ -615,7 +633,9 @@ export function timeQuiet(
     items.map((item) => item.s),
   );
   const acts = items.some((item) => item.acts);
-  const limit = acts ? Math.max(most, ACTION_MOST_S) : most;
+  const limit = acts
+    ? Math.max(most, isSequence(items) ? sequenceMost : ACTION_MOST_S)
+    : most;
   const done = (lengths: readonly number[], total: number) => ({
     starts: inTurn(items, lengths).starts.map(round),
     lengths: lengths.map(round),

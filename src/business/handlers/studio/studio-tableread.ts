@@ -12,8 +12,9 @@
  * Code's own checks across the script (voice, telling, plants, turns) go
  * to the critic and to the writer. Below the bar, only the failing scenes are
  * written again through the scene writer, their notes as the problems,
- * ending as they ended; at most two rounds, and the best-read script is
- * kept. Silent: the maker sees the better script, never the notes.
+ * ending as they ended; at most two rounds, each from the best-read
+ * script so far, and the best-read script is kept. Silent: the maker
+ * sees the better script, never the notes.
  */
 import type { LlmGatewayPort, LlmUsage } from '../../ports/llm.port';
 import type {
@@ -39,6 +40,7 @@ import {
 import {
   TABLE_READ_ROUNDS,
   belowBar,
+  castAsSeen,
   checkScript,
   coldReadOf,
   describeColdRead,
@@ -72,6 +74,24 @@ export interface ReadRound {
   rewritten: number[];
   /** The whole film as a first-time viewer retold it; null where no one did. */
   retell?: Retell | null;
+  /** Which read's script the rewrite after this one started from: the best so far, never one that read worse. */
+  from?: number;
+}
+
+/**
+ * The best of the reads so far, from 0: one a first-time viewer can
+ * follow before any that scores higher but loses them; else the higher
+ * overall; the earlier on a tie.
+ */
+export function bestRead(rounds: readonly Pick<ReadRound, 'read'>[]): number {
+  let best = 0;
+  rounds.forEach((round, r) => {
+    const was = rounds[best].read;
+    const clearer = unclear(was) && !unclear(round.read);
+    const asClear = unclear(was) === unclear(round.read);
+    if (clearer || (asClear && round.read.overall > was.overall)) best = r;
+  });
+  return best;
 }
 
 export interface TableReadResult {
@@ -172,14 +192,22 @@ export async function tableRead(
       coldRead(sheets),
       retold(sheets),
     ]);
-    const judged = judgeColdRead(viewer, story?.premise, bible);
+    const judged = judgeColdRead(
+      viewer,
+      story?.premise,
+      bible,
+      castAsSeen(sheets, bible, 0),
+    );
+    const asked = viewer
+      ? viewer.confused.filter((c) => !judged.confused.includes(c))
+      : [];
     const code = [
       ...checkScript(story, sheets, outline, bible),
       ...retellNotes(retell, story, outline, bible),
     ];
     if (viewer)
       log(
-        `cold read of scene 1 (sure ${viewer.sure}): ${viewer.about}${viewer.confused.length ? `; confused by: ${viewer.confused.join('; ')}` : ''}${judged.misses.length ? `; against the story: ${judged.misses.join('; ')}` : ''}${judged.unsure.length ? `; unsure: ${judged.unsure.join('; ')}` : ''}`,
+        `cold read of scene 1 (sure ${viewer.sure}): ${viewer.about}${judged.confused.length ? `; confused by: ${judged.confused.join('; ')}` : ''}${asked.length || viewer.wondering.length ? `; the film's own questions: ${[...asked, ...viewer.wondering].join('; ')}` : ''}${judged.misses.length ? `; against the story: ${judged.misses.join('; ')}` : ''}${judged.unsure.length ? `; unsure: ${judged.unsure.join('; ')}` : ''}`,
       );
     if (retell)
       log(
@@ -198,9 +226,19 @@ export async function tableRead(
         ? {
             viewer: [
               describeColdRead(viewer),
-              ...(judged.misses.length || judged.unsure.length
+              ...(judged.misses.length
                 ? [
-                    `Against the premise, code found the viewer got wrong: ${[...judged.misses, ...judged.unsure].join('; ')}.`,
+                    `Against the premise, code found the viewer got wrong: ${judged.misses.join('; ')}.`,
+                  ]
+                : []),
+              ...(judged.unsure.length
+                ? [
+                    `Code found the viewer could not tell: ${judged.unsure.join('; ')}.`,
+                  ]
+                : []),
+              ...(asked.length
+                ? [
+                    `Not confusion, but questions the story means them to ask at this point: ${asked.join('; ')}.`,
                   ]
                 : []),
             ].join('\n'),
@@ -250,6 +288,7 @@ export async function tableRead(
           planned,
           before,
           narrator,
+          brief.audience,
         );
         if (worse(written.problems, had) <= 0) {
           next[k] = written.sheet;
@@ -264,6 +303,7 @@ export async function tableRead(
             planned,
             before,
             narrator,
+            brief.audience,
           );
         let sheet = mendSheet(sheets[k], bible, before).sheet;
         let found = held(sheet);
@@ -295,23 +335,28 @@ export async function tableRead(
       `table read${r ? ` again (${r})` : ''} ${describeRead(read)}${bar.length ? `; below the bar: ${bar.join(', ')}` : ''}`,
     );
     if (!bar.length || r >= most || input.rewrite === false) break;
-    const targets = scenesToRewrite(read, code);
+    // Written again from the best script so far, with its read's notes: a
+    // rewrite that read worse is never built on.
+    const base = bestRead(rounds);
+    const from = rounds[base];
+    const targets = scenesToRewrite(from.read, from.code);
     if (!targets.length) break;
+    if (base !== r) {
+      sheets = from.sheets;
+      bible = biblesBy[base];
+      changed = changedBy[base];
+    }
     rounds[r].rewritten = targets;
-    log(`writing again: scene ${targets.map((k) => k + 1).join(', ')}`);
-    const next = await rewriteRound(sheets, targets, read, code);
+    rounds[r].from = base;
+    log(
+      `writing again: scene ${targets.map((k) => k + 1).join(', ')}${base !== r ? ` (from read ${base + 1}, the best so far)` : ''}`,
+    );
+    const next = await rewriteRound(sheets, targets, from.read, from.code);
     sheets = next.sheets;
     changed = new Map([...changed, ...next.problems]);
   }
-  // The best read kept: one a first-time viewer can follow before any
-  // that scores higher but loses them.
-  let best = 0;
-  rounds.forEach((round, r) => {
-    const was = rounds[best].read;
-    const clearer = unclear(was) && !unclear(round.read);
-    const asClear = unclear(was) === unclear(round.read);
-    if (clearer || (asClear && round.read.overall > was.overall)) best = r;
-  });
+  // The best read kept.
+  const best = bestRead(rounds);
   const kept = rounds[best].sheets;
   return {
     rounds,

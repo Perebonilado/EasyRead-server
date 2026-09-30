@@ -14,6 +14,7 @@
  * never left out. What code cannot put right is a problem, said in plain
  * words, which goes back to the writer once; the maker never sees it.
  */
+import { withBuilds } from './studio-build';
 import { narratorsLine, lineOf } from '../scene-screenplay';
 import {
   narrationKept,
@@ -3239,11 +3240,18 @@ export function mendOutline(
 ): StudioOutline {
   return {
     ...outline,
-    scenes: outline.scenes.map((scene) => ({
-      ...scene,
-      set: setId(scene.set, bible) ?? scene.set,
-      cast: [...new Set(scene.cast.map((id) => characterId(id, bible) ?? id))],
-    })),
+    // An explainer's builds made sound, and turned on where its scenes
+    // side by side share the show's pictures (studio-build).
+    scenes: withBuilds(
+      outline.scenes.map((scene) => ({
+        ...scene,
+        set: setId(scene.set, bible) ?? scene.set,
+        cast: [
+          ...new Set(scene.cast.map((id) => characterId(id, bible) ?? id)),
+        ],
+      })),
+      bible.pictures ?? [],
+    ),
   };
 }
 

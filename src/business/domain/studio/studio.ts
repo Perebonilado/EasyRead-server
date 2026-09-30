@@ -972,6 +972,13 @@ export interface OutlineScene {
   kind?: OutlineKind;
   /** A clip's: the narrator's line in the lesson after it that points back to it. Absent otherwise. */
   hook?: string;
+  /**
+   * An explainer's scene in a continuous build (studio-explainer-plan,
+   * part C): "start" begins a diagram the scenes after it grow, "continue"
+   * carries on the one before's. Set by the writer and by code
+   * (studio-build withBuilds). Absent or null, a scene of its own.
+   */
+  build?: 'start' | 'continue' | null;
 }
 
 /** What an explainer's scene is: a lesson page, or a short acted story clip. */
@@ -1053,6 +1060,9 @@ export function outlineOf(raw: unknown): StudioOutline {
             ...(clip ? { kind: 'clip' as const } : {}),
             ...(clip && textOrNull(s.hook, 300)
               ? { hook: textOrNull(s.hook, 300)! }
+              : {}),
+            ...(s.build === 'start' || s.build === 'continue'
+              ? { build: s.build }
               : {}),
           },
         ];

@@ -271,14 +271,14 @@ describe('an explainer with a story clip, made on the worker with the fake write
     const lesson = studioMakeOf(w.show, episode, rows[2], rows, w.show.bible!);
     expect(lesson.script?.cast.some((c) => c.id === CLIP_CARD)).toBe(true);
     expect(lesson.script?.steps[0].stage?.show[0]).toBe(CLIP_CARD);
-    expect(lesson.reuse?.has(CLIP_CARD)).toBe(true);
+    expect(lesson.drawn?.has(CLIP_CARD)).toBe(true);
     const made = lesson.finish!({
       things: [{ id: CLIP_CARD, kind: 'drawing' }],
     } as never);
     expect(made.things[0]).toMatchObject({ still: { sceneId: rows[1].id } });
     // The lesson before the clip has no card.
     expect(
-      studioMakeOf(w.show, episode, rows[0], rows, w.show.bible!).reuse,
+      studioMakeOf(w.show, episode, rows[0], rows, w.show.bible!).drawn,
     ).toBeUndefined();
   });
 });

@@ -651,6 +651,11 @@ export interface SceneStage {
   depth?: Record<string, number>;
   /** How those who go at this step go: at a run; off or on by a side, through a feature, squeezing under it. */
   going?: Record<string, SceneGoing>;
+  /**
+   * A stage of a continuous build (scene-board.ts): each thing's cell of
+   * the board, what has receded, what the camera frames. Set by code.
+   */
+  board?: BoardStage;
 }
 
 /** How someone goes on, off or across at a step. */
@@ -815,6 +820,12 @@ export interface SceneScript {
    * how much it pushes in on a feeling (0 never). Absent, as usual.
    */
   energy?: { cut: number; push: number };
+  /**
+   * A scene of a continuous build (scene-board.ts): its stages laid out on
+   * one board, and the things the scene before left there, on the stage
+   * from its first moment with no entrance. Set by code.
+   */
+  board?: { carried: string[] };
 }
 
 /**
@@ -920,6 +931,7 @@ export function wordsOf(text: string): string[] {
 }
 
 import { groupId, idKey, wordKey } from './scene-ids';
+import type { BoardStage } from './scene-board';
 export { groupId, idKey, wordKey };
 export { quotedSpans };
 

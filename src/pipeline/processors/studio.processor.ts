@@ -213,6 +213,15 @@ import { studioReading } from '../../business/domain/studio/studio-motion';
 /** A kit's spec for a character: a person's, an animal's, or a creature's. */
 type KitSpec = FigureSpec | AnimalSpec | CreatureSpec;
 import { QUEUE_SETTINGS, type StudioJobData } from '../queues';
+import { createHash } from 'node:crypto';
+import {
+  buildScript,
+  picturesIn,
+  sectionOf,
+  sharedDrawings,
+} from '../../business/domain/studio/studio-build';
+import type { DrawingThing } from '../../business/domain/scene-script';
+import type { GatedDrawing } from '../../business/domain/scene-svg';
 import { isPermanentFailure, type JobContext } from './base.processor';
 import { SceneProcessor } from './scene.processor';
 
@@ -251,6 +260,57 @@ const FAILED: Record<
     line: 'The scene could not be written. Try again in a moment.',
   },
 };
+
+/**
+ * An explainer's scenes as the stage plays them, by position: each sheet
+ * put right and checked as it is made. Null where a scene is not written.
+ */
+export function explainerScripts(
+  show: StudioShowRecord,
+  episode: StudioEpisodeRecord,
+  rows: readonly StudioSceneRecord[],
+  bible: StudioBible,
+): (position: number) => SceneScript | null {
+  const stage = stageOf(show.brief);
+  const known = new Map<number, SceneScript | null>();
+  return (position) => {
+    if (known.has(position)) return known.get(position)!;
+    const row = rows.find((r) => r.position === position);
+    const lesson = {
+      teach: episode.outline?.scenes[position]?.teach ?? null,
+      source: show.brief.source,
+      stage,
+      maths: bible.maths,
+      planned: null,
+    };
+    const script =
+      row?.sheet?.kind === 'explainer'
+        ? checkExplainer(repairExplainer(row.sheet, lesson), lesson).script
+        : null;
+    known.set(position, script);
+    return script;
+  };
+}
+
+/**
+ * Where a continuous build's drawing is kept for its show, drawn once and
+ * shown alike by every scene of its section: by its id and what it is, so
+ * a drawing asked for differently is drawn anew.
+ */
+export const studioBoardKey = (showId: string, thing: DrawingThing) =>
+  `studio/${showId}/board/${thing.id.slice(0, 40)}-${createHash('sha1')
+    .update(
+      JSON.stringify([
+        thing.name,
+        thing.brief,
+        thing.motion,
+        thing.shape,
+        thing.parts,
+        thing.states,
+      ]),
+    )
+    .digest('hex')
+    .slice(0, 12)}.json`;
 
 /**
  * What one scene of a film is made from, as the worker makes it: its
@@ -327,12 +387,19 @@ export function studioMakeOf(
         (r) => r.position === row.position - 1 && r.sheet?.kind === 'story',
       )
     : undefined;
+  // An explainer's scene in a continuous build is laid out on the board
+  // the scenes of its section before it left (studio-build).
+  const lessons = sheet ? null : explainerScripts(show, episode, rows, bible);
+  const built = lessons
+    ? buildScript(episode.outline?.scenes ?? [], row.position, lessons)
+    : null;
   const lessonScript = sheet
     ? null
-    : checkExplainer(
+    : (built?.script ??
+      checkExplainer(
         repairExplainer(row.sheet as ExplainerSheet, lesson),
         lesson,
-      ).script;
+      ).script);
   const script = sheet
     ? styled(stageStory(sheet, staged, { before, painted, gestures }))
     : clipBefore
@@ -447,7 +514,7 @@ export function studioMakeOf(
       : {}),
     ...(clipBefore
       ? {
-          reuse: new Map([[CLIP_CARD, clipCardDrawing()]]),
+          drawn: new Map([[CLIP_CARD, clipCardDrawing()]]),
           finish: (scene: SceneDto) => withStill(scene, clipBefore.id),
         }
       : {}),
@@ -2285,13 +2352,30 @@ export class StudioProcessor {
           ? `The scene after will teach: ${following.summary}`
           : 'It is the last scene: end with a short recap.',
     ].join(' ');
+    // A scene of a continuous build (part C): its things kept, and added to.
+    const shared = scene?.build
+      ? picturesIn(scene, bible.pictures).filter((name) =>
+          outline.scenes[k + (scene.build === 'continue' ? -1 : 1)]
+            ? picturesIn(
+                outline.scenes[k + (scene.build === 'continue' ? -1 : 1)],
+                bible.pictures,
+              ).includes(name)
+            : false,
+        )
+      : [];
+    const build =
+      scene?.build === 'continue'
+        ? ` This scene continues the diagram: keep its things, add yours. The scene before drew${shared.length ? ` ${shared.join(', ')} and` : ''} what it taught on one board; show only what is new, name anything kept exactly as it was named, and link what you add to it with arrows.`
+        : scene?.build === 'start'
+          ? ' This scene starts a diagram the scenes after it add to: give each thing a short name, and link them with arrows.'
+          : '';
     const ask = {
       documentTitle: show.title,
       topicTitle: outline.title,
       material: own
         ? `${teach}\n\nThe document's own pages for this scene (${pagesWords([scene.pages!])}), to keep its terms, numbers and examples exact; teach only what the scene above says:\n${own}`
         : teach,
-      context: `This is scene ${k + 1} of ${outline.scenes.length} of the animated lesson "${outline.title}": "${scene?.title ?? ''}", about ${scene?.seconds ?? 30} seconds. ${around} Teach only what this scene says; the scenes either side teach the rest.${fuller ? ` The page is fuller than ${scene?.seconds ?? 30} seconds can say: keep to its main ideas and leave out the detail.` : ''}`,
+      context: `This is scene ${k + 1} of ${outline.scenes.length} of the animated lesson "${outline.title}": "${scene?.title ?? ''}", about ${scene?.seconds ?? 30} seconds. ${around} Teach only what this scene says; the scenes either side teach the rest.${build}${fuller ? ` The page is fuller than ${scene?.seconds ?? 30} seconds can say: keep to its main ideas and leave out the detail.` : ''}`,
       profile: [
         describeScene(
           stage,
@@ -2539,6 +2623,15 @@ export class StudioProcessor {
         },
       );
     }
+    // An explainer's builds: each drawing its scenes share drawn once,
+    // before they are made side by side, so every scene shows it alike.
+    if (bible && show.brief.format === 'explainer')
+      await this.prepareBoards(show, episode, rows, bible, wanted).catch(
+        (error: Error) =>
+          this.logger.warn(
+            `studio ${episode.id}: the builds' drawings were not drawn ahead (${error.message}); each scene draws its own`,
+          ),
+      );
     await this.queue.enqueueStudio(
       wanted.map((row) => ({
         kind: 'make' as const,
@@ -2573,6 +2666,80 @@ export class StudioProcessor {
         `${who}: its last frame was not kept as its still (${(error as Error).message})`,
       );
     }
+  }
+
+  /**
+   * A continuous build's shared drawings, drawn once for the show and kept
+   * (studioBoardKey): those not kept yet, of the sections the scenes to be
+   * made are in.
+   */
+  private async prepareBoards(
+    show: StudioShowRecord,
+    episode: StudioEpisodeRecord,
+    rows: StudioSceneRecord[],
+    bible: StudioBible,
+    wanted: StudioSceneRecord[],
+  ): Promise<void> {
+    const scenes = episode.outline?.scenes ?? [];
+    if (!wanted.some((row) => sectionOf(scenes, row.position))) return;
+    const shared = sharedDrawings(
+      scenes,
+      explainerScripts(show, episode, rows, bible),
+    );
+    const kept = await this.boardDrawings(show.id, shared);
+    const missing = shared.filter((thing) => !kept.has(thing.id));
+    if (!missing.length) return;
+    for (const row of wanted)
+      await this.studio.updateScene(row.id, { step: 'drawing' });
+    const who = `studio ${episode.id} (build)`;
+    const drawn = await this.scenes.drawThings(
+      missing,
+      episode.outline?.title ?? episode.title,
+      episode.id,
+      who,
+    );
+    await this.keepBoardDrawings(show.id, missing, drawn);
+    this.logger.log(
+      `${who}: ${missing.length} drawing${missing.length === 1 ? '' : 's'} its scenes share drawn once: ${missing.map((t) => t.id).join(', ')}`,
+    );
+  }
+
+  /** A build's shared drawings as kept for the show, by the thing's id: those not kept are left out. */
+  private async boardDrawings(
+    showId: string,
+    things: readonly DrawingThing[],
+  ): Promise<Map<string, GatedDrawing>> {
+    const out = new Map<string, GatedDrawing>();
+    await Promise.all(
+      things.map(async (thing) => {
+        try {
+          const kept = await this.storage.get(studioBoardKey(showId, thing));
+          out.set(thing.id, JSON.parse(kept.toString('utf8')) as GatedDrawing);
+        } catch {
+          // Not drawn yet.
+        }
+      }),
+    );
+    return out;
+  }
+
+  /** A build's shared drawings kept for the show: those that came through. */
+  private async keepBoardDrawings(
+    showId: string,
+    things: readonly DrawingThing[],
+    drawn: ReadonlyMap<string, GatedDrawing | null>,
+  ): Promise<void> {
+    await Promise.all(
+      things.map(async (thing) => {
+        const drawing = drawn.get(thing.id);
+        if (!drawing) return;
+        await this.storage.put({
+          key: studioBoardKey(showId, thing),
+          body: Buffer.from(JSON.stringify(drawing)),
+          mimeType: 'application/json',
+        });
+      }),
+    );
   }
 
   /** Those of the show's cast the artist drew whose rigs turn their arms and nod: none when the cast cannot be read. */
@@ -2637,6 +2804,22 @@ export class StudioProcessor {
       await this.gesturing(show.id),
     );
     const base = `studio/${show.id}/${episode.id}/${row.id}-${fingerprint.slice(0, 8)}-${Date.now().toString(36)}`;
+    // A continuous build's drawings its scenes share, as drawn once for
+    // them: this scene draws none of them again (studio-build).
+    const shared =
+      row.sheet.kind === 'explainer' &&
+      sectionOf(episode.outline?.scenes ?? [], row.position) &&
+      of.script
+        ? sharedDrawings(
+            episode.outline?.scenes ?? [],
+            explainerScripts(show, episode, rows, bible),
+          ).filter((thing) =>
+            of.script!.cast.some((one) => one.id === thing.id),
+          )
+        : [];
+    const drawn = shared.length
+      ? await this.boardDrawings(show.id, shared)
+      : new Map<string, GatedDrawing>();
     // The Studio's own try again, its words as voiced: staged again on the
     // voice it was made with, nothing voiced, nothing spent.
     const voiced =
@@ -2684,10 +2867,25 @@ export class StudioProcessor {
               ? {
                   theme: showTheme(show.brief, bible) ?? undefined,
                   reading: studioReading(show.brief),
+                  // With the card of a clip before it, where it has one.
+                  ...(drawn.size
+                    ? { drawn: new Map([...(of.drawn ?? []), ...drawn]) }
+                    : {}),
                 }
               : {}),
           });
     if (made.fit === 'poor') throw new Error(made.reason);
+    // One its section shares that was not drawn ahead, as this scene drew
+    // it: kept, so the scenes after it show the same.
+    const late = shared.filter((thing) => !drawn.has(thing.id));
+    if (late.length && 'drawings' in made)
+      await this.keepBoardDrawings(
+        show.id,
+        late,
+        made.drawings as ReadonlyMap<string, GatedDrawing | null>,
+      ).catch((error: Error) =>
+        this.logger.warn(`${who}: build drawings not kept: ${error.message}`),
+      );
     const { scene, sceneKey, thumbKey, voice } = made;
     await this.studio.updateScene(row.id, {
       status: 'made',

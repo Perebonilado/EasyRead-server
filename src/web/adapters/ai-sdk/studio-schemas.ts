@@ -420,6 +420,7 @@ export const studioOutlineSchema = z.object({
       // An explainer's story clip (studio-clip), and the lesson line after it that points back.
       kind: z.enum(OUTLINE_KINDS).catch('lesson'),
       hook: z.string().nullable().catch(null),
+      build: z.enum(['start', 'continue']).nullable().catch(null),
     }),
   ),
 });

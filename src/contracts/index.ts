@@ -1012,10 +1012,21 @@ export interface VisualSetDto {
 
 export type SceneTiming = 'voice' | 'aligned' | 'estimated';
 export type SceneLayoutName =
-  'one' | 'row' | 'grid' | 'compare' | 'hub' | 'cycle' | 'focus' | 'stack';
+  | 'one'
+  | 'row'
+  | 'grid'
+  | 'compare'
+  | 'hub'
+  | 'cycle'
+  | 'focus'
+  | 'stack'
+  /** A continuous build's board (studio-explainer-plan, part C): each thing in its cell, where it stays. */
+  | 'board';
 export type SceneEffectName =
   'point' | 'show' | 'hide' | 'pulse' | 'zoom' | 'say';
-export type SceneEnterName = 'pop' | 'fade' | 'slide' | 'wipe' | 'grow';
+/** `draw`: a build's drawing drawn on, its lines stroke by stroke and then its fills (part C). */
+export type SceneEnterName =
+  'pop' | 'fade' | 'slide' | 'wipe' | 'grow' | 'draw';
 /** The page's feeling: how the voice sounds, and the music on a page made before the score. */
 export type SceneMoodName =
   'calm' | 'bright' | 'curious' | 'serious' | 'playful';
@@ -1324,6 +1335,14 @@ export interface SceneStepDto {
    * in, where people would otherwise walk. Absent on a change that is walked.
    */
   cut?: true;
+  /**
+   * A continuous build's stage: the things the voice has not named for a
+   * while, set back (faded and greyed) until they are named again. Absent,
+   * none.
+   */
+  faded?: string[];
+  /** A build's board paged here: the oldest columns slide out to the left, the rest with them. */
+  page?: true;
 }
 
 export interface SceneEffectDto {
@@ -2088,8 +2107,20 @@ export interface SceneDto {
        * said in, or null where there is no room, and it is not shown.
        */
       bubbles?: Record<string, SceneBubbleDto | null>;
+      /**
+       * A continuous build's camera, each step: the box it frames (x, y, w,
+       * h, of the staging's shape), the newest thing and what it connects
+       * to, or the whole board at a recap and at the section's end.
+       */
+      views?: [number, number, number, number][];
     }
   >;
+  /**
+   * A scene of a continuous build (studio-explainer-plan, part C): the
+   * things carried on from the scene before, on the stage from its first
+   * moment with no entrance. Absent on any other scene.
+   */
+  board?: { carried: string[] };
 }
 
 export interface VisualSceneDto {

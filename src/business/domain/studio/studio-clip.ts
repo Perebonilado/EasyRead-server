@@ -197,14 +197,17 @@ export function gateClips(
     clipSeconds += long;
     for (const id of cast) met.add(id);
     if (!scene.hook?.trim()) fixed.push(`clip ${n} given its hook`);
-    scenes.push({
+    // A clip is never part of a continuous build (studio-build).
+    const kept: OutlineScene = {
       ...scene,
       kind: 'clip',
       set,
       cast,
       seconds: long,
       hook: hookOf(scene),
-    });
+    };
+    delete kept.build;
+    scenes.push(kept);
   });
   return { outline: { ...outline, scenes }, fixed };
 }

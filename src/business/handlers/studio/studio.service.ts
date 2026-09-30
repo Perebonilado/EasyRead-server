@@ -2030,6 +2030,13 @@ export class StudioService {
         const side = (one: StudioSceneRecord) => ({
           sheet: one.sheet,
           scene: episode.outline?.scenes[one.position] ?? null,
+          // A continuous build carries its stage on (E5): only an
+          // explainer's scene, straight after the one it continues.
+          build:
+            one.sheet?.kind === 'explainer' &&
+            made[i - 1]?.position === one.position - 1
+              ? (episode.outline?.scenes[one.position]?.build ?? null)
+              : null,
         });
         // Into and out of an explainer's story clip (studio-clip): a
         // dissolve or an iris in, and out of it the clip shrinks into its

@@ -3386,6 +3386,27 @@ export interface StudioPlayDto {
     /** How the film joins this scene to the one before: a cut (the same place, time running on), a dissolve (a new place) or a dip to black (time has passed). The first comes up from black. */
     join: 'cut' | 'dissolve' | 'dip';
   }[];
+  /** What the film's music is scored from (studio-score.ts); absent on an explainer, or from an older server. */
+  score?: StudioScoreDto;
+}
+
+/** A story film's score, as its story gives it (S10): its colour, its curve, its themes and the lines that land. */
+export interface StudioScoreDto {
+  genre: StudioGenreName | null;
+  tone: 'funny' | 'gentle' | 'exciting' | 'serious' | 'calm' | null;
+  /** Made for children: brighter, never dark. */
+  young: boolean;
+  /** Whose story it is (a character's id): their motif returns at the story's key beats. */
+  hero: string | null;
+  /** Who stands against them, when anyone does: a contrasting motif. */
+  foil: string | null;
+  /** Each of the film's scenes, in order. */
+  scenes: {
+    /** The story beats it serves, in order: each one's role and planned tension, 0 to 10. */
+    beats: { role: string; intensity: number }[];
+    /** Its lines that land a moment: a joke, a tease, a reveal, a threat, an accusation, a confession. */
+    lines: { say: string; who: string | null; aim: string }[];
+  }[];
 }
 
 /** A line of the producer's streamed turn: a piece of the reply, then the whole outcome. */

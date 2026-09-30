@@ -1,4 +1,9 @@
-import { isStoryChange, keptPersonas } from '../../domain/studio/studio-story';
+import { scoreOf } from '../../domain/studio/studio-score';
+import {
+  isStoryChange,
+  keptPersonas,
+  storyOf,
+} from '../../domain/studio/studio-story';
 import { narratorRuleOf } from '../../domain/studio/studio-narrator';
 import { heardBrief } from '../../domain/studio/studio-heard';
 import { Inject, Injectable, Logger } from '@nestjs/common';
@@ -1805,6 +1810,20 @@ export class StudioService {
     scenes: StudioSceneRecord[],
     watermark: boolean,
   ): StudioPlayDto {
+    const made = scenes.filter((s) => s.sceneKey && s.audioKey && s.durationMs);
+    // The film's music is scored from its story: a story's, never an explainer's.
+    const story =
+      show.brief.format !== 'explainer'
+        ? storyOf(episode.outline?.story)
+        : null;
+    const score = story
+      ? scoreOf({
+          brief: show.brief,
+          story,
+          cast: show.bible?.characters ?? [],
+          scenes: made,
+        })
+      : undefined;
     return {
       episodeId: episode.id,
       title: episode.title,
@@ -1812,16 +1831,15 @@ export class StudioService {
       number: episode.number,
       watermark,
       madeWith: MADE_WITH,
-      scenes: scenes
-        .filter((s) => s.sceneKey && s.audioKey && s.durationMs)
-        .map((s, i, made) => ({
-          id: s.id,
-          title: s.sheet?.title ?? `Scene ${s.position + 1}`,
-          durationMs: s.durationMs!,
-          transition: s.sheet?.transition ?? 'cut',
-          // From the scene the film shows before it; the first comes up from black.
-          join: i ? joinOf(made[i - 1].sheet, s.sheet) : 'dip',
-        })),
+      ...(score ? { score } : {}),
+      scenes: made.map((s, i) => ({
+        id: s.id,
+        title: s.sheet?.title ?? `Scene ${s.position + 1}`,
+        durationMs: s.durationMs!,
+        transition: s.sheet?.transition ?? 'cut',
+        // From the scene the film shows before it; the first comes up from black.
+        join: i ? joinOf(made[i - 1].sheet, s.sheet) : 'dip',
+      })),
     };
   }
 

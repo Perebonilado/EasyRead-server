@@ -233,6 +233,7 @@ import {
 } from '../../business/domain/scene-pace-audio';
 import type { Pcm } from '../../business/domain/wav';
 import type { AudioCodecPort } from '../../business/ports/audio-codec.port';
+import { normaliseLoudness } from '../../business/domain/voice-loudness';
 import { spokenForm, type Pronunciations } from '../../business/domain/spoken';
 import { startMathsSpeech } from '../../business/domain/maths-speech';
 import type { AlignerPort } from '../../business/ports/aligner.port';
@@ -2369,6 +2370,9 @@ export class SceneProcessor {
     };
     let notes: PaceNotes | null = null;
     let out = kept;
+    /** The voice's samples as they now stand, where they were decoded: encoded once, at the end. */
+    let heard: Pcm | null = input.pcm;
+    let changed = false;
     // An estimate's times are guesses: nothing is measured on them.
     if (
       input.timing !== 'estimated' &&
@@ -2378,6 +2382,7 @@ export class SceneProcessor {
       try {
         const pcm =
           input.pcm ?? (await this.codec.decode(input.audio, input.mimeType));
+        heard = pcm;
         const planned = planPaceEdits({ pcm, ...plan });
         if (planned.edits.length) {
           const edited = applyPaceEdits(pcm, planned.edits);
@@ -2387,9 +2392,11 @@ export class SceneProcessor {
             durationMs: Math.round(
               (edited.samples.length / edited.sampleRate) * 1000,
             ),
-            audio: await this.codec.encode(edited),
-            mimeType: 'audio/mpeg',
+            audio: input.audio,
+            mimeType: input.mimeType,
           };
+          heard = edited;
+          changed = true;
           notes = planned.notes;
         }
       } catch (error) {
@@ -2397,6 +2404,41 @@ export class SceneProcessor {
           `${input.who}: pace: the voice is kept as it came (${(error as Error).message})`,
         );
         out = kept;
+        heard = input.pcm;
+        changed = false;
+      }
+    // As loud as every other scene's voice (voice-loudness): about −16
+    // LUFS, once, here, so the player's music and effects sit under it
+    // where they were set. Kept as it is when anything fails.
+    if (this.codec)
+      try {
+        heard ??= await this.codec.decode(input.audio, input.mimeType);
+        const level = normaliseLoudness(heard);
+        if (level.pcm) {
+          heard = level.pcm;
+          changed = true;
+        }
+        this.logger.log(
+          `${input.who}: loudness ${level.before === null ? 'unmeasured' : `${level.before.toFixed(1)} LUFS`}${level.pcm ? ` → ${level.after?.toFixed(1)} LUFS (${level.gainDb > 0 ? '+' : ''}${level.gainDb} dB)` : ', kept'}`,
+        );
+      } catch (error) {
+        this.logger.warn(
+          `${input.who}: loudness: the voice is kept as loud as it came (${(error as Error).message})`,
+        );
+      }
+    if (changed && heard && this.codec)
+      try {
+        out = {
+          ...out,
+          audio: await this.codec.encode(heard),
+          mimeType: 'audio/mpeg',
+        };
+      } catch (error) {
+        this.logger.warn(
+          `${input.who}: the voice could not be encoded again; kept as it came (${(error as Error).message})`,
+        );
+        out = kept;
+        notes = null;
       }
     if (!before) return out;
     const after = paceReport(out.beats, input.said);

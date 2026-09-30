@@ -6,10 +6,12 @@
  * voiced, and no minutes are spent; the queue is not used, so no other
  * worker picks the jobs up.
  *
- *   npm run studio:other-shape -- <episodeId> [--dev <dir>]
+ *   npm run studio:other-shape -- <episodeId> [--dev <dir>] [--offline]
  *
  * With --dev, each twin scene's scene.json and its voice are written to
- * <dir>/<n>/ as well (for /dev/player and /dev/stage).
+ * <dir>/<n>/ as well (for /dev/player and /dev/stage). With --offline, any
+ * model or voice asked for throws, to prove that nothing is spent. A twin
+ * scene that failed before is composed again, as the maker's try again does.
  */
 import 'reflect-metadata';
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -23,7 +25,12 @@ import type { JobQueuePort } from '../src/business/ports/job-queue.port';
 import type { LlmGatewayPort } from '../src/business/ports/llm.port';
 import type { StoragePort } from '../src/business/ports/storage.port';
 import type { ClockPort } from '../src/business/ports/clock.port';
-import { CLOCK, LLM_GATEWAY, STORAGE } from '../src/business/ports/tokens';
+import {
+  ALIGNER,
+  CLOCK,
+  LLM_GATEWAY,
+  STORAGE,
+} from '../src/business/ports/tokens';
 import type { AiCallLogRepository } from '../src/business/repositories/ai-call-log.repository';
 import type { StudioRepository } from '../src/business/repositories/studio.repository';
 import {
@@ -37,11 +44,39 @@ import { StudioService } from '../src/business/handlers/studio/studio.service';
 import { SceneProcessor } from '../src/pipeline/processors/scene.processor';
 import { StudioProcessor } from '../src/pipeline/processors/studio.processor';
 
-@Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true }), CoreModule],
-  providers: [SceneProcessor],
-})
-class StudioOtherShapeModule {}
+/** Anything asked of it throws: no model, voice or aligner is called (--offline). */
+const refused = (what: string): unknown =>
+  new Proxy(
+    {},
+    {
+      get: (_, key) =>
+        // What Nest asks of every provider, and a promise's check, are no call.
+        key === 'then' || /^(on|before)[A-Z]/.test(String(key))
+          ? undefined
+          : () => {
+              throw new Error(`--offline: ${what}.${String(key)} was asked`);
+            },
+    },
+  );
+
+/** The worker's parts, with models and voice refused when offline. */
+function moduleOf(offline: boolean) {
+  @Module({
+    imports: [ConfigModule.forRoot({ isGlobal: true }), CoreModule],
+    providers: [
+      SceneProcessor,
+      ...(offline
+        ? [
+            { provide: LLM_GATEWAY, useValue: refused('model') },
+            { provide: SceneVoiceService, useValue: refused('voice') },
+            { provide: ALIGNER, useValue: refused('aligner') },
+          ]
+        : []),
+    ],
+  })
+  class StudioOtherShapeModule {}
+  return StudioOtherShapeModule;
+}
 
 /** A flag's value: `--dev <dir>`. */
 function flag(args: string[], name: string): string | undefined {
@@ -53,18 +88,22 @@ async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const [episodeId] = args;
   if (!episodeId || episodeId.startsWith('--')) {
-    console.error('npm run studio:other-shape -- <episodeId> [--dev <dir>]');
+    console.error(
+      'npm run studio:other-shape -- <episodeId> [--dev <dir>] [--offline]',
+    );
     process.exit(2);
   }
   const dev = flag(args, '--dev');
-  const app = await NestFactory.createApplicationContext(
-    StudioOtherShapeModule,
-    { logger: ['log', 'warn', 'error'] },
-  );
+  const offline = args.includes('--offline');
+  const app = await NestFactory.createApplicationContext(moduleOf(offline), {
+    logger: ['log', 'warn', 'error'],
+  });
   try {
     const studio = app.get<StudioRepository>(STUDIO_REPOSITORY);
     const storage = app.get<StoragePort>(STORAGE);
-    const llm = app.get<LlmGatewayPort>(LLM_GATEWAY);
+    const llm = offline
+      ? (refused('model') as LlmGatewayPort)
+      : app.get<LlmGatewayPort>(LLM_GATEWAY);
     // The jobs the Studio would queue, kept here and run in this process.
     const jobs: StudioJob[] = [];
     const queue = {
@@ -84,22 +123,26 @@ async function main(): Promise<void> {
       app.get<AiCallLogRepository>(AI_CALL_LOG_REPOSITORY),
       app.get(EntitlementsService),
       app.get(StudioCastService),
-      app.get(SceneVoiceService),
+      offline
+        ? (refused('voice') as SceneVoiceService)
+        : app.get(SceneVoiceService),
     );
     const worker = new StudioProcessor(
       studio,
       llm,
       app.get<AiCallLogRepository>(AI_CALL_LOG_REPOSITORY),
       storage,
-      app.get(SceneProcessor),
+      app.get(SceneProcessor, { strict: false }),
       app.get(EntitlementsService),
       app.get(StudioCastService),
       queue,
     );
     const asked = await service.otherShape(episode.userId, episode.id);
-    const twinId = asked.twin?.id;
+    // Asked of the twin itself, or of its lead.
+    const twinId = episode.twinOf ? episode.id : asked.twin?.id;
+    const shape = episode.twinOf ? asked.shape : asked.twin?.shape;
     console.log(
-      `the ${asked.twin?.shape ?? '?'} version: episode ${twinId ?? 'none'}, ${jobs.length} scene(s) to compose`,
+      `the ${shape ?? '?'} version: episode ${twinId ?? 'none'}, ${jobs.length} scene(s) to compose`,
     );
     for (const job of jobs.splice(0))
       await worker.process(job, {

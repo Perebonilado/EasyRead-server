@@ -199,6 +199,10 @@ import {
   type StorySize,
   type StoryWorld,
 } from '../../business/domain/scene-story';
+import type {
+  SceneParts,
+  ScenePartsVoice,
+} from '../../business/domain/scene-film-parts';
 import {
   CANVAS,
   gateDrawing,
@@ -446,26 +450,8 @@ function withLayers(
   }
 }
 
-/** A made scene's voice, as its parts keep it. */
-interface ScenePartsVoice {
-  beats: TimedBeat[];
-  durationMs: number;
-  timing: SceneTiming;
-  voicePace?: number;
-}
-
-/**
- * A made scene's parts, kept beside its film (studio-twins partsKeyOf):
- * what its twin in the other shape is composed from, with nothing drawn
- * or voiced again.
- */
-export interface SceneParts extends ScenePartsVoice {
-  version: 1;
-  /** Its script as staged, the show's own things as drawn with it. */
-  script: SceneScript;
-  /** The drawings the artist made for it alone, by the thing's id. */
-  drawings: [string, GatedDrawing][];
-}
+// A made scene's parts, as kept beside its film (scene-film-parts).
+export type { SceneParts } from '../../business/domain/scene-film-parts';
 
 /** What composing a made scene takes, and how it is finished: the same for its own shape and its twin's. */
 interface Composing {
@@ -1160,6 +1146,11 @@ export class SceneProcessor {
       drawings: [...drawings].filter(
         (one): one is [string, GatedDrawing] => drawn.has(one[0]) && !!one[1],
       ),
+      // Those that did not come through: cards in its twin too, never drawn anew.
+      ...(() => {
+        const cards = [...drawn].filter((id) => !drawings.get(id));
+        return cards.length ? { cards } : {};
+      })(),
       beats: voice.beats,
       durationMs: voice.durationMs,
       timing: voice.timing,
@@ -1295,8 +1286,13 @@ export class SceneProcessor {
     const { parts, story, who } = input;
     const script = parts.script;
     const reuse = new Map(parts.drawings);
+    // A drawing that did not come through when it was made is a card
+    // again: never asked of the artist here.
+    const cards = new Set(parts.cards ?? []);
     const missing = script.cast.flatMap((thing) =>
-      thing.kind === 'drawing' && !reuse.has(thing.id) ? [thing.name] : [],
+      thing.kind === 'drawing' && !reuse.has(thing.id) && !cards.has(thing.id)
+        ? [thing.name]
+        : [],
     );
     if (story) {
       const [kept, sets, own] = await Promise.all([
@@ -1329,7 +1325,12 @@ export class SceneProcessor {
         `Not drawn for the show yet, so not composed: ${missing.join(', ')}`,
       );
     const drawings = await this.drawAll(
-      script,
+      cards.size
+        ? {
+            ...script,
+            cast: script.cast.filter((thing) => !cards.has(thing.id)),
+          }
+        : script,
       script.title,
       null,
       who,
@@ -1338,6 +1339,7 @@ export class SceneProcessor {
       reuse,
       input.shape,
     );
+    for (const id of cards) drawings.set(id, null);
     const made = await this.composeStored({
       script,
       drawings: await this.framedDrawings(

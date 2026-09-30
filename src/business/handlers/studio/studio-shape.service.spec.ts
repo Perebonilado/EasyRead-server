@@ -25,6 +25,7 @@ import type { EntitlementsService } from '../documents/entitlements.service';
 import { StudioCastService } from './studio-cast.service';
 import { StudioService } from './studio.service';
 import { sceneFingerprint } from './studio-views';
+import { needsRemaking } from './studio-twins';
 
 const at = new Date('2026-09-30T12:00:00Z');
 const bible = bibleOf({
@@ -427,5 +428,57 @@ describe('the other shape, any time after', () => {
     jobs.length = 0;
     await service.otherShape('u1', 'e1');
     expect(jobs).toHaveLength(0);
+  });
+
+  it('tries again only the twin’s scenes that failed, and says why one needs its scene made again', async () => {
+    const { service, twins, rowsOf, scenes, jobs, episodes } = studioWith(
+      null,
+      { phase: 'made' },
+      true,
+    );
+    await service.otherShape('u1', 'e1');
+    const twin = twins()[0];
+    // Settled by the worker: the first made, the second not.
+    episodes.set(twin.id, { ...episodes.get(twin.id)!, busy: null });
+    const [first, second] = rowsOf(twin.id);
+    const lead = scenes.get(first.twinOf!)!;
+    scenes.set(first.id, {
+      ...first,
+      status: 'made',
+      sceneKey: `${first.id}-scene.json`,
+      audioKey: lead.audioKey,
+      madeHash: lead.madeHash,
+    });
+    scenes.set(second.id, {
+      ...second,
+      status: 'failed',
+      error: 'This scene needs making again before it can be vertical.',
+    });
+    const seen = await service.episode('u1', 'e1');
+    expect(seen.twin).toMatchObject({
+      made: false,
+      making: false,
+      failed: 1,
+      error: 'Scene 2 needs making again before it can be vertical.',
+    });
+    jobs.length = 0;
+    const again = await service.otherShape('u1', 'e1');
+    expect(jobs.map((j) => j.sceneId)).toEqual([second.id]);
+    expect(scenes.get(second.id)).toMatchObject({
+      status: 'making',
+      error: null,
+    });
+    expect(again.twin).toMatchObject({ making: true, failed: 0 });
+  });
+});
+
+describe('why the other shape could not be made, in the maker’s words', () => {
+  it('names the scenes to make again first', () => {
+    expect(needsRemaking([3], 'tall')).toBe(
+      'Scene 3 needs making again before it can be vertical.',
+    );
+    expect(needsRemaking([1, 2, 4], 'wide')).toBe(
+      'Scenes 1, 2 and 4 need making again before they can be wide.',
+    );
   });
 });

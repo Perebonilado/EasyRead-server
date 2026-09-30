@@ -11,8 +11,9 @@ import type {
   StudioSceneRecord,
   StudioShowRecord,
 } from '../../business/repositories/studio.repository';
+import type { SceneDto } from '../../contracts';
 import type { SceneParts, SceneProcessor } from './scene.processor';
-import { StudioProcessor } from './studio.processor';
+import { StudioProcessor, studioMakeOf } from './studio.processor';
 
 /**
  * An episode's twin in the other shape, made by the worker (studio-
@@ -67,7 +68,11 @@ const episodeOf = (
 });
 
 /** The water cycle's lead (wide) and its twin (tall), in memory, and a worker over them. */
-function worker(leadMade: boolean) {
+function worker(
+  leadMade: boolean,
+  /** Its lead's parts as kept (null: made before they were), and its lead's films as stored, by key. */
+  kept: { parts?: SceneParts | null; films?: Record<string, SceneDto> } = {},
+) {
   const episodes = new Map<string, StudioEpisodeRecord>([
     ['we1', episodeOf({ shape: 'wide' })],
     ['wt1', episodeOf({ id: 'wt1', shape: 'tall', twinOf: 'we1' })],
@@ -166,7 +171,8 @@ function worker(leadMade: boolean) {
           : {}),
       });
     },
-    partsOf: () => Promise.resolve(parts),
+    partsOf: () =>
+      Promise.resolve(kept.parts === undefined ? parts : kept.parts),
     reshape: (input: Record<string, unknown>) => {
       calls.reshape.push(input);
       return Promise.resolve({
@@ -181,7 +187,10 @@ function worker(leadMade: boolean) {
     {} as LlmGatewayPort,
     { record: () => Promise.resolve() },
     {
-      get: () => Promise.reject(new Error('none')),
+      get: (key: string) =>
+        kept.films?.[key]
+          ? Promise.resolve(Buffer.from(JSON.stringify(kept.films[key])))
+          : Promise.reject(new Error('none')),
       put: () => Promise.resolve(),
       delete: () => Promise.resolve(),
     } as never,
@@ -204,7 +213,52 @@ function worker(leadMade: boolean) {
       { ...job, showId: 'w1', userId: 'u1' },
       { attemptsMade: 1, isFinalAttempt: true },
     );
-  return { run, calls, spent, scenes, episodes };
+  return { run, calls, spent, scenes, episodes, repo };
+}
+
+/** A lead scene's film as stored: its script's words on a voice, and each drawing it asks for as shown. */
+function filmOf(position: number, words?: (say: string) => string): SceneDto {
+  const w = worker(true);
+  const rows = [...w.scenes.values()].filter((s) => s.episodeId === 'we1');
+  const of = studioMakeOf(
+    show,
+    episodeOf({ shape: 'wide' }),
+    rows[position],
+    rows,
+    bible,
+  );
+  const script = of.script!;
+  return {
+    title: script.title,
+    durationMs: 20_000,
+    timing: 'aligned',
+    beats: script.beats.map((beat, k) => ({
+      text: words ? words(beat.say) : beat.say,
+      startMs: k * 1000,
+      endMs: k * 1000 + 800,
+      words: [],
+    })),
+    things: script.cast.flatMap((thing) =>
+      thing.kind === 'drawing'
+        ? [
+            {
+              id: thing.id,
+              kind: 'drawing',
+              svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><g id="p"><circle cx="50" cy="50" r="40"/></g></svg>',
+              aspect: 1,
+              caption: thing.name,
+              parts: {},
+              labels: {},
+              states: {},
+              hidden: [],
+              moves: false,
+            },
+          ]
+        : [],
+    ),
+    steps: [],
+    effects: [],
+  } as unknown as SceneDto;
 }
 
 describe('an episode made in both shapes', () => {
@@ -275,5 +329,77 @@ describe('the other shape made later', () => {
     await run({ kind: 'twin', episodeId: 'wt1', sceneId: 't-ws0' });
     expect(scenes.get('t-ws0')).toMatchObject({ status: 'failed' });
     expect(scenes.get('ws0')!.status).toBe('making');
+  });
+
+  it('rebuilds a lesson’s parts from its film when it was made before they were kept: nothing made, voiced or spent', async () => {
+    const film = filmOf(1);
+    const { run, calls, spent, scenes } = worker(true, {
+      parts: null,
+      films: { 'lead-1-scene.json': film },
+    });
+    scenes.set('t-ws1', {
+      id: 't-ws1',
+      episodeId: 'wt1',
+      position: 1,
+      sheet: WATER_SHEETS[1],
+      status: 'failed',
+      twinOf: 'ws1',
+    } as StudioSceneRecord);
+    await run({ kind: 'twin', episodeId: 'wt1', sceneId: 't-ws1' });
+    expect(calls.make).toHaveLength(0);
+    expect(calls.reshape).toHaveLength(1);
+    const parts = calls.reshape[0].parts as SceneParts;
+    expect(calls.reshape[0]).toMatchObject({ shape: 'tall', story: null });
+    // Its voice as the film plays it, its drawings as the film shows them.
+    expect(parts.beats.map((b) => b.text)).toEqual(
+      film.beats.map((b) => b.text),
+    );
+    expect(parts.drawings.map(([id]) => id)).toEqual(
+      film.things.map((t) => t.id),
+    );
+    expect(spent).toEqual([]);
+    expect(scenes.get('t-ws1')).toMatchObject({
+      status: 'made',
+      audioKey: 'voice-1.mp3',
+      error: null,
+    });
+  });
+
+  it('says plainly that a scene must be made again when its film is not its script’s now', async () => {
+    const { run, calls, scenes } = worker(true, {
+      parts: null,
+      films: { 'lead-1-scene.json': filmOf(1, (say) => `${say} Changed.`) },
+    });
+    scenes.set('t-ws1', {
+      id: 't-ws1',
+      episodeId: 'wt1',
+      position: 1,
+      sheet: WATER_SHEETS[1],
+      status: 'making',
+      twinOf: 'ws1',
+    } as StudioSceneRecord);
+    await run({ kind: 'twin', episodeId: 'wt1', sceneId: 't-ws1' });
+    expect(calls.reshape).toHaveLength(0);
+    expect(scenes.get('t-ws1')).toMatchObject({
+      status: 'failed',
+      error: 'This scene needs making again before it can be vertical.',
+    });
+  });
+
+  it('never leaves a twin’s scene making when its lead’s scene is gone', async () => {
+    const { run, scenes } = worker(true);
+    scenes.set('t-gone', {
+      id: 't-gone',
+      episodeId: 'wt1',
+      position: 9,
+      sheet: WATER_SHEETS[0],
+      status: 'making',
+      twinOf: 'nowhere',
+    } as StudioSceneRecord);
+    await run({ kind: 'twin', episodeId: 'wt1', sceneId: 't-gone' });
+    expect(scenes.get('t-gone')).toMatchObject({
+      status: 'failed',
+      error: 'This scene needs making again before it can be vertical.',
+    });
   });
 });

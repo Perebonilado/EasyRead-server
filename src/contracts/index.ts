@@ -3576,6 +3576,10 @@ export interface StudioTwinDto {
   shareToken: string | null;
   /** Being made now: its scenes composing. */
   making: boolean;
+  /** Scenes of it that could not be made, while none is making: tried again with the other shape's make. */
+  failed: number;
+  /** Why, in the maker's words, when one of them says (its scene to make again first); else null. */
+  error: string | null;
   /** What is being done to it now, while something is. */
   activity: StudioActivityDto | null;
 }

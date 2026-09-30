@@ -16,6 +16,7 @@ import type {
   StudioShapeChoice,
   StudioTwinDto,
 } from '../../../contracts';
+import { ValidationError } from '../../domain/errors/errors';
 import type { StudioBible, StudioBrief } from '../../domain/studio/studio';
 import { carriedWears } from '../../domain/studio/studio-check';
 import type {
@@ -31,6 +32,9 @@ export const otherShape = (shape: FilmShape): FilmShape =>
 /** A shape as the maker says it. */
 export const shapeWord = (shape: FilmShape): string =>
   shape === 'tall' ? 'vertical' : 'wide';
+
+/** What a twin's scene says when its lead's scene must be made again first (TwinNeedsRemake). */
+const NEEDS_REMAKE = 'This scene needs making again before it can be';
 
 /** An episode's shape: absent is wide (every episode made before shapes). */
 export const episodeShape = (episode: Pick<StudioEpisodeRecord, 'shape'>) =>
@@ -161,6 +165,16 @@ export function twinDto(
     ).length;
   }
   const made = otherRows.filter((row) => row.sceneKey && row.audioKey);
+  // What could not be made, once nothing is making: a try again for it,
+  // and the reason a scene gives that is not simply to try again.
+  const failed = working
+    ? []
+    : otherRows.filter((row) => row.status === 'failed');
+  // Those whose lead scene must be made again first, by number.
+  const told = failed
+    .filter((row) => row.error?.startsWith(NEEDS_REMAKE))
+    .map((row) => row.position + 1)
+    .sort((a, b) => a - b);
   return {
     id: other.id,
     shape: episodeShape(other),
@@ -171,8 +185,33 @@ export function twinDto(
     hasThumb: Boolean(other.thumbKey),
     shareToken: other.shareToken,
     making: working,
+    failed: failed.length,
+    error: told.length ? needsRemaking(told, episodeShape(other)) : null,
     activity: activityDto(other.activity, working),
   };
+}
+
+/** Scenes whose lead must be made again first, as the maker reads it: "Scenes 2 and 4 need making again before they can be vertical." */
+export function needsRemaking(
+  numbers: readonly number[],
+  shape: FilmShape,
+): string {
+  const one = numbers.length === 1;
+  const named = one
+    ? `Scene ${numbers[0]}`
+    : `Scenes ${numbers.slice(0, -1).join(', ')} and ${numbers[numbers.length - 1]}`;
+  return `${named} ${one ? 'needs' : 'need'} making again before ${one ? 'it' : 'they'} can be ${shapeWord(shape)}.`;
+}
+
+/**
+ * A twin's scene that cannot be composed from its lead's as made (made
+ * before its parts were kept, and its film not its script's now): the
+ * lead's scene must be made again first. Its message is the maker's.
+ */
+export class TwinNeedsRemake extends ValidationError {
+  constructor(shape: FilmShape) {
+    super(`${NEEDS_REMAKE} ${shapeWord(shape)}.`);
+  }
 }
 
 /** Where a made scene's parts are kept beside its film (its script and the drawings the artist made for it): what its twin is composed from. */

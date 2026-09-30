@@ -156,7 +156,8 @@ There are 15 uses of `STAGINGS.wide` and about 24 reads of `scene.stagings.wide`
 
 ### 1.4 Re-making a film in the other shape
 
-- **What the maker sees:** "Make a vertical version" (or "Make a wide version") in the film's `⋯` menu, the only new control.
+- **What the maker sees:** the film's Wide / Vertical switch, always above a made film. Choosing the shape it has none of yet shows, in the player's place and that shape's frame, "Make a vertical version" (or "Make a wide version"); it is made there and plays there. A scene of it that could not be made is said, with a try again for those alone. (Richard, 2026-10-01: the `⋯` menu item this replaced is gone.)
+- **A film made before its parts were kept:** a lesson's parts are rebuilt from its stored film by code (`scene-film-parts`: its voice, its drawings, their labels' places measured again); a story's is staged again on its own voice. One that cannot be says which scenes need making again first.
 - **What happens:** it creates a **sibling episode** with the same sheets, the same audio keys and the same title, marked `twinOf: <episodeId>` and the other shape.
 - **Only compose runs again, for each scene:** sets, blocking, shots, layouts, stills and checks. The writer, the voice and DeepSeek are not called.
   - The words and their timings are unchanged, so the audio is reused byte for byte.

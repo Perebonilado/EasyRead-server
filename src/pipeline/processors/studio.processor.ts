@@ -239,7 +239,9 @@ import {
   partsKeyOf,
   shapeWord,
   twinOf,
+  TwinNeedsRemake,
 } from '../../business/handlers/studio/studio-twins';
+import { partsFromFilm } from '../../business/domain/scene-film-parts';
 
 /** How wide a still the picture check looks at is: enough to tell a bus from an ark, at about 0.4 cents a look. */
 const STILL_PX = 960;
@@ -802,7 +804,12 @@ export class StudioProcessor {
         await this.studio.updateScene(job.sceneId, {
           status: 'failed',
           step: null,
-          error: `This scene could not be made ${shapeWord(episodeShape(episode))}. Try making it again.`,
+          // Why, in the maker's words: its scene to make again first, or
+          // simply to try again.
+          error:
+            error instanceof TwinNeedsRemake
+              ? error.message
+              : `This scene could not be made ${shapeWord(episodeShape(episode))}. Try making it again.`,
         });
         await this.settleTwin(show, episode);
         return;
@@ -3501,7 +3508,9 @@ export class StudioProcessor {
    * voice, with nothing drawn, voiced or written, and not spent again.
    * A lead's scene made before parts were kept is staged again from its
    * sheet on its own voice where it is a story's (the Studio's own try
-   * again does the same); a lesson's cannot be, and says so.
+   * again does the same); a lesson's has its parts rebuilt from its film
+   * as stored (scene-film-parts). One that cannot be says its scene must
+   * be made again first.
    */
   private async makeTwinScene(
     show: StudioShowRecord,
@@ -3509,14 +3518,15 @@ export class StudioProcessor {
     sceneId: string,
   ): Promise<void> {
     const row = await this.studio.findScene(sceneId);
+    if (!row) return;
+    const shape = episodeShape(twin);
     const lead = twin.twinOf
       ? await this.studio.findEpisode(twin.twinOf)
       : null;
-    const leadRow = row?.twinOf
-      ? await this.studio.findScene(row.twinOf)
-      : null;
-    if (!row || !lead || !leadRow?.sheet) return;
-    const who = `studio ${twin.id} s${leadRow.position + 1} (${episodeShape(twin)})`;
+    const leadRow = row.twinOf ? await this.studio.findScene(row.twinOf) : null;
+    // Nothing to compose it from: said on it, never left making.
+    if (!lead || !leadRow?.sheet) throw new TwinNeedsRemake(shape);
+    const who = `studio ${twin.id} s${leadRow.position + 1} (${shape})`;
     if (!leadRow.sceneKey || !leadRow.audioKey || leadRow.status !== 'made')
       throw new ValidationError(
         `${who}: its ${shapeWord(episodeShape(lead))} scene is not made`,
@@ -3534,7 +3544,6 @@ export class StudioProcessor {
       await this.gesturing(show.id),
     );
     const fingerprint = leadRow.madeHash ?? '';
-    const shape = episodeShape(twin);
     const base = `studio/${show.id}/${twin.id}/${row.id}-${fingerprint.slice(0, 8)}-${Date.now().toString(36)}`;
     const explainer = leadRow.sheet.kind === 'explainer';
     const finishing = {
@@ -3547,7 +3556,22 @@ export class StudioProcessor {
           }
         : {}),
     };
-    const parts = await this.scenes.partsOf(leadRow.sceneKey);
+    let parts = await this.scenes.partsOf(leadRow.sceneKey);
+    // Made before its parts were kept: a lesson's rebuilt from its film as
+    // stored, its words the voice's own, its drawings as the film shows them.
+    const voiced =
+      parts || of.story ? null : await this.storedScene(leadRow.sceneKey);
+    if (!parts && voiced && of.script && onItsVoice(of.script, voiced)) {
+      const rebuilt = await partsFromFilm(voiced, of.script);
+      for (const note of rebuilt?.notes ?? [])
+        this.logger.log(`${who}: parts: ${note}`);
+      if (rebuilt) {
+        parts = rebuilt.parts;
+        this.logger.log(
+          `${who}: parts rebuilt from its film (${rebuilt.parts.drawings.length} drawing${rebuilt.parts.drawings.length === 1 ? '' : 's'})`,
+        );
+      }
+    }
     let made: { sceneKey: string; thumbKey: string };
     if (parts)
       made = await this.scenes.reshape({
@@ -3563,19 +3587,21 @@ export class StudioProcessor {
     else {
       // Made before its parts were kept: a story's staged again on its
       // own voice, from its sheet, as the Studio's own try again does.
-      const voiced = await this.storedScene(leadRow.sceneKey);
+      const film = of.story ? await this.storedScene(leadRow.sceneKey) : null;
       const onVoice =
-        voiced && of.script && of.story ? onItsVoice(of.script, voiced) : null;
-      if (!voiced || !onVoice || !of.story)
-        throw new ValidationError(
-          `${who}: made before it could be made in another shape; make the scene again first`,
+        film && of.script && of.story ? onItsVoice(of.script, film) : null;
+      if (!film || !onVoice || !of.story) {
+        this.logger.warn(
+          `${who}: made before it could be made in another shape, and its film is not its script's now`,
         );
+        throw new TwinNeedsRemake(shape);
+      }
       made = await this.scenes.recompose({
         script: onVoice,
         kept: new Map(),
-        beats: voiced.beats,
-        durationMs: voiced.durationMs,
-        timing: voiced.timing,
+        beats: film.beats,
+        durationMs: film.durationMs,
+        timing: film.timing,
         profile: of.profile,
         story: of.story,
         base,

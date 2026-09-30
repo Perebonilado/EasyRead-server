@@ -159,6 +159,10 @@ import type { SetPiece } from '../../business/domain/scene-set-pieces';
 import { buildSet, reverseSet } from '../../business/domain/scene-set-layout';
 import { RIG_VERSION, rigSheet } from '../../business/domain/scene-sheet-rig';
 import { withMouths } from '../../business/domain/studio/studio-audit';
+import {
+  CLIP_CARD,
+  clipCardDrawing,
+} from '../../business/domain/studio/studio-clip';
 import { turnsCheck, turnsLine } from '../../business/domain/scene-turns-check';
 import {
   faceRhythm,
@@ -195,6 +199,10 @@ import {
   type StorySize,
   type StoryWorld,
 } from '../../business/domain/scene-story';
+import type {
+  SceneParts,
+  ScenePartsVoice,
+} from '../../business/domain/scene-film-parts';
 import {
   CANVAS,
   gateDrawing,
@@ -289,6 +297,10 @@ import {
   type DrawAgain,
 } from './scene-artist';
 import { KIT_LINE } from '../../business/domain/scene-ink';
+import type { FilmShape } from '../../business/domain/scene-shape';
+import { setInShape } from '../../business/domain/scene-set-shape';
+import { drawingShapeFor } from '../../business/domain/scene-lesson-shape';
+import { partsKeyOf } from '../../business/handlers/studio/studio-twins';
 import { SceneVoiceService } from '../../business/handlers/admin/scene-voice.service';
 
 /** The most of a page the writer reads. */
@@ -438,9 +450,34 @@ function withLayers(
   }
 }
 
+// A made scene's parts, as kept beside its film (scene-film-parts).
+export type { SceneParts } from '../../business/domain/scene-film-parts';
+
+/** What composing a made scene takes, and how it is finished: the same for its own shape and its twin's. */
+interface Composing {
+  script: SceneScript;
+  drawings: ReadonlyMap<string, GatedDrawing | null>;
+  voice: ScenePartsVoice;
+  profile: DocumentProfile;
+  story: PageStory | null;
+  reading?: SceneReading | null;
+  theme?: ThemeId;
+  finish?: (scene: SceneDto) => SceneDto;
+  recheck?: (scene: SceneDto) => {
+    notes: string[];
+    script: SceneScript | null;
+  };
+  keepAs: string;
+  who: string;
+  base: string;
+  shape: FilmShape;
+}
+
 @Injectable()
 export class SceneProcessor {
   private readonly logger = new Logger(SceneProcessor.name);
+  /** Sets built again by code for a tall film's frame, by the show's sets, the place and the shape: each built once while the worker runs. */
+  private readonly framedSets = new Map<string, Promise<SetSheet | null>>();
   /** Work others wait on rather than repeat: a book's story, a character's drawing. */
   private readonly running = new Map<string, Promise<unknown>>();
   /** Writes to one file, each after the last. */
@@ -772,6 +809,16 @@ export class SceneProcessor {
     drawn?: ReadonlyMap<string, GatedDrawing>;
     /** The scene as composed, finished before it is stored (a Studio clip's freeze, a lesson's card told its still). */
     finish?: (scene: SceneDto) => SceneDto;
+    /** The film's shape (studio-vertical-plan): absent, wide, composed as before shapes. */
+    shape?: FilmShape;
+    /**
+     * The same scene in the other shape too (a Studio episode's twin): the
+     * same drawings and voice composed again for that frame, and stored at
+     * `base`. Nothing more is drawn, voiced or asked of a model.
+     */
+    twin?: { shape: FilmShape; base: string };
+    /** Its parts kept beside its film (a Studio scene's), for a twin composed later. */
+    parts?: boolean;
   }): Promise<
     | { fit: 'poor'; reason: string }
     | {
@@ -783,6 +830,8 @@ export class SceneProcessor {
         script: SceneScript;
         drawings: Map<string, GatedDrawing | null>;
         filled: number;
+        /** The twin as stored, when one was asked for; null when it could not be composed. */
+        twin?: { scene: SceneDto; sceneKey: string; thumbKey: string } | null;
       }
   > {
     const { documentId, topic, who, base } = input;
@@ -849,6 +898,7 @@ export class SceneProcessor {
           stop.signal,
           story,
           new Map([...carried.reuse, ...(input.drawn ?? new Map())]),
+          input.shape ?? 'wide',
         ),
         this.drawOwn(script, story, documentId, who, stop.signal),
       ]).then(async ([made, own]) => {
@@ -890,6 +940,76 @@ export class SceneProcessor {
     const voice = spoken.value;
 
     await input.step?.('composing');
+    const composing: Composing = {
+      script,
+      drawings,
+      voice,
+      profile: input.profile,
+      story,
+      ...(input.reading ? { reading: input.reading } : {}),
+      ...(input.theme ? { theme: input.theme } : {}),
+      ...(input.finish ? { finish: input.finish } : {}),
+      ...(input.recheck ? { recheck: input.recheck } : {}),
+      keepAs: input.keepAs ?? 'page',
+      who,
+      base,
+      shape: input.shape ?? 'wide',
+    };
+    const made = await this.composeStored(composing);
+    // Its parts kept beside it (a Studio scene's): its twin in the other
+    // shape is composed from them later, with nothing drawn or voiced.
+    if (input.parts)
+      await this.storeParts(made.sceneKey, script, drawings, voice, who);
+    // The same scene in the other shape, from the same drawings and voice:
+    // composed again for its own frame, never drawn or voiced again.
+    const twin = input.twin
+      ? await this.composeStored({
+          ...composing,
+          drawings: await this.framedDrawings(
+            drawings,
+            script,
+            story,
+            input.twin.shape,
+            who,
+          ),
+          keepAs: `${composing.keepAs}-${input.twin.shape}`,
+          who: `${who} (${input.twin.shape})`,
+          base: input.twin.base,
+          shape: input.twin.shape,
+        }).catch((error: Error) => {
+          this.logger.warn(
+            `${who}: not made ${input.twin!.shape}: ${error.message}`,
+          );
+          return null;
+        })
+      : undefined;
+    return {
+      fit: 'good',
+      scene: made.scene,
+      sceneKey: made.sceneKey,
+      thumbKey: made.thumbKey,
+      voice,
+      script: made.script,
+      drawings,
+      filled: made.filled,
+      ...(twin !== undefined ? { twin } : {}),
+    };
+  }
+
+  /**
+   * A scene composed from its script, drawings and voice, looked at, and
+   * stored with its still: as a scene is made, and as its twin in the
+   * other shape is (studio-vertical-plan §1.4), on the same parts.
+   */
+  private async composeStored(input: Composing): Promise<{
+    scene: SceneDto;
+    sceneKey: string;
+    thumbKey: string;
+    script: SceneScript;
+    filled: number;
+  }> {
+    const { drawings, voice, story, who, base } = input;
+    let script = input.script;
     // Its text paced to be read (Ask 3 B), by code: keyword cards cut to
     // what its viewers read at a glance before it is laid out, and what
     // comes too fast put right once it is timed.
@@ -906,6 +1026,8 @@ export class SceneProcessor {
         profile: input.profile,
         // The book's or the show's own: each place keeps its regulars.
         key: story?.setsKey ?? null,
+        // Its shape: a wide scene is composed as it always was.
+        ...(input.shape !== 'wide' ? { shape: input.shape } : {}),
       });
       if (input.reading)
         made.scene.reading = { wpm: reading.wpm, motion: reading.motion };
@@ -934,7 +1056,7 @@ export class SceneProcessor {
         ? { ...mouthed, voicePace: voice.voicePace }
         : mouthed;
     for (const note of mouths) this.logger.log(`${who}: ${note}`);
-    await this.keepParts(input.keepAs ?? 'page', who, {
+    await this.keepParts(input.keepAs, who, {
       script,
       drawings: [...drawings],
       beats: voice.beats,
@@ -996,15 +1118,253 @@ export class SceneProcessor {
     if (input.theme && input.theme !== 'paper') scene.theme = input.theme;
     const finished = input.finish ? input.finish(scene) : scene;
     const { sceneKey, thumbKey } = await this.store(base, finished, who);
-    return {
-      fit: 'good',
-      scene: finished,
-      sceneKey,
-      thumbKey,
-      voice,
+    return { scene: finished, sceneKey, thumbKey, script, filled };
+  }
+
+  /**
+   * A made scene's parts, kept beside its film (studio-twins partsKeyOf):
+   * its script as staged, with what the show's own things are drawn as,
+   * the drawings the artist made for it alone, and its voice's words and
+   * times. Everyone and everywhere else is the show's, kept by the show.
+   * Never in the way of the film: one not kept is said.
+   */
+  private async storeParts(
+    sceneKey: string,
+    script: SceneScript,
+    drawings: ReadonlyMap<string, GatedDrawing | null>,
+    voice: ScenePartsVoice,
+    who: string,
+  ): Promise<void> {
+    const drawn = new Set(
+      script.cast.flatMap((thing) =>
+        thing.kind === 'drawing' ? [thing.id] : [],
+      ),
+    );
+    const parts: SceneParts = {
+      version: 1,
       script,
-      drawings,
-      filled,
+      drawings: [...drawings].filter(
+        (one): one is [string, GatedDrawing] => drawn.has(one[0]) && !!one[1],
+      ),
+      // Those that did not come through: cards in its twin too, never drawn anew.
+      ...(() => {
+        const cards = [...drawn].filter((id) => !drawings.get(id));
+        return cards.length ? { cards } : {};
+      })(),
+      beats: voice.beats,
+      durationMs: voice.durationMs,
+      timing: voice.timing,
+      ...(voice.voicePace !== undefined ? { voicePace: voice.voicePace } : {}),
+    };
+    await this.storage
+      .put({
+        key: partsKeyOf(sceneKey),
+        body: Buffer.from(JSON.stringify(parts)),
+        mimeType: 'application/json',
+      })
+      .catch((error: Error) =>
+        this.logger.warn(`${who}: parts not kept: ${error.message}`),
+      );
+  }
+
+  /** A made scene's parts as kept beside its film; null for one made before they were kept, or unreadable. */
+  async partsOf(sceneKey: string): Promise<SceneParts | null> {
+    try {
+      const kept = JSON.parse(
+        (await this.storage.get(partsKeyOf(sceneKey))).toString('utf8'),
+      ) as SceneParts;
+      return kept?.version === 1 && kept.script && Array.isArray(kept.drawings)
+        ? kept
+        : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * A tall film's charts and graphs drawn again for its frame, and a story
+   * clip's card as a frame of its shape (studio-vertical-plan §4.2, §4.7):
+   * code's own, so nothing is asked of a model. One that cannot be drawn
+   * so stays as it was.
+   */
+  private async codeInShape(
+    out: Map<string, GatedDrawing | null>,
+    script: SceneScript,
+    shape: FilmShape,
+    who: string,
+  ): Promise<void> {
+    for (const thing of script.cast.filter(isCodeThing)) {
+      if (thing.kind !== 'chart' && thing.kind !== 'plot') continue;
+      const drawn = await drawByCode(thing, shape).catch(() => null);
+      if (drawn) out.set(thing.id, drawn);
+      else this.logger.log(`${who}: "${thing.id}" kept as drawn wide`);
+    }
+    if (out.get(CLIP_CARD)) out.set(CLIP_CARD, clipCardDrawing(shape));
+  }
+
+  /**
+   * A scene's drawings as a film of a shape sees them: a tall film's set
+   * built again by code for its frame (scene-set-shape), once per place
+   * and shape while the worker runs; everything else as drawn. A set that
+   * cannot be built again stays as it was, laid over the tall stage.
+   */
+  private async framedDrawings(
+    drawings: ReadonlyMap<string, GatedDrawing | null>,
+    script: SceneScript,
+    story: PageStory | null,
+    shape: FilmShape,
+    who: string,
+  ): Promise<Map<string, GatedDrawing | null>> {
+    const out = new Map(drawings);
+    // What code draws, drawn again for the frame (a tall chart, a square
+    // graph), and a clip's card of its own shape (studio-vertical-plan §4).
+    if (shape !== 'wide') await this.codeInShape(out, script, shape, who);
+    if (shape === 'wide' || !story) return out;
+    const places = script.cast.filter(
+      (thing): thing is PlaceThing => thing.kind === 'place',
+    );
+    if (!places.length) return out;
+    const sets = await this.setsAt(story.setsKey);
+    for (const thing of places) {
+      const place = story.bible.places.find((p) => p.id === thing.ref);
+      const kept = place ? sets[place.id] : undefined;
+      if (!place || !kept) continue;
+      const key = `${story.setsKey}#${place.id}:${shape}:${kept.drawing.svg.length}`;
+      let framed = this.framedSets.get(key);
+      if (!framed) {
+        framed = setInShape(
+          kept,
+          place,
+          shape,
+          story.bookTitle,
+          story.bible.world ?? null,
+          story.look ?? null,
+        ).catch(() => null);
+        this.framedSets.set(key, framed);
+      }
+      const set = await framed;
+      if (!set) {
+        this.logger.log(
+          `${who}: ${place.name}: kept as painted over the ${shape} stage (it cannot be built again by code)`,
+        );
+        continue;
+      }
+      out.set(thing.id, {
+        ...set.drawing,
+        ...(set.ground ? { ground: set.ground } : {}),
+        ...(set.layered ? { layered: set.layered } : {}),
+      });
+    }
+    return out;
+  }
+
+  /**
+   * A made scene composed again in another shape (its twin, studio-
+   * vertical-plan §1.4): from its script, its own drawings and its voice
+   * as its parts keep them, on the show's cast, sets and own things as
+   * kept. No model is asked and nothing is voiced: one not drawn for the
+   * show yet is not drawn here, and the scene is not composed. Stored as
+   * a make stores it, with its still, beside the voice it was made with.
+   */
+  async reshape(input: {
+    parts: SceneParts;
+    profile: DocumentProfile;
+    /** A story's scene: its people and places are the show's. Null for a lesson's. */
+    story: PageStory | null;
+    shape: FilmShape;
+    base: string;
+    who: string;
+    keepAs?: string;
+    reading?: SceneReading | null;
+    theme?: ThemeId;
+    finish?: (scene: SceneDto) => SceneDto;
+    recheck?: (scene: SceneDto) => {
+      notes: string[];
+      script: SceneScript | null;
+    };
+  }): Promise<{ scene: SceneDto; sceneKey: string; thumbKey: string }> {
+    const { parts, story, who } = input;
+    const script = parts.script;
+    const reuse = new Map(parts.drawings);
+    // A drawing that did not come through when it was made is a card
+    // again: never asked of the artist here.
+    const cards = new Set(parts.cards ?? []);
+    const missing = script.cast.flatMap((thing) =>
+      thing.kind === 'drawing' && !reuse.has(thing.id) && !cards.has(thing.id)
+        ? [thing.name]
+        : [],
+    );
+    if (story) {
+      const [kept, sets, own] = await Promise.all([
+        this.castAt(story.castKey),
+        this.setsAt(story.setsKey),
+        story.ownKey ? this.ownAt(story.ownKey) : null,
+      ]);
+      // Whoever code can draw and the cast has not kept, drawn by code now.
+      const heal = missingByCode(script, story.bible, kept, this.bookAnimals);
+      if (heal.length)
+        await Promise.all(
+          heal.map((c) =>
+            this.sheetFor(story.castKey, c, story.bookTitle, null, who),
+          ),
+        );
+      const cast = heal.length ? await this.castAt(story.castKey) : kept;
+      missing.push(
+        ...notDrawnYet(
+          // The show's own things as its parts drew them: not asked again.
+          { ...script, ownThings: [], features: [] },
+          story.bible,
+          cast,
+          sets,
+          own,
+        ),
+      );
+    }
+    if (missing.length)
+      throw new Error(
+        `Not drawn for the show yet, so not composed: ${missing.join(', ')}`,
+      );
+    const drawings = await this.drawAll(
+      cards.size
+        ? {
+            ...script,
+            cast: script.cast.filter((thing) => !cards.has(thing.id)),
+          }
+        : script,
+      script.title,
+      null,
+      who,
+      new AbortController().signal,
+      story,
+      reuse,
+      input.shape,
+    );
+    for (const id of cards) drawings.set(id, null);
+    const made = await this.composeStored({
+      script,
+      drawings: await this.framedDrawings(
+        drawings,
+        script,
+        story,
+        input.shape,
+        who,
+      ),
+      voice: parts,
+      profile: input.profile,
+      story,
+      ...(input.reading ? { reading: input.reading } : {}),
+      ...(input.theme ? { theme: input.theme } : {}),
+      ...(input.finish ? { finish: input.finish } : {}),
+      ...(input.recheck ? { recheck: input.recheck } : {}),
+      keepAs: input.keepAs ?? 'page',
+      who,
+      base: input.base,
+      shape: input.shape,
+    });
+    return {
+      scene: made.scene,
+      sceneKey: made.sceneKey,
+      thumbKey: made.thumbKey,
     };
   }
 
@@ -1032,6 +1392,8 @@ export class SceneProcessor {
       notes: string[];
       script: SceneScript | null;
     };
+    /** The film's shape: a tall one's sets built again for its frame. Absent, wide. */
+    shape?: FilmShape;
   }): Promise<{
     scene: SceneDto;
     sceneKey: string;
@@ -1039,6 +1401,7 @@ export class SceneProcessor {
     script: SceneScript;
   }> {
     const { story, who } = input;
+    const shape = input.shape ?? 'wide';
     const [kept, sets, own] = await Promise.all([
       this.castAt(story.castKey),
       this.setsAt(story.setsKey),
@@ -1088,20 +1451,26 @@ export class SceneProcessor {
         new AbortController().signal,
         story,
         reuse,
+        shape,
       ),
       this.drawOwn(script, story, null, who),
     ]);
     if (drawn) script = { ...script, drawn };
+    const framed =
+      shape === 'wide'
+        ? drawings
+        : await this.framedDrawings(drawings, script, story, shape, who);
     const compose = (from: SceneScript) =>
       composeScene({
         script: from,
-        drawings,
+        drawings: framed,
         beats: input.beats,
         durationMs: input.durationMs,
         timing: input.timing,
         generator: SCENE_GENERATOR_VERSION,
         profile: input.profile,
         key: story.setsKey,
+        ...(shape !== 'wide' ? { shape } : {}),
       });
     let composed = compose(script);
     const again = input.recheck?.(composed.scene);
@@ -1673,10 +2042,27 @@ export class SceneProcessor {
     story: PageStory | null = null,
     /** Drawings the page before made, carried on: not drawn again. */
     reuse: ReadonlyMap<string, GatedDrawing> = new Map(),
+    /**
+     * The film's shape: a tall one's drawings asked for square rather
+     * than wide, its charts and graphs drawn for its frame (studio-
+     * vertical-plan §4.2). Absent, wide, as always.
+     */
+    shape: FilmShape = 'wide',
   ): Promise<Map<string, GatedDrawing | null>> {
-    const drawings = script.cast.filter(
-      (thing): thing is DrawingThing => thing.kind === 'drawing',
-    );
+    const drawings = script.cast
+      .filter((thing): thing is DrawingThing => thing.kind === 'drawing')
+      .map((thing) =>
+        shape === 'wide'
+          ? thing
+          : {
+              ...thing,
+              shape: drawingShapeFor(
+                thing.shape,
+                shape,
+                `${thing.name} ${thing.brief}`,
+              ),
+            },
+      );
     const characters = script.cast.filter(
       (thing): thing is CharacterThing => thing.kind === 'character',
     );
@@ -1704,7 +2090,7 @@ export class SceneProcessor {
     for (const thing of coded)
       out.set(
         thing.id,
-        await drawByCode(thing).catch((error: unknown) => {
+        await drawByCode(thing, shape).catch((error: unknown) => {
           this.logger.warn(
             `${who}: "${thing.id}" (${thing.kind}) is set as a card: ${(error as Error).message}`,
           );

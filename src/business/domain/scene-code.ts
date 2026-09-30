@@ -16,8 +16,15 @@ import { renderSvg } from './scene-raster';
 import type { CodeThing } from './scene-script';
 import { framedBox, type GatedDrawing } from './scene-svg';
 
-/** A thing drawn by code: rendered, measured, and framed to its ink. */
-export async function drawByCode(thing: CodeThing): Promise<GatedDrawing> {
+/**
+ * A thing drawn by code: rendered, measured, and framed to its ink. In a
+ * tall film a chart is taller than wide with fewer bars, and a graph
+ * square (studio-vertical-plan §4.2).
+ */
+export async function drawByCode(
+  thing: CodeThing,
+  shape: 'wide' | 'tall' = 'wide',
+): Promise<GatedDrawing> {
   let svg: string;
   let viewBox: [number, number, number, number];
   let parts: Record<string, string> = {};
@@ -29,7 +36,7 @@ export async function drawByCode(thing: CodeThing): Promise<GatedDrawing> {
     const set = renderMath(thing.lines, thing.picture ?? null);
     ({ svg, viewBox, parts, states } = set);
   } else if (thing.kind === 'plot') {
-    const plot = renderPlot(thing.plot);
+    const plot = renderPlot(thing.plot, shape);
     ({ svg, viewBox, parts, callouts } = plot);
     // Its curve draws itself as it arrives.
     moves = true;
@@ -39,7 +46,7 @@ export async function drawByCode(thing: CodeThing): Promise<GatedDrawing> {
     moves = true;
   } else if (thing.kind === 'chart') {
     // Its bars grow, or its line draws itself.
-    ({ svg, viewBox, parts } = renderChart(thing.chart));
+    ({ svg, viewBox, parts } = renderChart(thing.chart, shape));
     moves = true;
   } else {
     const quote = renderQuote({ text: thing.text, phrases: thing.phrases });

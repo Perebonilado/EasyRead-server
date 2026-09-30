@@ -27,16 +27,29 @@ import {
   type Spaced,
 } from './scene-spacing';
 import type { SceneLayout } from './scene-script';
+import {
+  BOX_STAGE,
+  SET_FRAMES,
+  STAGES,
+  TALL_PIECE_K,
+  TALL_SPOTS,
+  stageOf,
+  tallAcross,
+  tallDepth,
+  type FilmShape,
+} from './scene-shape';
+import { TALL_AREA, tallSlots, textNow } from './scene-lesson-shape';
 
+/** A wide scene's stagings: the reader's pane and the full screen (scene-shape's; a tall scene's are stagingsOf('tall')). */
 export const STAGINGS = {
-  box: { w: 1200, h: 900, margin: 44 },
-  wide: { w: 1600, h: 900, margin: 56 },
+  box: BOX_STAGE,
+  wide: STAGES.wide,
 } as const;
 export type StagingName = keyof typeof STAGINGS;
 
-/** The room between slots: an arrow runs through it. */
+/** The room between slots: an arrow runs through it (a wide stage's; a tall one's is scene-lesson-shape TEXT's). */
 export const SLOT_GAP = 72;
-/** The caption under a drawing, at its largest and smallest. */
+/** The caption under a drawing, at its largest and smallest, on a wide stage (a tall one's: scene-lesson-shape TEXT). */
 export const CAPTION_SIZE = { max: 38, min: 26 } as const;
 const LINE = 1.2;
 
@@ -103,8 +116,8 @@ export type LaidThing =
   | { kind: 'stat'; value: string; caption: string }
   | { kind: 'words'; text: string; style: 'title' | 'keyword' | 'card' };
 
-const content = (staging: StagingName): Rect => {
-  const { w, h, margin } = STAGINGS[staging];
+const content = (staging: StagingName, shape: FilmShape = 'wide'): Rect => {
+  const { w, h, margin } = stageOf(staging, shape);
   return { x: margin, y: margin, w: w - margin * 2, h: h - margin * 2 };
 };
 
@@ -174,9 +187,17 @@ export function slotsFor(
   staging: StagingName,
   /** How much of a row's width each thing wants, by its proportions. */
   weights?: number[],
+  /**
+   * The film's shape: a tall one's layouts reflowed into its text area
+   * (studio-vertical-plan §4.1, scene-lesson-shape tallSlots): a row as a
+   * column, compare top over bottom, focus big on top, a taller cycle.
+   * `weights` are then each one's share of a column's height.
+   */
+  shape: FilmShape = 'wide',
 ): Rect[] {
-  const area = content(staging);
-  const wide = staging === 'wide';
+  if (shape === 'tall') return tallSlots(layout, count, weights);
+  const area = content(staging, shape);
+  const wide = staging === 'wide' && shape === 'wide';
   const n = Math.max(1, count);
   switch (layout) {
     case 'one':
@@ -266,7 +287,7 @@ export function captionLines(
   width: number,
   size: number,
   /** The smallest it may be set: a caption's least unless said. */
-  least: number = CAPTION_SIZE.min,
+  least: number = textNow().caption.min,
 ): { lines: string[]; size: number } {
   const words = text.trim().split(/\s+/).filter(Boolean);
   for (let s = size; s >= least; s -= 2) {
@@ -358,7 +379,7 @@ export function captionWhole(
 ): { lines: string[]; size: number } {
   const set = captionLines(text, width, size);
   if (!set.lines.some((line) => line.endsWith('…'))) return set;
-  for (let s = CAPTION_SIZE.min; s >= CARD_LEAST; s -= 2) {
+  for (let s = textNow().caption.min; s >= textNow().least; s -= 2) {
     const lines = brokenLines(text, width, s, 3);
     if (lines) return { lines, size: s };
   }
@@ -377,9 +398,9 @@ export function wholeWords(
   width: number,
   size: number,
 ): { lines: string[]; size: number } {
-  const fitted = captionLines(text, width, size, CARD_LEAST);
+  const fitted = captionLines(text, width, size, textNow().least);
   if (!fitted.lines.some((line) => line.endsWith('…'))) return fitted;
-  for (let s = size; s >= CARD_LEAST; s -= 2) {
+  for (let s = size; s >= textNow().least; s -= 2) {
     const lines = brokenLines(text, width, s, 2);
     if (lines) return { lines, size: s };
   }
@@ -435,7 +456,9 @@ function passageNotes(
   const fits = (right: number, below: number) =>
     Math.min(art.w - right, (art.h - below) * aspect);
   const sized = (w: number) =>
-    Math.round(Math.min(most, Math.max(LABEL.min, words(w) * NOTE_SHARE)));
+    Math.round(
+      Math.min(most, Math.max(textNow().label.min, words(w) * NOTE_SHARE)),
+    );
   // In the margin: sized to the passage the room's own label size leaves,
   // then only as wide a margin as that size needs.
   const size = sized(fits(gutters(callouts, viewBox, room, most).right, 0));
@@ -463,10 +486,8 @@ export function fitInSlot(
 ): Place {
   const round = (n: number) => Math.round(n * 10) / 10;
   if (thing.kind === 'drawing') {
-    const base = Math.max(
-      CAPTION_SIZE.min,
-      Math.min(CAPTION_SIZE.max, slot.h * 0.11),
-    );
+    const sizes = textNow().caption;
+    const base = Math.max(sizes.min, Math.min(sizes.max, slot.h * 0.11));
     const caption = thing.caption
       ? captionWhole(thing.caption, slot.w * 0.96, base)
       : null;
@@ -485,6 +506,8 @@ export function fitInSlot(
     let side = { left: 0, right: 0 };
     let below = 0;
     let labelSize_: number | undefined;
+    /** The height given up to a band of labels (a tall stage's). */
+    let banded = 0;
     if (thing.callouts?.length && thing.viewBox && thing.words) {
       ({
         mode,
@@ -507,14 +530,19 @@ export function fitInSlot(
       );
       if (band && free >= band.h + LABEL.leaderRoom + 12)
         mode = captionOnTop ? 'below' : 'above';
-      else {
+      else if (band && textNow().label.by === 'w') {
+        // A tall stage is short of width, not height: the band's room is
+        // taken from the drawing's height, and the labels read across it.
+        mode = captionOnTop ? 'below' : 'above';
+        banded = band.h + LABEL.leaderRoom + 12 - Math.max(0, free);
+      } else {
         mode = 'sides';
         side = gutters(thing.callouts, thing.viewBox, slot);
       }
     }
     const w = Math.min(
       art.w - side.left - side.right,
-      (art.h - below) * aspect,
+      (art.h - below - banded) * aspect,
     );
     const h = w / aspect;
     // Sat on its caption, so captions in a row line up and each hugs its
@@ -544,14 +572,15 @@ export function fitInSlot(
     return place;
   }
   if (thing.kind === 'stat') {
+    const text = textNow();
     const size = Math.min(
-      sizeToFit(thing.value, slot.w * 0.9, 220),
+      sizeToFit(thing.value, slot.w * 0.9, text.stat),
       slot.h * 0.45,
     );
     const caption = captionLines(
       thing.caption,
       slot.w * 0.96,
-      Math.min(CAPTION_SIZE.max + 4, slot.h * 0.12),
+      Math.min(text.caption.max + 4, slot.h * 0.12),
     );
     const band = caption.lines.length * caption.size * LINE;
     const block = size * 1.1 + 18 + band;
@@ -584,10 +613,15 @@ export function fitInSlot(
   const share = thing.style === 'keyword' ? 0.8 : 0.86;
   const padding = thing.style === 'title' ? 0 : 0.6;
   // The largest size that fits across in two lines, then down if it is too tall.
+  const most = textNow().words;
   let lines = captionLines(
     thing.text,
     slot.w * share,
-    thing.style === 'title' ? 120 : thing.style === 'card' ? 64 : 52,
+    thing.style === 'title'
+      ? most.title
+      : thing.style === 'card'
+        ? most.card
+        : most.keyword,
   );
   for (let tries = 0; tries < 3; tries += 1) {
     const tall =
@@ -649,20 +683,26 @@ export function slotsOf(
   show: string[],
   things: ReadonlyMap<string, LaidThing>,
   staging: StagingName,
+  shape: FilmShape = 'wide',
 ): Rect[] {
   return slotsFor(
     layout,
     show.length,
     staging,
     // A column shares its height: a wide thing needs less of it, and a
-    // number or a card never less than its words need.
+    // number or a card never less than its words need. A tall stage's
+    // row of three or fewer is a column.
     show.map((id) => {
       const thing = things.get(id);
-      if (layout !== 'stack') return weightOf(thing);
+      const inColumn =
+        layout === 'stack' ||
+        (shape === 'tall' && layout === 'row' && show.length <= 3);
+      if (!inColumn) return weightOf(thing);
       if (thing?.kind === 'drawing')
         return Math.min(1.5, Math.max(0.5, 1 / (thing.aspect || 1)));
       return thing?.kind === 'stat' ? 0.9 : 0.7;
     }),
+    shape,
   );
 }
 
@@ -672,8 +712,9 @@ export function layoutStep(
   show: string[],
   things: ReadonlyMap<string, LaidThing>,
   staging: StagingName,
+  shape: FilmShape = 'wide',
 ): Record<string, Place> {
-  const slots = slotsOf(layout, show, things, staging);
+  const slots = slotsOf(layout, show, things, staging, shape);
   const out: Record<string, Place> = {};
   show.forEach((id, i) => {
     const thing = things.get(id);
@@ -703,8 +744,11 @@ export function standTogether(
   show: string[],
   staging: StagingName,
   grounded: boolean,
+  shape: FilmShape = 'wide',
 ): void {
-  const area = content(staging);
+  // A tall lesson's people stand in its text area, their faces clear of
+  // the platforms' own buttons and captions (studio-vertical-plan §5.1).
+  const area = shape === 'tall' ? TALL_AREA : content(staging, shape);
   const cap = (area.h * TALLEST_ADULT) / figureFrame('adult')[3];
   const units = (id: string) => {
     const thing = things.get(id);
@@ -777,7 +821,12 @@ export type StationShares = Record<keyof typeof STATION_SHARES, number>;
  * two people talking stand as far apart as they always have, and four
  * still stand clear of each other.
  */
-export function stationShares(largest: number): StationShares {
+export function stationShares(
+  largest: number,
+  /** A tall stage's spots are its own (scene-shape TALL_SPOTS): people stand in depth, not in a row. */
+  shape: FilmShape = 'wide',
+): StationShares {
+  if (shape === 'tall') return { ...TALL_SPOTS };
   const out = largest <= 2 ? 0.244 : largest === 3 ? 0.21 : 0.19;
   return {
     ...STATION_SHARES,
@@ -907,8 +956,31 @@ export function stationScale(
   things: readonly LaidThing[],
   largest: number,
   staging: StagingName,
+  /**
+   * The film's shape. A tall stage (studio-vertical-plan §3.2) fits only
+   * half its largest group across (the rest stand behind them), its people
+   * the same size in its units as on a wide stage (the same world, at the
+   * same scale per metre), their feet where its set's frame stands people.
+   */
+  shape: FilmShape = 'wide',
 ): StationScale {
-  const area = content(staging);
+  if (shape === 'tall') {
+    const area = content(staging, shape);
+    const [slot] = line(area, tallAcross(largest));
+    const wide = content(staging, 'wide');
+    const cap = (wide.h * TALLEST_ADULT) / figureFrame('adult')[3];
+    const units = things.flatMap((thing) =>
+      thing.kind === 'drawing' && thing.stands?.units
+        ? [fitInSlot(thing, slot).h / thing.stands.units]
+        : [],
+    );
+    return {
+      unit: units.length ? Math.min(cap, ...units) : null,
+      floor: SET_FRAMES.tall.feet,
+      slot,
+    };
+  }
+  const area = content(staging, shape);
   const [slot] = line(area, Math.max(2, largest));
   const cap = (area.h * TALLEST_ADULT) / figureFrame('adult')[3];
   const units = things.flatMap((thing) =>
@@ -1011,6 +1083,15 @@ export function layoutStations(input: {
   }[];
   things: ReadonlyMap<string, LaidThing>;
   staging: StagingName;
+  /**
+   * The film's shape: its stage's size. On a tall stage (studio-vertical-
+   * plan §3.2) a group whose depths nothing says stands in depth and on
+   * diagonals (scene-shape tallDepth), by their order across: two on a
+   * diagonal, whoever `opens` it (speaks first) the nearer.
+   */
+  shape?: FilmShape;
+  /** At each step, who speaks first from it: on a tall stage, the nearer of two. */
+  opens?: readonly (string | null)[];
   scale: StationScale;
   features: ReadonlyMap<string, FeatureAcross>;
   /** The ways through (a gate, a door) standing on the people's ground, where they stand across it: kept clear of. */
@@ -1034,7 +1115,7 @@ export function layoutStations(input: {
    */
   near?: readonly (readonly NearPair[])[];
 }): Record<string, Place>[] {
-  const { w: W, margin } = STAGINGS[input.staging];
+  const { w: W, margin } = stageOf(input.staging, input.shape);
   const { unit, floor, slot } = input.scale;
   const depthed = input.floor;
   const round = (n: number) => Math.round(n * 10) / 10;
@@ -1091,8 +1172,40 @@ export function layoutStations(input: {
     string,
     { station: string; x: number; d?: number; asked?: number }
   >();
+  /**
+   * How deep each at a spot of their own stands at a step when nothing
+   * says: on a wide stage as spreadDepth has a group; on a tall one, by
+   * their order across (scene-shape tallDepth), the one who opens a pair
+   * the nearer.
+   */
+  const spreadOf = (
+    step: (typeof input.steps)[number],
+    stepAt: number,
+  ): ((id: string) => number) => {
+    if (input.shape !== 'tall')
+      return (id) => spreadDepth(step.show.indexOf(id), step.show.length);
+    const shares: Record<string, number> = input.shares ?? STATION_SHARES;
+    const across = (id: string) => {
+      const at = step.at?.[id] ?? '';
+      return at in shares
+        ? shares[at]
+        : at.startsWith('@')
+          ? Number(at.slice(1)) || 0.5
+          : 0.5;
+    };
+    const order = [...step.show].sort((a, b) => across(a) - across(b));
+    const n = order.length;
+    const depths = new Map(order.map((id, i) => [id, tallDepth(i, n)]));
+    const opener = input.opens?.[stepAt];
+    if (n === 2 && opener && order[1] === opener) {
+      depths.set(order[0], tallDepth(1, 2));
+      depths.set(order[1], tallDepth(0, 2));
+    }
+    return (id) => depths.get(id) ?? 0.5;
+  };
   return input.steps.map((step, stepAt) => {
     const out: Record<string, Place> = {};
+    const spread = spreadOf(step, stepAt);
     const placed: {
       id: string;
       x: number;
@@ -1140,7 +1253,7 @@ export function layoutStations(input: {
             (was?.station === station && was.asked === asked
               ? was.d
               : undefined) ??
-            spreadDepth(step.show.indexOf(id), step.show.length))
+            spread(id))
           : undefined;
       /** Their feet and their size at a depth of the floor. */
       const floorHere = (dd: number | undefined) =>
@@ -1302,7 +1415,7 @@ export function layoutStations(input: {
               (was?.station === station && was.asked === asked
                 ? was.d
                 : undefined) ??
-              spreadDepth(step.show.indexOf(id), step.show.length))
+              spread(id))
           : undefined;
       const onFloor =
         depthed && d !== undefined
@@ -1325,7 +1438,7 @@ export function layoutStations(input: {
       const ground = beside
         ? (way.ground ?? way.y) -
           (station.startsWith('behind:') && way.ground !== undefined
-            ? STAGINGS[input.staging].h * BEHIND_BACK
+            ? stageOf(input.staging, input.shape).h * BEHIND_BACK
             : 0)
         : undefined;
       const k =
@@ -1503,6 +1616,8 @@ export const OWN_SEAT = 0.45;
  */
 export function placeFeature(input: {
   staging: StagingName;
+  /** The film's shape: its stage's size. */
+  shape?: FilmShape;
   spot: string;
   /** The stage's own drawing of it: its frame and its way through, in the kit's units. */
   piece?: {
@@ -1526,7 +1641,7 @@ export function placeFeature(input: {
   /** Where the spots stand, as the scene's largest group has them. */
   shares?: StationShares;
 }): FeaturePlace {
-  const { w: W, margin } = STAGINGS[input.staging];
+  const { w: W, margin } = stageOf(input.staging, input.shape);
   const round = (n: number) => Math.round(n * 10) / 10;
   const depth = (feet: number) =>
     Math.min(
@@ -1582,7 +1697,13 @@ export function placeFeature(input: {
     feet = input.horizon + BACK_DEPTH * (input.floor - input.horizon);
     middle = painted.x + painted.w / 2;
   } else {
-    const k = input.back ? BACK_DEPTH : 1;
+    // On a tall stage a piece stands a step back of where people stand
+    // (TALL_PIECE_K): two on a diagonal stand before it, not in it.
+    const k = input.back
+      ? BACK_DEPTH
+      : input.shape === 'tall'
+        ? TALL_PIECE_K
+        : 1;
     u = input.unit * k;
     feet = input.horizon + k * (input.floor - input.horizon);
     const w = vw * u;

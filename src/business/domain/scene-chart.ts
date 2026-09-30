@@ -21,10 +21,28 @@ export interface ChartSpec {
 
 /** The most bars one chart holds. */
 export const MAX_BARS = 8;
+/** And in a tall film (studio-vertical-plan §4.2): fewer, the rest as one "Other". */
+export const TALL_BARS = 6;
 
-const W = 1000;
-const H = 620;
-const AREA = { x0: 110, x1: 960, y0: 70, y1: 470 };
+/** A chart's canvas and plotting area, by the film's shape: a tall one's taller than wide, its words larger. */
+const CANVAS = {
+  wide: {
+    W: 1000,
+    H: 620,
+    AREA: { x0: 110, x1: 960, y0: 70, y1: 470 },
+    value: 28,
+    label: 24,
+    tick: 22,
+  },
+  tall: {
+    W: 800,
+    H: 900,
+    AREA: { x0: 120, x1: 770, y0: 80, y1: 690 },
+    value: 42,
+    label: 36,
+    tick: 32,
+  },
+} as const;
 // Drawn in the paper theme's tokens: the player recolours them for any other theme (scene-themes).
 const INK = PAPER.ink;
 const MUTED = PAPER.muted;
@@ -33,8 +51,6 @@ const GRID = PAPER.grid;
 const barColour = (i: number) => PAPER.chart[i % PAPER.chart.length];
 const LINE_COLOUR = PAPER.accent;
 const HALO = PAPER.card;
-const VALUE_SIZE = 28;
-const LABEL_SIZE = 24;
 
 const escape = (text: string) =>
   text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -79,15 +95,51 @@ function twoLines(text: string, width: number, size: number): string[] {
   return [out[0], `${last.trimEnd()}…`];
 }
 
-/** A chart, drawn: its SVG, and each bar or point as a part the voice can point at. */
-export function renderChart(spec: ChartSpec): {
+/**
+ * A bar chart's bars for a tall film: at most TALL_BARS, the smallest past
+ * the first TALL_BARS - 1 added up as one "Other". A line's points, and a
+ * chart of numbers that do not add up (any below zero), are only cut.
+ */
+export function tallBars(
+  bars: ChartSpec['bars'],
+  kind: ChartSpec['kind'],
+): ChartSpec['bars'] {
+  if (bars.length <= TALL_BARS) return bars;
+  if (kind === 'line' || bars.some((b) => b.value < 0))
+    return bars.slice(0, TALL_BARS);
+  const kept = [...bars]
+    .map((bar, i) => ({ bar, i }))
+    .sort((a, b) => b.bar.value - a.bar.value)
+    .slice(0, TALL_BARS - 1)
+    .sort((a, b) => a.i - b.i)
+    .map(({ bar }) => bar);
+  const other = bars
+    .filter((bar) => !kept.includes(bar))
+    .reduce((sum, bar) => sum + bar.value, 0);
+  return [...kept, { label: 'Other', value: Number(other.toPrecision(12)) }];
+}
+
+/** A chart, drawn: its SVG, and each bar or point as a part the voice can point at. A tall film's is taller than wide, with fewer bars. */
+export function renderChart(
+  spec: ChartSpec,
+  shape: 'wide' | 'tall' = 'wide',
+): {
   svg: string;
   viewBox: [number, number, number, number];
   parts: Record<string, string>;
 } {
-  const bars = spec.bars
+  const {
+    W,
+    H,
+    AREA,
+    value: VALUE_SIZE,
+    label: LABEL_SIZE,
+    tick,
+  } = CANVAS[shape];
+  const read = spec.bars
     .filter((b) => b.label.trim() && Number.isFinite(b.value))
     .slice(0, MAX_BARS);
+  const bars = shape === 'tall' ? tallBars(read, spec.kind) : read;
   if (bars.length < 2) throw new Error('a chart needs at least two numbers');
   const values = bars.map((b) => b.value);
   const low = Math.min(0, ...values);
@@ -107,7 +159,7 @@ export function renderChart(spec: ChartSpec): {
   for (const y of ys)
     out.push(
       `<line x1="${AREA.x0}" y1="${r(py(y))}" x2="${AREA.x1}" y2="${r(py(y))}" stroke="${GRID}" stroke-width="2"/>`,
-      `<text x="${AREA.x0 - 14}" y="${r(py(y) + 8)}" font-size="22" fill="${MUTED}" text-anchor="end">${escape(valueText(y, spec.unit === '%' ? '%' : null))}</text>`,
+      `<text x="${AREA.x0 - 14}" y="${r(py(y) + 8)}" font-size="${tick}" fill="${MUTED}" text-anchor="end">${escape(valueText(y, spec.unit === '%' ? '%' : null))}</text>`,
     );
   out.push(
     `<line x1="${AREA.x0}" y1="${r(zero)}" x2="${AREA.x1}" y2="${r(zero)}" stroke="${MUTED}" stroke-width="3" stroke-linecap="round"/>`,

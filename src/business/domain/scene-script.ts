@@ -656,6 +656,11 @@ export interface SceneStage {
    * the board, what has receded, what the camera frames. Set by code.
    */
   board?: BoardStage;
+  /**
+   * A tall lesson's step paged by code (scene-lesson-pages): what was on
+   * the stage goes up and off as this page comes up. Set by code.
+   */
+  page?: true;
 }
 
 /** How someone goes on, off or across at a step. */

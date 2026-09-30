@@ -7,8 +7,12 @@
  * the player parts them. One contact sheet of them all, each place's
  * pictures, and a report.
  *
- *   npm run set:bench -- --out <dir> [--only lagos-market,farm] [--judge] [--paint 3]
+ *   npm run set:bench -- --out <dir> [--only lagos-market,farm] [--judge] [--paint 3] [--tall]
  *
+ * --tall builds each place for a tall film's frame (900 × 1600, its eye
+ * raised: studio-vertical-plan §3.1), the two people standing on the
+ * tall stage's diagonal, one near and one farther back, and draws the
+ * phone's safe box and the subtitles' band over the flat picture.
  * --judge asks the drawing judge (drawing_judge: Gemini) to look at each
  * place once, all its layers as the player shows them and no one in it,
  * as a set painted for a show is looked at; about
@@ -35,6 +39,14 @@ import {
 } from '../src/business/domain/scene-set-layout';
 import { drawExtra, extraFor } from '../src/business/domain/scene-figure';
 import { FIGURE_INK, SET_UNIT_SHARE } from '../src/business/domain/scene-ink';
+import { floorAt } from '../src/business/domain/scene-layout';
+import {
+  SAFE,
+  SET_FRAMES,
+  SUBTITLE_BAND,
+  TALL_SPOTS,
+  tallDepth,
+} from '../src/business/domain/scene-shape';
 import { rasterise } from '../src/business/domain/scene-raster';
 import {
   verdictScore,
@@ -48,26 +60,55 @@ const flag = (name: string): string | undefined => {
   return at >= 0 ? args[at + 1] : undefined;
 };
 
+/** A tall film's frame (--tall): every place built for it, and drawn in it. */
+const TALL = args.includes('--tall');
+const FRAME = TALL ? SET_FRAMES.tall : SET_FRAMES.wide;
+const FW = FRAME.w;
+const FH = FRAME.h;
+
 /** How wide each picture is drawn on the sheet, and for the judge. */
-const PX = 800;
+const PX = TALL ? 450 : 800;
 const JUDGE_PX = 768;
 /** The camera the layered picture is seen through: panned this far right, pushed in this much. */
 const PAN = 150;
 const PUSH = 1.12;
 
-/** Two of the kit's people where the action is, where people stand, for scale. */
-function people(focal: number, world: BenchPlace['world']): string {
+/** Two of the kit's people where the action is, where people stand, for scale: on a tall frame, on its diagonal, one near and one farther back, as a tall stage stands two. */
+function people(
+  focal: number,
+  world: BenchPlace['world'],
+  eye: number | null = null,
+): string {
   const unit = SET_UNIT_SHARE * SET_H;
-  const feet = (820 / 900) * SET_H;
+  const feet = TALL ? FRAME.feet : (820 / 900) * SET_H;
   return [-1, 1]
     .map((side, k) => {
       const spec = extraFor(world, 'set-bench', k);
       const drawn = drawExtra(spec, { detail: 0, id: `p${k}` });
       const [bx, by, bw, bh] = drawn.viewBox;
-      const x = focal * SET_W + side * 110;
-      return `<svg x="${(x + bx * unit).toFixed(1)}" y="${(feet + by * unit).toFixed(1)}" width="${(bw * unit).toFixed(1)}" height="${(bh * unit).toFixed(1)}" viewBox="${bx} ${by} ${bw} ${bh}" overflow="visible"><g stroke="${FIGURE_INK}" stroke-width="2.6" stroke-linejoin="round">${drawn.legs}${drawn.upper}</g></svg>`;
+      // Tall: the spot's own across and depth, about where the action is.
+      const across = TALL_SPOTS[side < 0 ? 'centre-left' : 'centre-right'];
+      const d = tallDepth(k, 2);
+      const at = TALL && eye !== null ? floorAt(d, feet, eye, FH - 12) : null;
+      const u = unit * (at?.k ?? 1);
+      const y = at?.feet ?? feet;
+      const x = TALL
+        ? (focal - 0.5) * FW + across * FW
+        : focal * SET_W + side * 110;
+      return `<svg x="${(x + bx * u).toFixed(1)}" y="${(y + by * u).toFixed(1)}" width="${(bw * u).toFixed(1)}" height="${(bh * u).toFixed(1)}" viewBox="${bx} ${by} ${bw} ${bh}" overflow="visible"><g stroke="${FIGURE_INK}" stroke-width="2.6" stroke-linejoin="round">${drawn.legs}${drawn.upper}</g></svg>`;
     })
     .join('');
+}
+
+/** A tall frame's safe box and subtitles' band, outlined over it: where faces must be. */
+function safeOver(): string {
+  if (!TALL) return '';
+  const safe = SAFE.tall;
+  const band = SUBTITLE_BAND.tall;
+  return (
+    `<rect x="${FW * safe.left}" y="${FH * safe.top}" width="${FW * (1 - safe.left - safe.right)}" height="${FH * (1 - safe.top - safe.bottom)}" fill="none" stroke="#fff" stroke-width="4" stroke-dasharray="16 10"/>` +
+    `<rect x="0" y="${FH * band.from}" width="${FW}" height="${FH * (band.to - band.from)}" fill="#ffd400" fill-opacity="0.22"/>`
+  );
 }
 
 /** The flat picture with the people standing in it, before what stands before the camera. */
@@ -76,8 +117,8 @@ function flatWithPeople(
   layout: SetLayout,
   world: BenchPlace['world'],
 ): string {
-  const them = people(layout.focal?.x ?? 0.5, world);
-  return built.svg.replace(/<\/g><\/svg>$/, `${them}</g></svg>`);
+  const them = people(layout.focal?.x ?? 0.5, world, built.layered.floor.eye);
+  return built.svg.replace(/<\/g><\/svg>$/, `${them}</g>${safeOver()}</svg>`);
 }
 
 /** The layers as the camera sees them panned and pushed in: each moved by its own depth, the people on the floor's. */
@@ -87,8 +128,8 @@ function throughCamera(
   world: BenchPlace['world'],
   camera = { pan: PAN, push: PUSH, people: true },
 ): string {
-  const cx = SET_W / 2;
-  const cy = SET_H / 2;
+  const cx = FW / 2;
+  const cy = FH / 2;
   const inner = (svg: string) =>
     svg.replace(/^<svg\b[^>]*>/, '').replace(/<\/svg>$/, '');
   const moved = (depth: number, markup: string) => {
@@ -104,9 +145,14 @@ function throughCamera(
         (layer.id === 'stage' &&
           !built.layered.layers.some((one) => one.id === 'floor')))
     )
-      out.push(moved(1, people(layout.focal?.x ?? 0.5, world)));
+      out.push(
+        moved(
+          1,
+          people(layout.focal?.x ?? 0.5, world, built.layered.floor.eye),
+        ),
+      );
   }
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${SET_W} ${SET_H}"><rect width="${SET_W}" height="${SET_H}" fill="#f4f1ea"/>${out.join('')}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${FW} ${FH}"><rect width="${FW}" height="${FH}" fill="#f4f1ea"/>${out.join('')}</svg>`;
 }
 
 async function compose(
@@ -164,7 +210,7 @@ async function main(): Promise<void> {
     one: BenchPlace,
     layout: SetLayout,
   ): Promise<Row> => {
-    const built = buildSet(layout, one.place);
+    const built = buildSet(layout, one.place, {}, null, null, FRAME);
     const flatSvg = flatWithPeople(built, layout, one.world);
     const [flat, layered] = await Promise.all([
       rasterise(flatSvg, PX),
@@ -279,13 +325,13 @@ async function main(): Promise<void> {
   }
 
   // The contact sheet: each place flat, and through the camera.
-  const CELL_W = 640;
-  const CELL_H = 360;
+  const CELL_W = TALL ? 300 : 640;
+  const CELL_H = TALL ? 533 : 360;
   const HEAD = 34;
   const width = CELL_W * 2 + 60;
   const height = 90 + rows.length * (CELL_H + HEAD + 16);
   const texts: string[] = [
-    `<text x="20" y="40" font-size="26" font-weight="700" fill="#2d2a32">Set bench: richer scenery (L3)</text>`,
+    `<text x="20" y="40" font-size="26" font-weight="700" fill="#2d2a32">Set bench: richer scenery (L3)${TALL ? ', tall' : ''}</text>`,
     `<text x="20" y="68" font-size="15" fill="#666">flat, with two of the kit's people for scale · layers through a camera panned ${PAN} and pushed in ${Math.round((PUSH - 1) * 100)}%${judging ? ' · judged by the drawing judge' : ''}</text>`,
   ];
   const items: Parameters<typeof compose>[2] = [];

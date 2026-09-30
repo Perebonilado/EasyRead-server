@@ -7,6 +7,7 @@ import type {
 } from '../domain/studio/studio';
 import type { SheetProblem } from '../domain/studio/studio-check';
 import type { DocumentPick } from '../domain/studio/studio-document';
+import type { FilmShape } from '../domain/scene-shape';
 
 /**
  * Where an episode has got to: its brief being talked through, its
@@ -89,6 +90,10 @@ export interface StudioEpisodeRecord {
   activity?: StudioActivity | null;
   /** The pages of the show's document it teaches (studio-document); absent or null for none. */
   pages?: DocumentPick | null;
+  /** The shape its film is made in (studio-vertical-plan): exactly one; absent or wide for every episode made before shapes. */
+  shape?: FilmShape;
+  /** The episode it is the twin of, in the other shape: that one's script and voice are its. Absent or null for an episode of its own. */
+  twinOf?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -111,6 +116,8 @@ export interface StudioSceneRecord {
   durationMs: number | null;
   /** What is happening to it now (studio-progress); null when nothing is said. */
   activity?: StudioActivity | null;
+  /** A twin episode's scene: the scene of the episode it is the twin of that it is the same scene of. */
+  twinOf?: string | null;
   updatedAt: Date;
 }
 
@@ -206,6 +213,10 @@ export interface StudioRepository {
     phase: EpisodePhase;
     /** The pages of the show's document it teaches. */
     pages?: DocumentPick | null;
+    /** The shape its film is made in; absent, wide. */
+    shape?: FilmShape;
+    /** The episode it is the twin of (its number and title are that one's). */
+    twinOf?: string | null;
   }): Promise<StudioEpisodeRecord>;
   findEpisode(id: string): Promise<StudioEpisodeRecord | null>;
   findEpisodeByShareToken(token: string): Promise<StudioEpisodeRecord | null>;
@@ -225,6 +236,7 @@ export interface StudioRepository {
         | 'durationMs'
         | 'thumbKey'
         | 'pages'
+        | 'shape'
       >
     >,
   ): Promise<void>;
@@ -260,6 +272,16 @@ export interface StudioRepository {
       >
     >,
   ): Promise<void>;
+  /**
+   * A twin episode's scenes kept in step with the scenes of the episode it
+   * is the twin of (`lead`, in order): one each, at the same position,
+   * with its sheet; a twin's scene whose scene is gone is taken out, and
+   * one made keeps its film. Its scenes, in order.
+   */
+  syncTwinScenes(
+    twinEpisodeId: string,
+    lead: readonly Pick<StudioSceneRecord, 'id' | 'position' | 'sheet'>[],
+  ): Promise<StudioSceneRecord[]>;
   /** A scene added at a position, the ones after it moved along. */
   insertScene(episodeId: string, position: number): Promise<StudioSceneRecord>;
   /** A scene taken out, the ones after it moved up. */

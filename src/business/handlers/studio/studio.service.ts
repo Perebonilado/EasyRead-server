@@ -118,6 +118,16 @@ import { explainerPlay } from './studio-engage';
 import { StudioDocumentsService } from './studio-documents.service';
 import { EVENT_LINES, historyOf, logEvent } from './studio-log';
 import {
+  episodeShape,
+  otherShape,
+  shapesOf,
+  twinDto,
+  twinOf,
+  twinStale,
+  twinWork,
+  leadFingerprints,
+} from './studio-twins';
+import {
   bibleDto,
   blockersOf,
   briefDto,
@@ -247,8 +257,11 @@ export class StudioService {
 
   async shows(userId: string): Promise<StudioShowCardDto[]> {
     const shows = await this.studio.listShows(userId);
+    // A twin in the other shape is its episode's, not one more (studio-twins).
     const episodesOf = await Promise.all(
-      shows.map((show) => this.studio.listEpisodes(show.id)),
+      shows.map(async (show) =>
+        (await this.studio.listEpisodes(show.id)).filter((e) => !e.twinOf),
+      ),
     );
     // Each show's latest made episode stands for it: its still, and its film.
     const thumbs = episodesOf.map((episodes) =>
@@ -279,6 +292,9 @@ export class StudioService {
         busy: episodes.find((e) => e.busy)?.busy ?? null,
         durationMs: durationMs || null,
         scenes: thumb ? made.length : null,
+        ...(thumb && episodeShape(thumb) === 'tall'
+          ? { shape: 'tall' as const }
+          : {}),
       };
     });
   }
@@ -312,14 +328,26 @@ export class StudioService {
       briefMissing: briefMissing(show.brief),
       bible,
       ...themeOfShow(show),
-      episodes: episodes.map((e) => ({
-        id: e.id,
-        number: e.number,
-        title: e.title,
-        phase: e.phase,
-        durationMs: e.durationMs,
-        hasThumb: Boolean(e.thumbKey),
-      })),
+      // Each episode once: a twin in the other shape is on its episode's
+      // film (its Wide/Vertical switch), never an episode of its own.
+      episodes: episodes
+        .filter((e) => !e.twinOf)
+        .map((e) => {
+          const twin = twinOf(e, episodes);
+          return {
+            id: e.id,
+            number: e.number,
+            title: e.title,
+            phase: e.phase,
+            durationMs: e.durationMs,
+            hasThumb: Boolean(e.thumbKey),
+            ...(episodeShape(e) === 'tall' ? { shape: 'tall' as const } : {}),
+            ...(twin ? { twinShape: episodeShape(twin) } : {}),
+          };
+        }),
+      ...(show.brief.shape && show.brief.shape !== 'wide'
+        ? { shape: show.brief.shape }
+        : {}),
       messages: messages.map(messageDto),
       moreMessages: thread.length > THREAD,
       balance,
@@ -350,7 +378,35 @@ export class StudioService {
     episode: StudioEpisodeRecord,
   ): Promise<StudioEpisodeDto> {
     const scenes = await this.studio.listScenes(episode.id);
-    return episodeDto(episode, scenes, show.bible, show.brief);
+    // The same film in the other shape, where it has one: the lead's
+    // scenes are what either is judged against.
+    const other = twinOf(episode, await this.studio.listEpisodes(show.id));
+    const otherRows = other ? await this.studio.listScenes(other.id) : [];
+    const lead = episode.twinOf ? otherRows : scenes;
+    const twin = other
+      ? twinDto(other, otherRows, lead, show.bible, show.brief)
+      : null;
+    const dto = episodeDto(episode, scenes, show.bible, show.brief, twin);
+    if (!episode.twinOf) return dto;
+    // A twin's script is its lead's: nothing to make here but what the
+    // lead has made, and each scene stale as its lead's has changed.
+    const prints = leadFingerprints(lead, show.bible, show.brief);
+    const byId = new Map(lead.map((row) => [row.id, row]));
+    return {
+      ...dto,
+      scenes: dto.scenes.map((one, k) => {
+        const row = scenes[k];
+        const of = row.twinOf ? byId.get(row.twinOf) : undefined;
+        return {
+          ...one,
+          stale: Boolean(
+            one.made && of && twinStale(row, of, prints.get(of.id)),
+          ),
+        };
+      }),
+      toMakeSeconds: 0,
+      blockers: [],
+    };
   }
 
   // ── Shows ───────────────────────────────────────────────────────────────
@@ -408,6 +464,9 @@ export class StudioService {
     if (brief.narrator !== 'character') delete brief.narratorCharacter;
     // Whom it is for, taken back: the four words stay.
     if ('who' in patch && patch.who === null) delete brief.who;
+    // The shape set back: wide, as every film is unless chosen.
+    if ('shape' in patch && (patch.shape === null || patch.shape === ''))
+      delete brief.shape;
     await this.studio.updateShow(show.id, { brief, format: brief.format });
     // An explainer's Pace chip changed: its made scenes are played at the
     // new pace, stretched, never voiced again.
@@ -1253,6 +1312,10 @@ export class StudioService {
   ): Promise<string | null> {
     if (episode.busy) return 'One moment: I am still working on it.';
     const story = show.brief.format !== 'explainer';
+    // Planned: the film's shape is settled as the brief chose it, and a
+    // twin begun for the other shape when the maker chose both.
+    if (episode.phase === 'outline' || episode.phase === 'cast')
+      await this.settleShape(show, episode);
     if (episode.phase === 'outline' && story) {
       await this.studio.updateEpisode(episode.id, { phase: 'cast' });
       // Anyone the artist draws not drawn yet is drawn now, to meet.
@@ -1903,8 +1966,13 @@ export class StudioService {
   private async makeEpisode(
     userId: string,
     show: StudioShowRecord,
-    episode: StudioEpisodeRecord,
+    given: StudioEpisodeRecord,
   ): Promise<string | null> {
+    // A twin's film is its lead's script in its own shape: making it makes
+    // what its lead has changed (both shapes at once), and composes the rest.
+    if (given.twinOf) return this.makeTwin(userId, show, given);
+    // Its shape as the brief now asks, while nothing of it is made yet.
+    const episode = await this.settleShape(show, given);
     const scenes = await this.studio.listScenes(episode.id);
     const blockers = blockersOf(episode, scenes, show.bible, show.brief);
     if (blockers.length) return blockers[0];
@@ -1931,13 +1999,174 @@ export class StudioService {
       kind: 'prepare',
       sceneIds: stale.map((scene) => scene.id),
     });
+    // Its twin's scenes are made with them (the worker composes each in
+    // both shapes); any made before whose twin is behind, composed now.
+    const twin = twinOf(episode, await this.studio.listEpisodes(show.id));
+    if (twin) await this.composeTwin(show, episode, twin, false);
     return null;
+  }
+
+  /**
+   * An episode's shape as the brief asks (studio-vertical-plan §1.3),
+   * settled while nothing of it is made: a made film keeps the shape it
+   * was made in. With both chosen, its twin in the other shape is begun,
+   * to be made with it. Wide is the default.
+   */
+  private async settleShape(
+    show: StudioShowRecord,
+    episode: StudioEpisodeRecord,
+  ): Promise<StudioEpisodeRecord> {
+    if (episode.twinOf) return episode;
+    const { lead, twin } = shapesOf(show.brief);
+    let settled = episode;
+    if (episodeShape(episode) !== lead) {
+      const scenes = await this.studio.listScenes(episode.id);
+      if (!scenes.some((s) => s.sceneKey)) {
+        await this.studio.updateEpisode(episode.id, { shape: lead });
+        settled = { ...episode, shape: lead };
+      }
+    }
+    if (twin && episodeShape(settled) !== twin)
+      await this.twinFor(show, settled);
+    return settled;
+  }
+
+  /** An episode's twin in the other shape: the one it has, or a new one, on its script. */
+  private async twinFor(
+    show: StudioShowRecord,
+    lead: StudioEpisodeRecord,
+  ): Promise<StudioEpisodeRecord> {
+    const found = twinOf(lead, await this.studio.listEpisodes(show.id));
+    if (found) return found;
+    return this.studio.createEpisode({
+      showId: show.id,
+      userId: lead.userId,
+      number: lead.number,
+      title: lead.title,
+      // Its phase is its lead's, and made once its scenes are.
+      phase: lead.phase === 'made' ? 'script' : lead.phase,
+      shape: otherShape(episodeShape(lead)),
+      twinOf: lead.id,
+    });
+  }
+
+  /**
+   * A twin's scenes composed from its lead's as made (studio-vertical-
+   * plan §1.4): each lead scene made and unchanged whose twin is behind,
+   * one job each, with nothing written, drawn or voiced, and nothing
+   * spent. The number set composing; with `alone`, a note when none can be.
+   */
+  private async composeTwin(
+    show: StudioShowRecord,
+    lead: StudioEpisodeRecord,
+    twin: StudioEpisodeRecord,
+    alone: boolean,
+  ): Promise<{ count: number; note: string | null }> {
+    const leadRows = await this.studio.listScenes(lead.id);
+    const rows = await this.studio.syncTwinScenes(twin.id, leadRows);
+    const work = twinWork(leadRows, rows, show.bible, show.brief);
+    const making = rows.some((r) => r.status === 'making');
+    if (!work.length)
+      return {
+        count: 0,
+        note: !alone
+          ? null
+          : making || twin.busy
+            ? 'It is already being made.'
+            : leadRows.some((r) => r.status === 'making')
+              ? null
+              : 'Every scene is made already.',
+      };
+    if (!making && !twin.busy) await this.studio.claimEpisode(twin.id, 'make');
+    const jobs: StudioSceneRecord[] = [];
+    for (const one of work) {
+      const row = rows.find((r) => r.twinOf === one.id);
+      if (!row || row.status === 'making') continue;
+      await this.studio.updateScene(row.id, {
+        status: 'making',
+        step: null,
+        error: null,
+      });
+      jobs.push(row);
+    }
+    if (jobs.length)
+      await this.queue.enqueueStudio(
+        jobs.map((row) => ({
+          kind: 'twin' as const,
+          showId: show.id,
+          episodeId: twin.id,
+          userId: show.userId,
+          sceneId: row.id,
+        })),
+      );
+    return { count: jobs.length, note: null };
+  }
+
+  /**
+   * A twin made: what its lead has changed is made (in both shapes at
+   * once), and every other scene composed from its lead's as made.
+   */
+  private async makeTwin(
+    userId: string,
+    show: StudioShowRecord,
+    twin: StudioEpisodeRecord,
+  ): Promise<string | null> {
+    const lead = twin.twinOf
+      ? await this.studio.findEpisode(twin.twinOf)
+      : null;
+    if (!lead) throw new NotFoundError('Episode');
+    const leadRows = await this.studio.listScenes(lead.id);
+    const carried = carriedWears(leadRows, show.bible);
+    const changed = leadRows.some(
+      (s) =>
+        s.sceneKey &&
+        needsMaking(s, show.bible, show.brief, carried.get(s.position)),
+    );
+    if (changed && !lead.busy) {
+      const note = await this.makeEpisode(userId, show, lead);
+      if (note && note !== 'Every scene is made already.') return note;
+      return null;
+    }
+    if (!leadRows.some((s) => s.sceneKey))
+      return 'Make the film first: its other shape is made from it.';
+    return (await this.composeTwin(show, lead, twin, true)).note;
+  }
+
+  /**
+   * The film in the other shape (studio-vertical-plan §1.4): its twin
+   * episode, begun if it has none, and made from the film as made, with
+   * nothing written, drawn or voiced and no minutes spent. Both are kept.
+   */
+  async otherShape(
+    userId: string,
+    episodeId: string,
+  ): Promise<StudioEpisodeDto> {
+    const { show, episode } = await this.requireEpisode(userId, episodeId);
+    const lead = episode.twinOf
+      ? await this.studio.findEpisode(episode.twinOf)
+      : episode;
+    if (!lead) throw new NotFoundError('Episode');
+    const twin = await this.twinFor(show, lead);
+    const leadRows = await this.studio.listScenes(lead.id);
+    if (leadRows.some((s) => s.sceneKey)) {
+      const { count, note } = await this.composeTwin(show, lead, twin, true);
+      if (note && note !== 'Every scene is made already.')
+        throw new ValidationError(note);
+      if (count)
+        await this.log(show, lead, {
+          what: 'make',
+          step: 'made',
+          line: EVENT_LINES.shapeMaking(episodeShape(twin), count),
+        });
+    }
+    return this.episode(userId, episodeId);
   }
 
   async make(userId: string, episodeId: string): Promise<StudioEpisodeDto> {
     const { show, episode } = await this.requireEpisode(userId, episodeId);
     const note = await this.makeEpisode(userId, show, episode);
     if (note) throw new ValidationError(note);
+    if (episode.twinOf) return this.episode(userId, episodeId);
     const view = await this.episode(userId, episodeId);
     await this.log(show, episode, {
       what: 'make',
@@ -1963,6 +2192,8 @@ export class StudioService {
       number,
       title: `Episode ${number}`,
       phase: 'brief',
+      // In the shape the brief asks for (its twin begun when it is planned).
+      shape: shapesOf(show.brief).lead,
     });
     if (
       !briefMissing(show.brief).length &&
@@ -1997,10 +2228,15 @@ export class StudioService {
 
   private playOf(
     show: StudioShowRecord,
-    episode: StudioEpisodeRecord,
+    played: StudioEpisodeRecord,
     scenes: StudioSceneRecord[],
     watermark: boolean,
+    /** A twin's lead: its title, outline and number are the film's. */
+    lead: StudioEpisodeRecord | null = null,
   ): StudioPlayDto {
+    const episode = lead
+      ? { ...lead, id: played.id, shape: played.shape }
+      : played;
     const made = scenes.filter((s) => s.sceneKey && s.audioKey && s.durationMs);
     // The film's music is scored from its story: a story's, never an explainer's.
     const story =
@@ -2022,6 +2258,8 @@ export class StudioService {
       number: episode.number,
       watermark,
       madeWith: MADE_WITH,
+      // Its shape, so the player sizes itself before any scene loads.
+      ...(episodeShape(episode) === 'tall' ? { shape: 'tall' as const } : {}),
       ...themeOfShow(show),
       ...(score ? { score } : {}),
       // An explainer's host and "What next?" (Ask 9).
@@ -2051,11 +2289,17 @@ export class StudioService {
               show.brief.format,
               showTheme(show.brief, show.bible),
             ) ??
-            joinFor(side(made[i - 1]), side(s), show.bible?.pictures ?? []))
+            joinFor(
+              side(made[i - 1]),
+              side(s),
+              show.bible?.pictures ?? [],
+              episodeShape(episode),
+            ))
           : { join: 'dip' as const };
         return {
           id: s.id,
           title: s.sheet?.title ?? `Scene ${s.position + 1}`,
+          position: s.position,
           durationMs: s.durationMs!,
           transition: s.sheet?.transition ?? 'cut',
           ...joined,
@@ -2068,7 +2312,10 @@ export class StudioService {
     const { show, episode } = await this.requireEpisode(userId, episodeId);
     const scenes = await this.studio.listScenes(episode.id);
     const { watermarked } = await this.entitlements.studioBalance(userId);
-    return this.playOf(show, episode, scenes, watermarked);
+    const lead = episode.twinOf
+      ? await this.studio.findEpisode(episode.twinOf)
+      : null;
+    return this.playOf(show, episode, scenes, watermarked, lead);
   }
 
   /** A made scene, as its player plays it. */
@@ -2148,7 +2395,10 @@ export class StudioService {
     const { show, episode } = await this.shared(token);
     const scenes = await this.studio.listScenes(episode.id);
     const { watermarked } = await this.entitlements.studioBalance(show.userId);
-    return this.playOf(show, episode, scenes, watermarked);
+    const lead = episode.twinOf
+      ? await this.studio.findEpisode(episode.twinOf)
+      : null;
+    return this.playOf(show, episode, scenes, watermarked, lead);
   }
 
   async sharedFile(

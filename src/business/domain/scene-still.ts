@@ -29,8 +29,6 @@ import { posedDangles } from './scene-dangles';
 import {
   FLOOR_BACK_F,
   FLOOR_FRONT_F,
-  FRAME_H,
-  FRAME_W,
   PARALLAX,
   angleLayer,
   anglePeople,
@@ -51,10 +49,12 @@ import {
   reflectPlace,
   reflectRoom,
   roomOf,
+  restOn,
   viewOf,
   type SetRoom,
   type View,
 } from './scene-film';
+import { setFrameFor, stillSize } from './scene-shape';
 import { viewOnly } from './scene-figure-views';
 import {
   faceGroupsOf,
@@ -170,6 +170,7 @@ export function viewAtMoment(scene: SceneDto, t: number, room: SetRoom): View {
     W,
     H,
     room,
+    restOn(scene, k),
   );
 }
 
@@ -565,7 +566,8 @@ export interface StillPlan {
 
 /**
  * What a still of the film at `t` is made of, back to front, `width`
- * pixels wide: the set's layers behind the floor, each a window of it as
+ * pixels on its long side (a wide still 960 × 540, a tall one 540 × 960:
+ * scene-shape stillSize): the set's layers behind the floor, each a window of it as
  * the camera has its depth then; the set's crowd on its ground; the
  * features the stage draws, the people and the set's floor layer, by
  * their feet, each where its depth on the floor puts it; the layers
@@ -580,7 +582,7 @@ export function stillPlan(
   at: { camera?: StillCamera; places?: Record<string, ScenePlaceDto> } = {},
 ): StillPlan {
   const { w: W, h: H, places } = scene.stagings.wide;
-  const scale = width / W;
+  const scale = stillSize({ w: W, h: H }, width).w / W;
   const k = stepAtMoment(scene, t);
   const step = scene.steps[k];
   const set = step?.backdrop
@@ -615,10 +617,12 @@ export function stillPlan(
       h,
     };
   };
-  // The set covers the stage: its units to the stage's.
-  const unit = Math.max(W / FRAME_W, H / FRAME_H);
-  const left = (W - FRAME_W * unit) / 2;
-  const top = (H - FRAME_H * unit) / 2;
+  // The set covers the stage: its units to the stage's (a tall stage's
+  // set frame is tall, scene-shape).
+  const setFrame = setFrameFor(W, H);
+  const unit = Math.max(W / setFrame.w, H / setFrame.h);
+  const left = (W - setFrame.w * unit) / 2;
+  const top = (H - setFrame.h * unit) / 2;
   const toSet = (b: Box): Box => ({
     x: (b.x - left) / unit,
     y: (b.y - top) / unit,
@@ -1294,12 +1298,12 @@ export function stillSvg(
   });
   const filters = [
     plan.parts.some((part) => part.soft)
-      ? `<filter id="still-soft" x="-5%" y="-5%" width="110%" height="110%"><feGaussianBlur stdDeviation="${r2(SOFT_PX * (plan.W / 1600))}"/></filter>`
+      ? `<filter id="still-soft" x="-5%" y="-5%" width="110%" height="110%"><feGaussianBlur stdDeviation="${r2(SOFT_PX * (Math.max(plan.W, plan.H) / 1600))}"/></filter>`
       : '',
     // Out of focus behind an insert's thing: softer, and a little faded
     // into what is behind, as a lens close on a thing leaves the rest.
     plan.parts.some((part) => part.unfocused)
-      ? `<filter id="still-unfocused" x="-5%" y="-5%" width="110%" height="110%"><feGaussianBlur stdDeviation="${r2(UNFOCUSED_PX * (plan.W / 1600))}"/></filter>`
+      ? `<filter id="still-unfocused" x="-5%" y="-5%" width="110%" height="110%"><feGaussianBlur stdDeviation="${r2(UNFOCUSED_PX * (Math.max(plan.W, plan.H) / 1600))}"/></filter>`
       : '',
   ].join('');
   const defs = filters ? `<defs>${filters}</defs>` : '';
@@ -1307,7 +1311,8 @@ export function stillSvg(
 }
 
 /**
- * A still of the film at `t`, as a PNG `width` pixels wide: each part
+ * A still of the film at `t`, as a PNG `width` pixels on its long side
+ * (scene-shape stillSize): each part
  * rendered alone by `raster` (a drawing's SVG to a PNG that wide), laid
  * in place, and the whole rendered. A part that will not render is left
  * out; the rest is still a still.
@@ -1330,5 +1335,11 @@ export async function renderStill(
       ),
     ),
   );
-  return { png: await raster(stillSvg(plan, pngs), width), plan };
+  return {
+    png: await raster(
+      stillSvg(plan, pngs),
+      stillSize({ w: plan.W, h: plan.H }, width).w,
+    ),
+    plan,
+  };
 }

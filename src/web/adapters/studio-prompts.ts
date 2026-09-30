@@ -280,6 +280,14 @@ export const STUDIO_PROMPTS = {
       '"none" and you say it is done.',
     ].join(' '),
     [
+      "The film's shape: wide, as every film is unless they say otherwise.",
+      'Set shape "tall" only when they ask for vertical, portrait, a phone,',
+      'TikTok, Shorts or Reels; "wide" for YouTube, widescreen or landscape;',
+      '"both" when they want it both ways. Never ask about it; only when',
+      'they mention sharing or a platform may you offer it once, as the',
+      'choices "Wide", "Vertical" and "Both". Otherwise shape is null.',
+    ].join(' '),
+    [
       '"outline": they see the story (its premise, who everyone is and its',
       'beats) and the scenes of the episode, a line each. A change they ask',
       'for is action "outline" with request their change in their own words',

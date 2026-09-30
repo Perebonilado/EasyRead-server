@@ -78,7 +78,6 @@ import { climbsGrounded, keepGrounded } from './scene-grounding';
 import { describeDoorFaults, doorFaults } from './scene-door-check';
 import {
   SOLID_BESIDE,
-  STAGINGS,
   STATION_SHARES,
   extentOf,
   fitInSlot,
@@ -109,6 +108,7 @@ import {
   boardOverlaps,
   cellBox,
   frameBox,
+  pullOutReadable,
   slices,
   type BoardItem,
   type BoardStage,
@@ -201,7 +201,19 @@ import {
 } from './scene-set-audience';
 import { PAPER, themeOf, type ExplainerTheme } from './scene-themes';
 import { walkRound } from './scene-paths';
+import { SET_UNIT_SHARE } from './scene-ink';
+import {
+  SET_FRAMES,
+  raisedEye,
+  setViewBoxOf,
+  stagingsOf,
+  walkReach,
+  type FilmShape,
+} from './scene-shape';
+import { TALL_AREA, withTextOf } from './scene-lesson-shape';
+import { pagedForTall } from './scene-lesson-pages';
 import { describeSpace, spaceFaults } from './scene-space';
+import { describeTallShots, tallShotFaults } from './scene-safe';
 import { anchorMs, quietGaps, spaced, type TimedBeat } from './scene-timing';
 import { numberWords } from './spoken';
 
@@ -746,6 +758,12 @@ export interface ComposeInput {
     | null;
   /** The book's or the show's own key: each of its places keeps the same crowd, its regulars, whenever the story comes back to it. */
   key?: string | null;
+  /**
+   * The film's shape (studio-vertical-plan §2): its stage and its set's
+   * frame. Absent is wide, composed exactly as before shapes; a tall
+   * scene says so (SceneDto.shape) and is placed on a 900 × 1600 stage.
+   */
+  shape?: FilmShape;
 }
 
 /**
@@ -1257,6 +1275,8 @@ function insertShots(input: {
   ) => Extract<SceneThingDto, { kind: 'drawing' }> | undefined;
   momentMs: (beat: number, after: number) => number;
   endMs: number;
+  /** The film's full stage. */
+  stage: { w: number; h: number };
 }): SceneEffectDto[] {
   const { script, beats, steps, places, props } = input;
   const things = nameableThings(script).flatMap((one) =>
@@ -1339,7 +1359,7 @@ function insertShots(input: {
     // where the hands meet; one in a hand, framed a little low.
     const found = insertBoxOf(stage, one.thing, one.fromMs, one.untilMs);
     if (!found) return [];
-    const box = insertFramed(found, STAGINGS.wide.w, STAGINGS.wide.h);
+    const box = insertFramed(found, input.stage.w, input.stage.h);
     return [
       {
         atMs: one.fromMs,
@@ -1439,9 +1459,24 @@ function unlabelled(
 /**
  * The scene the player plays. Steps are timed on their phrases and kept
  * apart; effects follow their step; a stretch longer than the quiet limit
- * gets a pulse on the thing in focus; every step is placed twice.
+ * gets a pulse on the thing in focus; every step is placed twice. Its
+ * words set at its shape's sizes (scene-lesson-shape), a tall lesson's
+ * steps of more than a phone's screen holds paged by code.
  */
-export function composeScene(input: ComposeInput): {
+export function composeScene(
+  input: ComposeInput,
+): ReturnType<typeof composeShaped> {
+  const shape = input.shape ?? 'wide';
+  return withTextOf(shape, () =>
+    composeShaped(
+      shape === 'tall'
+        ? { ...input, script: pagedForTall(input.script) }
+        : input,
+    ),
+  );
+}
+
+function composeShaped(input: ComposeInput): {
   scene: SceneDto;
   filled: number;
   /** What the frame audit found wrong, per staging, per step. */
@@ -1450,6 +1485,12 @@ export function composeScene(input: ComposeInput): {
   staging: string[];
 } {
   const { script, beats, durationMs } = input;
+  /**
+   * Its shape (studio-vertical-plan §2.3): the stagings it is placed at and
+   * its set's frame follow from it, picked here once and passed down.
+   */
+  const shape: FilmShape = input.shape ?? 'wide';
+  const stagings = stagingsOf(shape);
   /** A Studio film's scene; and one whose camera its sheet directs. */
   const film = input.profile?.film === true;
   /**
@@ -1839,7 +1880,8 @@ export function composeScene(input: ComposeInput): {
         enter,
         focus,
         ...(board?.faded.length ? { faded: [...board.faded] } : {}),
-        ...(board?.page ? { page: true as const } : {}),
+        // A build's board paged, or a tall lesson's page (scene-lesson-pages).
+        ...(board?.page || step.stage.page ? { page: true as const } : {}),
         ...(backdrop ? { backdrop } : {}),
         ...(cut ? { cut: true as const } : {}),
         ...(Object.keys(exit).length ? { exit } : {}),
@@ -2883,9 +2925,8 @@ export function composeScene(input: ComposeInput): {
       ? other
       : null;
   })();
-  const setFrame: [number, number, number, number] = setDrawing?.viewBox ?? [
-    0, 0, 1600, 900,
-  ];
+  const setFrame: [number, number, number, number] =
+    setDrawing?.viewBox ?? setViewBoxOf(shape);
   /** The features gone through, in or out: drawn by the stage wherever they are. */
   const gone = new Set(
     script.steps.flatMap((step) =>
@@ -2969,7 +3010,7 @@ export function composeScene(input: ComposeInput): {
     unit: number,
     floor: number,
   ): Map<string, FeaturePlace> => {
-    const stage = STAGINGS[staging];
+    const stage = stagings[staging];
     const on = setFrameOn(setFrame, stage);
     const [, vy, , vh] = setFrame;
     const out = new Map<string, FeaturePlace>();
@@ -2996,6 +3037,7 @@ export function composeScene(input: ComposeInput): {
           : null;
       let placed = placeFeature({
         staging,
+        shape,
         spot: one.feature.spot,
         ...(one.piece
           ? {
@@ -3062,13 +3104,24 @@ export function composeScene(input: ComposeInput): {
    * else its horizon, as the features stand by (placeFeature).
    */
   const floorEye = (staging: StagingName, floor: number): number => {
-    const stage = STAGINGS[staging];
+    const stage = stagings[staging];
     const on = setFrameOn(setFrame, stage);
     const [, vy, , vh] = setFrame;
     const own = setDrawing?.layered?.floor.eye;
+    // A tall stage's eye is raised above its people's heads (§3.2), as its
+    // sets are built: where its set does not say its own.
+    const raised =
+      own === undefined
+        ? raisedEye(
+            SET_FRAMES[shape],
+            SET_UNIT_SHARE * SET_FRAMES.wide.h,
+            floor,
+          )
+        : null;
+    if (raised !== null) return Math.min(raised, floor - 60);
     const horizon = setDrawing?.ground
       ? on.toStage(0, vy + setDrawing.ground.horizon * vh)[1]
-      : stage.h * 0.64;
+      : stage.h * SET_FRAMES[shape].floorLine.outdoor;
     const eye = own !== undefined ? on.toStage(0, own)[1] : horizon;
     return Math.min(eye, floor - 60);
   };
@@ -3163,6 +3216,7 @@ export function composeScene(input: ComposeInput): {
         people.flatMap((id) => (lookup.get(id) ? [lookup.get(id)!] : [])),
         largest,
         staging,
+        shape,
       );
       // No one stands with people: a grown-up's height in a slot of the row.
       const unit = scale.unit ?? scale.slot.h / figureFrame('adult')[3];
@@ -3174,7 +3228,7 @@ export function composeScene(input: ComposeInput): {
       const floorNow = {
         floor: scale.floor,
         eye: floorEye(staging, scale.floor),
-        bottom: STAGINGS[staging].h - 12,
+        bottom: stagings[staging].h - 12,
       };
       floors[staging] = floorNow;
       furnitureAt[staging] = setFeatures.flatMap(({ feature }) => {
@@ -3186,13 +3240,28 @@ export function composeScene(input: ComposeInput): {
           furnitureOf(
             { x: stand.x - stand.w / 2, y: f.y, w: stand.w, h: f.h },
             f.feet,
-            STAGINGS[staging].h,
+            stagings[staging].h,
           ),
         ];
       });
       return layoutStations({
         near: nearAt,
-        shares: stationShares(largest),
+        shares: stationShares(largest, shape),
+        // On a tall stage, who opens each step's talk stands the nearer of two.
+        ...(shape === 'tall'
+          ? {
+              opens: steps.map(
+                (step, k) =>
+                  spoken.find(
+                    (line) =>
+                      !line.from &&
+                      line.startMs >= step.atMs &&
+                      line.startMs < (steps[k + 1]?.atMs ?? durationMs) &&
+                      step.show.includes(line.speaker),
+                  )?.speaker ?? null,
+              ),
+            }
+          : {}),
         steps: steps.map((step, k) => ({
           show: step.show,
           at: stationsAt[k],
@@ -3203,6 +3272,7 @@ export function composeScene(input: ComposeInput): {
         floor: { eye: floorNow.eye, bottom: floorNow.bottom },
         things: lookup,
         staging,
+        shape,
         scale,
         features: new Map(
           [...placed].map(([id, f]) => [
@@ -3262,14 +3332,14 @@ export function composeScene(input: ComposeInput): {
     // A build's board: each thing in its cell, where it stays.
     if (script.board)
       return steps.map((step) => {
-        const { w, h, margin } = STAGINGS[staging];
+        const { w, h, margin } = stagings[staging];
         const cells = boardsAt.get(step)?.cells ?? {};
         const out: Record<string, Place> = {};
         for (const id of step.show) {
           const thing = lookup.get(id);
           const cell = cells[id];
           if (!thing || !cell) continue;
-          const room = cellBox(cell, w, h, margin, script.board?.rows);
+          const room = cellBox(cell, w, h, margin, script.board?.rows, shape);
           out[id] = { ...fitInSlot(thing, room), room };
         }
         return out;
@@ -3281,6 +3351,7 @@ export function composeScene(input: ComposeInput): {
         step.show,
         crowded ? crowd : lookup,
         staging,
+        shape,
       );
       // People stand as people do: one scale, one ground.
       standTogether(
@@ -3289,6 +3360,7 @@ export function composeScene(input: ComposeInput): {
         step.show,
         staging,
         Boolean(step.backdrop),
+        shape,
       );
       return laidOut;
     });
@@ -3333,7 +3405,7 @@ export function composeScene(input: ComposeInput): {
       notes: [] as string[],
     };
     for (const staging of ['box', 'wide'] as const) {
-      const stage = STAGINGS[staging];
+      const stage = stagings[staging];
       const on = setFrameOn(setFrame, stage);
       const faces: Parameters<typeof keepFacesSeen>[0] = {
         W: stage.w,
@@ -3412,6 +3484,17 @@ export function composeScene(input: ComposeInput): {
         atDepth: atDepthOn(staging),
         name: (id) => nameOf(castById.get(id)) ?? id,
         durationMs,
+        // A tall film's camera rests on the step's focus at a medium, never the whole stage.
+        ...(shape === 'tall'
+          ? {
+              restOn: (k: number) => {
+                const focus = steps[k]?.focus;
+                return focus && castById.get(focus)?.kind === 'character'
+                  ? focus
+                  : null;
+              },
+            }
+          : {}),
         // One at a spot of their own on the open floor: by a thing, they
         // are where it has them.
         inThing: (place, k, id) =>
@@ -3625,7 +3708,8 @@ export function composeScene(input: ComposeInput): {
           move === 'hero' ? [{ who, atMs: at, ms }] : [],
         ),
       ),
-      W: STAGINGS.wide.w,
+      W: stagings.wide.w,
+      ...(shape === 'tall' ? { tall: true } : {}),
       asked: script.camera ?? [],
       // Shot and reverse shot where the place has another side, on the
       // same floor (studio-views-plan §4.2); the crowd's view the other way
@@ -3665,7 +3749,7 @@ export function composeScene(input: ComposeInput): {
       if (!floor) continue;
       const notes = keepGrounded({
         staging,
-        H: STAGINGS[staging].h,
+        H: stagings[staging].h,
         steps,
         places: layouts[staging],
         stations: stationsAt,
@@ -3697,7 +3781,8 @@ export function composeScene(input: ComposeInput): {
       const floor = floors[staging];
       if (!floor) continue;
       const notes = walkRound({
-        W: STAGINGS[staging].w,
+        W: stagings[staging].w,
+        R: walkReach(stagings[staging]),
         steps,
         places: layouts[staging],
         walks: (id) => geometry.get(id)?.stands !== undefined,
@@ -3747,9 +3832,9 @@ export function composeScene(input: ComposeInput): {
       : effects.filter((effect) => effect.do === 'zoom');
     // A film is only ever played wide: its crowd keeps clear of the story's
     // people as they stand there; a page's, in either staging.
-    const stagings = crowdStagings();
-    return stagings.flatMap((staging) => {
-      const stage = STAGINGS[staging];
+    const seenAt = crowdStagings();
+    return seenAt.flatMap((staging) => {
+      const stage = stagings[staging];
       const on = setFrameOn(crowdFrame, stage);
       /** The pieces the stage draws, in the set's units: no one is placed hidden behind one. */
       const piecesSeen = (at: StagingName): CastAt[] =>
@@ -3852,7 +3937,7 @@ export function composeScene(input: ComposeInput): {
           if (view.s <= 1.01) continue;
           rest -= to - from;
           seen.push({
-            share: (to - from) / total / stagings.length,
+            share: (to - from) / total / seenAt.length,
             wide: staging === 'wide',
             close: true,
             cast: castOf(step, k, view),
@@ -3860,7 +3945,7 @@ export function composeScene(input: ComposeInput): {
         }
         if (rest > 0)
           seen.unshift({
-            share: rest / total / stagings.length,
+            share: rest / total / seenAt.length,
             wide: staging === 'wide',
             cast: [...castOf(step, k, null), ...piecesSeen(staging)],
           });
@@ -3871,7 +3956,7 @@ export function composeScene(input: ComposeInput): {
   /** The pieces the stage draws over the crowd, where each staging stands them, in the set's units. */
   const piecesOverCrowd = () =>
     crowdStagings().flatMap((staging) => {
-      const on = setFrameOn(crowdFrame, STAGINGS[staging]);
+      const on = setFrameOn(crowdFrame, stagings[staging]);
       return setFeatures.flatMap(({ feature, piece }) => {
         const f = featurePlaces[staging].get(feature.id);
         if (!piece || !f) return [];
@@ -3894,7 +3979,7 @@ export function composeScene(input: ComposeInput): {
     body: { x: number; y: number; w: number; h: number };
   } | null => {
     if (!crowdDrawn || (step.backdrop ?? null) !== crowdPlace) return null;
-    const stage = STAGINGS[staging];
+    const stage = stagings[staging];
     const on = setFrameOn(crowdFrame, stage);
     const people = Object.entries(laidOut)
       .filter(([id]) => castById.get(id)?.kind === 'character')
@@ -3921,16 +4006,15 @@ export function composeScene(input: ComposeInput): {
   // people in the set's own frame, on its ground, and drawn.
   const crowdPlace = crowd ? painted(script.backdrop) : null;
   const crowdSet = crowdPlace ? drawings.get(crowdPlace) : null;
-  const crowdFrame: [number, number, number, number] = crowdSet?.viewBox ?? [
-    0, 0, 1600, 900,
-  ];
+  const crowdFrame: [number, number, number, number] =
+    crowdSet?.viewBox ?? setViewBoxOf(shape);
   const crowdPlan: CrowdPlan | null = crowd
     ? planCrowd({
         size: crowd,
         kind: script.setting?.place ?? 'outdoor',
         ground: crowdSet?.ground ?? conventionGround(),
         frame: crowdFrame,
-        scale: setFrameOn(crowdFrame, STAGINGS.wide).scale,
+        scale: setFrameOn(crowdFrame, stagings.wide).scale,
         seen: crowdSeen(),
         pieces: piecesOverCrowd(),
         // What the story's people wear, for no one in it to wear the same.
@@ -3954,8 +4038,8 @@ export function composeScene(input: ComposeInput): {
    */
   const goingBy = (): GoingBy[] => {
     const wideStage = {
-      w: STAGINGS.wide.w,
-      h: STAGINGS.wide.h,
+      w: stagings.wide.w,
+      h: stagings.wide.h,
       places: layouts.wide,
     };
     const paced = {
@@ -3965,7 +4049,7 @@ export function composeScene(input: ComposeInput): {
       props,
       setting: { features: featuresDto() },
     };
-    const on = setFrameOn(crowdFrame, STAGINGS.wide);
+    const on = setFrameOn(crowdFrame, stagings.wide);
     return walksOf({ ...paced, steps: film ? hurried(paced) : steps }).map(
       (one) => {
         const found = geometry.get(one.id);
@@ -4016,7 +4100,7 @@ export function composeScene(input: ComposeInput): {
   }
 
   const place = (staging: StagingName) => {
-    const stage = STAGINGS[staging];
+    const stage = stagings[staging];
     const places: Record<string, ScenePlaceDto>[] = [];
     const pills: Record<string, ScenePillDto | null>[] = [];
     const bubbles: Record<string, SceneBubbleDto | null> = {};
@@ -4068,7 +4152,14 @@ export function composeScene(input: ComposeInput): {
           stage,
           // On a board: at its arrow's middle, well clear of captions and things, or none.
           ...(script.board
-            ? { strict: { pad: BOARD_CLEAR, inset: stage.margin } }
+            ? {
+                strict: {
+                  pad: BOARD_CLEAR,
+                  inset: stage.margin,
+                  // A tall board's, inside its text area (scene-board §4.4).
+                  ...(shape === 'tall' ? { within: TALL_AREA } : {}),
+                },
+              }
             : {}),
         });
         stepPills[arrow.id] = pill;
@@ -4254,6 +4345,17 @@ export function composeScene(input: ComposeInput): {
   };
   const box = place('box');
   const wide = place('wide');
+  /** The sizes of the words at a step: captions, labels and arrows' labels. */
+  const sizesOn = (
+    places: Record<string, ScenePlaceDto>,
+    pills: Record<string, ScenePillDto | null> = {},
+  ): number[] => [
+    ...Object.values(places).flatMap((at) => [
+      ...(at.caption ? [at.caption.size] : []),
+      ...(at.labels ?? []).map((label) => label.size),
+    ]),
+    ...Object.values(pills).flatMap((pill) => (pill ? [pill.size] : [])),
+  ];
   /** Where a build's camera looks at each step, on a staging (scene-board frameBox): never cutting through a thing, which the audit checks. */
   const boardViews = (
     staging: StagingName,
@@ -4263,7 +4365,7 @@ export function composeScene(input: ComposeInput): {
     },
     audit: Collision[][],
   ): BoardBox[] => {
-    const { w, h, margin } = STAGINGS[staging];
+    const { w, h, margin } = stagings[staging];
     return steps.map((step, k) => {
       const frame = boardsAt.get(step)?.frame ?? 'whole';
       // The things, which a view takes whole or leaves out; the arrows'
@@ -4273,18 +4375,29 @@ export function composeScene(input: ComposeInput): {
         placed.places[k] ?? {},
         step.arrows,
         placed.pills[k] ?? {},
-        STAGINGS[staging],
+        stagings[staging],
       );
       const labels = [...withLabels]
         .filter(([id]) => id.startsWith('pill:'))
         .map(([, box]) => box);
+      // A tall board's pull-out only where its words are large enough to
+      // read seen whole (scene-board pullOutReadable); else the camera
+      // stays on what it framed last.
+      const pulled =
+        shape === 'tall' &&
+        frame === 'whole' &&
+        k > 0 &&
+        !pullOutReadable(sizesOn(placed.places[k] ?? {}, placed.pills[k]))
+          ? (boardsAt.get(steps[k - 1])?.frame ?? 'whole')
+          : frame;
       const view = frameBox(
-        frame,
-        frame === 'whole' ? withLabels : extents,
+        pulled,
+        pulled === 'whole' ? withLabels : extents,
         w,
         h,
         margin,
         labels,
+        shape,
       );
       const seen = { x: view[0], y: view[1], w: view[2], h: view[3] };
       for (const [id, extent] of extents)
@@ -4299,8 +4412,8 @@ export function composeScene(input: ComposeInput): {
   // stands everyone, as the film shows it.
   if (cameraDirected) {
     const wideStage = {
-      w: STAGINGS.wide.w,
-      h: STAGINGS.wide.h,
+      w: stagings.wide.w,
+      h: stagings.wide.h,
       places: wide.places,
     };
     const paced = {
@@ -4315,14 +4428,14 @@ export function composeScene(input: ComposeInput): {
       shotsBesideWalks(
         effects.filter((e) => e.do === 'zoom'),
         walked,
-        STAGINGS.wide.w,
+        stagings.wide.w,
       ),
       steps,
       {
-        ...STAGINGS.wide,
+        ...stagings.wide,
         places: wide.places,
         // On a wide set, the wide shot is where the action is (§6.3).
-        room: setRoomFor(STAGINGS.wide.w, STAGINGS.wide.h),
+        room: setRoomFor(stagings.wide.w, stagings.wide.h),
       },
       durationMs,
     );
@@ -4346,6 +4459,7 @@ export function composeScene(input: ComposeInput): {
           },
           momentMs,
           endMs: durationMs - HOLD_LAST_MS,
+          stage: stagings.wide,
         })
       : [];
     const cut = inserts.length
@@ -4406,7 +4520,7 @@ export function composeScene(input: ComposeInput): {
         durationMs,
       ),
     );
-    const on = setFrameOn(setFrame, STAGINGS.wide);
+    const on = setFrameOn(setFrame, stagings.wide);
     const turns = script.beats.flatMap((beat, i): AudienceTurn[] => {
       const t = beats[i];
       if (beat.kind !== 'line' || !beat.speaker || beat.from || !t) return [];
@@ -4428,11 +4542,13 @@ export function composeScene(input: ComposeInput): {
   }
   const setting = story ? settingOf() : null;
 
-  const composed: ReturnType<typeof composeScene> = {
+  const composed: ReturnType<typeof composeShaped> = {
     scene: {
       version: 4,
       generator: input.generator,
       title: script.title,
+      // A wide scene says nothing of its shape, as before shapes.
+      ...(shape === 'tall' ? { shape } : {}),
       durationMs,
       // The pace its walks were timed at, for the player to walk them so.
       walk: {
@@ -4496,16 +4612,16 @@ export function composeScene(input: ComposeInput): {
       effects,
       stagings: {
         box: {
-          w: STAGINGS.box.w,
-          h: STAGINGS.box.h,
+          w: stagings.box.w,
+          h: stagings.box.h,
           places: box.places,
           pills: box.pills,
           ...(says.length ? { bubbles: box.bubbles } : {}),
           ...(boxViews ? { views: boxViews } : {}),
         },
         wide: {
-          w: STAGINGS.wide.w,
-          h: STAGINGS.wide.h,
+          w: stagings.wide.w,
+          h: stagings.wide.h,
           places: wide.places,
           pills: wide.pills,
           ...(says.length ? { bubbles: wide.bubbles } : {}),
@@ -4567,6 +4683,16 @@ export function composeScene(input: ComposeInput): {
     composed.staging.push(
       ...describeSpace(
         spaceFaults(composed.scene),
+        (id) => nameOf(castById.get(id)) ?? id,
+      ),
+    );
+  // A tall film's shots as the phone shows them (scene-safe): never far
+  // off, faces in the safe box and above the subtitles, no head cut and no
+  // one cut in half at the frame's side; said, for the picture check.
+  if (stationed && film && shape === 'tall')
+    composed.staging.push(
+      ...describeTallShots(
+        tallShotFaults(composed.scene),
         (id) => nameOf(castById.get(id)) ?? id,
       ),
     );

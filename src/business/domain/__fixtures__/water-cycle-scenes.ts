@@ -4,6 +4,7 @@
  * drawn by hand in the house palette, its voice timed by an estimate. No
  * model is asked, nothing is voiced.
  */
+import type { FilmShape } from '../scene-shape';
 import type {
   StudioEpisodeRecord,
   StudioSceneRecord,
@@ -97,9 +98,10 @@ export function timedBeats(script: SceneScript): {
 }
 
 /** The build's three scenes, each composed as the Studio would, in order. */
-export async function composeWaterBuild(): Promise<
-  (ReturnType<typeof composeScene> & { pacing: string[] })[]
-> {
+export async function composeWaterBuild(
+  /** The film's shape (studio-vertical-plan): a tall build's board is turned, 3 × 4. */
+  shape: FilmShape = 'wide',
+): Promise<(ReturnType<typeof composeScene> & { pacing: string[] })[]> {
   const bible: StudioBible = {
     characters: [],
     sets: [],
@@ -169,6 +171,7 @@ export async function composeWaterBuild(): Promise<
       timing: 'estimated',
       generator: SCENE_GENERATOR_VERSION,
       profile: { ...of.profile, film: true },
+      ...(shape !== 'wide' ? { shape } : {}),
     });
     made.scene.reading = { wpm: reading.wpm, motion: reading.motion };
     return { ...made, pacing: textPacing(made.scene, reading) };

@@ -34,6 +34,8 @@ const MEET = 0.9;
 
 export interface PathsInput {
   W: number;
+  /** The stage's walk reach (scene-shape walkReach): its long side. Absent, W. */
+  R?: number;
   steps: readonly { atMs: number; show: readonly string[] }[];
   /** Each step's places, by id: bent walks are given their via here. */
   places: Record<string, ScenePlaceDto>[];
@@ -74,6 +76,8 @@ const meets = (a: Body, b: Body) =>
  */
 export function walkRound(input: PathsInput): string[] {
   const { W, steps, places } = input;
+  /** Walks are timed and measured against the stage's long side: the same world in either shape. */
+  const R = input.R ?? W;
   const notes: string[] = [];
   const name = input.name ?? ((id: string) => id);
   const things: Body[] = input.furniture.map((f, i) => ({
@@ -97,7 +101,7 @@ export function walkRound(input: PathsInput): string[] {
         input.walks(id) &&
         from &&
         to &&
-        walkLength(from, to, W) > W * 0.02
+        walkLength(from, to, R) > W * 0.02
       );
     });
     if (!walkers.length) continue;
@@ -109,14 +113,14 @@ export function walkRound(input: PathsInput): string[] {
     const at = (id: string, t: number): Body => {
       const from = was[id];
       const to = here[id];
-      const ms = walkBetween(from, to, W, input.pace);
+      const ms = walkBetween(from, to, R, input.pace);
       return bodyOf(
         id,
-        pathPlace(from, to, Math.min(1, Math.max(0, t / ms)), W),
+        pathPlace(from, to, Math.min(1, Math.max(0, t / ms)), R),
       );
     };
     const longest = (id: string) =>
-      walkBetween(was[id], here[id], W, input.pace);
+      walkBetween(was[id], here[id], R, input.pace);
     // The longer walks first: a short one bends round a long one.
     for (const id of [...walkers].sort((a, b) => longest(b) - longest(a))) {
       const from = was[id];
@@ -124,11 +128,11 @@ export function walkRound(input: PathsInput): string[] {
       const others = walkers.filter((o) => o !== id);
       /** Whom a walk of theirs meets, and where along it (0 to 1), as it goes. */
       const meetsOn = (path: ScenePlaceDto) => {
-        const ms = walkBetween(from, path, W, input.pace);
+        const ms = walkBetween(from, path, R, input.pace);
         const hit: { who: string; u: number; d: number }[] = [];
         for (let i = 1; i < SAMPLES; i += 1) {
           const u = i / SAMPLES;
-          const me = bodyOf(id, pathPlace(from, path, u, W));
+          const me = bodyOf(id, pathPlace(from, path, u, R));
           for (const o of [
             ...still,
             ...things,
@@ -159,9 +163,9 @@ export function walkRound(input: PathsInput): string[] {
       const u1 = Math.max(...straight.map((h) => h.u));
       const lead =
         1.5 / SAMPLES +
-        (from.w * 0.6) / Math.max(1, pathLength(from, straightTo, W));
-      const a = pathPlace(from, straightTo, Math.max(0, u0 - lead), W);
-      const b = pathPlace(from, straightTo, Math.min(1, u1 + lead), W);
+        (from.w * 0.6) / Math.max(1, pathLength(from, straightTo, R));
+      const a = pathPlace(from, straightTo, Math.max(0, u0 - lead), R);
+      const b = pathPlace(from, straightTo, Math.min(1, u1 + lead), R);
       const back = Math.min(...straight.map((h) => h.d));
       const front = Math.max(...straight.map((h) => h.d));
       const tries = BEND_ROWS.flatMap((row) => [

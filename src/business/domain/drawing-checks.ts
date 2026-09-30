@@ -23,6 +23,7 @@ import type { CharacterSheet, SetSheet } from './scene-sheet';
 import type { SheetFace } from './scene-sheet-face';
 import { variant } from './scene-sheet-rig';
 import type { PlaceKind } from './scene-story';
+import { worldHeightOf } from './scene-shape';
 
 /** One point, checked: whether it holds, and why not. */
 export interface Check {
@@ -354,7 +355,8 @@ export async function checkSet(
 ): Promise<CodeChecks> {
   const { drawing } = set;
   const viewBox = drawing.viewBox;
-  const kitPerUnit = 1 / (SET_UNIT_SHARE * viewBox[3]);
+  const kitPerUnit =
+    1 / (SET_UNIT_SHARE * worldHeightOf(viewBox[2], viewBox[3]));
   const composition: string[] = [];
   const covered = await renderSvg(drawing.svg, undefined, {
     grid: { svg: drawing.svg, cols: 64 },

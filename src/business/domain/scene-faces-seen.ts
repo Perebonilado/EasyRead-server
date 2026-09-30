@@ -28,13 +28,17 @@ import {
   floorFactor,
   isReverse,
   nearOf,
+  othersThan,
   reflectPlace,
+  tallFrame,
+  tallOne,
   viewOf,
   wideView,
   type SetRoom,
   type View,
 } from './scene-film';
 import { BODY_SHARE, SAME_ROW_D } from './scene-spacing';
+import { TALL_SHOT } from './scene-shape';
 
 /**
  * A view the camera takes, and whom its shot cheats near the camera (over
@@ -236,6 +240,33 @@ export interface FacesInput {
   room?: SetRoom;
   /** The set's other side, for a shot taken from there (studio-views-plan §4.2): its things, on the stage. Absent, none. */
   reverse?: ReverseSide;
+  /**
+   * Whom the camera rests on at step k when no shot is asked (scene-film
+   * restOn): on a tall stage never the whole stage, but a medium on them
+   * (studio-vertical-plan §3.3). Absent, or null, the whole stage.
+   */
+  restOn?: (k: number) => string | null;
+}
+
+/** The view the camera rests in at step k: the whole stage, or on a tall stage a medium on whom it rests on. */
+function restIn(
+  input: Pick<FacesInput, 'W' | 'H' | 'steps' | 'places' | 'room' | 'restOn'>,
+  k: number,
+): View {
+  const { W, H, steps, places, room = NO_ROOM } = input;
+  const key = input.restOn?.(k);
+  const one = key && steps[k].show.includes(key) ? places[k][key] : undefined;
+  return one && tallFrame(W, H)
+    ? tallOne(
+        one,
+        TALL_SHOT.medium,
+        W,
+        H,
+        room.span,
+        0,
+        othersThan(key ?? '', steps[k].show, places[k], W),
+      )
+    : wideView(steps[k].show, places[k], W, H, room);
 }
 
 /** What was mended: things before the camera faded while a line is said, and the notes. */
@@ -257,7 +288,7 @@ export function keepFacesSeen(input: FacesInput): FacesMended {
   const stepEnd = (k: number) => steps[k + 1]?.atMs ?? input.durationMs;
   /** The views the camera takes on a stretch of a step: the whole stage, and each shot then. */
   const viewsAt = (k: number, from: number, to: number): Framed[] => [
-    wideView(steps[k].show, places[k], W, H, room),
+    restIn(input, k),
     ...input.shots
       .filter(
         (shot) => shot.atMs < to && (shot.untilMs ?? input.durationMs) > from,
@@ -392,7 +423,7 @@ export function keepFacesSeen(input: FacesInput): FacesMended {
     );
     return (whole ? [whole] : shots)
       .map((shot) => framedBy(shot, steps[k].show, places[k], W, H, room))
-      .concat(whole ? [] : [wideView(steps[k].show, places[k], W, H, room)]);
+      .concat(whole ? [] : [restIn(input, k)]);
   };
   /** How much of the frame's height someone fills at a step, at the least over what the camera shows; null where they are out of it. */
   const heightSeen = (k: number, who: string, views: readonly Framed[]) => {
@@ -849,7 +880,7 @@ export function keepInClearView(input: ClearInput): ClearMended {
    * the whole stretch.
    */
   const viewsAt = (k: number, from: number, to: number): Seen[] => {
-    const wide = wideView(steps[k].show, places[k], W, H, room);
+    const wide = restIn(input, k);
     const on = input.shots.filter(
       (shot) => shot.atMs < to && shotEnd(shot) > from,
     );
@@ -1021,7 +1052,7 @@ export function keepInClearView(input: ClearInput): ClearMended {
     const from = steps[j].atMs;
     const to = stepEnd(j);
     const views: Framed[] = [
-      wideView(steps[j].show, places[j], W, H, room),
+      restIn(input, j),
       { s: 1, x: W / 2, y: H / 2 },
       ...input.shots
         .filter((shot) => shot.atMs < to && shotEnd(shot) > from)

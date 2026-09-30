@@ -34,6 +34,8 @@ import type { SetPiece } from '../../scene-set-pieces';
 import type { GatedDrawing } from '../../scene-svg';
 import type { TimedBeat } from '../../scene-timing';
 import { withMouths } from '../studio-audit';
+import type { FilmShape } from '../../scene-shape';
+import { setInShape } from '../../scene-set-shape';
 import { onItsVoice } from '../studio-stage';
 import type { StudioBible } from '../studio';
 
@@ -89,6 +91,8 @@ export interface ComposedNativity {
 export async function composeNativity(
   only?: readonly number[],
   film: NativityFilm = NATIVITY_FILM,
+  /** The film's shape: a tall one's sets are built again by code for its frame (scene-set-shape), as a twin's are. */
+  shape: FilmShape = 'wide',
 ): Promise<ComposedNativity[]> {
   const show = { ...film.show, userId: 'film' } as unknown as StudioShowRecord;
   const episode = {
@@ -150,7 +154,18 @@ export async function composeNativity(
         void _anchors;
         drawings.set(thing.id, { ...drawn, callouts: [] });
       } else if (thing.kind === 'place') {
-        const set = sets[thing.ref];
+        const kept = sets[thing.ref];
+        const place = of.story?.bible.places.find((p) => p.id === thing.ref);
+        const set =
+          kept && place && shape !== 'wide'
+            ? ((await setInShape(
+                kept,
+                place,
+                shape,
+                film.show.title,
+                of.story?.bible.world ?? null,
+              )) ?? kept)
+            : kept;
         drawings.set(
           thing.id,
           set
@@ -171,6 +186,7 @@ export async function composeNativity(
       timing: voiced.timing,
       generator: SCENE_GENERATOR_VERSION,
       profile: of.profile,
+      ...(shape !== 'wide' ? { shape } : {}),
     });
     let scene = made.scene;
     let used = script;
@@ -185,6 +201,7 @@ export async function composeNativity(
         timing: voiced.timing,
         generator: SCENE_GENERATOR_VERSION,
         profile: of.profile,
+        ...(shape !== 'wide' ? { shape } : {}),
       }).scene;
     }
     out.push({

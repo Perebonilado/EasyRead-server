@@ -29,6 +29,7 @@ import type {
   SceneStepDto,
 } from '../../contracts';
 import { SAME_ROW_D, BODY_SHARE } from './scene-spacing';
+import { setFrameFor, walkReach } from './scene-shape';
 import {
   handsAt,
   obstaclesOf,
@@ -153,6 +154,7 @@ export function bodiesAt(scene: SceneDto, t: number): BodyAt[] {
   const { steps } = scene;
   if (!steps.length) return [];
   const { w: W, places } = scene.stagings.wide;
+  const R = walkReach(scene.stagings.wide);
   const k = stepAt(steps, t);
   const step = steps[k];
   const prev = k > 0 ? steps[k - 1] : null;
@@ -171,13 +173,13 @@ export function bodiesAt(scene: SceneDto, t: number): BodyAt[] {
         step.pace?.[id] === 'run'
           ? 2.2
           : Math.min(2.2, Math.max(1, step.hurry?.[id] ?? 1));
-      const ms = walkBetween(from, target, W, scene.walk) / pace;
+      const ms = walkBetween(from, target, R, scene.walk) / pace;
       const p = (t - step.atMs) / ms;
       if (
         p < 1 &&
         Math.abs(from.x - target.x) + Math.abs(from.h - target.h) > 1
       ) {
-        place = pathPlace(from, target, Math.max(0, p), W);
+        place = pathPlace(from, target, Math.max(0, p), R);
         moving = p > 0;
       }
     }
@@ -321,8 +323,9 @@ function floorOf(scene: SceneDto): [number, number] | null {
   const set = scene.things.find((t) => t.id === id);
   if (set?.kind !== 'drawing' || !set.floor) return null;
   const { w: W, h: H } = scene.stagings.wide;
-  const k = Math.max(W / 1600, H / 900);
-  const top = (H - 900 * k) / 2;
+  const frame = setFrameFor(W, H);
+  const k = Math.max(W / frame.w, H / frame.h);
+  const top = (H - frame.h * k) / 2;
   return [top + set.floor[0] * k, top + set.floor[1] * k];
 }
 

@@ -21,6 +21,7 @@
  */
 import type { SceneDto, SceneView } from '../../contracts';
 import { walksOf } from './scene-film';
+import { STAGES } from './scene-shape';
 import {
   FLIP_BACK_MS,
   MIN_HOLD_MS,
@@ -101,7 +102,7 @@ export function turnsCheck(
   const cuts = cutsOf(scene);
   const atCut = (t: number) => cuts.some((c) => Math.abs(c - t) <= CUT_NEAR_MS);
   const walks = scene.stagings?.wide ? walksOf(scene) : [];
-  const W = scene.stagings?.wide?.w ?? 1600;
+  const W = scene.stagings?.wide?.w ?? STAGES.wide.w;
   const people: TurnsOfOne[] = [];
   const issues: TurnIssue[] = [];
   const minutes = Math.max(1, scene.durationMs) / 60000;

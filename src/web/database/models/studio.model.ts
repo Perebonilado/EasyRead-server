@@ -77,6 +77,14 @@ export class StudioEpisodeModel extends BaseModel {
   @Column({ type: DataType.TEXT, allowNull: true })
   declare pages: string | null;
 
+  /** The shape its film is made in: 'wide' or 'tall' (studio-vertical-plan). */
+  @Column({ type: DataType.STRING(8), allowNull: false, defaultValue: 'wide' })
+  declare shape: string;
+
+  /** The episode it is the twin of, in the other shape: that one's script and voice are its. */
+  @Column({ type: DataType.UUID, allowNull: true })
+  declare twinOf: string | null;
+
   declare createdAt: Date;
   declare updatedAt: Date;
 }
@@ -129,6 +137,10 @@ export class StudioSceneModel extends BaseModel {
   /** What is happening to it now, as JSON (studio-progress). */
   @Column({ type: DataType.TEXT, allowNull: true })
   declare activity: string | null;
+
+  /** A twin episode's scene: the scene of the episode it is the twin of that it is the same scene of. */
+  @Column({ type: DataType.UUID, allowNull: true })
+  declare twinOf: string | null;
 
   declare createdAt: Date;
   declare updatedAt: Date;

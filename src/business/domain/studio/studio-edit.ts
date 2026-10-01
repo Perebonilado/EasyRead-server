@@ -62,10 +62,10 @@ export interface JoinPlan {
 /** One side of a join: the scene's sheet, and its outline scene where known (its teaching, and the part it goes into). */
 export interface JoinSide {
   sheet: SceneSheet | null;
-  scene?: Pick<
-    OutlineScene,
-    'title' | 'summary' | 'teach' | 'points' | 'into'
-  > | null;
+  scene?:
+    | (Pick<OutlineScene, 'title' | 'summary' | 'teach' | 'points' | 'into'> &
+        Partial<Pick<OutlineScene, 'kind'>>)
+    | null;
   /** E5's continuous build: this scene carries on the diagram before. */
   build?: 'start' | 'continue' | null;
 }
@@ -231,6 +231,9 @@ function namesPartOf(side: JoinSide, parts: readonly string[]): string | null {
  *  - push: two steps of one list ("Step 2", "Step 3"); in a tall film a
  *    push-up, the next coming up from below as a phone's feed scrolls
  *    (studio-vertical-plan §4.6);
+ *  - an editor's illustrated scenes (illustratedJoin): from one shot of
+ *    a place to the next of the same place, a cut; anywhere else, and
+ *    into or out of a lesson, a dissolve;
  *  - a story's scenes as joinOf has them.
  */
 export function joinFor(
@@ -243,6 +246,8 @@ export function joinFor(
   if (after.build === 'continue') return { join: 'continue' };
   const a = before?.sheet ?? null;
   const b = after.sheet;
+  const illustrated = illustratedJoin(before, after);
+  if (illustrated) return illustrated;
   if (b?.transition === 'fade') return { join: 'dip' };
   if (a?.kind !== 'explainer' || b?.kind !== 'explainer')
     return { join: joinOf(a, b) };
@@ -308,5 +313,28 @@ export function joinFor(
   const two = placeInList(after.scene?.title ?? b.title);
   if (one && two && one.list === two.list && two.n === one.n + 1)
     return { join: shape === 'tall' ? 'push-up' : 'push' };
+  return { join: 'dissolve' };
+}
+
+/**
+ * How the film goes into, between and out of an editor's illustrated
+ * scenes: a shot of a place cut straight to the next of the same place,
+ * a dip where the writer marks time passing between two; any other move,
+ * and every way into or out of a lesson, a dissolve. Null where neither
+ * side is illustrated.
+ */
+export function illustratedJoin(
+  before: JoinSide | null,
+  after: JoinSide,
+): JoinPlan | null {
+  const was = before?.scene?.kind === 'illustrated';
+  const now = after.scene?.kind === 'illustrated';
+  if (!was && !now) return null;
+  const a = before?.sheet ?? null;
+  const b = after.sheet;
+  if (was && now && a?.kind === 'story' && b?.kind === 'story') {
+    if (b.transition === 'fade') return { join: 'dip' };
+    return { join: a.set === b.set ? 'cut' : 'dissolve' };
+  }
   return { join: 'dissolve' };
 }

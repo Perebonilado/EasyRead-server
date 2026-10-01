@@ -27,7 +27,13 @@ import {
   type FigureSpec,
 } from '../scene-figure';
 import { STORY_TIMES, type StoryTime } from '../scene-story';
-import { studioId, text, type StudioFormat } from './studio';
+import {
+  STUDIO_VOICES,
+  studioId,
+  text,
+  type StudioFormat,
+  type StudioVoice,
+} from './studio';
 
 // ── Small helpers ─────────────────────────────────────────────────────────
 
@@ -869,6 +875,8 @@ export interface EditorPerson {
   recurring: boolean;
   /** How the kit draws them: the same in every scene. */
   figure: FigureSpec;
+  /** The voice they would speak in, were they given a line. */
+  voice: StudioVoice;
   claims: string[];
 }
 
@@ -879,6 +887,8 @@ export interface EditorThing {
 
 export interface EditorWorld {
   era: Era;
+  /** Where the story happens, when it is somewhere: from the topic and its research, never assumed. */
+  region: string | null;
   /** Each recurring thing's colour, from the theme's tokens. */
   palette: { thing: string; token: PaletteToken }[];
   /** The colour held back for the payoff, and what it is for. */
@@ -906,6 +916,21 @@ function worldFigure(raw: unknown, id: string): FigureSpec {
   const age = oneOf(FIGURE_AGES)(said.age) ?? 'adult';
   const plain = figureFor(id, { age, top: PLAIN_FIGURE.top });
   return figureOf({ age, ...said }, plain);
+}
+
+/** A voice from what is said of someone, where none was given: their age and their words. */
+function voiceOf(raw: unknown, figure: FigureSpec, words: string): StudioVoice {
+  const given = oneOf(STUDIO_VOICES)(raw);
+  if (given) return given;
+  const he =
+    /\b(?:he|his|him|man|king|father|sir|mr|lord|emperor|prince|brother|son)\b/iu.test(
+      words,
+    );
+  const old = figure.age === 'elder';
+  const young = figure.age === 'child' || figure.age === 'teen';
+  if (young) return he ? 'boy' : 'girl';
+  if (old) return he ? 'old man' : 'old woman';
+  return he ? 'man' : 'woman';
 }
 
 /** The world made sound: tokens from the theme's list, ids unique, each list capped. */
@@ -957,14 +982,18 @@ export function worldOf(raw: unknown): EditorWorld {
       let id = studioId(text(p.id, 40) || name, 'someone');
       while (peopleIds.has(id)) id = `${id}-2`;
       peopleIds.add(id);
+      const figure = worldFigure(p.figure, id);
+      const role = plainText(p.role, 120);
+      const likeness = plainText(p.likeness, 400);
       return [
         {
           id,
           name,
-          role: plainText(p.role, 120),
-          likeness: plainText(p.likeness, 400),
+          role,
+          likeness,
           recurring: p.recurring !== false,
-          figure: worldFigure(p.figure, id),
+          figure,
+          voice: voiceOf(p.voice, figure, `${role} ${likeness}`),
           claims: list(p.claims)
             .map((c) => text(c, 16))
             .filter(Boolean)
@@ -975,6 +1004,7 @@ export function worldOf(raw: unknown): EditorWorld {
     .slice(0, WORLD_LIMITS.people);
   return {
     era: eraNamed(said.era) ?? 'today',
+    region: plainText(said.region, 120) || null,
     palette,
     held:
       heldToken && !palette.some((p) => p.token === heldToken)

@@ -1182,7 +1182,7 @@ export class SceneProcessor {
   }
 
   /**
-   * A tall film's charts and graphs drawn again for its frame, and a story
+   * A tall film's charts, graphs and maps drawn again for its frame, and a story
    * clip's card as a frame of its shape (studio-vertical-plan §4.2, §4.7):
    * code's own, so nothing is asked of a model. One that cannot be drawn
    * so stays as it was.
@@ -1194,7 +1194,12 @@ export class SceneProcessor {
     who: string,
   ): Promise<void> {
     for (const thing of script.cast.filter(isCodeThing)) {
-      if (thing.kind !== 'chart' && thing.kind !== 'plot') continue;
+      if (
+        thing.kind !== 'chart' &&
+        thing.kind !== 'plot' &&
+        thing.kind !== 'map'
+      )
+        continue;
       const drawn = await drawByCode(thing, shape).catch(() => null);
       if (drawn) out.set(thing.id, drawn);
       else this.logger.log(`${who}: "${thing.id}" kept as drawn wide`);

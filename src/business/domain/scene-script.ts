@@ -59,6 +59,13 @@ import { checkLines } from './maths-work';
 import { numberPicture, type NumberPicture } from './scene-numbers';
 import { checkArithmetic, markTerms, type MathLine } from './scene-math';
 import { sample, type PlotSpec } from './scene-plot';
+import {
+  mapPartNames,
+  readMap,
+  type MapDraft,
+  type MapSpec,
+} from './scene-map';
+import { mapFromWords, realMapIn } from './scene-map-places';
 import { findPhrase, isVerbatim } from './scene-quote';
 import { MAX_EVENTS, type TimelineSpec } from './scene-timeline';
 import {
@@ -431,9 +438,18 @@ export interface ChartThing {
   chart: ChartSpec;
 }
 
+/** A real place's map, drawn by code from real geographic data (scene-map). */
+export interface MapThing {
+  id: string;
+  kind: 'map';
+  /** Its caption. */
+  name: string;
+  map: MapSpec;
+}
+
 /** A thing drawn by code and not by the artist. */
 export type CodeThing =
-  MathThing | PlotThing | QuoteThing | TimelineThing | ChartThing;
+  MathThing | PlotThing | QuoteThing | TimelineThing | ChartThing | MapThing;
 
 /** The kinds code draws itself. */
 export const CODE_KINDS = [
@@ -442,6 +458,7 @@ export const CODE_KINDS = [
   'quote',
   'timeline',
   'chart',
+  'map',
 ] as const;
 
 /** Whether a thing is one code draws, not the artist. */
@@ -551,6 +568,7 @@ export function partNames(thing: SceneThing): string[] {
   if (thing.kind === 'timeline')
     return thing.timeline.events.map((e) => e.name || e.when);
   if (thing.kind === 'chart') return thing.chart.bars.map((b) => b.label);
+  if (thing.kind === 'map') return mapPartNames(thing.map);
   if (thing.kind === 'character' || thing.kind === 'person')
     return [...SHEET_PARTS];
   return [];
@@ -866,6 +884,7 @@ export interface SceneScriptDraft {
       | 'quote'
       | 'timeline'
       | 'chart'
+      | 'map'
       | 'character'
       | 'person'
       | 'place';
@@ -916,6 +935,8 @@ export interface SceneScriptDraft {
       unit: string | null;
       bars: { label: string; value: number }[];
     } | null;
+    /** A map of a real place: what it shows, by name only (scene-map). */
+    map?: MapDraft | null;
   }[];
   steps: {
     beat: number;
@@ -1352,6 +1373,37 @@ export function mendCast(
         text: name,
         style: raw.style === 'title' ? 'title' : 'keyword',
       });
+      return;
+    }
+    // A real place's map asked of the artist is drawn by code from real
+    // data instead (scene-map): a coastline or a border the artist
+    // remembers is a wrong one. One that names no place code knows is
+    // its caption in type.
+    if (raw.kind === 'drawing' && realMapIn(name, clean(raw.brief))) {
+      const read = mapFromWords(name, clean(raw.brief));
+      const asMap = read
+        ? readMap({
+            region: read.region,
+            highlight: read.highlight.map((one) => ({
+              name: one,
+              label: true,
+              group: null,
+            })),
+            places: read.places,
+            routes: null,
+          }).spec
+        : null;
+      if (asMap) {
+        mended.push(
+          `${id}: "${name}" is a map of a real place; drawn by code, of ${asMap.region.name || 'its places'}`,
+        );
+        cast.push({ id, kind: 'map', name, map: asMap });
+      } else {
+        mended.push(
+          `${id}: "${name}" is a map of a real place code cannot read; set in type`,
+        );
+        cast.push({ id, kind: 'words', text: name, style: 'keyword' });
+      }
       return;
     }
     if (isCodeThing(raw)) {
@@ -2644,6 +2696,22 @@ function codeThing(
           bars,
         },
       },
+      problems,
+      mended,
+    };
+  }
+  if (raw.kind === 'map') {
+    // Looked up by code: a name it does not know is left off, never guessed.
+    const { spec, dropped } = readMap(raw.map);
+    mended.push(...dropped.map((why) => `${id}: ${why}; left off the map`));
+    if (!spec) {
+      problems.push(
+        `The map "${raw.id}" names no place code knows: give map.region as "world", a continent, a region or a country, by its usual English name.`,
+      );
+      return words('a map of nowhere known');
+    }
+    return {
+      thing: { id, kind: 'map', name: clean(raw.name), map: spec },
       problems,
       mended,
     };

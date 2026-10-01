@@ -396,6 +396,7 @@ export function thingDto(
         quote: 'Quotation',
         timeline: 'Timeline',
         chart: 'Chart',
+        map: 'Map',
       } as Record<string, string>
     )[thing.kind] ||
     thing.id;

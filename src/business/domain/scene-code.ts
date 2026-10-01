@@ -8,6 +8,7 @@
  */
 import type { Callout } from './scene-callouts';
 import { renderChart } from './scene-chart';
+import { renderMap } from './scene-map';
 import { renderMath } from './scene-math';
 import { renderPlot } from './scene-plot';
 import { renderQuote } from './scene-quote';
@@ -18,8 +19,8 @@ import { framedBox, type GatedDrawing } from './scene-svg';
 
 /**
  * A thing drawn by code: rendered, measured, and framed to its ink. In a
- * tall film a chart is taller than wide with fewer bars, and a graph
- * square (studio-vertical-plan §4.2).
+ * tall film a chart is taller than wide with fewer bars, a graph square,
+ * and a map square or portrait (studio-vertical-plan §4.2).
  */
 export async function drawByCode(
   thing: CodeThing,
@@ -28,6 +29,7 @@ export async function drawByCode(
   let svg: string;
   let viewBox: [number, number, number, number];
   let parts: Record<string, string> = {};
+  let labels: Record<string, string> = {};
   let states: Record<string, string> = {};
   let callouts: Callout[] = [];
   let moves = false;
@@ -48,6 +50,14 @@ export async function drawByCode(
     // Its bars grow, or its line draws itself.
     ({ svg, viewBox, parts } = renderChart(thing.chart, shape));
     moves = true;
+  } else if (thing.kind === 'map') {
+    // Drawn from real data and fitted to the film's frame; its countries
+    // come in one after another and its routes draw themselves.
+    ({ svg, viewBox, parts, labels, callouts } = await renderMap(
+      thing.map,
+      shape,
+    ));
+    moves = true;
   } else {
     const quote = renderQuote({ text: thing.text, phrases: thing.phrases });
     ({ svg, viewBox, parts, callouts } = quote);
@@ -66,7 +76,7 @@ export async function drawByCode(
     viewBox: framed,
     aspect: Math.min(4, Math.max(0.4, framed[2] / framed[3])),
     parts,
-    labels: {},
+    labels,
     states,
     moves,
     callouts,

@@ -169,6 +169,8 @@ import { VisualsController } from './web/controllers/visuals.controller';
 import { StudioController } from './web/controllers/studio.controller';
 import { StudioService } from './business/handlers/studio/studio.service';
 import { StudioDocumentsController } from './web/controllers/studio-documents.controller';
+import { StudioExportController } from './web/controllers/studio-export.controller';
+import { StudioExportService } from './business/handlers/studio/studio-export.service';
 import { StudioDocumentsService } from './business/handlers/studio/studio-documents.service';
 import { StudioDocumentsQuery } from './query/studio-documents.query';
 import {
@@ -402,6 +404,7 @@ const queries = [
     VisualsController,
     StudioController,
     StudioDocumentsController,
+    StudioExportController,
     GuidedController,
     InstitutionsController,
     AdminInstitutionsController,
@@ -417,6 +420,7 @@ const queries = [
     ...queries,
     StudioService,
     StudioDocumentsService,
+    StudioExportService,
     StudioDocumentsQuery,
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: AuthGuard },

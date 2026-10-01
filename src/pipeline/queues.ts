@@ -32,6 +32,11 @@ export const QUEUE = {
   // scenes, and making each scene. Its own queue, so a maker's film and a
   // reader's page never wait on each other.
   studio: 'studio',
+  // A film made into a video file: a headless browser drawing it frame
+  // by frame into ffmpeg, minutes of a whole core and a few hundred MB.
+  // Its own queue, one at a time, so a video never holds up a scene
+  // being made, and two never fight for the worker's memory.
+  studioExport: 'studio-export',
 } as const;
 
 export type QueueName = (typeof QUEUE)[keyof typeof QUEUE];
@@ -85,6 +90,10 @@ export const QUEUE_SETTINGS: Record<
   // A scene of a film is a page's work; writing an episode's scenes is a
   // few model calls each, in order. A few at once.
   studio: { concurrency: 4, attempts: 2, backoffMs: 20_000 },
+  // One video at a time; a second attempt for a worker that went away
+  // mid-render (a deploy). A browser that crashes is relaunched inside
+  // the attempt, from the frame it had reached.
+  'studio-export': { concurrency: 1, attempts: 2, backoffMs: 30_000 },
 };
 
 export interface BaseJobData {
@@ -272,6 +281,14 @@ export const lectureVoiceJobId = (
   kind: SegmentKind = 'page',
 ) =>
   `lecture-voice-${documentId}-v${contentVersion}-${page}-${style}${kind === 'page' ? '' : `-${kind}`}`;
+
+/** A Studio film made into a video file: everything else is on its row (studio_exports). */
+export interface StudioExportJobData {
+  exportId: string;
+}
+
+export const studioExportJobId = (exportId: string) =>
+  `studio-export-${exportId}`;
 
 /** A piece of the Studio's work on one episode. */
 export interface StudioJobData {

@@ -101,6 +101,12 @@ const TASK_VAR: Record<LlmTask, string> = {
   studio_write: 'AI_MODEL_STUDIO_WRITE',
   // Whether a scene made again as asked shows it: a small read, a make.
   studio_check: 'AI_MODEL_STUDIO_CHECK',
+  // The editor's desk: a show planned and an episode written as an editor
+  // does (many small careful jobs), its research and fact check with the
+  // web, and each scene's board on the written script.
+  explainer_edit: 'AI_MODEL_EXPLAINER_EDIT',
+  explainer_research: 'AI_MODEL_EXPLAINER_RESEARCH',
+  explainer_board: 'AI_MODEL_EXPLAINER_BOARD',
   topic_quiz: 'AI_MODEL_QUIZ',
   // Guided reading: the preview is one call per chapter ever (cached), the
   // graders run once per checkpoint — all three default to the cheap model
@@ -155,6 +161,15 @@ const TASK_DEFAULT: Partial<Record<LlmTask, string>> = {
   // The check of a scene made again as asked: a few thousand tokens in, a
   // verdict out, thinking off (STUDIO_CHECK_THINKING).
   studio_check: 'deepseek:deepseek-flash',
+  // The editor's desk on a GPT mini, Richard's choice (2026-10-01): DeepSeek
+  // leaves the explainer's writing. GPT-5.4 mini, the newest "mini", at
+  // $0.75 / $4.50 a million; its reasoning effort is EXPLAINER_EDIT_EFFORT
+  // (medium), EXPLAINER_RESEARCH_EFFORT (low) and EXPLAINER_BOARD_EFFORT
+  // (low). The research and the fact check search the web with OpenAI's
+  // own tool (EXPLAINER_RESEARCH_SEARCHES, 30 a run at most). Never gpt-4.1.
+  explainer_edit: 'openai:gpt-5.4-mini',
+  explainer_research: 'openai:gpt-5.4-mini',
+  explainer_board: 'openai:gpt-5.4-mini',
   // A drawing judged from its picture: DeepSeek cannot see. Gemini 3.8
   // Flash, Richard's choice (2026-09-27; never gpt-4.1): it named every
   // flaw he found in Clover, Dot and Eggbert (a blanket drawn as a scarf, a
@@ -362,10 +377,28 @@ export class ModelRegistry {
     return this.config.get<string>('AI_EMBED_MODEL') || DEFAULT_EMBED_MODEL;
   }
 
+  /**
+   * The web search tool of a task's provider, where it has one (OpenAI's,
+   * through the Responses API): null for a provider that cannot search,
+   * whose model then answers from what it knows.
+   */
+  async webSearch(
+    task: LlmTask,
+    options: { searchContextSize: 'low' | 'medium' | 'high' },
+  ): Promise<unknown> {
+    const ref = this.refFor(task);
+    if (ref.provider !== 'openai') return null;
+    const provider = await this.client(ref.provider);
+    const tools = provider.tools as
+      { webSearch?: (options: unknown) => unknown } | undefined;
+    return tools?.webSearch?.(options) ?? null;
+  }
+
   private async client(name: ProviderName): Promise<{
     languageModel(id: string): unknown;
     chat?(id: string): unknown;
     textEmbeddingModel?(id: string): unknown;
+    tools?: unknown;
   }> {
     const cached = this.clients.get(name);
     if (cached) return cached as never;

@@ -33,8 +33,13 @@ import type {
   SketchDraft,
   SketchTemplate,
   StudioCheckVerdict,
+  StudioRevision,
   StudioTurnDraft,
+  EditorFound,
+  EditorSearchStep,
+  EditorWriteStep,
 } from '../../business/ports/llm.port';
+import { fakeEditorAnswer, fakeFound, fakeTopic } from './fake-editor';
 import type {
   DrawingThing,
   SceneScriptDraft,
@@ -2571,6 +2576,44 @@ export class FakeLlmAdapter implements LlmGatewayPort {
       },
       usage: this.usage(started, 1000, 60),
     });
+  }
+
+  // The editor's desk (fake-editor): a small, sound show on the brief's topic.
+  async editorWrite(
+    input: { step: EditorWriteStep; parts: string[] } & StudioRevision,
+  ): Promise<LlmResult<Record<string, unknown>>> {
+    const started = Date.now();
+    return {
+      value: fakeEditorAnswer(input.step, input.parts),
+      usage: this.usage(started, 4000, 800),
+    };
+  }
+
+  async editorSearch(input: {
+    step: EditorSearchStep;
+    parts: string[];
+    searches?: number;
+  }): Promise<
+    LlmResult<{ value: Record<string, unknown>; found: EditorFound[] }>
+  > {
+    const started = Date.now();
+    return {
+      value: {
+        value: fakeEditorAnswer(input.step, input.parts),
+        found: fakeFound(fakeTopic(input.parts)),
+      },
+      usage: { ...this.usage(started, 9000, 1500), searches: 3 },
+    };
+  }
+
+  async editorBoard(
+    input: { kind: 'lesson' | 'illustrated'; parts: string[] } & StudioRevision,
+  ): Promise<LlmResult<Record<string, unknown>>> {
+    const started = Date.now();
+    return {
+      value: fakeEditorAnswer(input.kind, input.parts),
+      usage: this.usage(started, 3000, 600),
+    };
   }
 
   async moderate(input: {

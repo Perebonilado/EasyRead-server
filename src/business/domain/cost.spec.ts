@@ -7,6 +7,7 @@ import {
   estimatePrepare,
   voiceSessionCost,
   geminiSpeechCost,
+  webSearchCost,
 } from './cost';
 
 describe('the cost of a call', () => {
@@ -274,5 +275,25 @@ describe('the ElevenLabs voice', () => {
         at: day('2026-10-20'),
       }),
     ).toBe(0.16);
+  });
+});
+
+describe("the editor's desk", () => {
+  it('prices GPT-5.4 mini, its cached input at a tenth', () => {
+    expect(
+      costOf({
+        task: 'explainer_edit',
+        model: 'openai:gpt-5.4-mini',
+        tokensIn: 1_000_000,
+        tokensOut: 100_000,
+        tokensCached: 500_000,
+      }),
+    ).toBeCloseTo(0.375 + 0.0375 + 0.45, 6);
+  });
+
+  it('prices web searches at ten dollars a thousand', () => {
+    expect(webSearchCost(30)).toBeCloseTo(0.3, 6);
+    expect(webSearchCost(0)).toBe(0);
+    expect(webSearchCost(-2)).toBe(0);
   });
 });

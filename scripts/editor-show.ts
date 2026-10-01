@@ -13,6 +13,10 @@
  *   npm run editor:show -- --bench --out <dir> [--only <id>] [--searches <n>] [--lanes <n>]
  *   npm run editor:show -- --board <episodeId> --out <dir>
  *
+ * With --make, the film is then made as "Make it" makes it: its script job
+ * set going on the real queue (REDIS_URL), for a worker running beside it
+ * to board and make (SCENE_VOICE_FORCE=kokoro on the worker for a local
+ * test), followed here until it is made.
  * With --boards, the episode's scenes are boarded too (no film is made);
  * --board boards an episode written before, and writes what each scene's
  * board came to (boards.md, boards.json).
@@ -34,7 +38,8 @@ import { ConfigModule } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { CoreModule } from '../src/core.module';
 import type { LlmGatewayPort } from '../src/business/ports/llm.port';
-import { LLM_GATEWAY } from '../src/business/ports/tokens';
+import { JOB_QUEUE, LLM_GATEWAY } from '../src/business/ports/tokens';
+import type { JobQueuePort } from '../src/business/ports/job-queue.port';
 import type { StudioJobData } from '../src/pipeline/queues';
 import {
   AI_CALL_LOG_REPOSITORY,
@@ -668,6 +673,72 @@ async function boardEpisode(
   );
 }
 
+/**
+ * An episode written made into film as "Make it" makes it: approved, its
+ * script job (boards, then the film) set going on the real queue for a
+ * worker, and followed until it is made, or stops.
+ */
+async function makeFilm(
+  deps: { studio: StudioRepository; queue: JobQueuePort },
+  episodeId: string,
+): Promise<void> {
+  const episode = await deps.studio.findEpisode(episodeId);
+  if (!episode?.editorial) throw new Error(`No editor's episode ${episodeId}`);
+  await deps.studio.updateEpisode(episode.id, {
+    phase: 'script',
+    busy: 'script',
+    error: null,
+  });
+  await deps.queue.enqueueStudio([
+    {
+      kind: 'script',
+      make: true,
+      showId: episode.showId,
+      episodeId: episode.id,
+      userId: episode.userId,
+    },
+  ]);
+  console.log(
+    `making ${episode.id}: its script job is on the queue for a worker`,
+  );
+  const started = Date.now();
+  let said = '';
+  for (;;) {
+    await new Promise((done) => setTimeout(done, 10_000));
+    const now = (await deps.studio.findEpisode(episode.id))!;
+    const scenes = await deps.studio.listScenes(episode.id);
+    const counts = scenes.reduce<Record<string, number>>((n, s) => {
+      n[s.status] = (n[s.status] ?? 0) + 1;
+      return n;
+    }, {});
+    const line = `${Math.round((Date.now() - started) / 1000)}s: phase ${now.phase}, busy ${now.busy ?? 'no'}, scenes ${JSON.stringify(counts)}`;
+    if (line.replace(/^\d+s/u, '') !== said.replace(/^\d+s/u, ''))
+      console.log(line);
+    said = line;
+    const working = scenes.some(
+      (s) => s.status === 'writing' || s.status === 'making',
+    );
+    if (!now.busy && !working && (now.phase === 'made' || scenes.length)) {
+      const made = scenes.filter((s) => s.status === 'made');
+      console.log(
+        `done: ${made.length} of ${scenes.length} scenes made, ${Math.round((now.durationMs ?? 0) / 1000)}s of film${now.error ? `; ${now.error}` : ''}`,
+      );
+      for (const s of scenes.filter((one) => one.status === 'failed'))
+        console.log(`  scene ${s.position + 1} failed: ${s.error}`);
+      const thread = await deps.studio.listMessages(episode.showId, 6);
+      for (const m of thread.slice(-3))
+        console.log(
+          `  thread: ${m.content}${m.meta?.choices?.length ? ` [${m.meta.choices.join(' | ')}]` : ''}`,
+        );
+      return;
+    }
+    if (Date.now() - started > 60 * 60_000) {
+      console.log('still making after an hour: stopped following');
+      return;
+    }
+  }
+}
+
 async function main() {
   const out = resolve(option('--out') ?? 'editor-show');
   const bench = flag('--bench');
@@ -691,6 +762,14 @@ async function main() {
       await boardEpisode(deps, boardOnly, out);
       return;
     }
+    const makeOnly = option('--make-episode');
+    if (makeOnly) {
+      await makeFilm(
+        { studio: deps.studio, queue: app.get<JobQueuePort>(JOB_QUEUE) },
+        makeOnly,
+      );
+      return;
+    }
     if (!bench) {
       const topic = option('--topic');
       if (!topic) throw new Error('Say what the show is about: --topic "…"');
@@ -705,6 +784,11 @@ async function main() {
       });
       console.log(rubricWords([rubricOf(made, 'show')]));
       console.log(`\nWritten to ${out}`);
+      if (flag('--make'))
+        await makeFilm(
+          { studio: deps.studio, queue: app.get<JobQueuePort>(JOB_QUEUE) },
+          made.episode.id,
+        );
       return;
     }
     const only = option('--only');

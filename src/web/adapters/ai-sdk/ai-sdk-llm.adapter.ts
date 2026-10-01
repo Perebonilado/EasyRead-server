@@ -2793,7 +2793,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     input: { step: EditorWriteStep; parts: string[] } & StudioRevision,
   ): Promise<LlmResult<Record<string, unknown>>> {
     const started = Date.now();
-    const { generateObject } = await this.registry.modules();
+    const ai = await this.registry.modules();
     const { model, ref } = await this.registry.languageModel('explainer_edit');
     const schema = {
       plan: editorPlanSchema,
@@ -2804,8 +2804,10 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
       read: editorReadSchema,
       package: editorPackageSchema,
     }[input.step];
+    // Streamed: a plan or a script thought through at medium effort runs
+    // three or four minutes, near the HTTP client's five for a first byte.
     const result = await this.againIfMisshapen(() =>
-      generateObject({
+      this.streamedObject(ai, {
         model,
         schema: schema as z.ZodTypeAny,
         system: EDITOR_PROMPTS[input.step],
@@ -2824,7 +2826,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
         `${dump}/${input.step}-${Date.now()}.json`,
         JSON.stringify(
           {
-            object: result.object as unknown,
+            object: result.object,
             finishReason: result.finishReason,
             usage: result.usage,
           },
@@ -2966,6 +2968,39 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
         searches: searchesOf(searched),
       },
     };
+  }
+
+  /**
+   * An answer in its shape, streamed: it comes as it is written, so a long
+   * one never waits past the HTTP client's five minutes for its first
+   * byte. Read after as a generated object is: the object (a misshapen one
+   * throws as generateObject's does), why it finished, what it cost.
+   */
+  private async streamedObject(
+    ai: typeof import('ai'),
+    request: Record<string, unknown>,
+  ): Promise<{
+    object: unknown;
+    finishReason: string;
+    usage: LanguageModelUsage;
+  }> {
+    const seen: { error?: Error } = {};
+    const result = ai.streamObject({
+      ...request,
+      onError: ({ error }: { error: unknown }) => {
+        seen.error ??=
+          error instanceof Error ? error : new Error(String(error));
+      },
+    } as Parameters<typeof ai.streamObject>[0]);
+    // Its partial objects are not wanted: read through to the end.
+    for await (const part of result.partialObjectStream) void part;
+    if (seen.error) throw seen.error;
+    const [object, finishReason, usage] = await Promise.all([
+      result.object as PromiseLike<unknown>,
+      result.finishReason,
+      result.usage,
+    ]);
+    return { object, finishReason, usage };
   }
 
   /**

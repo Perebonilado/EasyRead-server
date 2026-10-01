@@ -239,3 +239,58 @@ export function describeItems(plan: EditorPlan): string {
     )
     .join('\n');
 }
+
+/**
+ * The editor's desk as the producer is told it: how this show is planned,
+ * where its planning is, and what the maker can do now, so the producer's
+ * reply and its step agree with what code does with the maker's words.
+ */
+export function describeEditorForProducer(
+  editor: StudioEditor,
+  episode: {
+    number: number;
+    phase: string;
+    editorial: Pick<StudioEditorial, 'number' | 'rows' | 'stage'> | null;
+  },
+): string {
+  const lines = [
+    'This explainer is planned as an editor plans a video: a show of episodes of three to five minutes each, as long as their material. Never ask how long it should run.',
+  ];
+  if (!editor.stage)
+    lines.push(
+      'When the brief is complete and the maker is ready, action "outline" starts the planning: the questions the show could answer are found first.',
+    );
+  else if (editor.stage === 'angles' && !editor.question)
+    lines.push(
+      `The questions the show could answer are offered on a card, best first:\n${editor.angles
+        .slice(0, 3)
+        .map((a, k) => `${k + 1}. ${a.question}`)
+        .join(
+          '\n',
+        )}\nThe maker picks one there, or says which ("the second one") or "you choose"; the Studio takes it from their words. Help them choose; never pick for them unless asked.`,
+    );
+  if (editor.question) lines.push(`The show's question: ${editor.question}`);
+  if (editor.plan)
+    lines.push(
+      `The episodes planned:\n${editor.plan.episodes
+        .map(
+          (e) =>
+            `${e.number}. "${e.title}": ${e.question}${e.episodeId ? ' (begun)' : ' (waiting)'}`,
+        )
+        .join('\n')}`,
+    );
+  else if (editor.question)
+    lines.push(
+      'The show is being researched and planned now; its first episode is written straight after.',
+    );
+  const editorial = episode.editorial;
+  if (editorial?.rows.length && episode.phase === 'outline')
+    lines.push(
+      `Episode ${editorial.number}'s script is written in two columns (${editorial.rows.length} lines): "Make it" makes the film (action "make"); a change to the script is action "outline" with request their change.`,
+    );
+  if (episode.phase === 'made' && editor.plan)
+    lines.push(
+      'To go on: one of the waiting episodes, by its title, or anything else they want added, is action "episode" with request their words.',
+    );
+  return lines.join('\n');
+}

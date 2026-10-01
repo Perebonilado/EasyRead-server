@@ -246,6 +246,33 @@ export class StudioEditorProcessor {
     }
   }
 
+  /**
+   * An outline asked of an editor's show (the documents' path sets one
+   * going, as a brief made complete there does): its planning begun when
+   * it has none, else the episode's script written (or written again with
+   * what was asked).
+   */
+  async outlineAsked(
+    show: StudioShowRecord,
+    episode: StudioEpisodeRecord,
+    request?: string,
+    key?: string,
+  ): Promise<void> {
+    const editor = show.editor ?? EMPTY_EDITOR;
+    if (!editor.stage) {
+      await this.studio.updateEpisode(episode.id, { busy: 'angles' });
+      await this.angles(show, episode, key);
+      return;
+    }
+    if (editor.plan && editor.world) {
+      await this.studio.updateEpisode(episode.id, { busy: 'edit' });
+      await this.edit(show, episode, key, request);
+      return;
+    }
+    // Still being planned: its first episode is written once it is.
+    await this.studio.updateEpisode(episode.id, { busy: null });
+  }
+
   /** An editor's job given up on: said in the thread, the episode free again. */
   async failed(
     show: StudioShowRecord,

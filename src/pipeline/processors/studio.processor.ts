@@ -245,6 +245,7 @@ import {
 } from '../../business/handlers/studio/studio-twins';
 import { partsFromFilm } from '../../business/domain/scene-film-parts';
 import { StudioEditorProcessor, isEditorJob } from './studio-editor.processor';
+import { usesEditor } from '../../business/domain/studio/studio-editor';
 import { withWorldPlaces } from '../../business/domain/studio/studio-editor-world';
 
 /** How wide a still the picture check looks at is: enough to tell a bus from an ark, at about 0.4 cents a look. */
@@ -747,6 +748,9 @@ export class StudioProcessor {
     try {
       if (job.kind === 'bible')
         await this.writeBible(show, episode, job.request, true, key);
+      else if (job.kind === 'outline' && usesEditor(show))
+        // An editor's show is planned by the editor, however it was asked.
+        await this.editor.outlineAsked(show, episode, job.request, key);
       else if (job.kind === 'outline')
         await this.writeOutline(
           show,

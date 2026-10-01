@@ -74,6 +74,7 @@ import {
   genderOf,
   mendScript,
   quietStretches,
+  wordsAloneStretches,
   type SceneScript,
 } from '../scene-script';
 import type { LearningStage } from '../scene-stage';
@@ -3478,6 +3479,7 @@ export function checkExplainer(
     })),
     ...[
       ...quietStretches(mended.script, STILL_WORDS),
+      ...wordsAloneStretches(mended.script),
       ...fewStageChanges(mended.script),
     ].map((message) => ({
       rule: 'storyboard' as const,

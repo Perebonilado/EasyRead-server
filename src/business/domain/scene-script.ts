@@ -2819,6 +2819,49 @@ export function quietStretches(script: SceneScript, limit = 30): string[] {
 }
 
 /**
+ * Spoken words a lesson's stage may show nothing but word cards for
+ * (Richard, 2026-10-01): a pill held on the screen while the narrator talks
+ * is dead air, and viewers leave. A card is for following a list the voice
+ * reads out, each arriving as it is named; an idea is shown as a picture
+ * that builds up, with its words as its label. About five seconds.
+ */
+export const WORDS_ALONE = 12;
+
+/** Each stretch where the stage shows only word cards for more than `limit` spoken words, said for the writer. */
+export function wordsAloneStretches(
+  script: SceneScript,
+  limit = WORDS_ALONE,
+): string[] {
+  const cards = new Map(
+    script.cast.flatMap((thing) =>
+      thing.kind === 'words' ? [[thing.id, thing.text] as const] : [],
+    ),
+  );
+  let before = 0;
+  const offsets = script.beats.map((beat) => {
+    const at = before;
+    before += wordsOf(beat.say).length;
+    return at;
+  });
+  const stages = script.steps.flatMap((step) =>
+    step.stage
+      ? [{ at: offsets[step.at.beat] + step.word, show: step.stage.show }]
+      : [],
+  );
+  const out: string[] = [];
+  stages.forEach((stage, i) => {
+    const until = stages[i + 1]?.at ?? before;
+    if (!stage.show.length || !stage.show.every((id) => cards.has(id))) return;
+    if (until - stage.at <= limit) return;
+    const words = stage.show.map((id) => `"${cards.get(id)}"`).join(', ');
+    out.push(
+      `${until - stage.at} spoken words pass with only words on the stage (${words}), from word ${stage.at} (about ${Math.round((until - stage.at) / 2.5)} seconds): show the idea as a picture that builds up as the voice goes (a drawing, a person, a chart), with its words as its label. A word card alone is only for following a list the voice reads out, each arriving as it is named.`,
+    );
+  });
+  return out;
+}
+
+/**
  * Why a written draft goes back to its writer: its problems, and for a
  * lesson a picture that sits still too long. Nothing for a page the writer
  * said cannot be taught this way.
@@ -2828,6 +2871,7 @@ export function sendBack(mended: MendedScript, lesson: boolean): string[] {
   return [
     ...mended.problems,
     ...(lesson ? quietStretches(mended.script, STILL_WORDS) : []),
+    ...(lesson ? wordsAloneStretches(mended.script) : []),
     ...(lesson ? fewStageChanges(mended.script) : []),
   ];
 }

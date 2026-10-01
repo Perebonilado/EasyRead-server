@@ -9,6 +9,7 @@ import {
   phraseAt,
   quietStretches,
   sendBack,
+  wordsAloneStretches,
   listsIn,
   flowOrder,
   betterDraft,
@@ -350,6 +351,50 @@ describe('the writer’s storyboard, mended', () => {
     // it stood.
     expect(listing[2].stage!.show.slice(0, 2)).toEqual(['sun', 'leaf']);
     expect(mended.join(' ')).toContain('a list of 3 said aloud');
+  });
+
+  it('sends back a word card left alone on the stage while the voice talks, but not a list followed as it is read', () => {
+    const { script } = mendScript(draft());
+    const words = (n: number) =>
+      Array.from({ length: n }, () => 'word').join(' ');
+    const card = (id: string, text: string) =>
+      ({ id, kind: 'words', text, style: 'keyword' }) as const;
+    const step = script.steps.find((s) => s.stage)!;
+    const at = (word: number, show: string[]) => ({
+      ...step,
+      at: { ...step.at, beat: 0 },
+      word,
+      stage: { ...step.stage!, show },
+    });
+    const base = {
+      ...script,
+      cast: [
+        ...script.cast,
+        card('pill', 'Positive peer influence'),
+        card('a', 'Sunlight'),
+        card('b', 'Water'),
+        card('c', 'Carbon dioxide'),
+      ],
+      beats: [{ ...script.beats[0], say: `${words(20)}.` }],
+    };
+    // One pill held while twenty words are said: dead air.
+    const alone = wordsAloneStretches({ ...base, steps: [at(0, ['pill'])] });
+    expect(alone).toHaveLength(1);
+    expect(alone[0]).toContain('"Positive peer influence"');
+    // A list read out, each card arriving as it is named: followed along.
+    expect(
+      wordsAloneStretches({
+        ...base,
+        steps: [at(0, ['a']), at(5, ['a', 'b']), at(10, ['a', 'b', 'c'])],
+      }),
+    ).toHaveLength(0);
+    // A card as a picture's label: the picture carries it.
+    expect(
+      wordsAloneStretches({
+        ...base,
+        steps: [at(0, [...step.stage!.show, 'pill'])],
+      }),
+    ).toHaveLength(0);
   });
 
   it('sends a lesson whose picture sits still too long back on its own, and keeps the better draft', () => {

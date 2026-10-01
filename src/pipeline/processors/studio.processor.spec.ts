@@ -1336,19 +1336,17 @@ describe("an explainer's scene written for whom it teaches (Ask 8)", () => {
   const usage = { model: 'm', tokensIn: 1, tokensOut: 1, latencyMs: 1 };
   const HARD =
     'The hydrological cycle constitutes a continuous circulation of water, which is driven primarily by solar radiation; evaporation from oceanic surfaces transports substantial quantities of moisture into the atmosphere.';
-  const card = (id: string, name: string) => ({
-    id,
-    kind: 'words',
-    name,
-    style: 'keyword',
-  });
   const draft = (say: string, steps: boolean) => ({
     fit: 'good',
     fitReason: null,
     title: 'The cycle',
     mood: 'curious',
     beats: [{ say, pause: 'short', delivery: 'explain' }],
-    cast: [card('cycle', 'water cycle'), card('sea', 'evaporation')],
+    // Numbers, not cards held alone while the voice talks (wordsAloneStretches).
+    cast: [
+      { id: 'cycle', kind: 'stat', name: 'water cycle', value: '97%' },
+      { id: 'sea', kind: 'stat', name: 'evaporation', value: '86%' },
+    ],
     steps: steps
       ? [
           {

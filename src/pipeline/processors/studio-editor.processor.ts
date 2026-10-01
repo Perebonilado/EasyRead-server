@@ -81,6 +81,7 @@ import {
   soundScenes,
   splitLongActs,
   withoutDirections,
+  withoutRepeats,
   episodeTarget,
   fitBeats,
   planLengthProblems,
@@ -880,12 +881,15 @@ export class StudioEditorProcessor {
           ? revised
           : editorial.rows;
       // Mended silently: a stage direction still in it said as what it
-      // means, or dropped, never voiced; its sentences and words; its
-      // scenes people in places, never a lone shot between lesson rows.
+      // means, or dropped, never voiced; a row said again nearly word for
+      // word dropped; its sentences and words; its scenes people in
+      // places, never a lone shot between lesson rows.
       const plain = withoutDirections(rows, ctx);
-      if (plain.fixed.length)
-        this.deps.logger.log(`studio ${episode.id}: ${plain.fixed.join('; ')}`);
-      const scenes = soundScenes(mendRows(plain.rows, ctx).rows, world ?? null);
+      const once = withoutRepeats(plain.rows);
+      const said = [...plain.fixed, ...once.fixed];
+      if (said.length)
+        this.deps.logger.log(`studio ${episode.id}: ${said.join('; ')}`);
+      const scenes = soundScenes(mendRows(once.rows, ctx).rows, world ?? null);
       if (scenes.fixed)
         this.deps.logger.log(
           `studio ${episode.id}: ${scenes.fixed} scene rows made the lesson's`,

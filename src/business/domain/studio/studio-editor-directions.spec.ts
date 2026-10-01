@@ -5,9 +5,11 @@ import {
   directionIn,
   mendRows,
   namedText,
+  repeatOf,
   scriptProblems,
   withNames,
   withoutDirections,
+  withoutRepeats,
   type WorldNames,
 } from './studio-editor-checks';
 import { describeWorld } from './studio-editor-words';
@@ -218,6 +220,38 @@ describe('narration, never a stage direction', () => {
     );
   });
 
+  it("never takes a diagram's line for a direction, though it says what its picture shows", () => {
+    for (const [say, show, visual] of [
+      [
+        'After a century, the shortfall is about 24.22 days, nearly a month.',
+        'century bar, “24.22 days” nearly a month of drift.',
+        'how-many',
+      ],
+      [
+        'That is the interval from one vernal equinox to the next.',
+        'timeline marked from one equinox to the next, “vernal equinox”.',
+        'when',
+      ],
+      [
+        'So 1700, 1800, 1900, and 2100 are common years, while 1600, 2000, and 2400 are leap years.',
+        'century-year cards split into common and leap columns, “1700 / 2000”.',
+        'comparison',
+      ],
+    ] as const)
+      expect(directionIn({ say, show, visual }, world)).toBeNull();
+    // The same words on a scene of people in a place read out its picture.
+    expect(
+      directionIn(
+        {
+          say: 'A March page can sit beside bare branches.',
+          show: 'A park path, a presenter holds a March calendar page while bare trees frame the path, soft morning light.',
+          visual: 'scene',
+        },
+        world,
+      ),
+    ).toBe('it reads out its own picture (march, page, bare)');
+  });
+
   it('never takes a quote card, a name card or a date for a direction', () => {
     for (const [say, show] of [
       [
@@ -255,7 +289,7 @@ describe('narration, never a stage direction', () => {
 
   it('sends a direction back in the one revision, with its reason', () => {
     const problems = scriptProblems(
-      [row(LEAP[12][0], LEAP[12][1], { claims: ['c12'] })],
+      [row(LEAP[12][0], LEAP[12][1], { claims: ['c12'], visual: 'scene' })],
       { research, pace: PLAIN_PACE, world },
     );
     expect(problems).toContainEqual(
@@ -291,11 +325,15 @@ describe('narration, never a stage direction', () => {
       visual: 'scene',
       show: 'Modern home office, a calendar user crosses out 1900, circles 2000, daylight.',
     });
-    expect(fixed).toEqual([
+    expect(fixed.map((f) => f.replace(/ \(.*$/u, ''))).toEqual([
       'row 2: a stage direction dropped',
       'row 3: a stage direction said as what it means',
       'row 5: a stage direction dropped',
     ]);
+    // The log says what each said, and why it was a direction.
+    expect(fixed[0]).toContain(
+      '("At the Alexandria observatory, Sosigenes studied the sky in bright coastal daylight.", it reads out its own picture (bright, daylight))',
+    );
     expect(out.every((r) => !directionIn(r, world))).toBe(true);
   });
 
@@ -319,5 +357,53 @@ describe('narration, never a stage direction', () => {
     expect(told).toContain('- Modern home office (');
     expect(told).toContain('- A calendar user, keeps the calendar');
     expect(told).not.toMatch(/modern-home-office|a-calendar-user/);
+  });
+});
+
+describe('a line said once', () => {
+  const said = (...says: string[]) => says.map((say) => row(say, 'A picture'));
+  const script = said(
+    'A few hours sound small, but they stack into days over time.',
+    'Without leap days, summer would slide later over time.',
+    'The Julian calendar added a day every fourth year.',
+    'A few hours a year sound small, but over time they stop being small.',
+    'Without leap days, summer would slide later over time.',
+    'Its average year was eleven minutes too long.',
+    'Leap years exist because the year is not a whole number of days.',
+    'So why February?',
+  );
+
+  it('sends a row back that says again what an earlier one said', () => {
+    expect(script.map((_, k) => repeatOf(script, k))).toEqual([
+      null,
+      null,
+      null,
+      0,
+      1,
+      null,
+      null,
+      null,
+    ]);
+    const problems = scriptProblems(script, { research, pace: PLAIN_PACE });
+    expect(problems).toContainEqual(
+      expect.stringMatching(/^Row 4 says again what row 1 said/),
+    );
+  });
+
+  it('drops after the revision only a row said again nearly word for word', () => {
+    const { rows, fixed } = withoutRepeats(script);
+    expect(rows).toHaveLength(7);
+    expect(rows.map((r) => r.say)).not.toContain(undefined);
+    expect(fixed).toEqual([
+      'row 5: said again (row 2), dropped ("Without leap days, summer would slide later over time.")',
+    ]);
+    // A payoff, a recap and the last three rows may echo what came before.
+    const echo = said(
+      'Without leap days, summer would slide later over time.',
+      'The Julian calendar added a day every fourth year.',
+      'Its average year was eleven minutes too long.',
+      'Without leap days, summer would slide later over time.',
+    );
+    expect(withoutRepeats(echo).rows).toHaveLength(4);
   });
 });

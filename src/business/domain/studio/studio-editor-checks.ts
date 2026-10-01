@@ -1138,13 +1138,18 @@ function labelIn(
  * Why a row's words are a stage direction, not what a narrator says; null
  * when they are narration. A direction names someone or somewhere by the
  * world's id ("a-calendar-user"); sets a place or the light down as a
- * label before its sentence ("Modern home office, …"); or reads out its
- * own picture: most of its words are the ones its show asks to be drawn,
- * at least two of them more than the names of the world's people and
- * places (so a name card's line, which names who is shown, is narration).
+ * label before its sentence ("Modern home office, …"); or, on a scene of
+ * people in a place, reads out its own picture: most of its words the
+ * ones its show asks to be drawn, at least two of them more than the
+ * names of the world's people and places. A diagram's line that says what
+ * its picture shows is the read's to weigh (never narrate the graphic),
+ * not a direction: a chart of common and leap years beside "1900 was a
+ * common year" is narration.
  */
 export function directionIn(
-  row: Pick<EditorialRow, 'say' | 'show'>,
+  row: Pick<EditorialRow, 'say' | 'show'> & {
+    visual?: EditorialRow['visual'];
+  },
   world: WorldNames | null | undefined,
 ): string | null {
   const ids = idsIn(row.say, world);
@@ -1153,6 +1158,7 @@ export function directionIn(
   const label = labelIn(row, world);
   if (label)
     return `it opens on "${label}," set down as a label, as a direction does`;
+  if (row.visual && row.visual !== 'scene') return null;
   const said = meaningWords(row.say);
   if (said.size < 3) return null;
   const shown = meaningWords(unquoted(row.show));
@@ -1166,6 +1172,61 @@ export function directionIn(
   return shared.length * 2 >= said.size && plain.length >= 2
     ? `it reads out its own picture (${plain.join(', ')})`
     : null;
+}
+
+/** The share of their words two rows have in common: the same thing said twice. */
+const overlapOf = (a: ReadonlySet<string>, b: ReadonlySet<string>) => {
+  const shared = [...a].filter((w) => b.has(w)).length;
+  return { shared, share: shared / Math.max(1, a.size + b.size - shared) };
+};
+
+/**
+ * The earlier row a row says again (most of its words the same), as a
+ * writer padding to a length does; null when it says something new. A
+ * payoff, a recap and the last three rows may echo what came before.
+ */
+export function repeatOf(
+  rows: readonly Pick<EditorialRow, 'say' | 'payoff' | 'delivery'>[],
+  k: number,
+  most = 0.5,
+): number | null {
+  const row = rows[k];
+  if (!row || row.payoff || row.delivery === 'recap' || k >= rows.length - 3)
+    return null;
+  const words = meaningWords(row.say);
+  if (words.size < 4) return null;
+  for (let j = 0; j < k; j += 1) {
+    const { shared, share } = overlapOf(words, meaningWords(rows[j].say));
+    if (shared >= 4 && share >= most) return j;
+  }
+  return null;
+}
+
+/** A row said again nearly word for word: dropped after the revision, never voiced twice. */
+export const REPEAT_DROP = 0.8;
+
+/**
+ * A script's rows that say again what an earlier row said nearly word
+ * for word, dropped by code after the one revision, silently. What it did,
+ * for the log.
+ */
+export function withoutRepeats(given: readonly EditorialRow[]): {
+  rows: EditorialRow[];
+  fixed: string[];
+} {
+  const out: EditorialRow[] = [];
+  const fixed: string[] = [];
+  given.forEach((row, k) => {
+    const j = repeatOf([...out, ...given.slice(k)], out.length, REPEAT_DROP);
+    if (j === null) {
+      out.push(row);
+      return;
+    }
+    fixed.push(
+      `row ${k + 1}: said again (row ${j + 1}), dropped ("${row.say.slice(0, 90)}")`,
+    );
+  });
+  return { rows: out, fixed };
 }
 
 /** A claim's words as a sentence the narrator says. */
@@ -1199,16 +1260,20 @@ export function withoutDirections(
   const most = longestRow(ctx.pace) + 8;
   const out = rows.flatMap((row, k): EditorialRow[] => {
     if (!directions.has(k)) return [row];
+    // For the log: what it said, and why it was a direction.
+    const was = `"${row.say.slice(0, 90)}", ${directionIn(row, world)}`;
     const claim = claimsOf(row, ctx.research).find(
       (c) => !said.has(c.id) && count(c.text) <= most,
     );
     const say = claim ? sentenceOf(claim.text) : '';
-    if (claim && say && !directionIn({ say, show: row.show }, world)) {
+    if (claim && say && !directionIn({ ...row, say }, world)) {
       said.add(claim.id);
-      fixed.push(`row ${k + 1}: a stage direction said as what it means`);
+      fixed.push(
+        `row ${k + 1}: a stage direction said as what it means (${was})`,
+      );
       return [{ ...row, say, claims: [claim.id] }];
     }
-    fixed.push(`row ${k + 1}: a stage direction dropped`);
+    fixed.push(`row ${k + 1}: a stage direction dropped (${was})`);
     return [];
   });
   return { rows: out, fixed };
@@ -1281,6 +1346,11 @@ export function scriptProblems(
     if (direction)
       out.push(
         `Row ${n} is a stage direction, not narration ("${row.say}"): ${direction}. Say is only what the narrator speaks aloud: what the moment means and why it matters. The place, the light and what people do belong in show.`,
+      );
+    const again = repeatOf(rows, k);
+    if (again !== null)
+      out.push(
+        `Row ${n} says again what row ${again + 1} said ("${row.say}"): cut it, or say something new from this episode's material; never pad to a length.`,
       );
   });
   // Each act's words against its budget, and the whole episode's: its

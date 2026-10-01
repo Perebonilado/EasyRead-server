@@ -12,6 +12,7 @@
  *     [--tone calm] [--user <uuid>] [--searches <n>] [--boards]
  *   npm run editor:show -- --bench --out <dir> [--only <id>] [--searches <n>] [--lanes <n>]
  *   npm run editor:show -- --board <episodeId> --out <dir>
+ *   npm run editor:show -- --edit <episodeId> --out <dir>   (its script written again)
  *
  * With --make, the film is then made as "Make it" makes it: its script job
  * set going on the real queue (REDIS_URL), for a worker running beside it
@@ -178,6 +179,115 @@ interface Made {
   seconds: number;
 }
 
+/** The editor's desk in-process: each call kept for the ledger and the bill, each job it sets going kept to run next. */
+function deskFor(
+  deps: {
+    studio: StudioRepository;
+    llm: LlmGatewayPort;
+    ledger: AiCallLogRepository;
+  },
+  spent: AiCallLogInput[],
+  queued: StudioJobData[],
+  say: (line: string) => void,
+): StudioEditorProcessor {
+  return new StudioEditorProcessor({
+    studio: deps.studio,
+    llm: deps.llm,
+    calls: {
+      record: async (call) => {
+        spent.push(call);
+        await deps.ledger.record(call);
+      },
+    },
+    queue: {
+      enqueueStudio: (jobs) => {
+        queued.push(...(jobs as StudioJobData[]));
+        return Promise.resolve();
+      },
+    },
+    setting: (name) => process.env[name],
+    material: null,
+    logger: {
+      log: (line) => say(`  · ${line}`),
+      warn: (line) => say(`  ! ${line}`),
+    },
+  });
+}
+
+/** What a run spent, in dollars: each call's own cost, else its tokens priced. */
+const dollarsOf = (spent: readonly AiCallLogInput[]) =>
+  spent.reduce(
+    (n, call) =>
+      n +
+      (call.costUsd ??
+        costOf({
+          task: call.task,
+          model: call.model,
+          tokensIn: call.tokensIn,
+          tokensOut: call.tokensOut,
+          tokensCached: call.tokensCached ?? null,
+        }) ??
+        0),
+    0,
+  );
+
+/**
+ * An episode written before, written again from its beat sheet and its
+ * hook: the script, the editor's read and the one revision, code's
+ * repairs, the fact check, the cut and the package. A cheap look at what
+ * the script's steps make now, on the same show.
+ */
+async function editAgain(
+  deps: {
+    studio: StudioRepository;
+    llm: LlmGatewayPort;
+    ledger: AiCallLogRepository;
+  },
+  episodeId: string,
+  out: string,
+  say: (line: string) => void,
+): Promise<Made> {
+  const started = Date.now();
+  const spent: AiCallLogInput[] = [];
+  const editor = deskFor(deps, spent, [], say);
+  const before = await deps.studio.findEpisode(episodeId);
+  if (!before?.editorial?.beats || !before.editorial.hook)
+    throw new RefusedError(
+      `Episode ${episodeId} has no beat sheet and hook to write its script from.`,
+    );
+  await deps.studio.updateEpisode(before.id, {
+    editorial: {
+      ...before.editorial,
+      stage: 'hooks',
+      rows: [],
+      notes: [],
+      facts: null,
+      package: null,
+    },
+  });
+  const t = Date.now();
+  await editor.run(
+    { kind: 'edit' },
+    (await deps.studio.findShow(before.showId))!,
+    (await deps.studio.findEpisode(before.id))!,
+    'cli:edit-again',
+  );
+  say(`  edit done in ${Math.round((Date.now() - t) / 1000)}s`);
+  const show = (await deps.studio.findShow(before.showId))!;
+  const episode = (await deps.studio.findEpisode(before.id))!;
+  const made: Made = {
+    show,
+    episode,
+    editor: show.editor!,
+    editorial: episode.editorial!,
+    dollars: dollarsOf(spent),
+    calls: spent.filter((c) => c.tokensIn !== null).length,
+    seconds: Math.round((Date.now() - started) / 1000),
+  };
+  writeArtifacts(out, made, spent);
+  return made;
+}
+
 async function makeShow(
   deps: {
     studio: StudioRepository;
@@ -197,28 +307,7 @@ async function makeShow(
   const started = Date.now();
   const spent: AiCallLogInput[] = [];
   const queued: StudioJobData[] = [];
-  const editor = new StudioEditorProcessor({
-    studio: deps.studio,
-    llm: deps.llm,
-    calls: {
-      record: async (call) => {
-        spent.push(call);
-        await deps.ledger.record(call);
-      },
-    },
-    queue: {
-      enqueueStudio: (jobs) => {
-        queued.push(...(jobs as StudioJobData[]));
-        return Promise.resolve();
-      },
-    },
-    setting: (name) => process.env[name],
-    material: null,
-    logger: {
-      log: (line) => input.say(`  · ${line}`),
-      warn: (line) => input.say(`  ! ${line}`),
-    },
-  });
+  const editor = deskFor(deps, spent, queued, input.say);
   const brief = briefOf({
     format: 'explainer',
     idea: input.topic,
@@ -280,26 +369,12 @@ async function makeShow(
   }
   const show = (await deps.studio.findShow(created.id))!;
   const episode = (await deps.studio.findEpisode(first.id))!;
-  const dollars = spent.reduce(
-    (n, call) =>
-      n +
-      (call.costUsd ??
-        costOf({
-          task: call.task,
-          model: call.model,
-          tokensIn: call.tokensIn,
-          tokensOut: call.tokensOut,
-          tokensCached: call.tokensCached ?? null,
-        }) ??
-        0),
-    0,
-  );
   const made: Made = {
     show,
     episode,
     editor: show.editor!,
     editorial: episode.editorial!,
-    dollars,
+    dollars: dollarsOf(spent),
     calls: spent.filter((c) => c.tokensIn !== null).length,
     seconds: Math.round((Date.now() - started) / 1000),
   };
@@ -775,6 +850,15 @@ async function main() {
     const boardOnly = option('--board');
     if (boardOnly) {
       await boardEpisode(deps, boardOnly, out);
+      return;
+    }
+    const editOnly = option('--edit');
+    if (editOnly) {
+      const made = await editAgain(deps, editOnly, out, (line) =>
+        console.log(line),
+      );
+      console.log(rubricWords([rubricOf(made, 'again')]));
+      console.log(`\nWritten to ${out}`);
       return;
     }
     // A film is made for someone: its seconds are counted to the show's

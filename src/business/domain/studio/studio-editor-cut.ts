@@ -33,14 +33,28 @@ export const EDITOR_LESSON_SECONDS = [10, 60] as const;
 /** The base picture a row is shown on: the map, the timeline, a scene, or the lesson's own stage. */
 type Family = 'scene' | 'map' | 'timeline' | 'lesson';
 
-const familyOf = (row: Pick<EditorialRow, 'visual'>): Family =>
+const familyOf = (
+  row: Pick<EditorialRow, 'visual'>,
+  illustrated = true,
+): Family =>
   row.visual === 'scene'
-    ? 'scene'
+    ? illustrated
+      ? 'scene'
+      : 'lesson'
     : row.visual === 'place'
       ? 'map'
       : row.visual === 'when'
         ? 'timeline'
         : 'lesson';
+
+/**
+ * Whether an editor's scenes of people and places are made illustrated
+ * (STUDIO_ILLUSTRATED, off unless set on): off, a scene row is a lesson's,
+ * its board drawing the moment as a picture.
+ */
+export function illustratedSwitchOn(setting: string | undefined | null) {
+  return /^(?:on|true|1|yes)$/iu.test((setting ?? '').trim());
+}
 
 /** A run of rows that will be one scene: from `first` to `last`, of one act and family. */
 interface Run {
@@ -163,6 +177,8 @@ export function cutScenes(
   beats: Pick<EditorialBeats, 'acts'> | null,
   world: EditorWorld | null,
   wpm: number,
+  /** Illustrated scenes made as such (STUDIO_ILLUSTRATED); off, every row is a lesson's. */
+  illustrated = true,
 ): OutlineScene[] {
   if (!rows.length) return [];
   const seconds = (k: number) => rowSeconds(rows[k], wpm);
@@ -174,7 +190,7 @@ export function cutScenes(
   // Runs of one act and one family.
   let runs: Run[] = [];
   rows.forEach((row, k) => {
-    const family = familyOf(row);
+    const family = familyOf(row, illustrated);
     const last = runs[runs.length - 1];
     if (last && last.act === row.act && last.family === family) last.last = k;
     else runs.push({ first: k, last: k, act: row.act, family });
@@ -277,11 +293,19 @@ export function editorOutline(input: {
   beats: Pick<EditorialBeats, 'acts'> | null;
   world: EditorWorld | null;
   wpm: number;
+  /** Illustrated scenes made as such; absent, they are. */
+  illustrated?: boolean;
 }): StudioOutline {
   return {
     title: input.title,
     logline: input.question,
-    scenes: cutScenes(input.rows, input.beats, input.world, input.wpm),
+    scenes: cutScenes(
+      input.rows,
+      input.beats,
+      input.world,
+      input.wpm,
+      input.illustrated ?? true,
+    ),
     editor: true,
   };
 }

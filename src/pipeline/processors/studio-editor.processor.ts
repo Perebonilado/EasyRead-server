@@ -51,6 +51,7 @@ import {
   type EditorPlan,
   type EditorResearch,
   type EditorSource,
+  type EditorWorld,
   type StudioEditor,
 } from '../../business/domain/studio/studio-editor';
 import {
@@ -82,7 +83,10 @@ import {
   withPalette,
   type EditorPace,
 } from '../../business/domain/studio/studio-editor-checks';
-import { editorOutline } from '../../business/domain/studio/studio-editor-cut';
+import {
+  editorOutline,
+  illustratedSwitchOn,
+} from '../../business/domain/studio/studio-editor-cut';
 import { worldBible } from '../../business/domain/studio/studio-editor-world';
 import {
   describeBeats,
@@ -917,6 +921,9 @@ export class StudioEditorProcessor {
       beats,
       world: world ?? null,
       wpm: pace.wpm,
+      // Illustrated scenes when switched on (STUDIO_ILLUSTRATED); off, a
+      // scene row is a lesson's, its board drawing the moment.
+      illustrated: illustratedSwitchOn(this.deps.setting('STUDIO_ILLUSTRATED')),
     });
     if (!outline.scenes.length) throw new Error('The script cut into nothing');
     await keep({ rows, stage: 'board' });
@@ -1115,7 +1122,7 @@ export class StudioEditorProcessor {
       // Whom it is for: the narration is written, so no word budget.
       `Whom it teaches: ${show.brief.audience ?? 'adults'}${recipe ? `. ${recipe.pictures}` : ''}`,
       `This is scene ${k + 1} of ${outline.scenes.length} of "${outline.title}", about ${scene.seconds} seconds.${k === 0 ? ' It opens the episode.' : ''}`,
-      `The lines, one beat each, word for word, with what the editor wants seen:\n${lines.map((r, i) => `${i + 1}. SAY: ${r.say}\n   SHOW: ${r.show || '(your choice)'} [${r.visual}]`).join('\n')}`,
+      `The lines, one beat each, word for word, with what the editor wants seen:\n${lines.map((r, i) => `${i + 1}. SAY: ${r.say}\n   SHOW: ${r.show || '(your choice)'} [${r.visual}]${r.visual === 'scene' ? ' (a moment of people in a place: draw it as one drawing, kind "drawing", the people and the place as the world describes them; never a keyword card)' : ''}`).join('\n')}`,
       world ? `The show's world and colours:\n${describeWorld(world)}` : '',
       `The page:\n${scene.teach ?? ''}`,
     ];
@@ -1128,9 +1135,10 @@ export class StudioEditorProcessor {
     };
     const first = await this.llm.editorBoard({ kind: 'lesson', parts });
     await this.record(episode.id, first.usage, 'explainer_board');
-    // On its written lines, its things in the show's colours.
+    // On its written lines, its things in the show's colours, and every
+    // moment of people in a place a drawing of it, never a word card.
     const sheetOf = (draft: unknown) => {
-      const lined = onTheLines(draft, lines);
+      const lined = drawnMoments(onTheLines(draft, lines), lines, world);
       return explainerSheetOf({
         kind: 'explainer',
         title: scene.title,
@@ -1691,32 +1699,36 @@ export function plainLesson(
   lines: readonly EditorialRow[],
 ): ExplainerSheet {
   const draft = onTheLines({ title: scene.title, cast: [], steps: [] }, lines);
-  const cards = lines.map((line, k) => ({
-    id: `card-${k + 1}`,
-    kind: 'words' as const,
-    name: cardWords(line),
-    brief: null,
-    motion: null,
-    parts: null,
-    states: null,
-    shape: null,
-    value: null,
-    style: 'keyword' as const,
-    sound: null,
-    lines: null,
-    plot: null,
-    quote: null,
-    phrases: null,
-    ref: null,
-    state: null,
-    figure: null,
-    count: null,
-    pose: null,
-    signs: null,
-    holding: null,
-    timeline: null,
-    chart: null,
-  }));
+  const cards = lines.map((line, k) =>
+    line.visual === 'scene'
+      ? momentDrawing(`moment-${k + 1}`, cardWords(line), line.show || line.say)
+      : {
+          id: `card-${k + 1}`,
+          kind: 'words' as const,
+          name: cardWords(line),
+          brief: null,
+          motion: null,
+          parts: null,
+          states: null,
+          shape: null,
+          value: null,
+          style: 'keyword' as const,
+          sound: null,
+          lines: null,
+          plot: null,
+          quote: null,
+          phrases: null,
+          ref: null,
+          state: null,
+          figure: null,
+          count: null,
+          pose: null,
+          signs: null,
+          holding: null,
+          timeline: null,
+          chart: null,
+        },
+  );
   return explainerSheetOf({
     kind: 'explainer',
     title: scene.title,
@@ -1759,4 +1771,98 @@ export function plainShots(
     scene.set ?? '',
     bible,
   );
+}
+
+/** A thing of a lesson's cast, every field present: a drawing the artist makes of a moment. */
+function momentDrawing(id: string, name: string, brief: string) {
+  return {
+    id,
+    kind: 'drawing' as const,
+    name,
+    brief,
+    motion: null,
+    parts: null,
+    states: null,
+    shape: 'wide' as const,
+    value: null,
+    style: null,
+    sound: null,
+    lines: null,
+    plot: null,
+    quote: null,
+    phrases: null,
+    ref: null,
+    state: null,
+    figure: null,
+    count: null,
+    pose: null,
+    signs: null,
+    holding: null,
+    timeline: null,
+    chart: null,
+  };
+}
+
+/**
+ * A lesson board's moments of people in a place (rows the script marked
+ * "scene", made the lesson's while illustrated scenes are switched off)
+ * each shown as a drawing of the moment: where its line brings on nothing
+ * but words, a drawing of what it shows comes on with it, the people and
+ * the place as the world describes them. Never a word card for a moment.
+ */
+export function drawnMoments(
+  draft: SceneScriptDraft,
+  lines: readonly EditorialRow[],
+  world: Pick<EditorWorld, 'places' | 'people' | 'era'> | null,
+): SceneScriptDraft {
+  const byId = new Map(draft.cast.map((t) => [t.id, t]));
+  const cast = [...draft.cast];
+  const steps = [...draft.steps];
+  lines.forEach((line, k) => {
+    if (line.visual !== 'scene') return;
+    const shown = steps
+      .filter((st) => st.beat === k)
+      .flatMap((st) => st.show ?? []);
+    if (shown.some((id) => byId.get(id) && byId.get(id)!.kind !== 'words'))
+      return;
+    const said = `${line.show} ${line.say}`.toLowerCase();
+    const place = world?.places.find((p) =>
+      said.includes(p.name.toLowerCase()),
+    );
+    const people = (world?.people ?? []).filter((p) =>
+      said.includes(p.name.toLowerCase()),
+    );
+    const id = `moment-${k + 1}`;
+    const brief = [
+      line.show || line.say,
+      place ? `The place: ${place.name}, ${place.look}` : '',
+      people.length
+        ? `The people: ${people.map((p) => `${p.name}, ${p.likeness}`).join('; ')}`
+        : '',
+      world
+        ? `In ${world.era === 'today' ? 'the present day' : world.era}.`
+        : '',
+    ]
+      .filter(Boolean)
+      .join(' ');
+    const name = (line.show || line.say)
+      .replace(/[.,;:!?]+$/u, '')
+      .split(/\s+/u)
+      .slice(0, 5)
+      .join(' ');
+    cast.push(momentDrawing(id, name, brief));
+    steps.push({
+      beat: k,
+      phrase: '',
+      layout: null,
+      show: [id],
+      arrows: null,
+      effects: null,
+    });
+  });
+  return {
+    ...draft,
+    cast,
+    steps: steps.sort((a, b) => a.beat - b.beat),
+  };
 }

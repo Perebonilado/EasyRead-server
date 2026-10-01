@@ -39,7 +39,11 @@ import { planOf, researchOf } from '../../business/domain/studio/studio-editor';
 
 const at = new Date('2026-10-01T10:00:00Z');
 
-function desk(editor: StudioEditor | null = EMPTY_EDITOR) {
+function desk(
+  editor: StudioEditor | null = EMPTY_EDITOR,
+  /** The worker's settings: illustrated scenes on, unless a test says. */
+  settings: Record<string, string> = { STUDIO_ILLUSTRATED: 'on' },
+) {
   const shows = new Map<string, StudioShowRecord>([
     [
       's1',
@@ -192,7 +196,7 @@ function desk(editor: StudioEditor | null = EMPTY_EDITOR) {
         return Promise.resolve();
       },
     },
-    setting: () => undefined,
+    setting: (name) => settings[name],
     logger: { log: () => undefined, warn: () => undefined },
   });
   const show = () => structuredClone(shows.get('s1')!);
@@ -228,8 +232,8 @@ function desk(editor: StudioEditor | null = EMPTY_EDITOR) {
 }
 
 /** The show planned from angles to world, its first episode written. */
-async function planned() {
-  const d = desk();
+async function planned(settings?: Record<string, string>) {
+  const d = desk(EMPTY_EDITOR, settings);
   await d.processor.run({ kind: 'angles' }, d.show(), d.ep());
   // The maker leaves it to the Studio: the best angle.
   d.shows.set('s1', {
@@ -739,6 +743,38 @@ describe('a board that cannot be had', () => {
             .filter((b) => b.kind === 'narration')
             .map((b) => b.say),
         ).toEqual(said);
+    }
+  });
+});
+
+describe('with illustrated scenes switched off (STUDIO_ILLUSTRATED)', () => {
+  it('cuts no illustrated scene, and boards each moment of people as a drawing of it, never a word card', async () => {
+    const d = await planned({});
+    const outline = d.ep().outline!;
+    expect(outline.scenes.some((s) => s.kind === 'illustrated')).toBe(false);
+    const rows = d.ep().editorial!.rows;
+    // The script still says where its moments of people are.
+    expect(rows.some((r) => r.visual === 'scene')).toBe(true);
+    await d.processor.boards(d.show(), d.ep());
+    for (const scene of d.scenes.values()) {
+      expect(scene.sheet?.kind).toBe('explainer');
+      const planned = outline.scenes[scene.position];
+      const sheet = scene.sheet as Extract<
+        typeof scene.sheet,
+        { kind: 'explainer' }
+      >;
+      rows.slice(planned.rows![0], planned.rows![1] + 1).forEach((row, k) => {
+        if (row.visual !== 'scene') return;
+        const shown = sheet.draft.steps
+          .filter((st) => st.beat === k)
+          .flatMap((st) => st.show ?? []);
+        expect(
+          shown.some(
+            (id) =>
+              sheet.draft.cast.find((t) => t.id === id)?.kind === 'drawing',
+          ),
+        ).toBe(true);
+      });
     }
   });
 });

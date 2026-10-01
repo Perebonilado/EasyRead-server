@@ -1191,8 +1191,17 @@ export type SceneThingDto =
       callouts?: Record<string, string>;
       /** Of those, the parts whose label waits until the voice points at the part. */
       calloutsLater?: string[];
-      /** Drawn by code, not by the artist: working, a graph, the text's own words, a timeline or a chart. */
-      source?: 'math' | 'plot' | 'quote' | 'timeline' | 'chart' | 'map';
+      /** Drawn by code, not by the artist: working, a graph, the text's own words, a timeline, a chart, a map, flags, a flow or a molecule. */
+      source?:
+        | 'math'
+        | 'plot'
+        | 'quote'
+        | 'timeline'
+        | 'chart'
+        | 'map'
+        | 'flag'
+        | 'flow'
+        | 'molecule';
       /** A story's place: the scene behind the stage, never in a slot. */
       backdrop?: true;
       /**

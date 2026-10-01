@@ -629,6 +629,10 @@ export const sceneScriptSchema = z.object({
           'timeline',
           'chart',
           'map',
+          'flag',
+          'equation',
+          'flow',
+          'molecule',
           'character',
           'person',
           'place',
@@ -722,6 +726,39 @@ export const sceneScriptSchema = z.object({
         })
         .nullable()
         .catch(null),
+      // The exact pictures code draws (scene-exact), each by names only:
+      // a country's flag, an equation's LaTeX, a flow's steps, a molecule
+      // by its common name. A stray value is null, never a lost scene.
+      flag: z.array(z.string()).nullable().catch(null),
+      equation: z.array(z.string()).nullable().catch(null),
+      flow: z
+        .object({
+          direction: z.enum(['down', 'across', 'cycle']).nullable().catch(null),
+          nodes: z
+            .array(
+              z.object({
+                label: z.string().catch(''),
+                kind: z
+                  .enum(['step', 'decision', 'start', 'end'])
+                  .nullable()
+                  .catch(null),
+              }),
+            )
+            .catch([]),
+          edges: z
+            .array(
+              z.object({
+                from: z.string().catch(''),
+                to: z.string().catch(''),
+                label: z.string().nullable().catch(null),
+              }),
+            )
+            .nullable()
+            .catch(null),
+        })
+        .nullable()
+        .catch(null),
+      molecule: z.string().nullable().catch(null),
     }),
   ),
   steps: z.array(

@@ -309,6 +309,15 @@ const MATERIAL_CHARS = 14_000;
 const PROFILE_SAMPLE_CHARS = 6_000;
 /** A page with fewer words than this has too little to teach. */
 const THIN_PAGE_WORDS = 40;
+/** What code draws again for a tall film's frame: charts, graphs, maps, flags, flows and molecules. */
+const DRAWN_FOR_SHAPE: ReadonlySet<string> = new Set([
+  'chart',
+  'plot',
+  'map',
+  'flag',
+  'flow',
+  'molecule',
+]);
 /** A story page's own text with fewer words than this is too little to write from: its note is used. */
 const STORY_OWN_WORDS = 20;
 /** A story's page is a scene with this many of its own words: a picture book's page has few. */
@@ -1182,7 +1191,7 @@ export class SceneProcessor {
   }
 
   /**
-   * A tall film's charts, graphs and maps drawn again for its frame, and a story
+   * A tall film's charts, graphs, maps, flags, flows and molecules drawn again for its frame, and a story
    * clip's card as a frame of its shape (studio-vertical-plan §4.2, §4.7):
    * code's own, so nothing is asked of a model. One that cannot be drawn
    * so stays as it was.
@@ -1194,12 +1203,7 @@ export class SceneProcessor {
     who: string,
   ): Promise<void> {
     for (const thing of script.cast.filter(isCodeThing)) {
-      if (
-        thing.kind !== 'chart' &&
-        thing.kind !== 'plot' &&
-        thing.kind !== 'map'
-      )
-        continue;
+      if (!DRAWN_FOR_SHAPE.has(thing.kind)) continue;
       const drawn = await drawByCode(thing, shape).catch(() => null);
       if (drawn) out.set(thing.id, drawn);
       else this.logger.log(`${who}: "${thing.id}" kept as drawn wide`);

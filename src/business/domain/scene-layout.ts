@@ -101,8 +101,17 @@ export type LaidThing =
         ends?: { left: [number, number]; right: [number, number] };
       }[];
       viewBox?: [number, number, number, number];
-      /** Drawn by code: working, a graph, a passage, a timeline, a chart or a map. */
-      source?: 'math' | 'plot' | 'quote' | 'timeline' | 'chart' | 'map';
+      /** Drawn by code: working, a graph, a passage, a timeline, a chart, a map, flags, a flow or a molecule. */
+      source?:
+        | 'math'
+        | 'plot'
+        | 'quote'
+        | 'timeline'
+        | 'chart'
+        | 'map'
+        | 'flag'
+        | 'flow'
+        | 'molecule';
       /** A passage: the size of its words, in its own units. */
       words?: { size: number };
       /**

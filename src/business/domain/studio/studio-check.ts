@@ -125,6 +125,7 @@ import {
 } from './studio-stage';
 import { screenTalkIn } from './studio-screen-talk';
 import { realMapIn } from '../scene-map-places';
+import { exactAskMessage, exactPictureIn, type ExactAsk } from '../scene-exact';
 
 export interface SheetProblem {
   /** Which rule: for the card's icon and for tests. */
@@ -152,7 +153,9 @@ export interface SheetProblem {
     /** An explainer's voice saying where things are on the screen, or what the learner can see, instead of teaching (studio-screen-talk): sent back once. */
     | 'screen'
     /** An explainer whose lines mostly start cold, a list of facts rather than one chain of cause and effect (studio-chain): rides along on a send-back, never one alone. */
-    | 'chain';
+    | 'chain'
+    /** A drawing asked of the artist that code draws exactly: a flag, an equation, a molecule, a flow (scene-exact): sent back once. */
+    | 'exact';
   /** In plain words, for the writer. */
   message: string;
   /** The beat it is about, from 0; null for the whole scene. */
@@ -3458,6 +3461,17 @@ export function realMapDrawings(sheet: ExplainerSheet): string[] {
   );
 }
 
+/** The drawings of an explainer's sheet that are pictures code draws exactly (a flag, an equation, a molecule, a flow), with what each is. */
+export function exactDrawings(
+  sheet: ExplainerSheet,
+): { id: string; ask: ExactAsk }[] {
+  return sheet.draft.cast.flatMap((thing) => {
+    if (thing.kind !== 'drawing') return [];
+    const ask = exactPictureIn(thing.name ?? '', thing.brief ?? '');
+    return ask ? [{ id: thing.id, ask }] : [];
+  });
+}
+
 /**
  * An explainer's sheet checked: its storyboard mended as a lesson's page
  * is, what the lesson writer would be sent back for, and its length.
@@ -3529,6 +3543,17 @@ export function checkExplainer(
     problems.push({
       rule: 'storyboard',
       message: `The drawing "${id}" is a map of a real place: show it as kind "map" (map.region, map.highlight, map.places, by name), drawn by code from real geographic data. A drawing's map is only for a made-up place.`,
+      beat: null,
+      level: 'warning',
+    });
+  // A flag, an equation, a molecule or a flow of named steps asked of the
+  // artist goes back once, to be written as its own kind. Should it come
+  // back the same, code draws it anyway where the words say what it is
+  // (mendCast), and the artist draws the rest.
+  for (const { id, ask } of exactDrawings(sheet))
+    problems.push({
+      rule: 'exact',
+      message: exactAskMessage(id, ask),
       beat: null,
       level: 'warning',
     });
@@ -3662,7 +3687,9 @@ export function repairExplainer(
   const refused = new Set(
     errorsIn(checkExplainer(sheet, options).problems).flatMap((p) => {
       const named =
-        /^The (?:chart|timeline|graph|quotation|map) "([^"]+)"/.exec(p.message);
+        /^The (?:chart|timeline|graph|quotation|map|flow|equation) "([^"]+)"/.exec(
+          p.message,
+        );
       return named ? [named[1]] : [];
     }),
   );
@@ -3688,6 +3715,10 @@ export function repairExplainer(
               phrases: null,
               lines: null,
               map: null,
+              flag: null,
+              equation: null,
+              flow: null,
+              molecule: null,
             }
           : thing,
       ),
@@ -3712,6 +3743,7 @@ export const sentBackFor = (problems: readonly SheetProblem[]) =>
       p.rule === 'quiet' ||
       p.rule === 'storyboard' ||
       p.rule === 'screen' ||
+      p.rule === 'exact' ||
       p.rule === 'kept',
   );
 

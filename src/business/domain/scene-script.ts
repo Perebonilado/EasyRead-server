@@ -66,6 +66,20 @@ import {
   type MapSpec,
 } from './scene-map';
 import { mapFromWords, realMapIn } from './scene-map-places';
+import { exactPictureIn } from './scene-exact';
+import { textFloorOf } from './scene-exact-style';
+import { readFlags, type FlagCountry } from './scene-flag-names';
+import {
+  flowPartNames,
+  readFlow,
+  type FlowDraft,
+  type FlowSpec,
+} from './scene-flow';
+import {
+  moleculeOf,
+  moleculePartNames,
+  type KnownMolecule,
+} from './scene-molecule-names';
 import { findPhrase, isVerbatim } from './scene-quote';
 import { MAX_EVENTS, type TimelineSpec } from './scene-timeline';
 import {
@@ -438,6 +452,35 @@ export interface ChartThing {
   chart: ChartSpec;
 }
 
+/** A real country's flag, or a few, drawn by code from flag-icons (scene-flag). */
+export interface FlagThing {
+  id: string;
+  kind: 'flag';
+  name: string;
+  /** Each country, with the name the writer gave it: what the voice points at. */
+  flags: (FlagCountry & { said: string })[];
+  /** The smallest text its audience reads, in stage units (scene-exact-style). */
+  text?: number;
+}
+
+/** A process, a cycle or a tree of named steps, laid out and drawn by code (scene-flow). */
+export interface FlowThing {
+  id: string;
+  kind: 'flow';
+  name: string;
+  flow: FlowSpec;
+  text?: number;
+}
+
+/** A real molecule's structure, one code knows by name, drawn by code (scene-molecule). */
+export interface MoleculeThing {
+  id: string;
+  kind: 'molecule';
+  name: string;
+  molecule: Pick<KnownMolecule, 'key' | 'name' | 'smiles'>;
+  text?: number;
+}
+
 /** A real place's map, drawn by code from real geographic data (scene-map). */
 export interface MapThing {
   id: string;
@@ -449,7 +492,15 @@ export interface MapThing {
 
 /** A thing drawn by code and not by the artist. */
 export type CodeThing =
-  MathThing | PlotThing | QuoteThing | TimelineThing | ChartThing | MapThing;
+  | MathThing
+  | PlotThing
+  | QuoteThing
+  | TimelineThing
+  | ChartThing
+  | MapThing
+  | FlagThing
+  | FlowThing
+  | MoleculeThing;
 
 /** The kinds code draws itself. */
 export const CODE_KINDS = [
@@ -459,6 +510,9 @@ export const CODE_KINDS = [
   'timeline',
   'chart',
   'map',
+  'flag',
+  'flow',
+  'molecule',
 ] as const;
 
 /** Whether a thing is one code draws, not the artist. */
@@ -569,6 +623,10 @@ export function partNames(thing: SceneThing): string[] {
     return thing.timeline.events.map((e) => e.name || e.when);
   if (thing.kind === 'chart') return thing.chart.bars.map((b) => b.label);
   if (thing.kind === 'map') return mapPartNames(thing.map);
+  if (thing.kind === 'flag') return thing.flags.map((f) => f.said);
+  if (thing.kind === 'flow') return flowPartNames(thing.flow);
+  if (thing.kind === 'molecule')
+    return moleculePartNames(thing.molecule.smiles);
   if (thing.kind === 'character' || thing.kind === 'person')
     return [...SHEET_PARTS];
   return [];
@@ -885,6 +943,10 @@ export interface SceneScriptDraft {
       | 'timeline'
       | 'chart'
       | 'map'
+      | 'flag'
+      | 'equation'
+      | 'flow'
+      | 'molecule'
       | 'character'
       | 'person'
       | 'place';
@@ -937,6 +999,14 @@ export interface SceneScriptDraft {
     } | null;
     /** A map of a real place: what it shows, by name only (scene-map). */
     map?: MapDraft | null;
+    /** Flags: the countries, by name; code looks each up (scene-flag-names). */
+    flag?: string[] | null;
+    /** An equation: its lines of LaTeX, set by code as working is. */
+    equation?: string[] | null;
+    /** A flow: its steps and what leads to what, by label (scene-flow). */
+    flow?: FlowDraft | null;
+    /** A molecule: its common name; code knows its structure (scene-molecule-names). */
+    molecule?: string | null;
   }[];
   steps: {
     beat: number;
@@ -1406,14 +1476,58 @@ export function mendCast(
       }
       return;
     }
-    if (isCodeThing(raw)) {
+    // A flag, a molecule's structure, an equation or a process of named
+    // steps asked of the artist is drawn by code instead, where code can
+    // tell from the words what it is (scene-exact): the artist's would be
+    // wrong. The rest goes back to the writer once (studio-check).
+    const exact =
+      raw.kind === 'drawing' ? exactPictureIn(name, clean(raw.brief)) : null;
+    const routed: SceneScriptDraft['cast'][number] | null = !exact
+      ? null
+      : exact.flags
+        ? { ...raw, kind: 'flag', flag: exact.flags.map((f) => f.name) }
+        : exact.molecule
+          ? { ...raw, kind: 'molecule', molecule: exact.molecule.name }
+          : exact.equation
+            ? { ...raw, kind: 'equation', equation: exact.equation.latex }
+            : exact.flow
+              ? { ...raw, kind: 'flow', flow: exact.flow }
+              : null;
+    if (routed) {
+      mended.push(
+        `${id}: "${name}" is a ${routed.kind === 'flow' ? 'flow of named steps' : routed.kind}; drawn by code, not the artist`,
+      );
+    }
+    const drawnAs = routed ?? raw;
+    // An equation is set as working is: by MathJax, its terms marked.
+    const coded =
+      drawnAs.kind === 'equation'
+        ? {
+            ...drawnAs,
+            kind: 'math' as const,
+            lines: (drawnAs.equation ?? [])
+              .map((latex) => ({ latex: clean(latex), check: null }))
+              .filter((line) => line.latex)
+              .slice(0, MAX_EQUATION_LINES),
+          }
+        : drawnAs;
+    if (drawnAs.kind === 'equation' && !coded.lines?.length) {
+      problems.push(
+        `The equation "${raw.id}" has no lines: give equation as one to four lines of LaTeX.`,
+      );
+      mended.push(`${id}: an equation with no lines; set in type`);
+      cast.push({ id, kind: 'words', text: name, style: 'keyword' });
+      return;
+    }
+    if (isCodeThing(coded)) {
       const made = codeThing(
         id,
-        raw,
+        coded,
         name,
         formats,
         options.material,
         options.stage === 'early',
+        textFloorOf(options.stage),
       );
       mended.push(...made.mended);
       problems.push(...made.problems);
@@ -2514,6 +2628,8 @@ function codeThing(
   material: string | undefined,
   /** A young learner's page: a sum is shown as a picture too. */
   young = false,
+  /** The smallest text its audience reads, in stage units: what flags, flows and molecules are drawn at. */
+  textFloor?: number,
 ): { thing: SceneThing; problems: string[]; mended: string[] } {
   const problems: string[] = [];
   const mended: string[] = [];
@@ -2716,6 +2832,65 @@ function codeThing(
       mended,
     };
   }
+  if (raw.kind === 'flag') {
+    // Looked up by code: a country it does not know is left off, never guessed.
+    const { flags, unknown } = readFlags(raw.flag ?? []);
+    mended.push(
+      ...unknown.map((one) => `${id}: no flag for "${one}"; left off`),
+    );
+    if (!flags.length) return words('a flag of no country code knows');
+    return {
+      thing: {
+        id,
+        kind: 'flag',
+        name: clean(raw.name),
+        flags,
+        ...(textFloor ? { text: textFloor } : {}),
+      },
+      problems,
+      mended,
+    };
+  }
+  if (raw.kind === 'molecule') {
+    // From the table only: a molecule it does not know is its name in type.
+    const known = moleculeOf(clean(raw.molecule) || name);
+    if (!known)
+      return words(
+        `"${clean(raw.molecule) || name}" is no molecule code knows`,
+      );
+    return {
+      thing: {
+        id,
+        kind: 'molecule',
+        name: clean(raw.name),
+        molecule: { key: known.key, name: known.name, smiles: known.smiles },
+        ...(textFloor ? { text: textFloor } : {}),
+      },
+      problems,
+      mended,
+    };
+  }
+  if (raw.kind === 'flow') {
+    const { spec, dropped } = readFlow(raw.flow);
+    mended.push(...dropped.map((why) => `${id}: ${why}; left off`));
+    if (!spec) {
+      problems.push(
+        `The flow "${raw.id}" needs at least two steps: give flow.nodes, each a label of one to five words.`,
+      );
+      return words('a flow with fewer than two steps');
+    }
+    return {
+      thing: {
+        id,
+        kind: 'flow',
+        name: clean(raw.name),
+        flow: spec,
+        ...(textFloor ? { text: textFloor } : {}),
+      },
+      problems,
+      mended,
+    };
+  }
   if (!formats.has('reading')) return words('not a book to read closely');
   // A quotation keeps its line breaks; only spaces within a line are tidied.
   const text = (raw.quote ?? '')
@@ -2756,6 +2931,8 @@ function codeThing(
 
 /** The most lines one working holds: more is a second working. */
 export const MAX_MATH_LINES = 6;
+/** And one equation: a formula, or a short worked step. */
+export const MAX_EQUATION_LINES = 4;
 
 /** An effect made sound, or why it was dropped. */
 function effectOf(

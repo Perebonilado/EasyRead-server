@@ -74,6 +74,7 @@ import {
   genderOf,
   mendScript,
   quietStretches,
+  wordsAloneStretches,
   type SceneScript,
 } from '../scene-script';
 import type { LearningStage } from '../scene-stage';
@@ -122,6 +123,8 @@ import {
   quietRuns,
   timeQuiet,
 } from './studio-stage';
+import { screenTalkIn } from './studio-screen-talk';
+import { realMapIn } from '../scene-map-places';
 
 export interface SheetProblem {
   /** Which rule: for the card's icon and for tests. */
@@ -145,7 +148,11 @@ export interface SheetProblem {
     /** A drawing whose picture is not what its label says (scene-picture-label): set in type by code; rides along on a send-back, never one alone. */
     | 'picture'
     /** A first scene that does not open on a question, a surprise or a situation (studio-cold-open): rides along. */
-    | 'cold-open';
+    | 'cold-open'
+    /** An explainer's voice saying where things are on the screen, or what the learner can see, instead of teaching (studio-screen-talk): sent back once. */
+    | 'screen'
+    /** An explainer whose lines mostly start cold, a list of facts rather than one chain of cause and effect (studio-chain): rides along on a send-back, never one alone. */
+    | 'chain';
   /** In plain words, for the writer. */
   message: string;
   /** The beat it is about, from 0; null for the whole scene. */
@@ -3442,6 +3449,15 @@ export function pictureMismatches(sheet: ExplainerSheet): PictureMismatch[] {
   );
 }
 
+/** The drawings of an explainer's sheet that are maps of real places, by id. */
+export function realMapDrawings(sheet: ExplainerSheet): string[] {
+  return sheet.draft.cast.flatMap((thing) =>
+    thing.kind === 'drawing' && realMapIn(thing.name ?? '', thing.brief ?? '')
+      ? [thing.id]
+      : [],
+  );
+}
+
 /**
  * An explainer's sheet checked: its storyboard mended as a lesson's page
  * is, what the lesson writer would be sent back for, and its length.
@@ -3473,6 +3489,7 @@ export function checkExplainer(
     })),
     ...[
       ...quietStretches(mended.script, STILL_WORDS),
+      ...wordsAloneStretches(mended.script),
       ...fewStageChanges(mended.script),
     ].map((message) => ({
       rule: 'storyboard' as const,
@@ -3503,6 +3520,23 @@ export function checkExplainer(
           ? `The drawing "${wrong.id}" is labelled "${wrong.name}" but draws the comparison the voice makes (${wrong.with}), not ${wrong.name} itself: draw what its label says, or show it as a keyword card.`
           : `The drawing "${wrong.id}" is labelled "${wrong.name}" but is drawn just as "${wrong.with}" is: draw what its label says, or show it as a keyword card.`,
       beat: null,
+      level: 'warning',
+    });
+  // A real place's map asked of the artist goes back once: the map kind
+  // draws it from real data. Should it come back the same, code draws it
+  // as a map anyway (mendScript), never freehand.
+  for (const id of realMapDrawings(sheet))
+    problems.push({
+      rule: 'storyboard',
+      message: `The drawing "${id}" is a map of a real place: show it as kind "map" (map.region, map.highlight, map.places, by name), drawn by code from real geographic data. A drawing's map is only for a made-up place.`,
+      beat: null,
+      level: 'warning',
+    });
+  for (const talk of screenTalkIn(sheet.draft.beats))
+    problems.push({
+      rule: 'screen',
+      message: `Line ${talk.beat + 1} talks about the screen ("${talk.words}"): the voice teaches what things mean (why, how, what follows), never where they stand or what can be seen; the picture is laid out by code, and the same voice plays under a wide and a vertical film. Name the thing instead.`,
+      beat: talk.beat,
       level: 'warning',
     });
   const seconds = secondsOf(sheet);
@@ -3618,7 +3652,7 @@ export function repairedWith(
 
 /**
  * An explainer scene made sound whatever its writer left wrong: a chart,
- * a timeline, a graph or a quotation the check turns down is shown as its
+ * a timeline, a graph, a map or a quotation the check turns down is shown as its
  * name in type instead, so nothing made up is drawn, and the film is made.
  */
 export function repairExplainer(
@@ -3627,9 +3661,8 @@ export function repairExplainer(
 ): ExplainerSheet {
   const refused = new Set(
     errorsIn(checkExplainer(sheet, options).problems).flatMap((p) => {
-      const named = /^The (?:chart|timeline|graph|quotation) "([^"]+)"/.exec(
-        p.message,
-      );
+      const named =
+        /^The (?:chart|timeline|graph|quotation|map) "([^"]+)"/.exec(p.message);
       return named ? [named[1]] : [];
     }),
   );
@@ -3654,6 +3687,7 @@ export function repairExplainer(
               quote: null,
               phrases: null,
               lines: null,
+              map: null,
             }
           : thing,
       ),
@@ -3677,6 +3711,7 @@ export const sentBackFor = (problems: readonly SheetProblem[]) =>
       p.rule === 'length' ||
       p.rule === 'quiet' ||
       p.rule === 'storyboard' ||
+      p.rule === 'screen' ||
       p.rule === 'kept',
   );
 

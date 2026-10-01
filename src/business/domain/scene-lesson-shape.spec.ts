@@ -22,7 +22,7 @@ import {
   textNow,
   withTextOf,
 } from './scene-lesson-shape';
-import { cellBox, tallFrameBox } from './scene-board';
+import { CENTRE_FROM, cellBox, centredAt, tallFrameBox } from './scene-board';
 import type { SceneLayout, SceneScript } from './scene-script';
 import { wordsAt } from './scene-text-check';
 import { composeVaccine } from './studio/__fixtures__/vaccine';
@@ -331,6 +331,38 @@ describe('a tall build’s board (§4.4)', () => {
     expect(tallFrameBox('whole', new Map([['a', one]]), 900, 1600)).toEqual([
       0, 0, 900, 1600,
     ]);
+  });
+
+  it('puts what a tall view frames in the middle of its text area, past the stage’s edge where it must (Richard, 2026-10-01)', () => {
+    // The first thing, top middle of the board: centred, the view runs past the stage's top.
+    const one = cellBox([0, 1], 900, 1600, 48, [0, 2], 'tall');
+    const [x, y, w, h] = tallFrameBox(['a'], new Map([['a', one]]), 900, 1600);
+    expect(y).toBeLessThan(0);
+    const mid = {
+      x: x + ((TALL_AREA.x + TALL_AREA.w / 2) / 900) * w,
+      y: y + ((TALL_AREA.y + TALL_AREA.h / 2) / 1600) * h,
+    };
+    expect(mid.x).toBeCloseTo(one.x + one.w / 2, 0);
+    expect(mid.y).toBeCloseTo(one.y + one.h / 2, 0);
+    // A view barely closer than the whole stage comes only part of the way past the edge.
+    expect(centredAt(900, 1600, 900, 1600, 0, 0, 0.5, 0.5)).toEqual({
+      x: 0,
+      y: 0,
+    });
+    const part = centredAt(
+      900 / (1 + (CENTRE_FROM - 1) / 2),
+      1600 / (1 + (CENTRE_FROM - 1) / 2),
+      900,
+      1600,
+      0,
+      0,
+      0.5,
+      0.5,
+    );
+    const all = centredAt(450, 800, 900, 1600, 0, 0, 0.5, 0.5);
+    expect(part.x).toBeLessThan(0);
+    expect(part.x).toBeGreaterThan(-900 / (1 + (CENTRE_FROM - 1) / 2) / 2);
+    expect(all).toEqual({ x: -225, y: -400 });
   });
 
   it('builds the water cycle tall, every word safe where the camera shows it', async () => {

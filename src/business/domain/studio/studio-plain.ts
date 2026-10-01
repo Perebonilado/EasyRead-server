@@ -8,7 +8,9 @@
  * Put right by code first: a sentence longer than the audience's cap is
  * split where it joins two thoughts ("; ", ", which", ", and then",
  * " because "), and a short list of stiff words is swapped for plain ones
- * ("utilise" is "use"). What is still well over the bar is a problem that
+ * ("utilise" is "use"; "due to the fact that" is "because"). Abstract
+ * words no code can swap safely ("mechanism", "locomotion") are named
+ * with their plain ones. What is still well over the bar is a problem that
  * rides along on the scene's one send-back, if it has one; never a send-
  * back of its own. Otherwise it is accepted, and logged.
  *
@@ -156,8 +158,108 @@ export function measurePlain(
 
 // ── Put right by code ─────────────────────────────────────────────────────
 
-/** Stiff words and the plain ones said in their place. */
+/**
+ * Stiff words and the plain ones said in their place: only swaps that
+ * keep the sentence's grammar whatever surrounds them (a phrase before
+ * the word it holds, a verb only where its form is sure). Richard,
+ * 2026-10-01: the words a friend would use, short and concrete ("it
+ * moves", "they fit"), never the academic ones.
+ */
 const STIFF: [RegExp, string][] = [
+  [/\bdue to the fact that\b/gi, 'because'],
+  [/\bowing to the fact that\b/gi, 'because'],
+  [/\bin the event that\b/gi, 'if'],
+  [/\bwith (?:regard|respect) to\b/gi, 'about'],
+  [/\bat (?:this point in time|the present time)\b/gi, 'now'],
+  [/\bin close proximity to\b/gi, 'close to'],
+  [/\bin the vicinity of\b/gi, 'near'],
+  // "Most of the cells", but "most cells": "of" kept before a word that needs it.
+  [
+    /\ba sufficient (?:amount|number) of(?=\s+(?:the|them|us|these|those|this|that|its|their|our|your|his|her|my)\b)/gi,
+    'enough of',
+  ],
+  [/\ba sufficient (?:amount|number) of\b/gi, 'enough'],
+  [
+    /\ba (?:large|great) number of(?=\s+(?:the|them|us|these|those|its|their|our|your|his|her|my)\b)/gi,
+    'many of',
+  ],
+  [/\ba (?:large|great) number of\b/gi, 'many'],
+  [
+    /\b(?:the|a) majority of(?=\s+(?:the|them|us|these|those|this|that|its|their|our|your|his|her|my)\b)/gi,
+    'most of',
+  ],
+  [/\b(?:the|a) majority of\b/gi, 'most'],
+  [/\bin addition to\b/gi, 'as well as'],
+  [/\bin addition\b/gi, 'also'],
+  [/\bin order for\b/gi, 'for'],
+  [/\b(?:is|are) able to\b/gi, 'can'],
+  [/\b(?:was|were) able to\b/gi, 'could'],
+  [/(?<=^|[.!?]\s+)however,\s*/gi, 'but '],
+  [/\bconverts\b(?=(?:\s+[\w'-]+){0,4}\s+into\b)/gi, 'turns'],
+  [/\bconverted\b(?=(?:\s+[\w'-]+){0,4}\s+into\b)/gi, 'turned'],
+  [/\bconverting\b(?=(?:\s+[\w'-]+){0,4}\s+into\b)/gi, 'turning'],
+  [/\bconvert\b(?=(?:\s+[\w'-]+){0,4}\s+into\b)/gi, 'turn'],
+  [/\btransforms\b(?=(?:\s+[\w'-]+){0,4}\s+into\b)/gi, 'turns'],
+  [/\btransformed\b(?=(?:\s+[\w'-]+){0,4}\s+into\b)/gi, 'turned'],
+  [/\btransforming\b(?=(?:\s+[\w'-]+){0,4}\s+into\b)/gi, 'turning'],
+  [/\btransform\b(?=(?:\s+[\w'-]+){0,4}\s+into\b)/gi, 'turn'],
+  [/\bgenerates\b/gi, 'makes'],
+  [/\bgenerated\b/gi, 'made'],
+  [/\bgenerating\b/gi, 'making'],
+  [/\bgenerate\b/gi, 'make'],
+  [/\brequires\b/gi, 'needs'],
+  [/\brequired\b/gi, 'needed'],
+  [/\brequiring\b/gi, 'needing'],
+  [/\brequire\b/gi, 'need'],
+  [/\bmodifies\b/gi, 'changes'],
+  [/\bmodified\b/gi, 'changed'],
+  [/\bmodifying\b/gi, 'changing'],
+  [/\bmodify\b/gi, 'change'],
+  [/\beliminates\b/gi, 'removes'],
+  [/\beliminated\b/gi, 'removed'],
+  [/\beliminating\b/gi, 'removing'],
+  [/\beliminate\b/gi, 'remove'],
+  [/\bindicates\b/gi, 'shows'],
+  [/\bindicating\b/gi, 'showing'],
+  [/\bindicate\b/gi, 'show'],
+  [/\binitiates\b/gi, 'starts'],
+  [/\binitiated\b/gi, 'started'],
+  [/\binitiating\b/gi, 'starting'],
+  [/\binitiate\b/gi, 'start'],
+  // "Cease to work" is not "stop to work": only before anything but "to".
+  [/\bceases\b(?!\s+to\b)/gi, 'stops'],
+  [/\bceased\b(?!\s+to\b)/gi, 'stopped'],
+  [/\bceasing\b(?!\s+to\b)/gi, 'stopping'],
+  [/\bcease\b(?!\s+to\b)/gi, 'stop'],
+  [/\bassists\b/gi, 'helps'],
+  [/\bassisted\b/gi, 'helped'],
+  [/\bassisting\b/gi, 'helping'],
+  [/\battempted to\b/gi, 'tried to'],
+  [/\battempting to\b/gi, 'trying to'],
+  [/\bresides\b/gi, 'lives'],
+  [/\bresiding\b/gi, 'living'],
+  [/\breside\b/gi, 'live'],
+  [/\bpossess\b/gi, 'have'],
+  [/\bfacilitated\b/gi, 'helped'],
+  [/\bfacilitating\b/gi, 'helping'],
+  [/\bfrequently\b/gi, 'often'],
+  [/\brapidly\b/gi, 'quickly'],
+  [/\binitially\b/gi, 'at first'],
+  [/\bultimately\b/gi, 'in the end'],
+  [/\bprimarily\b/gi, 'mainly'],
+  [/\bpredominantly\b/gi, 'mostly'],
+  [/\badditionally\b/gi, 'also'],
+  [/\bnevertheless\b/gi, 'still'],
+  [/\bnonetheless\b/gi, 'still'],
+  // "Thus protecting you" is not "so protecting you".
+  [/\bthus\b(?!\s+\w+ing\b)/gi, 'so'],
+  [/\bhence\b(?!\s+\w+ing\b)/gi, 'so'],
+  [/\bwhereas\b/gi, 'while'],
+  [/\bwhilst\b/gi, 'while'],
+  [/\bamongst\b/gi, 'among'],
+  [/(?<!\bonce )\bupon\b/gi, 'on'],
+  [/\bbeneficial\b/gi, 'helpful'],
+  [/\bdetrimental\b/gi, 'harmful'],
   [/\butili[sz]es\b/gi, 'uses'],
   [/\butili[sz]ed\b/gi, 'used'],
   [/\butili[sz]ing\b/gi, 'using'],
@@ -214,6 +316,67 @@ export function plainWords(
       return /^[A-Z]/.test(word) ? capital(plain) : plain;
     });
   return { text: out, swapped };
+}
+
+/**
+ * Abstract and academic words no code can swap safely ("the mechanism
+ * is..." has no one-word plain form), each with what a friend would say
+ * instead. What is left of them after the swaps rides along on the one
+ * send-back as plain words, unless the lesson's own material or terms
+ * use them (a course on reaction mechanisms keeps "mechanism").
+ */
+const ABSTRACT: [RegExp, string][] = [
+  [/\bmechanisms?\b/i, 'how it works'],
+  [/\blocomotion\b/i, 'moving'],
+  [/\bphenomen(?:on|a)\b/i, 'what happens'],
+  [/\bmethodolog(?:y|ies)\b/i, 'the way it is done'],
+  [/\bparadigms?\b/i, 'way of thinking'],
+  [/\boptim(?:al|um)\b/i, 'best'],
+  [/\boptimi[sz](?:e|es|ed|ing)\b/i, 'make better'],
+  [/\bsubsequent(?:ly)?\b/i, 'next, or later'],
+  [/\bsignificant(?:ly)?\b/i, 'big, or a lot'],
+  [/\bsubstantial(?:ly)?\b/i, 'big, or a lot'],
+  [/\bimplement(?:s|ed|ing|ation)?\b/i, 'put to use'],
+  [/\bconstitut(?:e|es|ed|ing)\b/i, 'make up'],
+  [/\bcompris(?:e|es|ed|ing)\b/i, 'is made of'],
+  [/\bcomponents?\b/i, 'part'],
+  [/\bentit(?:y|ies)\b/i, 'thing'],
+  [/\bwhereby\b/i, 'so that'],
+  [/\bthereby\b/i, 'and so'],
+  [/\binherent(?:ly)?\b/i, 'built in'],
+  [/\butili[sz]ation\b/i, 'use'],
+  [/\bfacilitation\b/i, 'help'],
+  [/\bfunctionality\b/i, 'what it does'],
+  [/\bcapabilit(?:y|ies)\b/i, 'what it can do'],
+  [/\bmagnitude\b/i, 'size'],
+  [/\bproximity\b/i, 'how close'],
+  [/\bacquisition\b/i, 'getting'],
+  [/\bexhibits\b/i, 'shows'],
+];
+
+/**
+ * The abstract words a narration still says, in the order it says them,
+ * each with its plain word, leaving out any the lesson's own material or
+ * terms use.
+ */
+export function abstractWords(
+  text: string,
+  material = '',
+  terms: readonly string[] = [],
+): { word: string; plain: string }[] {
+  const lesson = `${material} ${terms.join(' ')}`.toLowerCase();
+  const out: { word: string; plain: string; at: number }[] = [];
+  for (const [pattern, plain] of ABSTRACT) {
+    const found = pattern.exec(text);
+    if (!found) continue;
+    const word = found[0].toLowerCase();
+    if (lesson.includes(word)) continue;
+    out.push({ word, plain, at: found.index });
+  }
+  // In the order they are said.
+  return out
+    .sort((a, b) => a.at - b.at)
+    .map(({ word, plain }) => ({ word, plain }));
 }
 
 const wordCount = (s: string) => tokensOf(s).length;
@@ -420,19 +583,36 @@ export function plainExplainer(
   const longest = sentencesIn(narration).sort(
     (a, b) => wordCount(b) - wordCount(a),
   )[0];
+  const abstract = measure.english
+    ? abstractWords(narration, material, [
+        ...(input.terms ?? []),
+        ...cards,
+      ]).slice(0, 5)
+    : [];
+  const plainFor = abstract.map((a) => `"${a.word}" (${a.plain})`).join(', ');
   if (
     measure.english &&
     measure.words >= 20 &&
     measure.grade >= input.recipe.grade + GRADE_SLACK
   ) {
-    const hard = measure.hard.slice(0, 5).map((w) => `"${w}"`);
+    const hard = measure.hard
+      .filter((w) => !abstract.some((a) => a.word === w))
+      .slice(0, 5 - abstract.length)
+      .map((w) => `"${w}"`);
+    const instead = [plainFor, ...hard].filter(Boolean).join(', ');
     say(
-      `The narration reads at about grade ${Math.round(measure.grade)}; for these learners keep it near grade ${input.recipe.grade} or easier: sentences of at most ${cap} words, one idea each, and everyday words${hard.length ? ` in place of ${hard.join(', ')}` : ''}.`,
+      `The narration reads at about grade ${Math.round(measure.grade)}; for these learners keep it near grade ${input.recipe.grade} or easier: sentences of at most ${cap} words, one idea each, and everyday words${instead ? ` in place of ${instead}` : ''}.`,
     );
-  } else if (longest && measure.longest > cap + LONG_SLACK)
-    say(
-      `A sentence runs ${measure.longest} words ("${longest.split(/\s+/).slice(0, 8).join(' ')}…"); keep each to at most ${cap} words, one idea each.`,
-    );
+  } else {
+    if (longest && measure.longest > cap + LONG_SLACK)
+      say(
+        `A sentence runs ${measure.longest} words ("${longest.split(/\s+/).slice(0, 8).join(' ')}…"); keep each to at most ${cap} words, one idea each.`,
+      );
+    if (abstract.length)
+      say(
+        `Say it in the words a friend would use, short and concrete, not abstract or academic ones: ${plainFor}. Name what things do with action words ("moves", "pushes", "fits", "sticks to").`,
+      );
+  }
   if (input.check && !out.draft.beats.some((b) => b.delivery === 'question'))
     say(
       'Ask the viewer one question in this scene to check they follow (a sentence with delivery "question"), then leave a pause for them to think before the answer.',

@@ -3,6 +3,7 @@ import { explainerSheetOf, type ExplainerSheet } from './studio';
 import { recipeFor } from './studio-audience';
 import type { SheetProblem } from './studio-check';
 import {
+  abstractWords,
   measurePlain,
   plainDraft,
   plainExplainer,
@@ -150,6 +151,68 @@ describe('a narration put right by code', () => {
     ).toBe('Proteins facilitate diffusion.');
   });
 
+  it('swaps stiff phrases and verbs for the words a friend would use', () => {
+    const plain = (text: string) => plainWords(text).text;
+    expect(plain('Due to the fact that it is cold, the water freezes.')).toBe(
+      'Because it is cold, the water freezes.',
+    );
+    expect(plain('The cell is able to generate heat.')).toBe(
+      'The cell can make heat.',
+    );
+    expect(plain('However, the leaf converts light into sugar.')).toBe(
+      'But the leaf turns light into sugar.',
+    );
+    expect(plain('The majority of the cells cease beating.')).toBe(
+      'Most of the cells stop beating.',
+    );
+    expect(plain('The cells cease to work.')).toBe('The cells cease to work.');
+    expect(plain('The majority of people recover rapidly.')).toBe(
+      'Most people recover quickly.',
+    );
+    expect(plain('Antibodies eliminate germs, thus the fever ends.')).toBe(
+      'Antibodies remove germs, so the fever ends.',
+    );
+    expect(plain('It cools, thus forming clouds.')).toBe(
+      'It cools, thus forming clouds.',
+    );
+    // Only where its grammar is sure: "converts" with nothing turned into
+    // is left, as is "once upon a time" and "however" inside a sentence.
+    expect(plain('The bank converts your money.')).toBe(
+      'The bank converts your money.',
+    );
+    expect(plain('Once upon a time it depends upon the sun.')).toBe(
+      'Once upon a time it depends on the sun.',
+    );
+    expect(plain('The answer, however, is simple.')).toBe(
+      'The answer, however, is simple.',
+    );
+    // A word the lesson's own material uses is kept.
+    expect(
+      plainWords(
+        'Genetically modified crops grow fast.',
+        'Genetically modified organisms',
+      ).text,
+    ).toBe('Genetically modified crops grow fast.');
+  });
+
+  it('names the abstract words no code can swap, unless the lesson uses them', () => {
+    expect(
+      abstractWords('The mechanism of locomotion is simple.').map(
+        (a) => a.word,
+      ),
+    ).toEqual(['mechanism', 'locomotion']);
+    expect(abstractWords('The robot moves the water.')).toEqual([]);
+    expect(
+      abstractWords(
+        'The mechanism has two steps.',
+        'Reaction mechanisms in organic chemistry',
+      ),
+    ).toEqual([]);
+    expect(abstractWords('Each component matters.', '', ['component'])).toEqual(
+      [],
+    );
+  });
+
   it('makes each split part a beat, and keeps each step on its words', () => {
     const sheet = sheetOf(
       ['Water is everywhere.', UNIVERSITY, 'That is the cycle.'],
@@ -215,6 +278,28 @@ describe('an explainer’s scene held to its audience', () => {
         terms,
       }).problems,
     ).toEqual([]);
+  });
+
+  it('asks for everyday words in place of abstract ones, riding along with the rest', () => {
+    const robot = sheetOf([
+      'This robot is smaller than a penny.',
+      'Its mechanism of locomotion is strange.',
+      'Light hits one part of it.',
+      'That part pushes the water.',
+    ]);
+    const out = plainExplainer(robot, { recipe: grade5 });
+    expect(out.problems).toEqual([
+      expect.objectContaining({ rule: 'plain', level: 'warning' }),
+    ]);
+    expect(out.problems[0].message).toMatch(
+      /"mechanism" \(how it works\), "locomotion" \(moving\)/,
+    );
+    // Over its grade too: one problem, the abstract words named first.
+    const hard = plainExplainer(sheetOf([UNIVERSITY]), { recipe: grade5 });
+    expect(hard.problems).toHaveLength(1);
+    expect(hard.problems[0].message).toMatch(
+      /in place of "constitutes" \(make up\)/,
+    );
   });
 
   it('holds a narration in another language to its sentences only', () => {

@@ -108,7 +108,10 @@ export function applyPalette<T extends SceneThing>(
         ...thing,
         strike: {
           ...thing.strike,
-          colour: lookup(thing.name) ?? thing.strike.colour,
+          colour:
+            lookup(thing.name) ??
+            lookup(thing.strike.label) ??
+            thing.strike.colour,
         },
       };
     case 'document':

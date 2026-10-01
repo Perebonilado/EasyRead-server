@@ -3245,7 +3245,11 @@ function infographicThing(
   textFloor: number | undefined,
 ): { thing: InfographicThing; problems: string[] } | { why: string } {
   const extra = { colour: raw.colour, source: raw.source };
-  const own = clean(raw.name);
+  // Each kind draws its own words: none takes the stage's caption too (its
+  // name would be said twice), and a counter or a strike with no words of
+  // its own takes the writer's name for them.
+  const own = '';
+  const named = clean(raw.name) || null;
   const text = textFloor ? { text: textFloor } : {};
   const problems: string[] = [];
   /** A number the page does not give, said for the writer once per thing. */
@@ -3259,8 +3263,9 @@ function infographicThing(
   };
   switch (raw.kind as InfographicKind) {
     case 'counter': {
-      const counter = readCounter(raw.counter, extra);
-      if (!counter) return { why: 'a counter with no number' };
+      const read = readCounter(raw.counter, extra);
+      if (!read) return { why: 'a counter with no number' };
+      const counter = { ...read, label: read.label ?? named };
       unsourced(
         'counter',
         [counter.value, ...(counter.then !== null ? [counter.then] : [])],
@@ -3288,8 +3293,7 @@ function infographicThing(
       const namecard = readNamecard(raw.namecard, name, extra);
       if (!namecard) return { why: 'a name card with no one named' };
       return {
-        // Its caption is its name already: none under it.
-        thing: { id, kind: 'namecard', name: '', namecard, ...text },
+        thing: { id, kind: 'namecard', name: own, namecard, ...text },
         problems,
       };
     }
@@ -3310,15 +3314,15 @@ function infographicThing(
         null,
       );
       return {
-        // Its caption is drawn under its key.
-        thing: { id, kind: 'seats', name: '', seats, ...text },
+        thing: { id, kind: 'seats', name: own, seats, ...text },
         problems,
       };
     }
     case 'strike': {
-      const strike = readStrike(raw.strike, extra);
-      if (!strike)
+      const read = readStrike(raw.strike, extra);
+      if (!read)
         return { why: 'words struck out with nothing to replace them' };
+      const strike = { ...read, label: read.label ?? named };
       return {
         thing: { id, kind: 'strike', name: own, strike, ...text },
         problems,
@@ -3336,7 +3340,7 @@ function infographicThing(
       const document = readDocument(raw.document, name, extra);
       if (!document) return { why: 'a document with no title' };
       return {
-        thing: { id, kind: 'document', name: '', document, ...text },
+        thing: { id, kind: 'document', name: own, document, ...text },
         problems,
       };
     }

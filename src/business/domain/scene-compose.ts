@@ -404,6 +404,7 @@ export function thingDto(
     (thing.kind === 'namecard' ? thing.namecard.name : '') ||
     (thing.kind === 'document' ? thing.document.title : '') ||
     (thing.kind === 'seats' ? (thing.seats.label ?? '') : '') ||
+    (thing.kind === 'counter' ? (thing.counter.label ?? '') : '') ||
     (
       {
         math: 'Working',

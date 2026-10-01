@@ -2814,6 +2814,21 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
         ...this.effort(ref, 'EXPLAINER_EDIT_EFFORT', 'medium'),
       }),
     );
+    // A developer's look at what the editor answered, before it is made
+    // sound (EDITOR_DUMP_DIR): one file a call, named for its step.
+    const dump = this.config.get<string>('EDITOR_DUMP_DIR');
+    if (dump) {
+      const { writeFile, mkdir } = await import('node:fs/promises');
+      await mkdir(dump, { recursive: true });
+      await writeFile(
+        `${dump}/${input.step}-${Date.now()}.json`,
+        JSON.stringify(
+          { object: result.object, finishReason: result.finishReason, usage: result.usage },
+          null,
+          1,
+        ),
+      );
+    }
     return {
       value: result.object as Record<string, unknown>,
       usage: this.usage(ref, result.usage, started),

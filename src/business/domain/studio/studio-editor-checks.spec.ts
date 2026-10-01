@@ -24,6 +24,8 @@ import {
   splitLongActs,
   splitSentence,
   withoutScreenTalk,
+  spokenWords,
+  unusedClaims,
 } from './studio-editor-checks';
 
 const research = researchOf({
@@ -782,5 +784,36 @@ describe('the script held to its length and its scenes', () => {
       'why',
     ]);
     expect(fixed).toBe(3);
+  });
+});
+
+describe('an episode keeps its length with new matter', () => {
+  const research = {
+    claims: ['c1', 'c2', 'c3', 'c4', 'c5', 'c6'].map((id) => ({ id })),
+  } as unknown as Parameters<typeof unusedClaims>[1];
+  const plan = {
+    items: [
+      { claims: ['c1', 'c2'], episode: 1, decision: 'keep' },
+      { claims: ['c3'], episode: 1, decision: 'compress' },
+      { claims: ['c4'], episode: 2, decision: 'keep' },
+      { claims: ['c5'], episode: null, decision: 'cut' },
+    ],
+  } as unknown as Parameters<typeof unusedClaims>[0];
+
+  it("offers the episode's own claims not yet said, then claims no episode was given", () => {
+    const rows = [{ claims: ['c1'] }];
+    // c2 and c3 are episode 1's; c6 was given to none (c5 sits on a cut item, given to none too);
+    // c4 is episode 2's and stays for it.
+    expect(unusedClaims(plan, research, 1, rows)).toEqual(['c2', 'c3', 'c5', 'c6']);
+  });
+
+  it('never offers what an earlier episode already said', () => {
+    expect(
+      unusedClaims(plan, research, 1, [], [{ rows: [{ claims: ['c2', 'c6'] }] }]),
+    ).toEqual(['c1', 'c3', 'c5']);
+  });
+
+  it('counts the words a script says', () => {
+    expect(spokenWords([{ say: 'Three regions, three plans.' }, { say: 'One date.' }])).toBe(6);
   });
 });

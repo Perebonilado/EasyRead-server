@@ -82,6 +82,8 @@ import {
   splitLongActs,
   withoutDirections,
   withoutRepeats,
+  spokenWords,
+  unusedClaims,
   episodeTarget,
   fitBeats,
   planLengthProblems,
@@ -845,7 +847,17 @@ export class StudioEditorProcessor {
           : {}),
       });
       await this.record(episode.id, first.usage, 'explainer_edit');
-      const rows = rowsOf(first.value.rows, known, beats.acts.length);
+      let rows = rowsOf(first.value.rows, known, beats.acts.length);
+      // An answer whose rows did not come back in shape (seen once: the
+      // whole list made sound to nothing) is asked for once more.
+      if (!rows.length) {
+        const again = await this.llm.editorWrite({
+          step: 'script',
+          parts: scriptParts,
+        });
+        await this.record(episode.id, again.usage, 'explainer_edit');
+        rows = rowsOf(again.value.rows, known, beats.acts.length);
+      }
       if (!rows.length) throw new Error('The script came back empty');
       await keep({ rows, notes: [], stage: 'script' });
     }
@@ -867,11 +879,27 @@ export class StudioEditorProcessor {
       await this.record(episode.id, read.usage, 'explainer_edit');
       const notes = notesOf(read.value);
       progressNow({ says: 'Revising the script' });
+      // Its length is kept with new matter, never with the repeats the
+      // read cut (Richard: as much of the research as fits, 3–5 minutes):
+      // the claims of the episode not yet said go with the revision.
+      const fresh = unusedClaims(
+        plan,
+        research,
+        number,
+        editorial.rows,
+        earlier,
+      );
+      const length = `Keep the script at about ${beats.words} spoken words (the draft says ${spokenWords(editorial.rows)}). Wherever a note asks you to cut or merge a repeated idea, put a NEW point in its place, one row each, from the episode's claims not yet used${fresh.length ? ` (${fresh.join(', ')})` : ''}, each where it belongs in the story's order.`;
       const again = await this.llm.editorWrite({
         step: 'script',
-        parts: scriptParts,
+        parts: fresh.length
+          ? [
+              ...scriptParts,
+              `The episode's claims not yet used:\n${describeResearch(research, new Set(fresh))}`,
+            ]
+          : scriptParts,
         previous: { rows: editorial.rows },
-        problems: [...notes, ...found],
+        problems: [...notes, ...found, length],
       });
       await this.record(episode.id, again.usage, 'explainer_edit');
       const revised = rowsOf(again.value.rows, known, beats.acts.length);
@@ -885,10 +913,49 @@ export class StudioEditorProcessor {
       // word dropped; its sentences and words; its scenes people in
       // places, never a lone shot between lesson rows.
       const plain = withoutDirections(rows, ctx);
-      const once = withoutRepeats(plain.rows);
+      let once = withoutRepeats(plain.rows);
       const said = [...plain.fixed, ...once.fixed];
       if (said.length)
         this.deps.logger.log(`studio ${episode.id}: ${said.join('; ')}`);
+      // Still well short of its length once the repeats are gone, while the
+      // research holds more: filled once, with new rows of unused claims
+      // put where they belong, every other row left as it is.
+      const have = spokenWords(once.rows);
+      const more = unusedClaims(plan, research, number, once.rows, earlier);
+      if (have < beats.words * 0.85 && more.length) {
+        progressNow({ says: 'Filling the script out' });
+        const rowsShort = Math.max(
+          1,
+          Math.round((beats.words - have) / Math.max(1, rowWords(pace))),
+        );
+        const filled = await this.llm.editorWrite({
+          step: 'script',
+          parts: [
+            ...scriptParts,
+            `The episode's claims not yet used:\n${describeResearch(research, new Set(more))}`,
+          ],
+          previous: { rows: once.rows },
+          problems: [
+            `The script is about ${beats.words - have} spoken words short of its length (${have} of about ${beats.words}). Add about ${rowsShort} new rows, each one NEW point from the episode's claims not yet used (${more.join(', ')}), each placed where it belongs in the story's order, each with its own picture. Keep every other row exactly as it is, word for word. Never say an idea the script already says.`,
+          ],
+        });
+        await this.record(episode.id, filled.usage, 'explainer_edit');
+        const longer = withoutRepeats(
+          withoutDirections(
+            rowsOf(filled.value.rows, known, beats.acts.length),
+            ctx,
+          ).rows,
+        );
+        if (
+          spokenWords(longer.rows) > have &&
+          longer.rows.length >= once.rows.length
+        ) {
+          this.deps.logger.log(
+            `studio ${episode.id}: filled out from ${have} to ${spokenWords(longer.rows)} words`,
+          );
+          once = longer;
+        }
+      }
       const scenes = soundScenes(mendRows(once.rows, ctx).rows, world ?? null);
       if (scenes.fixed)
         this.deps.logger.log(

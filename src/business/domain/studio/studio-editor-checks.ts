@@ -784,6 +784,50 @@ export function promiseReturns(
 
 // ── The script ────────────────────────────────────────────────────────────
 
+/** How many words a script says. */
+export function spokenWords(rows: readonly Pick<EditorialRow, 'say'>[]): number {
+  return rows.reduce((n, r) => n + wordsOf(r.say).length, 0);
+}
+
+/**
+ * The claims an episode may still say, by id: its own items' claims
+ * first, then the research's claims the plan gave no episode, less any
+ * its script or an earlier episode's already says. Richard (2026-10-01):
+ * an episode holds as much of the research as fits, never padding; so a
+ * revision that cuts a repeated idea puts one of these in its place, and
+ * the episode keeps its length with new matter rather than losing it.
+ */
+export function unusedClaims(
+  plan: Pick<EditorPlan, 'items'>,
+  research: Pick<EditorResearch, 'claims'>,
+  number: number,
+  rows: readonly Pick<EditorialRow, 'claims'>[],
+  earlier: readonly { rows: readonly Pick<EditorialRow, 'claims'>[] }[] = [],
+  most = 20,
+): string[] {
+  const said = new Set(
+    [...rows, ...earlier.flatMap((e) => e.rows)].flatMap((r) => r.claims),
+  );
+  const given = new Set(
+    plan.items.filter((i) => i.episode !== null).flatMap((i) => i.claims),
+  );
+  const own = plan.items
+    .filter((i) => i.episode === number && i.decision !== 'cut')
+    .flatMap((i) => i.claims);
+  const loose = research.claims
+    .map((c) => c.id)
+    .filter((id) => !given.has(id));
+  const known = new Set(research.claims.map((c) => c.id));
+  const out: string[] = [];
+  for (const id of [...own, ...loose]) {
+    if (!known.has(id) || said.has(id) || out.includes(id)) continue;
+    out.push(id);
+    if (out.length >= most) break;
+  }
+  return out;
+}
+
+
 /** The longest sentence a row may be, in words. */
 export const MOST_SENTENCE_WORDS = 22;
 

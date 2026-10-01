@@ -326,7 +326,9 @@ describe("the editor's desk on the worker", () => {
       role: 'assistant',
       meta: { choices: ['Make it', 'Read the script'] },
     });
-    // The steps the editor model was asked, in order: one revision after the read.
+    // The steps the editor model was asked, in order: one revision after
+    // the read, then (the fake's script being well short of its beat
+    // sheet's words, with the research holding more) one filling out.
     expect(d.asked).toEqual([
       'angles',
       'research',
@@ -336,6 +338,7 @@ describe("the editor's desk on the worker", () => {
       'hooks',
       'script',
       'read',
+      'script',
       'script',
       'facts',
       'package',
@@ -363,7 +366,8 @@ describe("the editor's desk on the worker", () => {
     await d.processor.run({ kind: 'edit' }, d.show(), d.ep(), 'job:edit');
     expect(d.ep().editorial).toMatchObject({ stage: 'ready' });
     expect(d.asked.filter((s) => s === 'beats')).toHaveLength(1);
-    expect(d.asked.filter((s) => s === 'script')).toHaveLength(2);
+    // The draft, the revision and the one filling out: none written twice.
+    expect(d.asked.filter((s) => s === 'script')).toHaveLength(3);
   });
 
   it('says a job given up on in the thread, and frees the episode', async () => {

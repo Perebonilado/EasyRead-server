@@ -692,6 +692,38 @@ const contains = (view: Rect, thing: Rect) =>
   thing.x + thing.w <= view.x + view.w + HAIR &&
   thing.y + thing.h <= view.y + view.h + HAIR;
 
+/**
+ * Below this scale (the stage's width over the view's) a build's camera is
+ * at its whole board: it comes into centring what it frames as it closes
+ * in, wholly from here on. The player's CENTRE_FROM (timeline.ts).
+ */
+export const CENTRE_FROM = 1.1;
+
+/**
+ * Where a view `w` × `h` of a W × H stage goes to have the point (cx, cy)
+ * at the shares (fx, fy) of it: there exactly, past the stage's edge where
+ * that is what it takes (plain paper there, Richard, 2026-10-01); a view
+ * barely closer than the whole stage only part of the way from inside it
+ * (CENTRE_FROM), as the player's centredView.
+ */
+export function centredAt(
+  w: number,
+  h: number,
+  W: number,
+  H: number,
+  cx: number,
+  cy: number,
+  fx: number,
+  fy: number,
+): { x: number; y: number } {
+  const x = cx - fx * w;
+  const y = cy - fy * h;
+  const inX = Math.min(W - w, Math.max(0, x));
+  const inY = Math.min(H - h, Math.max(0, y));
+  const k = Math.min(1, Math.max(0, (W / w - 1) / (CENTRE_FROM - 1)));
+  return { x: inX + (x - inX) * k, y: inY + (y - inY) * k };
+}
+
 /** How much a view may widen to keep the arrows' labels whole, not cut at its edge. */
 export const LABELS_WIDEN = 1.25;
 
@@ -705,7 +737,9 @@ export const WHOLE_ROOM = 0.04;
  * than FRAME_LEAST; then moved or widened as little as it may be so that
  * it cuts through no thing on the board (`extents`, all of them): each is
  * in the view whole, or out of it. At a pull-out, all of the diagram,
- * fitted to the frame and centred in it.
+ * fitted to the frame and centred in it. Inside the stage (the wide lock,
+ * scene-shape.spec): the player centres a view the stage's edge held off
+ * what it frames (timeline.ts boardCentred).
  */
 export function frameBox(
   frame: BoardFrame,
@@ -781,8 +815,10 @@ export function frameBox(
  * the platforms' own buttons and captions) holds what it frames, a little
  * room round it; that text area never more than FRAME_MOST of the board's
  * height and never less than FRAME_LEAST; on the newest where it cannot
- * hold them all; moved or widened as little as it may be to cut through
- * no thing. At a pull-out, the whole stage: the board is its text area.
+ * hold them all; the text area's middle on the middle of what it frames,
+ * past the stage's edge where that is what it takes; moved or widened as
+ * little as it may be to cut through no thing. At a pull-out, the whole
+ * stage: the board is its text area.
  */
 export function tallFrameBox(
   frame: BoardFrame,
@@ -825,13 +861,10 @@ export function tallFrameBox(
   const newest = boxes[0];
   const cx = fits ? (x0 + x1) / 2 : newest.x + newest.w / 2;
   const cy = fits ? (y0 + y1) / 2 : newest.y + newest.h / 2;
-  // The middle of the text area on the middle of what it frames.
-  const want: Rect = {
-    x: Math.min(W - w, Math.max(0, cx - ((t.x0 + t.x1) / 2) * w)),
-    y: Math.min(H - h, Math.max(0, cy - ((t.y0 + t.y1) / 2) * h)),
-    w,
-    h,
-  };
+  // The middle of the text area on the middle of what it frames, past
+  // the stage's edge where that is what it takes (Richard, 2026-10-01).
+  const mid = { x: (t.x0 + t.x1) / 2, y: (t.y0 + t.y1) / 2 };
+  const want: Rect = { ...centredAt(w, h, W, H, cx, cy, mid.x, mid.y), w, h };
   // Everything on the board, and the arrows' labels: none seen in the
   // frame but outside its text area (under the platforms' buttons, in the
   // subtitles' band, or cut at its edge). The nearest view so, widened as
@@ -871,17 +904,16 @@ export function tallFrameBox(
     const vw = Math.min(W, want.w * grow);
     const vh = vw / aspect;
     const steps = 8;
+    // Centred, or moved off it: inside the stage, or past its edge as far
+    // as the centred view is.
+    const { x: mx, y: my } = centredAt(vw, vh, W, H, cx, cy, mid.x, mid.y);
+    const clamp = (v: number, top: number, centred: number) =>
+      Math.min(Math.max(top, centred), Math.max(Math.min(0, centred), v));
     for (let i = -steps; i <= steps; i += 1)
       for (let j = -steps; j <= steps; j += 1) {
         const v = {
-          x: Math.min(
-            W - vw,
-            Math.max(0, cx - ((t.x0 + t.x1) / 2) * vw + (i * vw) / (steps * 3)),
-          ),
-          y: Math.min(
-            H - vh,
-            Math.max(0, cy - ((t.y0 + t.y1) / 2) * vh + (j * vh) / (steps * 3)),
-          ),
+          x: clamp(mx + (i * vw) / (steps * 3), W - vw, mx),
+          y: clamp(my + (j * vh) / (steps * 3), H - vh, my),
           w: vw,
           h: vh,
         };

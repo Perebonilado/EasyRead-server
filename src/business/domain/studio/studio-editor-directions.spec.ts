@@ -397,6 +397,19 @@ describe('a line said once', () => {
     expect(fixed).toEqual([
       'row 5: said again (row 2), dropped ("Without leap days, summer would slide later over time.")',
     ]);
+    // One that holds nearly all of an earlier one's words, a few added, is said again too.
+    const longer = said(
+      'After a century, summer would not start until mid-July.',
+      'The Julian calendar added a day every fourth year.',
+      'After a century, summer would not start until mid-July on the old calendar.',
+      'Its average year was eleven minutes too long.',
+      'Leap years exist because the year is not a whole number of days.',
+      'So why February?',
+      'The answer is in Rome.',
+    );
+    expect(withoutRepeats(longer).fixed).toEqual([
+      'row 3: said again (row 1), dropped ("After a century, summer would not start until mid-July on the old calendar.")',
+    ]);
     // A payoff, a recap and the last three rows may echo what came before.
     const echo = said(
       'Without leap days, summer would slide later over time.',

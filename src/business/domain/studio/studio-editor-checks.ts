@@ -1174,36 +1174,52 @@ export function directionIn(
     : null;
 }
 
-/** The share of their words two rows have in common: the same thing said twice. */
+/** How much two rows' words are one: shared over all of them, and over the shorter's. */
 const overlapOf = (a: ReadonlySet<string>, b: ReadonlySet<string>) => {
   const shared = [...a].filter((w) => b.has(w)).length;
-  return { shared, share: shared / Math.max(1, a.size + b.size - shared) };
+  return {
+    shared,
+    share: shared / Math.max(1, a.size + b.size - shared),
+    within: shared / Math.max(1, Math.min(a.size, b.size)),
+  };
 };
 
 /**
- * The earlier row a row says again (most of its words the same), as a
- * writer padding to a length does; null when it says something new. A
- * payoff, a recap and the last three rows may echo what came before.
+ * How alike two rows are before one says the other again: for the one
+ * revision, most of their words the same, or nearly all of the shorter's;
+ * for code to drop after it, nearly word for word.
+ */
+const REPEATS = {
+  note: { share: 0.5, within: 0.8, shared: 4 },
+  drop: { share: 0.8, within: 0.9, shared: 5 },
+} as const;
+
+/**
+ * The earlier row a row says again, as a writer padding to a length does;
+ * null when it says something new. A payoff, a recap and the last three
+ * rows may echo what came before.
  */
 export function repeatOf(
   rows: readonly Pick<EditorialRow, 'say' | 'payoff' | 'delivery'>[],
   k: number,
-  most = 0.5,
+  level: keyof typeof REPEATS = 'note',
 ): number | null {
   const row = rows[k];
   if (!row || row.payoff || row.delivery === 'recap' || k >= rows.length - 3)
     return null;
   const words = meaningWords(row.say);
   if (words.size < 4) return null;
+  const most = REPEATS[level];
   for (let j = 0; j < k; j += 1) {
-    const { shared, share } = overlapOf(words, meaningWords(rows[j].say));
-    if (shared >= 4 && share >= most) return j;
+    const { shared, share, within } = overlapOf(
+      words,
+      meaningWords(rows[j].say),
+    );
+    if (shared >= 4 && share >= most.share) return j;
+    if (shared >= most.shared && within >= most.within) return j;
   }
   return null;
 }
-
-/** A row said again nearly word for word: dropped after the revision, never voiced twice. */
-export const REPEAT_DROP = 0.8;
 
 /**
  * A script's rows that say again what an earlier row said nearly word
@@ -1217,7 +1233,7 @@ export function withoutRepeats(given: readonly EditorialRow[]): {
   const out: EditorialRow[] = [];
   const fixed: string[] = [];
   given.forEach((row, k) => {
-    const j = repeatOf([...out, ...given.slice(k)], out.length, REPEAT_DROP);
+    const j = repeatOf([...out, ...given.slice(k)], out.length, 'drop');
     if (j === null) {
       out.push(row);
       return;

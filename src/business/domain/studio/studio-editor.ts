@@ -278,6 +278,12 @@ export function urlKey(url: string): string {
   }
 }
 
+/** An address by its site and path alone: a page cited without the query it was found with is the same page. */
+export function pathKey(url: string): string {
+  const key = urlKey(url);
+  return key.split('?')[0];
+}
+
 /** A source's address made sound: the web's, or a page of the maker's document; null for anything else. */
 export function sourceUrl(raw: unknown): string | null {
   const said = typeof raw === 'string' ? raw.trim() : '';
@@ -322,6 +328,10 @@ export function researchOf(
 ): EditorResearch {
   const said = record(raw);
   const taken = new Set<string>();
+  // A page cited without the query the search found it with is that page.
+  const byPath = new Map<string, EditorSource>();
+  for (const page of found?.values() ?? [])
+    if (!byPath.has(pathKey(page.url))) byPath.set(pathKey(page.url), page);
   const claims = list(said.claims)
     .slice(0, RESEARCH_LIMITS.claims)
     .flatMap((one, k): EditorClaim[] => {
@@ -340,7 +350,7 @@ export function researchOf(
           const url = sourceUrl(typeof s === 'string' ? s : src.url);
           if (!url) return [];
           if (found) {
-            const real = found.get(urlKey(url));
+            const real = found.get(urlKey(url)) ?? byPath.get(pathKey(url));
             if (!real && !url.startsWith('document:')) return [];
             return [
               {

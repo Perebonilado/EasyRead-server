@@ -1040,15 +1040,50 @@ export class StudioEditorProcessor {
           const at = k++;
           const scene = outline.scenes[at];
           progressNow({ says: `Boarding scene ${at + 1}`, scene: at });
-          if (isIllustrated(scene))
-            await this.illustratedBoard(show, episode, bible, rows[at], at);
-          else await this.lessonBoard(show, episode, bible, rows[at], at);
+          try {
+            if (isIllustrated(scene))
+              await this.illustratedBoard(show, episode, bible, rows[at], at);
+            else await this.lessonBoard(show, episode, bible, rows[at], at);
+          } catch (error) {
+            // A board that cannot be had is a plain one, never a hole in
+            // the film: its lines said over what they name.
+            this.deps.logger.warn(
+              `studio ${episode.id} s${at + 1}: boarded plainly: ${(error as Error).message}`,
+            );
+            await this.plainBoard(show, episode, bible, rows[at], at);
+          }
           progressNow({ scene: at, done: true });
         }
       },
     );
     await Promise.all(lanes);
     return rows.length;
+  }
+
+  /**
+   * A scene boarded by code alone, when its board cannot be had: a
+   * lesson's lines each over a keyword card of what it shows; an
+   * illustrated scene's narration in its place, its people there.
+   */
+  private async plainBoard(
+    show: StudioShowRecord,
+    episode: StudioEpisodeRecord,
+    bible: StudioBible,
+    row: StudioSceneRecord,
+    k: number,
+  ): Promise<void> {
+    const scene = episode.outline!.scenes[k];
+    const lines = this.rowsOf(episode, scene);
+    const sheet = isIllustrated(scene)
+      ? plainShots(scene, lines, bible)
+      : plainLesson(scene, lines);
+    await this.studio.updateScene(row.id, {
+      sheet,
+      sheetHash: sceneFingerprint(sheet, bible, show.brief, []),
+      problems: [],
+      status: 'ready',
+      error: null,
+    });
   }
 
   /** The lines a scene says: its rows, in order. */
@@ -1640,4 +1675,88 @@ function EMPTY_BIBLE_FOR(show: StudioShowRecord): StudioBible {
     maths: false,
     pictures: [],
   };
+}
+
+/** The words a row's picture names, for a plain keyword card: what it quotes, else its first few words. */
+function cardWords(row: EditorialRow): string {
+  const quoted = /["“]([^"”]{1,40})["”]/u.exec(row.show)?.[1];
+  if (quoted) return quoted;
+  const words = (row.show || row.say).replace(/[.,;:!?]+$/u, '').split(/\s+/u);
+  return words.slice(0, 4).join(' ');
+}
+
+/** A lesson scene boarded by code alone: each line over a keyword card of what it shows. */
+export function plainLesson(
+  scene: Pick<OutlineScene, 'title'>,
+  lines: readonly EditorialRow[],
+): ExplainerSheet {
+  const draft = onTheLines({ title: scene.title, cast: [], steps: [] }, lines);
+  const cards = lines.map((line, k) => ({
+    id: `card-${k + 1}`,
+    kind: 'words' as const,
+    name: cardWords(line),
+    brief: null,
+    motion: null,
+    parts: null,
+    states: null,
+    shape: null,
+    value: null,
+    style: 'keyword' as const,
+    sound: null,
+    lines: null,
+    plot: null,
+    quote: null,
+    phrases: null,
+    ref: null,
+    state: null,
+    figure: null,
+    count: null,
+    pose: null,
+    signs: null,
+    holding: null,
+    timeline: null,
+    chart: null,
+  }));
+  return explainerSheetOf({
+    kind: 'explainer',
+    title: scene.title,
+    transition: 'cut',
+    draft: {
+      ...draft,
+      cast: cards,
+      steps: cards.map((card, k) => ({
+        beat: k,
+        phrase: '',
+        layout: null,
+        show: [card.id],
+        arrows: null,
+        effects: null,
+      })),
+    },
+  });
+}
+
+/** An illustrated scene boarded by code alone: its narration in its place, its people there. */
+export function plainShots(
+  scene: Pick<OutlineScene, 'title' | 'set' | 'cast'>,
+  lines: readonly EditorialRow[],
+  bible: Pick<StudioBible, 'characters' | 'sets'>,
+): StorySheet {
+  const spots = ['centre-left', 'centre-right', 'left', 'right'];
+  const here = scene.cast
+    .filter((id) => bible.characters.some((c) => c.id === id))
+    .slice(0, 2);
+  return narratedSheet(
+    storySheetOf({
+      title: scene.title,
+      set: scene.set ?? bible.sets[0]?.id ?? '',
+      time: 'day',
+      crowd: 'few',
+      onStage: here.map((who, k) => ({ who, spot: spots[k] })),
+      beats: [],
+    }),
+    lines,
+    scene.set ?? '',
+    bible,
+  );
 }

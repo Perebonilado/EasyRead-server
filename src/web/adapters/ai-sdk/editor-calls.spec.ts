@@ -1,6 +1,8 @@
 import {
   effortOptions,
+  filled,
   foundOf,
+  lenient,
   misshapen,
   revisedPrompt,
   searchesOf,
@@ -138,5 +140,90 @@ describe("the boards' prompts", () => {
     expect(boardLessonPrompt().length).toBeGreaterThan(2000);
     expect(boardIllustratedPrompt()).toMatch(/No one speaks/);
     expect(boardIllustratedPrompt()).toMatch(/violence is never shown/);
+  });
+});
+
+describe("a board's answer read leniently", () => {
+  it('takes an answer that leaves out the keys a thing does not use, and fills them as the schema would', () => {
+    const { sceneScriptSchema } =
+      jest.requireActual<typeof import('./schemas')>('./schemas');
+    const answer = {
+      title: 'A scene',
+      beats: [{ say: 'One line.' }],
+      cast: [{ id: 'loop', kind: 'drawing', name: 'Loop', brief: 'a loop' }],
+      steps: [{ beat: 0, phrase: 'One', show: ['loop'] }],
+    };
+    expect(() => sceneScriptSchema.parse(answer)).toThrow();
+    const read = lenient(sceneScriptSchema).parse(answer);
+    const sound = filled(read, sceneScriptSchema) as {
+      fit: string;
+      fitReason: unknown;
+      mood: string;
+      beats: { pause: string; delivery: string; speaker: unknown }[];
+      cast: { plot: unknown; parts: unknown; kind: string }[];
+      steps: { arrows: unknown; effects: unknown }[];
+    };
+    expect(sound.fit).toBe('good');
+    expect(sound.fitReason).toBeNull();
+    expect(sound.mood).toBe('calm');
+    expect(sound.beats[0]).toMatchObject({
+      pause: 'short',
+      delivery: 'explain',
+      speaker: null,
+    });
+    expect(sound.cast[0]).toMatchObject({
+      kind: 'drawing',
+      plot: null,
+      parts: null,
+    });
+    expect(sound.steps[0]).toMatchObject({ arrows: null, effects: null });
+    // Filled, the answer is the full schema's.
+    expect(() => sceneScriptSchema.parse(sound)).not.toThrow();
+  });
+});
+
+describe('the pages a search found', () => {
+  it('are those each search consulted or opened too, not only those the answer cited', () => {
+    const found = foundOf({
+      steps: [
+        {
+          sources: [],
+          toolCalls: [{ toolName: 'web_search' }],
+          toolResults: [
+            {
+              toolName: 'web_search',
+              output: {
+                action: { type: 'search', query: 'leap years' },
+                sources: [
+                  {
+                    type: 'url',
+                    url: 'https://a.example.com/leap?utm_source=openai',
+                  },
+                  { type: 'url', url: 'https://b.example.org/calendar' },
+                ],
+              },
+            },
+            {
+              toolName: 'web_search',
+              output: {
+                action: { type: 'openPage', url: 'https://c.example.net/x' },
+              },
+            },
+            {
+              toolName: 'other',
+              output: { sources: [{ url: 'https://d.example.com' }] },
+            },
+          ],
+        },
+      ],
+      sources: [
+        { sourceType: 'url', url: 'https://a.example.com/leap', title: 'Leap' },
+      ],
+    });
+    expect(found).toEqual([
+      { url: 'https://a.example.com/leap', title: 'Leap' },
+      { url: 'https://b.example.org/calendar', title: '' },
+      { url: 'https://c.example.net/x', title: '' },
+    ]);
   });
 });

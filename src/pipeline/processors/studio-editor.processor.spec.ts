@@ -712,3 +712,33 @@ describe('the Studio processor hands the editor its work', () => {
     expect(d.ep()).toMatchObject({ busy: null });
   });
 });
+
+describe('a board that cannot be had', () => {
+  it('is a plain one, never a hole in the film', async () => {
+    const d = await planned();
+    (d.llm as unknown as { editorBoard: () => Promise<never> }).editorBoard =
+      () => Promise.reject(new Error('the board fell over'));
+    const count = await d.processor.boards(d.show(), d.ep());
+    const outline = d.ep().outline!;
+    const rows = d.ep().editorial!.rows;
+    expect(count).toBe(outline.scenes.length);
+    for (const scene of d.scenes.values()) {
+      const planned = outline.scenes[scene.position];
+      const said = rows
+        .slice(planned.rows![0], planned.rows![1] + 1)
+        .map((r) => r.say);
+      expect(scene.status).toBe('ready');
+      if (scene.sheet?.kind === 'explainer') {
+        expect(scene.sheet.draft.beats.map((b) => b.say)).toEqual(said);
+        expect(scene.sheet.draft.cast.every((t) => t.kind === 'words')).toBe(
+          true,
+        );
+      } else
+        expect(
+          scene.sheet?.beats
+            .filter((b) => b.kind === 'narration')
+            .map((b) => b.say),
+        ).toEqual(said);
+    }
+  });
+});

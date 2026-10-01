@@ -86,7 +86,9 @@ import {
 } from '../editor-prompts';
 import {
   effortOptions,
+  filled,
   foundOf,
+  lenient,
   misshapen,
   revisedPrompt,
   searchesOf,
@@ -2954,12 +2956,15 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     const { generateObject } = await this.registry.modules();
     const { model, ref } = await this.registry.languageModel('explainer_board');
     const lesson = input.kind === 'lesson';
+    // The lesson writer's own schema, or a story's sheet's, read leniently:
+    // a key the board leaves out is given what the schema would give it.
+    const full = (
+      lesson ? sceneScriptSchema : studioSceneSchema
+    ) as z.ZodTypeAny;
     const result = await this.againIfMisshapen(() =>
       generateObject({
         model,
-        schema: (lesson
-          ? sceneScriptSchema
-          : studioSceneSchema) as z.ZodTypeAny,
+        schema: lenient(full),
         system: lesson ? boardLessonPrompt() : boardIllustratedPrompt(),
         prompt: revisedPrompt(input.parts, input),
         maxRetries: this.maxRetries(),
@@ -2967,7 +2972,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
       }),
     );
     return {
-      value: result.object as Record<string, unknown>,
+      value: filled(result.object, full) as Record<string, unknown>,
       usage: this.usage(ref, result.usage, started),
     };
   }

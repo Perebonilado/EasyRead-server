@@ -383,3 +383,37 @@ describe('how sure a claim is', () => {
     ]);
   });
 });
+
+describe('a source cited without its query', () => {
+  it('is the page the search found with it', () => {
+    const found = new Map([
+      [
+        urlKey('https://blogs.loc.gov/law/2013/01/tea/?loclr=bloglaw'),
+        {
+          url: 'https://blogs.loc.gov/law/2013/01/tea/?loclr=bloglaw',
+          title: '',
+        },
+      ],
+    ]);
+    const research = researchOf(
+      {
+        claims: [
+          {
+            id: 'c1',
+            text: 'Ten days went.',
+            sources: [
+              { url: 'https://blogs.loc.gov/law/2013/01/tea/', title: 'Tea' },
+            ],
+          },
+        ],
+      },
+      found,
+    );
+    expect(research.claims[0].sources).toEqual([
+      {
+        url: 'https://blogs.loc.gov/law/2013/01/tea/?loclr=bloglaw',
+        title: 'Tea',
+      },
+    ]);
+  });
+});

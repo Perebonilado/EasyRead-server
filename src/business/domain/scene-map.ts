@@ -802,9 +802,19 @@ export function readMap(draft: MapDraft | null | undefined): {
     }
     if (pins.length >= MAP_LIMITS.pins) continue;
     const label = tidy(raw.label, 40) || null;
-    let name = label ?? point?.name ?? place;
-    for (let k = 2; pins.some((p) => p.name === name); k++)
-      name = `${label ?? point?.name ?? place} ${k}`;
+    // Its own name among the map's parts: a place it is on is its pin's.
+    const own = label ?? point?.name ?? place;
+    const named = (name: string) =>
+      [...highlights, ...areas, ...merged, ...pins].some(
+        (one) => placeKey(one.name) === placeKey(name),
+      ) ||
+      places.some(
+        (one) =>
+          placeKey(one.name) === placeKey(name) &&
+          !(point && one.name === point.name),
+      );
+    let name = own;
+    for (let k = 2; named(name); k++) name = `${own} ${k}`;
     pins.push({
       name,
       at: point ? [point.lon, point.lat] : null,
@@ -843,6 +853,13 @@ export function readMap(draft: MapDraft | null | undefined): {
     });
   }
 
+  // A place a pin is on is marked by its pin alone: one mark, one name.
+  const pinned = new Set(
+    pins.flatMap((pin) => (pin.at ? [`${pin.at[0]},${pin.at[1]}`] : [])),
+  );
+  for (let i = places.length - 1; i >= 0; i--)
+    if (pinned.has(`${places[i].lon},${places[i].lat}`)) places.splice(i, 1);
+
   // The region; failing that, what it colours and marks; failing that, the show's.
   let region: MapRegion | null = asked;
   if (!region) {
@@ -877,13 +894,23 @@ export function readMap(draft: MapDraft | null | undefined): {
   const period =
     year !== null &&
     (differ === true || (differ !== false && year < TODAYS_BORDERS_FROM));
-  // A group's colour from the show, or a named region of its name.
-  const groupColours = groups.map(
-    (name) =>
-      (name ? tint(name) : null) ??
-      merged.find((m) => name && placeKey(m.name) === placeKey(name))?.colour ??
-      null,
-  );
+  // A group's colour from the show's palette, or a named region's of its
+  // name, drawn here or only the show's: the West's areas are the West's
+  // colour in every scene.
+  const groupColours = groups.map((name) => {
+    if (!name) return null;
+    const shows = baseGroup(name);
+    return (
+      tint(name) ??
+      merged.find((m) => placeKey(m.name) === placeKey(name))?.colour ??
+      (shows
+        ? (mapColourOf(shows.colour) ??
+          MERGED_COLOURS[
+            (base?.groups ?? []).indexOf(shows) % MERGED_COLOURS.length
+          ])
+        : null)
+    );
+  });
   // Drawn in the show's one map, unless it asks for more than it, or for elsewhere.
   const framed =
     baseRegion !== null && (!asked || regionInside(asked, baseRegion));

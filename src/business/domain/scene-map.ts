@@ -934,6 +934,21 @@ export function readMap(draft: MapDraft | null | undefined): {
   };
 }
 
+/**
+ * Whether two maps are drawn in one frame: the same show's one map, and
+ * each of no more than it. Scenes one after another that end and open on
+ * them line up exactly, and the film carries one into the other.
+ */
+export function sameMapFrame(
+  a: MapDraft | null | undefined,
+  b: MapDraft | null | undefined,
+): boolean {
+  if (!a?.base || !b?.base) return false;
+  const one = readMap(a).spec?.base;
+  const two = readMap(b).spec?.base;
+  return Boolean(one && two && JSON.stringify(one) === JSON.stringify(two));
+}
+
 /** The names of a map's parts, as the voice points at them: each highlight, area, named region, pin, seam, place and route. */
 export const mapPartNames = (spec: MapSpec): string[] => [
   ...spec.highlights.map((h) => h.name),

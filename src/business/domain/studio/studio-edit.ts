@@ -13,6 +13,7 @@
 import type { FilmShape } from '../scene-shape';
 import type { StudioJoinName, StudioJoinWithDto } from '../../../contracts';
 import { groupId } from '../scene-ids';
+import { sameMapFrame } from '../scene-map';
 import type {
   ExplainerSheet,
   OutlineScene,
@@ -225,7 +226,8 @@ function namesPartOf(side: JoinSide, parts: readonly string[]): string | null {
  *  - zoom-through: the next scene names a part of what the last one ended
  *    on ("inside the nucleus"), or its outline says `into` it;
  *  - morph: the same thing in both, at the end of one and the start of
- *    the next (its place, and a chart's or graph's numbers, change);
+ *    the next (its place, and a chart's or graph's numbers, change), and
+ *    two maps in a show's one frame (scene-map), which line up exactly;
  *  - match: what the last ended on and the next opens on are one of the
  *    show's pictures, or the same shape (a chart and a chart);
  *  - push: two steps of one list ("Step 2", "Step 3"); in a tall film a
@@ -270,10 +272,13 @@ export function joinFor(
   const opens = now.first
     .map((id) => castB.get(id))
     .filter((c): c is Cast => Boolean(c));
+  // Two maps in the show's one frame are one map, however each is
+  // captioned: the film carries it across, and what it colours changes.
   const sameThing = (x: Cast, y: Cast) =>
-    x.kind === y.kind &&
-    nameKey(x.name) !== '' &&
-    nameKey(x.name) === nameKey(y.name);
+    (x.kind === y.kind &&
+      nameKey(x.name) !== '' &&
+      nameKey(x.name) === nameKey(y.name)) ||
+    (x.kind === 'map' && y.kind === 'map' && sameMapFrame(x.map, y.map));
   const ranked = [...ends].sort(
     (x, y) => Number(SET_BY_CODE.has(y.kind)) - Number(SET_BY_CODE.has(x.kind)),
   );

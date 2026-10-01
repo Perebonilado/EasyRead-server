@@ -1,3 +1,4 @@
+import type { MapDraft } from '../scene-map';
 import type { ExplainerSheet, StorySheet } from './studio';
 import { joinFor, joinOf, placeInList, type JoinSide } from './studio-edit';
 import { motionFor, studioReading } from './studio-motion';
@@ -119,6 +120,48 @@ describe('how an explainer joins its scenes (Ask 4 D), by code', () => {
       join: 'morph',
       joinWith: { from: 'rain1', to: 'rain2' },
     });
+  });
+
+  it("morphs one map into the next where both are in the show's one frame, however each is captioned", () => {
+    const base = { kind: 'map' as const, region: 'Germany', year: 1961 };
+    const map = (id: string, name: string, more: Partial<MapDraft>) =>
+      thing(id, name, {
+        kind: 'map',
+        map: {
+          region: 'Germany',
+          highlight: null,
+          places: null,
+          routes: null,
+          ...more,
+        },
+      });
+    const before = sheet(
+      'Two Germanys',
+      [map('m1', 'A divided country', { areas: ['Bavaria'], base })],
+      [['m1']],
+    );
+    const after = sheet(
+      'The wall',
+      [map('m2', 'Berlin in 1961', { places: ['Berlin'], base })],
+      [['m2']],
+    );
+    expect(joinFor(side(before), side(after))).toEqual({
+      join: 'morph',
+      joinWith: { from: 'm1', to: 'm2' },
+    });
+    // Without the show's frame, two maps of other captions are two shapes
+    // of one kind: matched, as before.
+    const own = (one: typeof before) => ({
+      ...one,
+      draft: {
+        ...one.draft,
+        cast: one.draft.cast.map((c) => ({
+          ...c,
+          map: c.map ? { ...c.map, base: null } : c.map,
+        })),
+      },
+    });
+    expect(joinFor(side(own(before)), side(own(after))).join).toBe('match');
   });
 
   it("matches what one ended on and the next opens on where they are one of the show's pictures, or two of a kind code draws", () => {

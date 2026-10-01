@@ -60,6 +60,7 @@ export {
   StudioSceneModel,
   StudioMessageModel,
 } from './studio.model';
+export { StudioExportModel } from './studio-export.model';
 
 import { AiCallLogModel } from './ai-call-log.model';
 import { AppSettingsModel } from './app-settings.model';
@@ -123,6 +124,7 @@ import {
   StudioSceneModel,
   StudioMessageModel,
 } from './studio.model';
+import { StudioExportModel } from './studio-export.model';
 
 /** Registered with SequelizeModule in both the API and the worker. */
 export const ALL_MODELS = [
@@ -131,6 +133,7 @@ export const ALL_MODELS = [
   StudioEpisodeModel,
   StudioSceneModel,
   StudioMessageModel,
+  StudioExportModel,
   StudyGroupModel,
   StudyGroupMemberModel,
   StudySessionModel,

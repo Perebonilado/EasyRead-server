@@ -38,3 +38,4 @@ export const ITEM_REVIEW_REPOSITORY = Symbol('ItemReviewRepository');
 export const PRONUNCIATION_REPOSITORY = Symbol('PronunciationRepository');
 export const APP_SETTINGS_REPOSITORY = Symbol('AppSettingsRepository');
 export const STUDIO_REPOSITORY = Symbol('StudioRepository');
+export const STUDIO_EXPORT_REPOSITORY = Symbol('StudioExportRepository');

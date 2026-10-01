@@ -2823,7 +2823,11 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
       await writeFile(
         `${dump}/${input.step}-${Date.now()}.json`,
         JSON.stringify(
-          { object: result.object, finishReason: result.finishReason, usage: result.usage },
+          {
+            object: result.object as unknown,
+            finishReason: result.finishReason,
+            usage: result.usage,
+          },
           null,
           1,
         ),

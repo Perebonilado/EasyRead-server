@@ -785,7 +785,9 @@ export function promiseReturns(
 // ── The script ────────────────────────────────────────────────────────────
 
 /** How many words a script says. */
-export function spokenWords(rows: readonly Pick<EditorialRow, 'say'>[]): number {
+export function spokenWords(
+  rows: readonly Pick<EditorialRow, 'say'>[],
+): number {
   return rows.reduce((n, r) => n + wordsOf(r.say).length, 0);
 }
 
@@ -814,9 +816,7 @@ export function unusedClaims(
   const own = plan.items
     .filter((i) => i.episode === number && i.decision !== 'cut')
     .flatMap((i) => i.claims);
-  const loose = research.claims
-    .map((c) => c.id)
-    .filter((id) => !given.has(id));
+  const loose = research.claims.map((c) => c.id).filter((id) => !given.has(id));
   const known = new Set(research.claims.map((c) => c.id));
   const out: string[] = [];
   for (const id of [...own, ...loose]) {
@@ -826,7 +826,6 @@ export function unusedClaims(
   }
   return out;
 }
-
 
 /** The longest sentence a row may be, in words. */
 export const MOST_SENTENCE_WORDS = 22;

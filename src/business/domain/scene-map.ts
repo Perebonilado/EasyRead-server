@@ -548,7 +548,7 @@ export function readMap(draft: MapDraft | null | undefined): {
   // The groups a colour is for, a key's rows: in the order first named.
   const groups: string[] = [];
   const groupFor = (group: string, name: string): number => {
-    let index = groups.indexOf(group);
+    const index = groups.indexOf(group);
     if (index >= 0) return index;
     if (groups.length < MAP_LIMITS.groups) {
       groups.push(group);
@@ -1533,7 +1533,9 @@ export async function frameFor(
       translate: [tx, ty],
     },
   };
-  if (frames.size >= FRAMES_KEPT) frames.delete(frames.keys().next().value!);
+  // The frame worked out longest ago let go.
+  const oldest = frames.keys().next();
+  if (frames.size >= FRAMES_KEPT && !oldest.done) frames.delete(oldest.value);
   frames.set(key, frame);
   return frame;
 }
@@ -1574,7 +1576,7 @@ function areaGeometries(keys: readonly string[]): GeometryObject[] {
   const units = topology.objects.units.geometries;
   return [...new Set(keys)].flatMap((key) => {
     const i = byKey.get(key);
-    return i === undefined ? [] : [units[i] as GeometryObject];
+    return i === undefined ? [] : [units[i]];
   });
 }
 
@@ -1582,10 +1584,7 @@ function areaGeometries(keys: readonly string[]): GeometryObject[] {
 function areaLand(keys: readonly string[]): MultiPolygon | null {
   const geometries = areaGeometries(keys);
   if (!geometries.length) return null;
-  return merge(
-    naturalAreas().topology as unknown as Topology,
-    geometries as never,
-  );
+  return merge(naturalAreas().topology, geometries as never);
 }
 
 /** A country's areas, by their keys: the country as admin-1 draws it. */
@@ -1650,8 +1649,8 @@ function sharedBorder(
     new Set(areaGeometries([...b.keys, ...keysOfCountries(b.countries)])),
   ];
   const line = mesh(
-    topology as unknown as Topology,
-    topology.objects.units as unknown as GeometryObject,
+    topology,
+    topology.objects.units,
     (x, y) =>
       x !== y && ((inA.has(x) && inB.has(y)) || (inA.has(y) && inB.has(x))),
   );
@@ -1892,7 +1891,7 @@ function drawMap(
       return;
     }
     // A small one is drawn whole, however small: it is what the map is about.
-    const d = finePath(geometry as never);
+    const d = finePath(geometry);
     const rings =
       geometry.type === 'FeatureCollection'
         ? geometry.features.flatMap((f) =>
@@ -1944,8 +1943,8 @@ function drawMap(
       (one as unknown as { properties?: { c?: string } }).properties?.c ?? '';
     const lines = path(
       mesh(
-        topology as unknown as Topology,
-        topology.objects.units as unknown as GeometryObject,
+        topology,
+        topology.objects.units,
         (a, b) =>
           a !== b &&
           countryOf(a) === countryOf(b) &&

@@ -11,11 +11,14 @@
  */
 import {
   MAX_PICTURES,
+  type ExplainerSheet,
   type StudioBible,
   type StudioCharacter,
   type StudioSet,
 } from './studio';
 import type { StoryBible, StoryPlace, StoryWorld } from '../scene-story';
+import { withShowMap } from '../scene-map';
+import type { PaletteEntry, PaletteToken } from '../scene-palette';
 import { packOfWorld, plainPack } from '../scene-style-packs';
 import { withPresets } from './studio-clip';
 import {
@@ -266,4 +269,35 @@ export function withWorldPlaces(
       return out;
     }),
   };
+}
+
+/**
+ * What an editor's show holds a lesson's storyboard to as it is mended
+ * (checkExplainer, mendScript): its world's colours, each thing it names
+ * in its token in every scene, and the colour it holds back for the
+ * payoff. Nothing for a show with no world.
+ */
+export function worldColours(
+  world: Pick<EditorWorld, 'palette' | 'held'> | null | undefined,
+): { palette?: PaletteEntry[]; held?: PaletteToken } {
+  if (!world?.palette.length) return {};
+  return {
+    palette: world.palette.map((p) => ({ thing: p.thing, token: p.token })),
+    ...(world.held ? { held: world.held.token } : {}),
+  };
+}
+
+/**
+ * A lesson's storyboard drawn on the show's one map, in its colours: every
+ * map in it given the world's map (withShowMap), so maps in scenes one
+ * after another line up and keep their regions' colours. As the board
+ * writes it and again as the make draws it: done twice, the same.
+ */
+export function onShowMap(
+  sheet: ExplainerSheet,
+  world: Pick<EditorWorld, 'base' | 'palette'> | null | undefined,
+): ExplainerSheet {
+  if (!world) return sheet;
+  const draft = withShowMap(sheet.draft, world.base ?? null, world.palette);
+  return draft === sheet.draft ? sheet : { ...sheet, draft };
 }

@@ -1083,33 +1083,3 @@ export function soundPackage<
       .slice(0, 3000);
   return out;
 }
-
-/**
- * A lesson board's things in the show's colours: each whose name is one
- * the palette colours, given its token (a theme token's name), unless the
- * board gave one. Read by the code-drawn kinds that take a colour; the
- * rest leave it be.
- */
-export function withPalette<T extends { name?: string | null; id?: string }>(
-  cast: readonly T[],
-  palette: readonly { thing: string; token: string }[],
-): T[] {
-  if (!palette.length) return [...cast];
-  const key = (said: string) =>
-    said
-      .toLowerCase()
-      .replace(/^(?:the|a|an)\s+/u, '')
-      .replace(/[^\p{L}\p{N}\s]/gu, ' ')
-      .replace(/\s+/gu, ' ')
-      .trim();
-  return cast.map((thing) => {
-    if ((thing as { colour?: unknown }).colour) return thing;
-    const name = key(thing.name ?? thing.id ?? '');
-    if (!name) return thing;
-    const found = palette.find((p) => {
-      const of = key(p.thing);
-      return of && (name === of || name.includes(of) || of.includes(name));
-    });
-    return found ? { ...thing, colour: found.token } : thing;
-  });
-}

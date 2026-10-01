@@ -80,14 +80,17 @@ import {
   soundPlan,
   soundScenes,
   splitLongActs,
-  withPalette,
   type EditorPace,
 } from '../../business/domain/studio/studio-editor-checks';
 import {
   editorOutline,
   illustratedSwitchOn,
 } from '../../business/domain/studio/studio-editor-cut';
-import { worldBible } from '../../business/domain/studio/studio-editor-world';
+import {
+  onShowMap,
+  worldBible,
+  worldColours,
+} from '../../business/domain/studio/studio-editor-world';
 import {
   describeBeats,
   describeEarlierScripts,
@@ -1126,29 +1129,30 @@ export class StudioEditorProcessor {
       world ? `The show's world and colours:\n${describeWorld(world)}` : '',
       `The page:\n${scene.teach ?? ''}`,
     ];
+    // Mended in the show's colours: each thing its palette names keeps its token.
     const options = {
       teach: scene.teach,
       source: null,
       stage,
       maths: bible.maths,
       planned: scene.seconds,
+      ...worldColours(world),
     };
     const first = await this.llm.editorBoard({ kind: 'lesson', parts });
     await this.record(episode.id, first.usage, 'explainer_board');
-    // On its written lines, its things in the show's colours, and every
-    // moment of people in a place a drawing of it, never a word card.
-    const sheetOf = (draft: unknown) => {
-      const lined = drawnMoments(onTheLines(draft, lines), lines, world);
-      return explainerSheetOf({
-        kind: 'explainer',
-        title: scene.title,
-        transition: 'cut',
-        draft: {
-          ...lined,
-          cast: withPalette(lined.cast, world?.palette ?? []),
-        },
-      });
-    };
+    // On its written lines and the playbook's pace, every moment of people
+    // in a place a drawing of it (never a word card), and every map on the
+    // show's one map, in its colours.
+    const sheetOf = (draft: unknown) =>
+      onShowMap(
+        explainerSheetOf({
+          kind: 'explainer',
+          title: scene.title,
+          transition: 'cut',
+          draft: drawnMoments(onTheLines(draft, lines), lines, world),
+        }),
+        world,
+      );
     let sheet = sheetOf(first.value);
     let problems: SheetProblem[] = checkExplainer(sheet, options).problems;
     if (errorsIn(problems).length) {
@@ -1556,6 +1560,8 @@ export function onTheLines(
       speaker: null,
       music: line.music ?? said?.music ?? null,
       energy: said?.energy ?? null,
+      // A row the editor holds: its picture stays while it is said.
+      ...(line.hold ? { hold: true } : {}),
     };
   });
   const last = Math.max(0, beats.length - 1);
@@ -1564,6 +1570,8 @@ export function onTheLines(
     fitReason: null,
     title: typeof draft.title === 'string' ? draft.title : 'A scene',
     mood: draft.mood ?? 'curious',
+    // Paced as the playbook paces a film: something new every three to five seconds.
+    pace: 'infographic',
     beats,
     cast: Array.isArray(draft.cast) ? draft.cast : [],
     steps: (Array.isArray(draft.steps) ? draft.steps : []).map((step) => ({

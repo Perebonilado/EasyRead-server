@@ -26,6 +26,8 @@ import {
   figureOf,
   type FigureSpec,
 } from '../scene-figure';
+import { readMapBase, type ShowMapBase } from '../scene-map';
+import { PALETTE_TOKENS, type PaletteToken } from '../scene-palette';
 import { STORY_TIMES, type StoryTime } from '../scene-story';
 import {
   STUDIO_VOICES,
@@ -845,23 +847,10 @@ export const ERA_WORDS: Record<Era, string> = {
 
 /**
  * The colours a world's things may take: the names of the theme's own
- * tokens (scene-themes), never a colour of the model's, so a film keeps
- * its look in every theme and in the dark.
+ * tokens (scene-themes, scene-palette), never a colour of the model's, so
+ * a film keeps its look in every theme and in the dark.
  */
-export const PALETTE_TOKENS = [
-  'accent',
-  'accent2',
-  'chart0',
-  'chart1',
-  'chart2',
-  'chart3',
-  'chart4',
-  'chart5',
-  'good',
-  'bad',
-  'muted',
-] as const;
-export type PaletteToken = (typeof PALETTE_TOKENS)[number];
+export { PALETTE_TOKENS, type PaletteToken } from '../scene-palette';
 
 /**
  * The kinds of place a world's recurring places are, as the set builder
@@ -929,8 +918,15 @@ export interface EditorWorld {
   held: { token: PaletteToken; for: string } | null;
   /** When the legend appears and where it stays, in words. */
   legend: string;
-  /** The one picture the show comes back to: its base map, its cross-section. */
-  base: string;
+  /** The one picture the show comes back to: its base map, its cross-section, its timeline, in words. */
+  picture: string;
+  /**
+   * The show's one map, when its story happens in a place: its region and
+   * named regions (each today's areas or countries, and its colour), the
+   * seams between them, its year (scene-map's ShowMapBase, made sound by
+   * readMapBase). Every map of every scene is drawn into it (withShowMap).
+   */
+  base?: ShowMapBase | null;
   places: EditorPlace[];
   people: EditorPerson[];
   things: EditorThing[];
@@ -1045,7 +1041,9 @@ export function worldOf(raw: unknown): EditorWorld {
         ? { token: heldToken, for: plainText(heldRaw.for, 160) }
         : null,
     legend: plainText(said.legend, 240),
-    base: plainText(said.base, 240),
+    // A world kept before the map was its base said its picture there.
+    picture: plainText(said.picture ?? said.base, 240),
+    base: readMapBase(said.map ?? said.base),
     places,
     people,
     things: list(said.things)

@@ -303,6 +303,43 @@ describe("the editor's plan and world, made sound", () => {
     });
   });
 
+  it("keeps the show's one map as code knows it, and its picture in words", () => {
+    const world = worldOf({
+      picture: 'the map of Germany, divided',
+      map: {
+        region: 'Germany',
+        groups: [
+          {
+            name: 'East Germany',
+            members: ['Saxony', 'Brandenburg', 'Thuringia'],
+            colour: 'chart1',
+          },
+          { name: 'East Germany', members: ['Berlin'] },
+        ],
+        seams: [{ between: ['East Germany', 'West Germany'], style: 'dashed' }],
+        year: 1961,
+      },
+    });
+    expect(world.picture).toBe('the map of Germany, divided');
+    expect(world.base).toMatchObject({
+      kind: 'map',
+      region: 'Germany',
+      year: 1961,
+    });
+    expect(world.base?.groups?.map((g) => [g.name, g.colour])).toEqual([
+      ['East Germany', 'chart1'],
+    ]);
+    // A region code does not know is no map; a world kept before the map said its picture as its base.
+    expect(worldOf({ map: { region: 'Atlantis' } }).base).toBeNull();
+    const kept = worldOf({ base: 'a timeline of the years' });
+    expect([kept.picture, kept.base]).toEqual([
+      'a timeline of the years',
+      null,
+    ]);
+    // Read back as kept, the same.
+    expect(worldOf(JSON.parse(JSON.stringify(world)))).toEqual(world);
+  });
+
   it('reads an era as people write it', () => {
     expect(eraNamed('1945–1975')).toBe('1945-1975');
     expect(eraNamed('the present day')).toBe('today');

@@ -9,7 +9,12 @@
  * and no example here belongs to one region.
  */
 import * as prompts from './prompts';
-import { PROMPTS } from './prompts';
+import {
+  INFOGRAPHIC_KINDS_CAST,
+  INFOGRAPHIC_KINDS_GUIDE,
+  MAP_GROUPS_GUIDE,
+  PROMPTS,
+} from './prompts';
 import {
   ERAS,
   PALETTE_TOKENS,
@@ -229,8 +234,20 @@ export const EDITOR_PROMPTS = {
       '- held: one token kept back for the payoff (in no palette entry), and',
       '  what it is for.',
       '- legend: when the legend appears and where it stays, in words.',
-      '- base: the one picture the show comes back to: its base map (the',
+      '- picture: the one picture the show comes back to: its base map (the',
       '  region, with the period’s borders), a cross-section, a timeline.',
+      '- map: when the story happens in a real place, the show’s one map,',
+      '  every map of every scene drawn in it; null when it has no place.',
+      '  region: what it shows ("Nigeria", "West Africa", "Europe", "world").',
+      '  groups: the named regions the story is told in (up to six), each a',
+      '  name, its members (the areas or countries of today it is made of,',
+      '  by name: a region of the past is drawn as the areas of today that',
+      '  were in it) and its colour token (the palette’s for that thing, or',
+      '  null). seams: the borders between two of them the story turns on',
+      '  (between two names; style "dashed" for a line drawn or agreed,',
+      '  "glow" for a front or a fault line; name, or null). year: the year',
+      '  the story’s map is about, or null; bordersDiffer: true when that',
+      '  year’s borders were not today’s, false when they were, else null.',
       '- places: the real places the story happens in, where its illustrated',
       '  scenes show people (up to six): a square, a hall, a field, a harbour, a',
       '  street, a home of the time. Never a diagram, a board, a desk or a',
@@ -412,9 +429,16 @@ export const EDITOR_PROMPTS = {
 
 /** The board of a lesson scene: the lesson writer's own craft, on narration already written. */
 export function boardLessonPrompt(): string {
+  const write = PROMPTS.sceneWrite;
+  // Each guide once: the writer's craft already lists the kinds' fields
+  // and the map's regions, so the editor's guide adds its decision rule.
+  const kinds = write.includes(INFOGRAPHIC_KINDS_CAST)
+    ? INFOGRAPHIC_KINDS_GUIDE.replace(INFOGRAPHIC_KINDS_CAST, '')
+    : INFOGRAPHIC_KINDS_GUIDE;
   return [
-    PROMPTS.sceneWrite,
-    guide('INFOGRAPHIC_KINDS_GUIDE'),
+    write,
+    kinds.replace(/\s{2,}/gu, ' ').trim(),
+    write.includes(MAP_GROUPS_GUIDE) ? '' : MAP_GROUPS_GUIDE,
     [
       'This scene comes from an editor’s two-column script, and its narration',
       'is written. Its beats are the lines given, one beat a line, in order,',
@@ -426,10 +450,15 @@ export function boardLessonPrompt(): string {
     [
       '- Each line comes with what the editor wants seen ("show"): draw that,',
       '  on that line.',
-      '- The decision rule: a place → a map (kind "map", by names); when → a',
-      '  timeline; how many → a chart or a stat; exact words → a quote; why →',
-      '  a flow, or arrows between things; a country’s flag → a flag; working',
-      '  → math. A drawing only for what no code kind draws.',
+      '- The decision rule: a place → a map (kind "map", by names; the show’s',
+      '  regions by their names); when → a calendar for a date or two, a',
+      '  timeline for several; how many → a counter for one number, icons for',
+      '  a count you can picture, a chart for three or more numbers; who → a',
+      '  namecard; why → a transfer when something moves from one to another,',
+      '  else a flow; a comparison → a split; exact words → a quote; a',
+      '  decision or a promise changed → a strike; an official paper → a',
+      '  document; a vote or an assembly → seats; a country’s flag → a flag;',
+      '  working → math. A drawing only for what no code kind draws.',
       '- A visual change every three to five seconds: a new thing on, a',
       '  pointer, a highlight, a zoom on what is named.',
       '- The show’s colours: a thing named in its palette keeps its colour',

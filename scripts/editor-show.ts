@@ -367,7 +367,10 @@ function planWords({ editor }: Made): string {
       ? [
           `Era: ${ERA_WORDS[world.era]}${world.region ? `; ${world.region}` : ''}`,
           `Palette: ${world.palette.map((p) => `${p.thing} = ${p.token}`).join('; ')}${world.held ? `; held: ${world.held.token} (${world.held.for})` : ''}`,
-          `Base: ${world.base}`,
+          `Base picture: ${world.picture}`,
+          world.base
+            ? `Map: ${world.base.region}${world.base.year ? `, ${world.base.year}` : ''}; regions: ${(world.base.groups ?? []).map((g) => `${g.name} [${(g.members ?? []).join(', ')}]${g.colour ? ` ${g.colour}` : ''}`).join('; ') || 'none'}`
+            : 'Map: none',
           `Places: ${world.places.map((p) => `${p.name} (${p.kind}, ${p.time}): ${p.look}`).join(' | ')}`,
           `People: ${world.people.map((p) => `${p.name}, ${p.role}: ${p.likeness}`).join(' | ')}`,
         ].join('\n\n')

@@ -235,7 +235,33 @@ export const editorWorldSchema = z.object({
     .nullable()
     .catch(null),
   legend: words(),
-  base: words(),
+  picture: words(),
+  map: z
+    .object({
+      region: words(),
+      groups: z
+        .array(
+          z.object({
+            name: words(),
+            members: z.array(words()).catch([]),
+            colour: z.enum(PALETTE_TOKENS).nullable().catch(null),
+          }),
+        )
+        .catch([]),
+      seams: z
+        .array(
+          z.object({
+            between: z.array(words()).catch([]),
+            style: z.enum(['dashed', 'glow']).nullable().catch(null),
+            name: z.string().nullable().catch(null),
+          }),
+        )
+        .catch([]),
+      year: z.number().nullable().catch(null),
+      bordersDiffer: z.boolean().nullable().catch(null),
+    })
+    .nullable()
+    .catch(null),
   places: z
     .array(
       z.object({

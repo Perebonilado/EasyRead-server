@@ -210,7 +210,8 @@ export function fakeEditorAnswer(
         ],
         held: { token: 'accent', for: 'the answer' },
         legend: 'a small key in the corner while the timeline is up',
-        base: 'a timeline of the years',
+        picture: 'a timeline of the years',
+        map: null,
         places: [
           {
             name: 'The council hall',

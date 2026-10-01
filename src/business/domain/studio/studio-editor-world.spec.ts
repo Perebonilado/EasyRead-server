@@ -1,11 +1,14 @@
 import { bibleOf, type StorySheet } from './studio';
 import { worldOf } from './studio-editor';
 import {
+  onShowMap,
   storyWorldOf,
   withWorldPlaces,
   worldBible,
+  worldColours,
   worldSetLayout,
 } from './studio-editor-world';
+import { explainerSheetOf } from './studio';
 import { storyBibleFor } from './studio-stage';
 import { illustratedJoin, joinFor } from './studio-edit';
 
@@ -180,5 +183,81 @@ describe('the joins of illustrated scenes', () => {
         { sheet: lesson, scene: plain },
       ),
     ).toBeNull();
+  });
+});
+
+describe("a lesson in the show's colours, on its one map", () => {
+  const mapped = worldOf({
+    palette: [
+      { thing: 'East Germany', token: 'chart1' },
+      { thing: 'West Germany', token: 'chart0' },
+    ],
+    held: { token: 'accent', for: 'the wall falls' },
+    map: {
+      region: 'Germany',
+      groups: [
+        { name: 'East Germany', members: ['Saxony', 'Brandenburg'] },
+        { name: 'West Germany', members: ['Bavaria', 'Hesse'] },
+      ],
+      year: 1961,
+    },
+  });
+  const sheet = explainerSheetOf({
+    kind: 'explainer',
+    title: 'Divided',
+    draft: {
+      fit: 'good',
+      fitReason: null,
+      title: 'Divided',
+      mood: 'curious',
+      beats: [
+        { say: 'One country became two.', pause: 'short', delivery: 'explain' },
+      ],
+      cast: [
+        {
+          id: 'map',
+          kind: 'map',
+          name: 'Germany',
+          map: {
+            region: 'Germany',
+            highlight: null,
+            places: null,
+            routes: null,
+            groups: [{ name: 'East Germany', members: null }],
+          },
+        },
+        { id: 'card', kind: 'words', name: 'Two countries' },
+      ],
+      steps: [{ beat: 0, phrase: '', show: ['map', 'card'] }],
+    },
+  });
+
+  it('mends with its palette and the colour it holds back', () => {
+    expect(worldColours(mapped)).toEqual({
+      palette: [
+        { thing: 'East Germany', token: 'chart1' },
+        { thing: 'West Germany', token: 'chart0' },
+      ],
+      held: 'accent',
+    });
+    expect(worldColours(worldOf({}))).toEqual({});
+    expect(worldColours(null)).toEqual({});
+  });
+
+  it("gives every map the show's map and colours, once however often", () => {
+    const once = onShowMap(sheet, mapped);
+    const map = once.draft.cast.find((t) => t.id === 'map')?.map;
+    expect(map?.base).toMatchObject({ region: 'Germany', year: 1961 });
+    expect(map?.palette).toEqual([
+      { thing: 'East Germany', colour: 'chart1' },
+      { thing: 'West Germany', colour: 'chart0' },
+    ]);
+    expect(once.draft.cast.find((t) => t.id === 'card')).toEqual(
+      sheet.draft.cast.find((t) => t.id === 'card'),
+    );
+    expect(onShowMap(once, mapped)).toEqual(once);
+    // No world, no map: the sheet as it was.
+    expect(onShowMap(sheet, null)).toBe(sheet);
+    expect(onShowMap(sheet, worldOf({}))).toBe(sheet);
   });
 });

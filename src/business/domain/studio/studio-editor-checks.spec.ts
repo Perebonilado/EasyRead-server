@@ -20,7 +20,6 @@ import {
   soundScenes,
   splitLongActs,
   splitSentence,
-  withPalette,
   withoutScreenTalk,
 } from './studio-editor-checks';
 
@@ -536,25 +535,6 @@ describe('the package and the palette, put right by code', () => {
     expect(sound.description).toBe(
       'Why leap years exist.\n\nWhat we left out: The French calendar.',
     );
-  });
-
-  it("gives a board's things their palette colour, by name", () => {
-    const cast = withPalette(
-      [
-        { id: 'north', name: 'The North' },
-        { id: 'chart', name: 'Seats won' },
-        { id: 'given', name: 'The South', colour: 'chart5' },
-      ],
-      [
-        { thing: 'the North', token: 'chart0' },
-        { thing: 'the South', token: 'chart1' },
-      ],
-    );
-    expect(cast.map((c) => (c as { colour?: string }).colour)).toEqual([
-      'chart0',
-      undefined,
-      'chart5',
-    ]);
   });
 });
 

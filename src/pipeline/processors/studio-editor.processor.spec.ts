@@ -520,6 +520,9 @@ describe('what the editor’s boards are held to', () => {
       ['Nobody lost any sleep.', 'short', 'explain', null],
     ]);
     expect(draft.steps[0]).toMatchObject({ beat: 1, phrase: '' });
+    // Paced as the playbook paces a film, a held row held still.
+    expect(draft.pace).toBe('infographic');
+    expect(draft.beats.map((b) => b.hold ?? null)).toEqual([true, null]);
   });
 
   it('keeps an illustrated scene narrated by its lines, its acting where the board put it, no one speaking', () => {

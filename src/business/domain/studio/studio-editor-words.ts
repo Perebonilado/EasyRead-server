@@ -162,14 +162,37 @@ export function describePlannedEpisode(
 export const describeLeftOut = (plan: EditorPlan) =>
   plan.leftOut.length ? `Left out of the show: ${plan.leftOut.join('; ')}` : '';
 
-/** The world in words: its era, colours, base picture, places, people and things, with their ids. */
+/**
+ * The show's one map in words, for its boards: its region, and its named
+ * regions already made, each named with members null on a map to keep its
+ * shape and its colour in every scene (MAP_GROUPS_GUIDE).
+ */
+export function describeShowMap(world: Pick<EditorWorld, 'base'>): string {
+  const base = world.base;
+  if (!base) return '';
+  const groups = base.groups ?? [];
+  return [
+    `The show's map: ${base.region}${base.year ? `, in ${base.year}` : ''}; every map in its scenes is drawn in this one frame.`,
+    groups.length
+      ? `Its regions, already made (on a map, name one in map.groups with members null, and it keeps its shape and its colour): ${groups.map((g) => `${g.name}${g.colour ? ` (${g.colour})` : ''}`).join('; ')}.`
+      : '',
+    base.seams?.length
+      ? `Its seams: ${base.seams.map((m) => m.name || m.between.join(' and ')).join('; ')}.`
+      : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+}
+
+/** The world in words: its era, colours, base picture and map, places, people and things, with their ids. */
 export function describeWorld(world: EditorWorld): string {
   return [
     `Era: ${ERA_WORDS[world.era]}${world.region ? `; where: ${world.region}` : ''}`,
     world.palette.length
       ? `Colours (by token; the same thing keeps its colour in every frame): ${world.palette.map((p) => `${p.thing} = ${p.token}`).join('; ')}${world.held ? `; held back for the payoff: ${world.held.token} (${world.held.for})` : ''}`
       : '',
-    world.base ? `The base picture: ${world.base}` : '',
+    world.picture ? `The base picture: ${world.picture}` : '',
+    describeShowMap(world),
     world.legend ? `The legend: ${world.legend}` : '',
     world.places.length
       ? `Places (by id):\n${world.places.map((p) => `- ${p.id}: ${p.name} (${p.kind}, usually ${p.time}): ${p.look}`).join('\n')}`

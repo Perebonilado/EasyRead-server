@@ -246,7 +246,11 @@ import {
 import { partsFromFilm } from '../../business/domain/scene-film-parts';
 import { StudioEditorProcessor, isEditorJob } from './studio-editor.processor';
 import { usesEditor } from '../../business/domain/studio/studio-editor';
-import { withWorldPlaces } from '../../business/domain/studio/studio-editor-world';
+import {
+  onShowMap,
+  withWorldPlaces,
+  worldColours,
+} from '../../business/domain/studio/studio-editor-world';
 
 /** How wide a still the picture check looks at is: enough to tell a bus from an ark, at about 0.4 cents a look. */
 const STILL_PX = 960;
@@ -299,16 +303,21 @@ export function explainerScripts(
   return (position) => {
     if (known.has(position)) return known.get(position)!;
     const row = rows.find((r) => r.position === position);
+    const world = show.editor?.world ?? null;
     const lesson = {
       teach: episode.outline?.scenes[position]?.teach ?? null,
       source: show.brief.source,
       stage,
       maths: bible.maths,
       planned: null,
+      ...worldColours(world),
     };
     const script =
       row?.sheet?.kind === 'explainer'
-        ? checkExplainer(repairExplainer(row.sheet, lesson), lesson).script
+        ? checkExplainer(
+            repairExplainer(onShowMap(row.sheet, world), lesson),
+            lesson,
+          ).script
         : null;
     known.set(position, script);
     return script;
@@ -364,12 +373,15 @@ export function studioMakeOf(
   // staged as a story is, with a light narrator in the lesson's voice.
   const clip = story && show.brief.format === 'explainer' && !illustrated;
   const stage = stageOf(show.brief);
+  // An editor's show: its lessons in its world's colours, on its one map.
+  const world = show.editor?.world ?? null;
   const lesson = {
     teach: episode.outline?.scenes[row.position]?.teach ?? null,
     source: show.brief.source,
     stage,
     maths: bible.maths,
     planned: null,
+    ...worldColours(world),
   };
   // Whatever the writer left wrong is put right here, so a scene is
   // always one the stage can play: carrying on from how the scene before
@@ -431,7 +443,7 @@ export function studioMakeOf(
     ? null
     : (built?.script ??
       checkExplainer(
-        repairExplainer(row.sheet as ExplainerSheet, lesson),
+        repairExplainer(onShowMap(row.sheet as ExplainerSheet, world), lesson),
         lesson,
       ).script);
   const script = sheet

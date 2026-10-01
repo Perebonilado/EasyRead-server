@@ -344,7 +344,7 @@ export function backedBy(
           const said = part.value.error;
           throw said instanceof Error
             ? said
-            : new Error(String(said ?? 'error'));
+            : new Error(typeof said === 'string' ? said : 'error');
         }
         before.push(part.value);
         if (

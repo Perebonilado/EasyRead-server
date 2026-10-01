@@ -179,6 +179,42 @@ export const FIGURE_GUIDE = [
   'looks is made fun of.',
 ].join(' ');
 
+/**
+ * How the writer, or the editor's board, asks a map for more than
+ * countries (scene-map): areas inside a country, named regions made of
+ * them drawn as one shape each, the border two regions share as a seam,
+ * pins with a number, and the year the map is about. Code looks every
+ * name up and leaves off one it does not know; a show's maps share one
+ * frame and one set of named regions, which code gives them.
+ */
+export const MAP_GROUPS_GUIDE = [
+  'A map shows more than whole countries. map.areas colours areas inside',
+  'a country as map.highlight colours countries, each with name, label',
+  'and group: a state, a province, a region of it, or a part of a',
+  'country, by its usual name ("Bavaria", "California", "Kerala",',
+  '"Scotland", "the Midwest"). map.groups are named regions drawn as one',
+  'shape each, its name written in it: name, members (the areas and',
+  'countries it is made of, by name: "East Germany" is Mecklenburg-',
+  'Vorpommern, Brandenburg, Saxony-Anhalt, Thuringia, Saxony and Berlin)',
+  'and colour, a theme colour by its name (accent, accent2, chart0 to',
+  'chart5, good, bad, muted) or null for the next one. A region of the',
+  'past is drawn as the areas of today that were in it. In a show, its',
+  "map's regions are already made: name one with members null, and it",
+  'keeps its shape and its colour in every scene. map.seams draws the',
+  'border two regions (or countries, or areas) share as a line of its',
+  'own: between the two names, style "dashed" for a line drawn or agreed,',
+  '"glow" for a front or a fault line; point at "id.<first> and <second>"',
+  'as the voice reaches it. map.pins puts a pin on a place, an area or a',
+  'country, with a label of one to three words and number, a figure the',
+  'voice says ("174", "45 million"), on a card beside it, or null; point',
+  'at "id.<label>", else "id.<place>". map.year is the year the map is',
+  "about, or null: a map of the past is drawn with today's borders and",
+  "says so itself, so never say its borders are that year's. Colour only",
+  'what the voice is about: two or three named things at once, each',
+  'pointed at as it is named. The voice names a region by its name, never',
+  'by where it sits on the picture.',
+].join(' ');
+
 export const PROMPTS = {
   /**
    * OCR of a scanned page — printed or handwritten, the model reads both.
@@ -1545,6 +1581,7 @@ export const PROMPTS = {
       'off. name is its caption. Point at "id.<country>", "id.<place>" or',
       '"id.<route name>" as the voice names each, and show only what the',
       'voice talks about.',
+      MAP_GROUPS_GUIDE,
       '"flag" is a real country\'s flag, drawn by code from the true flag:',
       'flag lists one to six countries by name ("Kenya", "Brazil",',
       '"Japan"); point at "id.<country>" as the voice names each.',

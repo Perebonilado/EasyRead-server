@@ -1794,6 +1794,14 @@ function composeShaped(input: ComposeInput): {
       // there all along: they fade in. Those the words bring walk on, and
       // anyone who comes later.
       const character = (id: string) => castById.get(id)?.kind === 'character';
+      // The show's one map (scene-map's frame) is the world the film is
+      // in: it is there as a scene opens on it, never popped or wiped in,
+      // so the join from the scene before carries it, and fades in where
+      // it comes later.
+      const showsMap = (id: string) => {
+        const thing = castById.get(id);
+        return thing?.kind === 'map' && Boolean(thing.map.base);
+      };
       firstBeat ??= step.at.beat;
       const opening = !charactersSeen && step.at.beat === firstBeat;
       for (const id of newcomers)
@@ -1801,18 +1809,20 @@ function composeShaped(input: ComposeInput): {
           // A build's drawings are drawn on, stroke by stroke (the player's draw).
           script.board && castById.get(id)?.kind === 'drawing'
             ? { how: 'draw' }
-            : character(id) &&
-                (cut ||
-                  step.stage.cutIn?.includes(id) ||
-                  (opening && !arriving.has(id)) ||
-                  (cutAway.has(id) && !arriving.has(id)))
+            : showsMap(id)
               ? { how: 'fade' }
-              : entranceFor(
-                  id,
-                  { layout: step.stage.layout, arrows },
-                  before,
-                  byId.get(id),
-                );
+              : character(id) &&
+                  (cut ||
+                    step.stage.cutIn?.includes(id) ||
+                    (opening && !arriving.has(id)) ||
+                    (cutAway.has(id) && !arriving.has(id)))
+                ? { how: 'fade' }
+                : entranceFor(
+                    id,
+                    { layout: step.stage.layout, arrows },
+                    before,
+                    byId.get(id),
+                  );
       if (step.stage.show.some(character)) charactersSeen = true;
       // Whoever a cut takes off the stage comes back by a cut too, not
       // walking on; whoever walks off is gone.

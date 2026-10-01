@@ -2784,3 +2784,60 @@ describe('what a drawing tells the player of itself', () => {
     });
   });
 });
+
+describe("a show's one map on the stage", () => {
+  const draw = (base: boolean) =>
+    composeScene({
+      script: {
+        ...script,
+        cast: [
+          {
+            id: 'map',
+            kind: 'map',
+            name: 'The regions',
+            map: {
+              region: {
+                name: 'Nigeria',
+                kind: 'countries',
+                countries: ['Nigeria'],
+                box: null,
+              },
+              highlights: [],
+              groups: [],
+              places: [],
+              routes: [],
+              ...(base
+                ? {
+                    base: {
+                      name: 'Nigeria',
+                      kind: 'countries' as const,
+                      countries: ['Nigeria'],
+                      box: null,
+                    },
+                  }
+                : {}),
+            },
+          },
+        ],
+        steps: [
+          {
+            at: { beat: 0, phrase: 'Plants make' },
+            word: 0,
+            stage: { layout: 'one', show: ['map'], arrows: [] },
+            effects: [],
+          },
+        ],
+      },
+      drawings: new Map([['map', drawing({ aspect: 1.7 })]]),
+      beats,
+      durationMs: 16_000,
+      timing: 'voice',
+      generator: 'scene-1',
+    }).scene;
+
+  it('is there as the scene opens, never wiped or popped in, so the join carries it', () => {
+    expect(draw(true).steps[0].enter.map).toEqual({ how: 'fade' });
+    // A map of its own comes in as a wide drawing does.
+    expect(draw(false).steps[0].enter.map).toEqual({ how: 'wipe' });
+  });
+});

@@ -1,15 +1,19 @@
 /**
- * Natural Earth's places, rivers and lakes, as a map drawn by code reads
- * them (scene-map, scene-map-places). Natural Earth is public domain
+ * Natural Earth's places, rivers and lakes, and the areas inside its
+ * countries, as a map drawn by code reads them (scene-map,
+ * scene-map-places). Natural Earth is public domain
  * (naturalearthdata.com/about/terms-of-use). The files in assets/maps are
  * its 1:50m populated places, rivers and lake centrelines, and lakes,
  * trimmed by scripts/map-data.ts from the GeoJSON in its official
  * repository (github.com/nvkelso/natural-earth-vector, geojson/): names,
  * countries, coordinates and outlines only, rounded to what a screen
- * shows. Each is read once, when a map first needs it.
+ * shows; and its 1:10m states and provinces (admin-1), made into one
+ * TopoJSON by scripts/map-admin1.ts (assets/maps/README.md). Each is read
+ * once, when a map first needs it.
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import type { GeometryCollection, Topology } from 'topojson-specification';
 
 export type Position = [number, number];
 
@@ -97,4 +101,77 @@ export function naturalLakes(): NaturalLake[] {
     }),
   );
   return lakes;
+}
+
+/** An area inside a country (a state, a province, a region: Natural Earth's admin-1), as assets/maps/admin1.json keeps it. */
+export interface NaturalArea {
+  /** Its ISO 3166-2 code ("NG-KN"), or one made from its country's. */
+  key: string;
+  /** As a map writes it: "Kano", "Bavaria". */
+  name: string;
+  /** Its other names: the local one, the one with its kind ("Kano State"), the old ones ("Orissa"). */
+  others: string[];
+  /** world-atlas's country it is in. */
+  country: string;
+  /** What kind of area it is: "State", "Province", "Region". */
+  type: string;
+  /** The larger region Natural Earth puts it in, where there is one: a United States census region, a French région. */
+  region: string | null;
+  /** The part of its country it is in, where the country is made of parts: Scotland, Wales, Zanzibar. */
+  part: string | null;
+}
+
+type AreaProperties = {
+  k: string;
+  n: string;
+  a: string;
+  c: string;
+  t: string;
+  r: string;
+  p: string;
+};
+
+export interface NaturalAreas {
+  /** Every area's outline, one geometry each in `units`, sharing their borders as arcs. */
+  topology: Topology<{ units: GeometryCollection<AreaProperties> }>;
+  /** The areas, in the order of the topology's units. */
+  areas: NaturalArea[];
+  /** Each area's place in `areas`, by its key. */
+  byKey: Map<string, number>;
+  /** Each country's areas, by their places in `areas`. */
+  byCountry: Map<string, number[]>;
+}
+
+let areas: NaturalAreas | null = null;
+/**
+ * Natural Earth's states and provinces (1:10m admin-1, simplified to a
+ * kilometre): about 4,600 in 241 countries. Read when a map first colours
+ * an area or merges some into a region.
+ */
+export function naturalAreas(): NaturalAreas {
+  if (areas) return areas;
+  const topology = load<NaturalAreas['topology']>('admin1.json');
+  const list: NaturalArea[] = topology.objects.units.geometries.map(
+    (geometry) => {
+      const p = geometry.properties as AreaProperties;
+      return {
+        key: p.k,
+        name: p.n,
+        others: p.a ? p.a.split('|') : [],
+        country: p.c,
+        type: p.t,
+        region: p.r || null,
+        part: p.p || null,
+      };
+    },
+  );
+  const byKey = new Map(list.map((area, i) => [area.key, i]));
+  const byCountry = new Map<string, number[]>();
+  list.forEach((area, i) => {
+    const own = byCountry.get(area.country) ?? [];
+    own.push(i);
+    byCountry.set(area.country, own);
+  });
+  areas = { topology, areas: list, byKey, byCountry };
+  return areas;
 }

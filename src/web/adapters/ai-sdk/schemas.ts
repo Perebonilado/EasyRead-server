@@ -14,6 +14,7 @@ import {
   PAGE_RELATIONS,
   POINT_KINDS,
 } from '../../../business/domain/lesson-notes';
+import { MAP_COLOURS } from '../../../business/domain/scene-map';
 import {
   SCREENPLAY_BEATS,
   SCREENPLAY_DOINGS,
@@ -723,6 +724,48 @@ export const sceneScriptSchema = z.object({
             )
             .nullable()
             .catch(null),
+          // Areas inside countries, named regions of them, the seams
+          // between regions, pins and the year (scene-map, MAP_GROUPS_GUIDE).
+          areas: z
+            .array(
+              z.object({
+                name: z.string(),
+                label: z.boolean().nullable().catch(null),
+                group: z.string().nullable().catch(null),
+              }),
+            )
+            .nullable()
+            .catch(null),
+          groups: z
+            .array(
+              z.object({
+                name: z.string(),
+                members: z.array(z.string()).nullable().catch(null),
+                colour: z.enum(MAP_COLOURS).nullable().catch(null),
+              }),
+            )
+            .nullable()
+            .catch(null),
+          seams: z
+            .array(
+              z.object({
+                between: z.array(z.string()),
+                style: z.enum(['dashed', 'glow']).nullable().catch(null),
+              }),
+            )
+            .nullable()
+            .catch(null),
+          pins: z
+            .array(
+              z.object({
+                place: z.string(),
+                label: z.string().nullable().catch(null),
+                number: z.string().nullable().catch(null),
+              }),
+            )
+            .nullable()
+            .catch(null),
+          year: z.number().int().nullable().catch(null),
         })
         .nullable()
         .catch(null),

@@ -58,7 +58,9 @@ export interface CounterDraft {
 export const COUNTER_THEN = 'then';
 
 const clean = (text: unknown, most: number) =>
-  typeof text === 'string' ? text.replace(/\s+/g, ' ').trim().slice(0, most) : '';
+  typeof text === 'string'
+    ? text.replace(/\s+/g, ' ').trim().slice(0, most)
+    : '';
 
 /** A number as the writer gave it ("45", "1,500", "3.5", 45): its value and its places; null for none. */
 export function numberOf(
@@ -66,14 +68,20 @@ export function numberOf(
 ): { value: number; places: number } | null {
   if (typeof raw === 'number')
     return Number.isFinite(raw)
-      ? { value: raw, places: Math.min(3, (/\.(\d+)/.exec(String(raw))?.[1] ?? '').length) }
+      ? {
+          value: raw,
+          places: Math.min(3, (/\.(\d+)/.exec(String(raw))?.[1] ?? '').length),
+        }
       : null;
   if (typeof raw !== 'string') return null;
   const m = /-?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?/.exec(raw);
   if (!m) return null;
   const value = Number(m[0].replace(/,/g, ''));
   if (!Number.isFinite(value)) return null;
-  return { value, places: Math.min(3, (/\.(\d+)/.exec(m[0])?.[1] ?? '').length) };
+  return {
+    value,
+    places: Math.min(3, (/\.(\d+)/.exec(m[0])?.[1] ?? '').length),
+  };
 }
 
 /** A counter made sound, or null when it has no number. */
@@ -160,14 +168,25 @@ function layOut(
   const sign = spec.prefix ? SIGN.test(spec.prefix) : false;
   const attached = spec.unit ? ATTACHED.test(spec.unit) : false;
   const at = (size: number, unitUnder: boolean): Laid => {
-    const prefixSize = spec.prefix ? (sign ? size : Math.max(least * 0.5, size * 0.34)) : 0;
-    const unitSize = spec.unit ? (attached ? size * 0.62 : Math.max(least * 0.5, size * 0.38)) : 0;
+    const prefixSize = spec.prefix
+      ? sign
+        ? size
+        : Math.max(least * 0.5, size * 0.34)
+      : 0;
+    const unitSize = spec.unit
+      ? attached
+        ? size * 0.62
+        : Math.max(least * 0.5, size * 0.38)
+      : 0;
     const prefixW = spec.prefix
-      ? measureText(spec.prefix, prefixSize, 700) + (sign ? size * 0.04 : size * 0.12)
+      ? measureText(spec.prefix, prefixSize, 700) +
+        (sign ? size * 0.04 : size * 0.12)
       : 0;
-    const unitW = spec.unit && !unitUnder
-      ? measureText(spec.unit, unitSize, 700) + (attached ? size * 0.03 : size * 0.12)
-      : 0;
+    const unitW =
+      spec.unit && !unitUnder
+        ? measureText(spec.unit, unitSize, 700) +
+          (attached ? size * 0.03 : size * 0.12)
+        : 0;
     return {
       size,
       prefixSize,
@@ -263,8 +282,7 @@ export function renderCounter(
   const room = roomOf(shape);
   const colour = colourOr(spec.colour, PAPER.accent);
   const main = counterText(spec.value, spec.places);
-  const later =
-    spec.then !== null ? counterText(spec.then, spec.places) : null;
+  const later = spec.then !== null ? counterText(spec.then, spec.places) : null;
   const most = shape === 'tall' ? 230 : 250;
   const laid = layOut(
     later ? [main, later] : [main],
@@ -275,20 +293,26 @@ export function renderCounter(
   );
   const { size } = laid;
   const label = spec.label
-    ? fitWords(spec.label, room.w * 0.9, text * 1.35, text, shape === 'tall' ? 3 : 2)
+    ? fitWords(
+        spec.label,
+        room.w * 0.9,
+        text * 1.35,
+        text,
+        shape === 'tall' ? 3 : 2,
+      )
     : null;
   const source = sourceText(spec.source);
   // Down the frame: the number's band, the unit under it if it must, the label, the source.
   const numberTop = 0;
   const baseline = numberTop + size * 0.92;
   const unitUnderH = laid.unitUnder ? laid.unitSize * 1.3 : 0;
-  const labelTop = baseline + size * 0.2 + unitUnderH + (label ? text * 0.3 : 0);
+  const labelTop =
+    baseline + size * 0.2 + unitUnderH + (label ? text * 0.3 : 0);
   const labelH = label ? label.lines.length * label.size * 1.18 : 0;
   const sourceTop = labelTop + labelH;
   const height = sourceTop + (source ? sourceRoom(text) : text * 0.3);
   const width = room.w;
-  const lineW = (t: string) =>
-    laid.prefixW + wheelsWidth(t, size) + laid.unitW;
+  const lineW = (t: string) => laid.prefixW + wheelsWidth(t, size) + laid.unitW;
   const lineX = (t: string) => (width - lineW(t)) / 2;
   const parts: Record<string, string> = {};
   const states: Record<string, string> = {};
@@ -306,7 +330,11 @@ export function renderCounter(
     out.push(wheels(t, from, x + laid.prefixW, baseline, size, colour, delay));
     if (spec.unit && !laid.unitUnder) {
       const attached = ATTACHED.test(spec.unit);
-      const ux = x + laid.prefixW + wheelsWidth(t, size) + (attached ? size * 0.03 : size * 0.12);
+      const ux =
+        x +
+        laid.prefixW +
+        wheelsWidth(t, size) +
+        (attached ? size * 0.03 : size * 0.12);
       out.push(
         `<text x="${r1(ux)}" y="${r1(attached ? baseline - size * 0.02 : baseline)}" font-size="${r1(laid.unitSize)}" font-weight="700" fill="${attached ? colour : PAPER.ink}">${escapeXml(spec.unit)}</text>`,
       );
@@ -354,6 +382,11 @@ export function renderCounter(
         `<g clip-path="url(#counter-window)">${line(later, main, 0.05)}</g></g>`,
     );
   }
-  const viewBox: [number, number, number, number] = [0, r1(bandTop - text * 0.2), width, r1(height - bandTop + text * 0.2)];
+  const viewBox: [number, number, number, number] = [
+    0,
+    r1(bandTop - text * 0.2),
+    width,
+    r1(height - bandTop + text * 0.2),
+  ];
   return { svg: svgOf(viewBox, out.join('')), viewBox, parts, states };
 }

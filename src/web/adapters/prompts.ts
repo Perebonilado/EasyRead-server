@@ -210,7 +210,7 @@ export const INFOGRAPHIC_KINDS_CAST = [
   '"namecard" is who someone is while the voice tells their part:',
   'namecard.name, namecard.role (at most eight words) and namecard.line',
   '(at most ten words: what they stand for in the story), each or null;',
-  'their initials stand in the portrait, their colour is the show\'s for',
+  "their initials stand in the portrait, their colour is the show's for",
   'them. Point at "id.name", "id.role", "id.line" or "id.portrait".',
   '"calendar" is when, as tear-off calendars: calendar.calendars one to',
   'three, each a label of at most four words or null, and dates one to',
@@ -238,7 +238,7 @@ export const INFOGRAPHIC_KINDS_CAST = [
   '"id.tokens".',
   '"document" is an official paper or a newspaper: document.style "paper"',
   'or "newspaper", document.title its title or the paper\'s name,',
-  'document.headline one headline in type or null (never an article\'s',
+  "document.headline one headline in type or null (never an article's",
   'text: its lines are drawn as grey bars), document.stamp at most three',
   'words stamped on it ("NOT RECOMMENDED", "APPROVED"), shown with',
   '"id.stamp" on the words, or null.',
@@ -260,7 +260,7 @@ export const INFOGRAPHIC_KINDS_CAST = [
  * editor's storyboard and any writer that plans an infographic film.
  */
 export const INFOGRAPHIC_KINDS_GUIDE = [
-  'Choose each line\'s picture by what the line is about. A place: the',
+  "Choose each line's picture by what the line is about. A place: the",
   'map. When: a calendar for a date or two, a timeline for several. How',
   'many: a counter for one number, icons for a count a viewer can picture',
   '(soldiers, schools, ships), a chart for three or more numbers',
@@ -273,8 +273,8 @@ export const INFOGRAPHIC_KINDS_GUIDE = [
   'Numbers go on the screen; what they mean goes in the voice: never say',
   'what the picture shows ("this chart shows"), say what it means. Each',
   'picture shows one idea, at most eight words on it, and changes as the',
-  'voice moves on: a later look (a calendar\'s next date, a strike, a',
-  'stamp, a counter\'s later number, a highlight) is shown on the words',
+  "voice moves on: a later look (a calendar's next date, a strike, a",
+  "stamp, a counter's later number, a highlight) is shown on the words",
   'that bring it. A thing the show gives a colour keeps it: name it as the',
   'show names it.',
   INFOGRAPHIC_KINDS_CAST,

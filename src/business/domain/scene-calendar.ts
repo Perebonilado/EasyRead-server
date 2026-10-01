@@ -105,12 +105,21 @@ export function pageOf(raw: string): CalendarPage | null {
     const m = monthOf(word);
     if (m && month === null) month = m;
     else if (/^\d{3,4}s?$/.test(word) && year === null) year = word;
-    else if (ordinal && day === null && Number(ordinal[1]) >= 1 && Number(ordinal[1]) <= 31)
+    else if (
+      ordinal &&
+      day === null &&
+      Number(ordinal[1]) >= 1 &&
+      Number(ordinal[1]) <= 31
+    )
       day = Number(ordinal[1]);
     else unread.push(word);
   }
   // A date only when every word was part of one, and it has a month or a year.
-  if (!unread.length && (month !== null || year !== null) && !(day !== null && month === null))
+  if (
+    !unread.length &&
+    (month !== null || year !== null) &&
+    !(day !== null && month === null)
+  )
     return { text, day, month, year };
   return { text, day: null, month: null, year: null };
 }
@@ -146,7 +155,9 @@ export function readCalendar(
 }
 
 /** The states a page flips to: its date's words, and "page 2" and on for the first calendar. */
-function pageStates(spec: CalendarSpec): { name: string; c: number; p: number }[] {
+function pageStates(
+  spec: CalendarSpec,
+): { name: string; c: number; p: number }[] {
   const out: { name: string; c: number; p: number }[] = [];
   const taken = new Set<string>();
   const add = (name: string, c: number, p: number) => {
@@ -167,7 +178,9 @@ function pageStates(spec: CalendarSpec): { name: string; c: number; p: number }[
 }
 
 export const calendarPartNames = (spec: CalendarSpec): string[] =>
-  spec.calendars.map((one, c) => one.label ?? one.pages[0].text ?? `calendar ${c + 1}`);
+  spec.calendars.map(
+    (one, c) => one.label ?? one.pages[0].text ?? `calendar ${c + 1}`,
+  );
 export const calendarStateNames = (spec: CalendarSpec): string[] => [
   ...pageStates(spec).map((s) => s.name),
   ...(spec.merge && spec.calendars.length > 1
@@ -175,7 +188,20 @@ export const calendarStateNames = (spec: CalendarSpec): string[] => [
     : []),
 ];
 
-const SHORT = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+const SHORT = [
+  'JAN',
+  'FEB',
+  'MAR',
+  'APR',
+  'MAY',
+  'JUN',
+  'JUL',
+  'AUG',
+  'SEP',
+  'OCT',
+  'NOV',
+  'DEC',
+];
 
 /** What a page shows: the small words in its band, and its big words. */
 export function faceOf(page: CalendarPage): { band: string; big: string } {
@@ -205,7 +231,13 @@ function pageSvg(
   const corner = Math.min(w, h) * 0.07;
   const stroke = strokeOf(text);
   const bandWords = face.band
-    ? fitWords(face.band, w * 0.86, Math.min(band * 0.5, text * 1.25), text * 0.8, 1)
+    ? fitWords(
+        face.band,
+        w * 0.86,
+        Math.min(band * 0.5, text * 1.25),
+        text * 0.8,
+        1,
+      )
     : null;
   const bigRoom = h - band - h * 0.12;
   const big = fitWords(
@@ -226,7 +258,13 @@ function pageSvg(
     `<rect x="${r1(x)}" y="${r1(y)}" width="${r1(w)}" height="${r1(h)}" rx="${r1(corner)}" fill="${PAPER.card}" stroke="${PAPER.paperEdge}" stroke-width="${r1(stroke)}"/>` +
     `<path d="M${r1(x)} ${r1(y + band)}V${r1(y + corner)}Q${r1(x)} ${r1(y)} ${r1(x + corner)} ${r1(y)}H${r1(x + w - corner)}Q${r1(x + w)} ${r1(y)} ${r1(x + w)} ${r1(y + corner)}V${r1(y + band)}Z" fill="${colour}"/>` +
     (bandWords
-      ? textLines(bandWords.lines, x + w / 2, y + band / 2 + bandWords.size * 0.36, bandWords.size, { fill: PAPER.card, spacing: bandWords.size * 0.06 })
+      ? textLines(
+          bandWords.lines,
+          x + w / 2,
+          y + band / 2 + bandWords.size * 0.36,
+          bandWords.size,
+          { fill: PAPER.card, spacing: bandWords.size * 0.06 },
+        )
       : '') +
     textLines(
       big.lines,
@@ -258,7 +296,8 @@ export function renderCalendar(
   // A page's size: the room shared by the calendars, or by the one they merge into when it is larger.
   const w = Math.min(
     (room.w - gap * (cols - 1)) / cols,
-    ((room.h - labelRoom * rows - gap * (rows - 1)) / rows - text * 0.4) / ratio,
+    ((room.h - labelRoom * rows - gap * (rows - 1)) / rows - text * 0.4) /
+      ratio,
     shape === 'tall' ? 330 : 380,
   );
   const h = w * ratio;
@@ -268,7 +307,10 @@ export function renderCalendar(
     const row = Math.floor(c / cols);
     const inRow = Math.min(cols, n - row * cols);
     const x0 = (width - (inRow * w + gap * (inRow - 1))) / 2;
-    return { x: x0 + (c - row * cols) * (w + gap), y: text * 0.5 + row * (cellH + gap) };
+    return {
+      x: x0 + (c - row * cols) * (w + gap),
+      y: text * 0.5 + row * (cellH + gap),
+    };
   };
   const out: string[] = [
     styleOf({
@@ -315,13 +357,18 @@ export function renderCalendar(
     // More flips for more time passing: years apart, or a day count.
     const before = one.pages[state.p - 1];
     const after = one.pages[state.p];
-    const years = Math.abs((Number.parseInt(after.year ?? '', 10) || 0) - (Number.parseInt(before.year ?? '', 10) || 0));
+    const years = Math.abs(
+      (Number.parseInt(after.year ?? '', 10) || 0) -
+        (Number.parseInt(before.year ?? '', 10) || 0),
+    );
     const flips = years >= 2 ? 3 : 1;
     for (let k = flips - 1; k >= 0; k -= 1)
       ghosts.push(
         `<g class="flip" opacity="0" style="${delayOf(0.05 + k * 0.16)}">${pageSvg(k === flips - 1 ? before : { text: '', day: null, month: null, year: null }, x, y, w, h, colour, text)}</g>`,
       );
-    out.push(`<g id="${id}">${pageSvg(after, x, y, w, h, colour, text)}${ghosts.join('')}</g>`);
+    out.push(
+      `<g id="${id}">${pageSvg(after, x, y, w, h, colour, text)}${ghosts.join('')}</g>`,
+    );
   }
   // Their meeting: each calendar slides to the middle and goes, and the one date is there.
   let bottom = rows * cellH + gap * (rows - 1) + text * 0.5;

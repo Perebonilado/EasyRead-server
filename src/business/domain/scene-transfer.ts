@@ -9,7 +9,13 @@
  * dotted trace, and a lid snaps down on the second box.
  */
 import { measureText } from './scene-font';
-import { iconOf, iconSymbol, iconUse, isIconName, type IconName } from './scene-icon-set';
+import {
+  iconOf,
+  iconSymbol,
+  iconUse,
+  isIconName,
+  type IconName,
+} from './scene-icon-set';
 import { colourOr, tokenOf, type PaletteToken } from './scene-palette';
 import type { FilmShape } from './scene-shape';
 import { PAPER } from './scene-themes';
@@ -152,7 +158,10 @@ export function renderTransfer(
   // stand along the arc; once its motion runs they give way at once to
   // those that move.
   const bez = (t: number, a: number, b: number, c: number, d: number) =>
-    (1 - t) ** 3 * a + 3 * (1 - t) ** 2 * t * b + 3 * (1 - t) * t ** 2 * c + t ** 3 * d;
+    (1 - t) ** 3 * a +
+    3 * (1 - t) ** 2 * t * b +
+    3 * (1 - t) * t ** 2 * c +
+    t ** 3 * d;
   const still = [0.3, 0.5, 0.7]
     .map((t) =>
       iconUse(
@@ -169,13 +178,25 @@ export function renderTransfer(
   );
   parts.tokens = 'transfer-tokens';
   // The boxes over the tokens' ends: what comes and goes is inside them.
-  const box = (x: number, label: string, colour: string, id: string, delay: number) => {
+  const box = (
+    x: number,
+    label: string,
+    colour: string,
+    id: string,
+    delay: number,
+  ) => {
     const words = fitWords(label, boxW * 0.84, text * 1.35, text, 2);
     const h = words.lines.length * words.size * 1.15;
     return (
       `<g id="${id}"><g class="pop" style="${delayOf(delay)}">` +
       `<rect x="${r1(x)}" y="${r1(top)}" width="${r1(boxW)}" height="${r1(boxH)}" rx="${r1(text * 0.55)}" fill="${PAPER.card}" stroke="${colour}" stroke-width="${r1(stroke * 1.6)}"/>` +
-      textLines(words.lines, x + boxW / 2, top + (boxH - h) / 2 + words.size * 0.88, words.size, { leading: 1.15 }) +
+      textLines(
+        words.lines,
+        x + boxW / 2,
+        top + (boxH - h) / 2 + words.size * 0.88,
+        words.size,
+        { leading: 1.15 },
+      ) +
       `</g></g>`
     );
   };

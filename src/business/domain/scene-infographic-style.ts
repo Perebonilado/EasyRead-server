@@ -125,7 +125,11 @@ export function fitWords(
     if (current) out.push(current);
     return out;
   };
-  for (let size = Math.round(most); size >= least; size -= Math.max(1, size * 0.04)) {
+  for (
+    let size = Math.round(most);
+    size >= least;
+    size -= Math.max(1, size * 0.04)
+  ) {
     const set = breakAt(size);
     if (
       set.length <= lines &&
@@ -136,7 +140,10 @@ export function fitWords(
   const size = Math.round(least);
   const set = breakAt(size);
   const kept = set.slice(0, lines);
-  if (set.length > lines || kept.some((l) => measureText(l, size, weight) > width)) {
+  if (
+    set.length > lines ||
+    kept.some((l) => measureText(l, size, weight) > width)
+  ) {
     let last = set.slice(lines - 1).join(' ');
     while (last.length > 1 && measureText(`${last}…`, size, weight) > width)
       last = last.slice(0, -1);

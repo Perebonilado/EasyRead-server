@@ -91,7 +91,8 @@ function bars(
 ): string {
   const out: string[] = [];
   for (let i = 0; i < lines; i += 1) {
-    const end = last && i === lines - 1 ? 0.35 + random() * 0.3 : 0.82 + random() * 0.18;
+    const end =
+      last && i === lines - 1 ? 0.35 + random() * 0.3 : 0.82 + random() * 0.18;
     out.push(
       `<rect x="${r1(x)}" y="${r1(y + i * size * 1.75)}" width="${r1(w * end)}" height="${r1(size * 0.62)}" rx="${r1(size * 0.31)}" fill="${PAPER.grid}"/>`,
     );
@@ -111,7 +112,10 @@ export function renderDocument(
   const stroke = strokeOf(text);
   // A page's proportion: portrait, as large as the room lets it be.
   const pageH = Math.min(room.h * 0.98, tall ? 760 : 600);
-  const pageW = Math.min(room.w * (tall ? 0.94 : 0.62), pageH * (spec.style === 'newspaper' ? 0.92 : 0.76));
+  const pageW = Math.min(
+    room.w * (tall ? 0.94 : 0.62),
+    pageH * (spec.style === 'newspaper' ? 0.92 : 0.76),
+  );
   const pad = pageW * 0.08;
   const inner = pageW - pad * 2;
   const bar = Math.max(text * 0.42, pageW * 0.022);
@@ -143,7 +147,13 @@ export function renderDocument(
     );
     y += stroke * 2.2 + text * 0.7;
     if (spec.headline) {
-      const head = fitWords(spec.headline.toUpperCase(), inner, text * 2.1, text, 3);
+      const head = fitWords(
+        spec.headline.toUpperCase(),
+        inner,
+        text * 2.1,
+        text,
+        3,
+      );
       parts.headline = 'document-headline';
       body.push(
         `<g id="document-headline">${textLines(head.lines, pageW / 2, y + head.size * 0.86, head.size, { fill: PAPER.ink, leading: 1.08 })}</g>`,
@@ -154,9 +164,14 @@ export function renderDocument(
     const cols = 3;
     const gap = pad * 0.6;
     const colW = (inner - gap * (cols - 1)) / cols;
-    const lines = Math.max(2, Math.floor((pageH - pad - y) / ((bar / 0.62) * 1.75)));
+    const lines = Math.max(
+      2,
+      Math.floor((pageH - pad - y) / ((bar / 0.62) * 1.75)),
+    );
     for (let c = 0; c < cols; c += 1)
-      body.push(bars(pad + c * (colW + gap), y, colW, lines, bar / 0.62, random));
+      body.push(
+        bars(pad + c * (colW + gap), y, colW, lines, bar / 0.62, random),
+      );
   } else {
     // A paper: its title, a rule, paragraphs of grey lines, a signature.
     const title = fitWords(spec.title, inner, text * 1.5, text, 2);
@@ -202,8 +217,16 @@ export function renderDocument(
     // The stamp: a double-ruled box of words, turned, slammed down over
     // the page's middle; a few drops of its ink round it.
     const colour = colourOr(spec.colour, PAPER.bad);
-    const words = fitWords(spec.stamp.toUpperCase(), pageW * 0.78, text * 2, text, 2);
-    const ww = Math.max(...words.lines.map((l) => measureText(l, words.size, 700))) + words.size * 1.2;
+    const words = fitWords(
+      spec.stamp.toUpperCase(),
+      pageW * 0.78,
+      text * 2,
+      text,
+      2,
+    );
+    const ww =
+      Math.max(...words.lines.map((l) => measureText(l, words.size, 700))) +
+      words.size * 1.2;
     const wh = words.lines.length * words.size * 1.1 + words.size * 0.9;
     const cx = room.w / 2;
     const cy = pageH * 0.56;
@@ -221,7 +244,13 @@ export function renderDocument(
         `<g transform="rotate(-9 ${r1(cx)} ${r1(cy)})">` +
         `<rect x="${r1(cx - ww / 2)}" y="${r1(cy - wh / 2)}" width="${r1(ww)}" height="${r1(wh)}" rx="${r1(text * 0.3)}" fill="none" stroke="${colour}" stroke-width="${r1(ring)}"/>` +
         `<rect x="${r1(cx - ww / 2 + ring * 1.6)}" y="${r1(cy - wh / 2 + ring * 1.6)}" width="${r1(ww - ring * 3.2)}" height="${r1(wh - ring * 3.2)}" rx="${r1(text * 0.2)}" fill="none" stroke="${colour}" stroke-width="${r1(ring * 0.45)}"/>` +
-        textLines(words.lines, cx, cy - (words.lines.length * words.size * 1.1) / 2 + words.size * 0.84, words.size, { fill: colour, leading: 1.1, spacing: words.size * 0.05 }) +
+        textLines(
+          words.lines,
+          cx,
+          cy - (words.lines.length * words.size * 1.1) / 2 + words.size * 0.84,
+          words.size,
+          { fill: colour, leading: 1.1, spacing: words.size * 0.05 },
+        ) +
         `</g></g>` +
         `<g class="ink" style="${delayOf(0.38)}">${drops}</g>` +
         `</g>`,

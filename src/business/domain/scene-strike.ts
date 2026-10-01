@@ -89,8 +89,20 @@ export function renderStrike(
   // The two lines share the room: the old words as large as fit, the new
   // ones as large or larger, each at most three lines.
   const share = (room.h - labelH) / 2.2;
-  const old = fitWords(spec.from, width * 0.9, Math.min(share * 0.9, tall ? 150 : 190), text * 1.4, 3);
-  const fresh = fitWords(spec.to, width * 0.9, Math.min(share * 0.95, tall ? 160 : 200), text * 1.4, 3);
+  const old = fitWords(
+    spec.from,
+    width * 0.9,
+    Math.min(share * 0.9, tall ? 150 : 190),
+    text * 1.4,
+    3,
+  );
+  const fresh = fitWords(
+    spec.to,
+    width * 0.9,
+    Math.min(share * 0.95, tall ? 160 : 200),
+    text * 1.4,
+    3,
+  );
   const oldH = old.lines.length * old.size * 1.1;
   const freshH = fresh.lines.length * fresh.size * 1.1;
   const gap = text * 0.8;
@@ -143,6 +155,11 @@ export function renderStrike(
     new: 'strike-new',
   };
   const bottom = freshTop + freshH + text * 0.3;
-  const viewBox: [number, number, number, number] = [0, r1(-text * 0.3), width, r1(bottom + text * 0.3)];
+  const viewBox: [number, number, number, number] = [
+    0,
+    r1(-text * 0.3),
+    width,
+    r1(bottom + text * 0.3),
+  ];
   return { svg: svgOf(viewBox, out.join('')), viewBox, parts, states };
 }

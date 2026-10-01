@@ -176,14 +176,10 @@ export function withBust<T extends NamecardSpec | { namecard: NamecardSpec }>(
   svg: string,
 ): T {
   const carried = 'namecard' in card;
-  const spec: NamecardSpec = carried
-    ? (card as { namecard: NamecardSpec }).namecard
-    : (card as NamecardSpec);
+  const spec: NamecardSpec = carried ? card.namecard : card;
   const bust = bustOf(svg, spec.colour ? colourOr(spec.colour, '') : null);
   if (!bust) return card;
-  return carried
-    ? { ...card, namecard: { ...spec, bust } }
-    : { ...card, bust };
+  return carried ? { ...card, namecard: { ...spec, bust } } : { ...card, bust };
 }
 
 /** The light ground a bust stands on, the same in every look (no token), as a portrait's backdrop. */
@@ -222,7 +218,10 @@ export function renderNamecard(
   const textX = tall ? cardW / 2 : pad * 2 + disc;
   const anchor = tall ? 'middle' : 'start';
   let y = tall ? pad + disc + text * 0.8 : (cardH - block) / 2;
-  const parts: Record<string, string> = { portrait: 'card-portrait', name: 'card-name' };
+  const parts: Record<string, string> = {
+    portrait: 'card-portrait',
+    name: 'card-name',
+  };
   const out: string[] = [
     styleOf({
       card: 'animation:ig-rise .5s cubic-bezier(.2,.8,.3,1) both',
@@ -242,7 +241,10 @@ export function renderNamecard(
       `<circle cx="${r1(discX)}" cy="${r1(discY)}" r="${r1(r)}" fill="none" stroke="${colour}" stroke-width="${r1(stroke * 0.8)}"/>`
     : (() => {
         const initials = initialsOf(spec.name);
-        const size = Math.min(disc * 0.42, (disc * 0.78) / Math.max(1, measureText(initials, 1, 700)));
+        const size = Math.min(
+          disc * 0.42,
+          (disc * 0.78) / Math.max(1, measureText(initials, 1, 700)),
+        );
         return (
           `<circle cx="${r1(discX)}" cy="${r1(discY)}" r="${r1(r)}" fill="${colour}" fill-opacity="0.16" stroke="${colour}" stroke-width="${r1(stroke * 0.8)}"/>` +
           `<text x="${r1(discX)}" y="${r1(discY + size * 0.36)}" font-size="${r1(size)}" font-weight="700" fill="${colour}" text-anchor="middle">${escapeXml(initials)}</text>`

@@ -144,11 +144,7 @@ import {
   type SplitDraft,
   type SplitSpec,
 } from './scene-split';
-import {
-  tokenOf,
-  type PaletteEntry,
-  type PaletteToken,
-} from './scene-palette';
+import { tokenOf, type PaletteEntry, type PaletteToken } from './scene-palette';
 import { applyPalette, showPalette } from './scene-palette-apply';
 import {
   SHEET_PARTS,
@@ -3000,7 +2996,9 @@ function codeThing(
             .map((p) => ({ x: p.x, name: clean(p.name) })),
           xLabel: clean(plot.xLabel) || null,
           yLabel: clean(plot.yLabel) || null,
-          ...(clean(raw.source) ? { source: clean(raw.source).slice(0, 90) } : {}),
+          ...(clean(raw.source)
+            ? { source: clean(raw.source).slice(0, 90) }
+            : {}),
         },
       },
       problems,
@@ -3035,7 +3033,9 @@ function codeThing(
         name: clean(raw.name),
         timeline: {
           events,
-          ...(clean(raw.source) ? { source: clean(raw.source).slice(0, 90) } : {}),
+          ...(clean(raw.source)
+            ? { source: clean(raw.source).slice(0, 90) }
+            : {}),
         },
       },
       problems,
@@ -3077,7 +3077,9 @@ function codeThing(
           unit: clean(raw.chart?.unit) || null,
           bars,
           ...(tokenOf(raw.colour) ? { colour: tokenOf(raw.colour) } : {}),
-          ...(clean(raw.source) ? { source: clean(raw.source).slice(0, 90) } : {}),
+          ...(clean(raw.source)
+            ? { source: clean(raw.source).slice(0, 90) }
+            : {}),
         },
       },
       problems,
@@ -3264,7 +3266,10 @@ function infographicThing(
         [counter.value, ...(counter.then !== null ? [counter.then] : [])],
         counter.unit,
       );
-      return { thing: { id, kind: 'counter', name: own, counter, ...text }, problems };
+      return {
+        thing: { id, kind: 'counter', name: own, counter, ...text },
+        problems,
+      };
     }
     case 'icons': {
       const icons = readIcons(raw.icons, name, extra);
@@ -3274,7 +3279,10 @@ function infographicThing(
         [icons.count, ...(icons.highlight ? [icons.highlight.count] : [])],
         icons.unit,
       );
-      return { thing: { id, kind: 'icons', name: own, icons, ...text }, problems };
+      return {
+        thing: { id, kind: 'icons', name: own, icons, ...text },
+        problems,
+      };
     }
     case 'namecard': {
       const namecard = readNamecard(raw.namecard, name, extra);
@@ -3288,12 +3296,19 @@ function infographicThing(
     case 'calendar': {
       const calendar = readCalendar(raw.calendar, extra);
       if (!calendar) return { why: 'a calendar with no date' };
-      return { thing: { id, kind: 'calendar', name: own, calendar, ...text }, problems };
+      return {
+        thing: { id, kind: 'calendar', name: own, calendar, ...text },
+        problems,
+      };
     }
     case 'seats': {
       const seats = readSeats(raw.seats, name, extra);
       if (!seats) return { why: 'a chamber with no seats' };
-      unsourced('seats', seats.groups.map((g) => g.seats), null);
+      unsourced(
+        'seats',
+        seats.groups.map((g) => g.seats),
+        null,
+      );
       return {
         // Its caption is drawn under its key.
         thing: { id, kind: 'seats', name: '', seats, ...text },
@@ -3302,23 +3317,36 @@ function infographicThing(
     }
     case 'strike': {
       const strike = readStrike(raw.strike, extra);
-      if (!strike) return { why: 'words struck out with nothing to replace them' };
-      return { thing: { id, kind: 'strike', name: own, strike, ...text }, problems };
+      if (!strike)
+        return { why: 'words struck out with nothing to replace them' };
+      return {
+        thing: { id, kind: 'strike', name: own, strike, ...text },
+        problems,
+      };
     }
     case 'transfer': {
       const transfer = readTransfer(raw.transfer, name, extra);
       if (!transfer) return { why: 'things moving with no two ends' };
-      return { thing: { id, kind: 'transfer', name: own, transfer, ...text }, problems };
+      return {
+        thing: { id, kind: 'transfer', name: own, transfer, ...text },
+        problems,
+      };
     }
     case 'document': {
       const document = readDocument(raw.document, name, extra);
       if (!document) return { why: 'a document with no title' };
-      return { thing: { id, kind: 'document', name: '', document, ...text }, problems };
+      return {
+        thing: { id, kind: 'document', name: '', document, ...text },
+        problems,
+      };
     }
     case 'split': {
       const split = readSplit(raw.split);
       if (!split) return { why: 'a split screen without two sides' };
-      return { thing: { id, kind: 'split', name: own, split, ...text }, problems };
+      return {
+        thing: { id, kind: 'split', name: own, split, ...text },
+        problems,
+      };
     }
     default:
       return { why: 'no kind code draws' };
@@ -3455,7 +3483,10 @@ export function quietStretches(script: SceneScript, limit = 30): string[] {
   const heldBeats: [number, number][] = [];
   script.beats.forEach((beat, k) => {
     if (!beat.hold) return;
-    const span: [number, number] = [offsets[k], offsets[k] + wordsOf(beat.say).length];
+    const span: [number, number] = [
+      offsets[k],
+      offsets[k] + wordsOf(beat.say).length,
+    ];
     heldBeats.push(span);
     positions.push(span[0], span[1]);
   });

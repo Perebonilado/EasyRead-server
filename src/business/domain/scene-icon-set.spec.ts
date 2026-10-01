@@ -29,7 +29,9 @@ describe('the infographic icons', () => {
 
   it('holds nothing that is a weapon or a faith', () => {
     for (const name of ICON_NAMES)
-      expect(name).not.toMatch(/gun|rifle|sword|bomb|church|mosque|temple|cross$/);
+      expect(name).not.toMatch(
+        /gun|rifle|sword|bomb|church|mosque|temple|cross$/,
+      );
   });
 
   it('draws each icon as paths in a box of 100, and nothing the sanitiser removes', () => {

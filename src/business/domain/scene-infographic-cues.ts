@@ -37,7 +37,20 @@ const wordsOf = (text: string | null | undefined): string[] =>
   (text ?? '').split(/\s+/).map(wordOf).filter(Boolean);
 
 /** The words that say a flow has stopped. */
-const STOPS = [['shut'], ['shuts'], ['closed'], ['closes'], ['close'], ['stopped'], ['stops'], ['stop'], ['ended'], ['ends'], ['halted'], ['cut', 'off']];
+const STOPS = [
+  ['shut'],
+  ['shuts'],
+  ['closed'],
+  ['closes'],
+  ['close'],
+  ['stopped'],
+  ['stops'],
+  ['stop'],
+  ['ended'],
+  ['ends'],
+  ['halted'],
+  ['cut', 'off'],
+];
 
 /** Each later look of a thing, in the order it comes, with its cues. */
 export function stateCues(thing: InfographicThing): StateCue[] {

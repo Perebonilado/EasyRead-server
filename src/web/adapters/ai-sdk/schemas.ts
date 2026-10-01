@@ -602,7 +602,10 @@ const fraction = z.number().min(0).max(1);
 /** A number as a model may write it: 45, or "45", or "1,500". Code reads it (scene-counter numberOf). */
 const looseNumber = z.union([z.number(), z.string()]).nullable().catch(null);
 const maybeText = z.string().nullable().catch(null);
-const iconName = z.enum(ICON_NAMES as [string, ...string[]]).nullable().catch(null);
+const iconName = z
+  .enum(ICON_NAMES as [string, ...string[]])
+  .nullable()
+  .catch(null);
 
 /**
  * The infographic kinds (scene-counter … scene-split), each by what it

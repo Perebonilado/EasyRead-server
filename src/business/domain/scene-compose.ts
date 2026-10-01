@@ -2937,7 +2937,10 @@ function composeShaped(input: ComposeInput): {
     // The camera a sheet directs is the whole of it; so is a build's.
     shots: !cameraDirected && !script.board,
     ...(paced
-      ? { pace: INFOGRAPHIC_FILL, holds: holdSpans(script, beats, timed, durationMs) }
+      ? {
+          pace: INFOGRAPHIC_FILL,
+          holds: holdSpans(script, beats, timed, durationMs),
+        }
       : {}),
   });
   effects.sort((a, b) => a.atMs - b.atMs);

@@ -57,7 +57,8 @@ export interface SeatsSpec {
 /** A chamber as the writer gives it. */
 export interface SeatsDraft {
   layout: string | null;
-  groups: { name: string; seats: number | string; colour?: string | null }[] | null;
+  groups:
+    { name: string; seats: number | string; colour?: string | null }[] | null;
   majority: boolean | null;
   label: string | null;
 }
@@ -82,7 +83,9 @@ export function readSeats(
     const seats = Math.round(numberOf(one?.seats)?.value ?? 0);
     const label = clean(one?.name, 28);
     if (!label || !(seats > 0)) continue;
-    const same = groups.find((g) => g.name.toLowerCase() === label.toLowerCase());
+    const same = groups.find(
+      (g) => g.name.toLowerCase() === label.toLowerCase(),
+    );
     if (same) same.seats += seats;
     else groups.push({ name: label, seats, colour: tokenOf(one?.colour) });
   }
@@ -94,7 +97,11 @@ export function readSeats(
     groups.length > MOST_GROUPS
       ? [
           ...kept.slice(0, MOST_GROUPS - 1),
-          { name: 'Others', seats: rest.reduce((n, g) => n + g.seats, 0), colour: 'muted' as const },
+          {
+            name: 'Others',
+            seats: rest.reduce((n, g) => n + g.seats, 0),
+            colour: 'muted' as const,
+          },
         ]
       : kept;
   const total = shown.reduce((n, g) => n + g.seats, 0);
@@ -121,7 +128,10 @@ export function groupColours(spec: SeatsSpec): string[] {
   const free = GIVE_ORDER.filter((t) => !used.has(t) && t !== 'chart3');
   let k = 0;
   return spec.groups.map((g) =>
-    colourOr(g.colour ?? free[k++ % Math.max(1, free.length)] ?? 'muted', PAPER.muted),
+    colourOr(
+      g.colour ?? free[k++ % Math.max(1, free.length)] ?? 'muted',
+      PAPER.muted,
+    ),
   );
 }
 
@@ -139,18 +149,29 @@ interface Seat {
  * apart along a row as the rows are; ordered round the arc from its first
  * end to its last, so each group is a wedge. Radius 1, its centre at 0, 0.
  */
-export function hemicycle(n: number): { seats: Seat[]; dot: number; inner: number } {
+export function hemicycle(n: number): {
+  seats: Seat[];
+  dot: number;
+  inner: number;
+} {
   const inner = n <= 30 ? 0.36 : n <= 120 ? 0.32 : 0.28;
   let best: { seats: Seat[]; dot: number } | null = null;
-  for (let rows = 1; rows <= 24; rows += 1) {
+  // Never more rows than seats: every row holds one at least.
+  for (let rows = 1; rows <= Math.min(24, Math.max(1, n)); rows += 1) {
     const radii = Array.from({ length: rows }, (_, i) =>
       rows === 1 ? (1 + inner) / 2 : inner + ((1 - inner) * i) / (rows - 1),
     );
     const sum = radii.reduce((a, b) => a + b, 0);
     const counts = radii.map((r) => Math.max(1, Math.round((n * r) / sum)));
-    // The rounding put right on the outermost rows.
+    // The rounding put right on the outermost rows, a seat at a time; a
+    // row count it cannot be put right on (every row down to one) is
+    // passed over.
     let diff = n - counts.reduce((a, b) => a + b, 0);
-    for (let i = rows - 1; diff !== 0; i = (i - 1 + rows) % rows) {
+    for (
+      let i = rows - 1, tries = 0;
+      diff !== 0 && tries < rows * (Math.abs(diff) + 1);
+      i = (i - 1 + rows) % rows, tries += 1
+    ) {
       if (diff > 0) {
         counts[i] += 1;
         diff -= 1;
@@ -159,23 +180,30 @@ export function hemicycle(n: number): { seats: Seat[]; dot: number; inner: numbe
         diff += 1;
       }
     }
+    if (diff !== 0) continue;
     const radial = rows === 1 ? 1 - inner : (1 - inner) / (rows - 1);
     const along = Math.min(
-      ...radii.map((r, i) => (counts[i] > 1 ? (Math.PI * r) / (counts[i] - 1) : Math.PI * r)),
+      ...radii.map((r, i) =>
+        counts[i] > 1 ? (Math.PI * r) / (counts[i] - 1) : Math.PI * r,
+      ),
     );
     const dot = Math.min(radial, along) * 0.42;
     if (!best || dot > best.dot * 1.001) {
       const seats: Seat[] = [];
       radii.forEach((r, i) => {
         for (let k = 0; k < counts[i]; k += 1) {
-          const a = counts[i] === 1 ? Math.PI / 2 : Math.PI * (1 - k / (counts[i] - 1));
+          const a =
+            counts[i] === 1 ? Math.PI / 2 : Math.PI * (1 - k / (counts[i] - 1));
           seats.push({ x: r * Math.cos(a), y: -r * Math.sin(a), order: 0 });
         }
       });
       // Round the arc, from its first end; inner before outer at one angle.
       const angle = (s: Seat) => Math.atan2(-s.y, s.x);
       seats
-        .sort((a, b) => angle(b) - angle(a) || Math.hypot(a.x, a.y) - Math.hypot(b.x, b.y))
+        .sort(
+          (a, b) =>
+            angle(b) - angle(a) || Math.hypot(a.x, a.y) - Math.hypot(b.x, b.y),
+        )
         .forEach((s, i) => (s.order = i));
       best = { seats, dot };
     }
@@ -188,7 +216,11 @@ export function hemicycle(n: number): { seats: Seat[]; dot: number; inner: numbe
  * seats on one, the rest on the other, each bench filled column by column
  * from its first end, so each group is a block. Units: a seat's pitch is 1.
  */
-export function benches(n: number): { seats: Seat[]; cols: number; rows: number } {
+export function benches(n: number): {
+  seats: Seat[];
+  cols: number;
+  rows: number;
+} {
   const half = Math.ceil(n / 2);
   const rows = Math.max(1, Math.min(6, Math.round(Math.sqrt(half / 4))));
   const cols = Math.ceil(half / rows);
@@ -217,7 +249,8 @@ export function renderSeats(
   // Each group's dots: its share, rounded so the dots add up.
   const dots = spec.groups.map((g) => g.seats / per);
   const counts = dots.map(Math.floor);
-  let left = Math.max(1, Math.round(members / per)) - counts.reduce((a, b) => a + b, 0);
+  let left =
+    Math.max(1, Math.round(members / per)) - counts.reduce((a, b) => a + b, 0);
   dots
     .map((d, i) => ({ i, frac: d - Math.floor(d) }))
     .sort((a, b) => b.frac - a.frac)
@@ -238,7 +271,8 @@ export function renderSeats(
     words: `${g.name} ${g.seats.toLocaleString('en-GB')}`,
     colour: colours[i],
   }));
-  const entryW = (e: { words: string }) => keySize * 1.3 + measureText(e.words, keySize, 700) + keySize * 1.2;
+  const entryW = (e: { words: string }) =>
+    keySize * 1.3 + measureText(e.words, keySize, 700) + keySize * 1.2;
   const keyRows: (typeof entries)[] = [[]];
   let rowW = 0;
   for (const e of entries) {
@@ -251,10 +285,17 @@ export function renderSeats(
     rowW += w;
   }
   const keyH = keyRows.length * keySize * 1.7;
-  const label = spec.label ? fitWords(spec.label, width * 0.92, text * 1.25, text, 1) : null;
-  const perKey = per > 1 ? `Each dot = ${per.toLocaleString('en-GB')} members` : null;
+  const label = spec.label
+    ? fitWords(spec.label, width * 0.92, text * 1.25, text, 1)
+    : null;
+  const perKey =
+    per > 1 ? `Each dot = ${per.toLocaleString('en-GB')} members` : null;
   const below =
-    text * 0.6 + keyH + (label ? label.size * 1.5 : 0) + (perKey ? text * 1.6 : 0) + (source ? sourceRoom(text) : 0);
+    text * 0.6 +
+    keyH +
+    (label ? label.size * 1.5 : 0) +
+    (perKey ? text * 1.6 : 0) +
+    (source ? sourceRoom(text) : 0);
   const out: string[] = [];
   const parts: Record<string, string> = {};
   const used = new Set<string>();
@@ -279,19 +320,37 @@ export function renderSeats(
   let highest = 0;
   if (spec.layout === 'hemicycle') {
     const arc = hemicycle(n);
-    const radius = Math.min(width * 0.47, (room.h - below - text * 0.6) / (1 + arc.dot), tall ? 330 : 470);
+    const radius = Math.min(
+      width * 0.47,
+      (room.h - below - text * 0.6) / (1 + arc.dot),
+      tall ? 330 : 470,
+    );
     centre = { x: width / 2, y: radius * (1 + arc.dot) + text * 0.3 };
     dotR = arc.dot * radius;
-    seatAt = (s) => ({ x: centre.x + s.x * radius, y: centre.y + s.y * radius });
+    seatAt = (s) => ({
+      x: centre.x + s.x * radius,
+      y: centre.y + s.y * radius,
+    });
     laid = arc.seats;
     chamberBottom = centre.y + dotR;
     // The total in its hollow.
     const total = members.toLocaleString('en-GB');
-    const totalSize = Math.min(arc.inner * radius * 0.62, (arc.inner * radius * 1.6) / Math.max(1, measureText(total, 1, 700)));
+    const totalSize = Math.min(
+      arc.inner * radius * 0.62,
+      (arc.inner * radius * 1.6) / Math.max(1, measureText(total, 1, 700)),
+    );
     out.push(
       `<g id="seats-total" class="show" style="${delayOf(fill * 0.6)}">` +
-        textLines([total], centre.x, centre.y - totalSize * 0.28, totalSize, { fill: PAPER.ink }) +
-        textLines(['seats'], centre.x, centre.y + text * 0.15 - totalSize * 0.28 + totalSize * 0.62, Math.max(text * 0.85, totalSize * 0.3), { fill: PAPER.muted, weight: 600 }) +
+        textLines([total], centre.x, centre.y - totalSize * 0.28, totalSize, {
+          fill: PAPER.ink,
+        }) +
+        textLines(
+          ['seats'],
+          centre.x,
+          centre.y + text * 0.15 - totalSize * 0.28 + totalSize * 0.62,
+          Math.max(text * 0.85, totalSize * 0.3),
+          { fill: PAPER.muted, weight: 600 },
+        ) +
         `</g>`,
     );
     parts.total = 'seats-total';
@@ -312,10 +371,17 @@ export function renderSeats(
     const bench = benches(n);
     const across = bench.cols;
     const down = bench.rows * 2 + 1.6;
-    const pitch = Math.min((width * 0.94) / across, (room.h - below - text) / down, text * 2.2);
+    const pitch = Math.min(
+      (width * 0.94) / across,
+      (room.h - below - text) / down,
+      text * 2.2,
+    );
     dotR = pitch * 0.4;
     const x0 = (width - across * pitch) / 2 + pitch / 2;
-    seatAt = (s) => ({ x: x0 + s.x * pitch, y: text * 0.3 + pitch / 2 + s.y * pitch });
+    seatAt = (s) => ({
+      x: x0 + s.x * pitch,
+      y: text * 0.3 + pitch / 2 + s.y * pitch,
+    });
     laid = bench.seats;
     // The floor between the benches: its table.
     const floorY = text * 0.3 + pitch * (bench.rows + 0.25);
@@ -335,13 +401,19 @@ export function renderSeats(
     for (let i = 0; i < mine.length; i += batch) {
       const run = mine.slice(i, i + batch);
       const delay = 0.2 + (start + i) * each;
+      // A dense chamber's seats on whole units: a tenth of one is never seen, and it keeps the drawing small.
+      const at1 = n > 300 ? Math.round : r1;
       const dots = run
         .map((s) => {
           const at = seatAt(s);
-          return `<circle cx="${r1(at.x)}" cy="${r1(at.y)}" r="${r1(dotR)}"${batch === 1 ? ` class="s" style="${delayOf(delay)}"` : ''}/>`;
+          return `<circle cx="${at1(at.x)}" cy="${at1(at.y)}" r="${r1(dotR)}"${batch === 1 ? ` class="s" style="${delayOf(delay)}"` : ''}/>`;
         })
         .join('');
-      circles.push(batch === 1 ? dots : `<g class="b" style="${delayOf(delay)}">${dots}</g>`);
+      circles.push(
+        batch === 1
+          ? dots
+          : `<g class="b" style="${delayOf(delay)}">${dots}</g>`,
+      );
     }
     start += counts[gi];
     out.push(`<g id="${id}" fill="${colours[gi]}">${circles.join('')}</g>`);
@@ -362,7 +434,9 @@ export function renderSeats(
     }
     y += keySize * 1.7;
   });
-  out.push(`<g id="seats-key" class="show" style="${delayOf(fill * 0.5)}">${keyItems.join('')}</g>`);
+  out.push(
+    `<g id="seats-key" class="show" style="${delayOf(fill * 0.5)}">${keyItems.join('')}</g>`,
+  );
   parts.key = 'seats-key';
   if (label) {
     parts.label = 'seats-label';

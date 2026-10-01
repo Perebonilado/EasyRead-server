@@ -85,15 +85,26 @@ const clean = (text: unknown, most: number) =>
  * How many each icon stands for, so the grid holds at most `most`: 1 while
  * the count fits, else the least of 2, 5, 10, 20, 50 … that brings it under.
  */
-export function perIcon(count: number, most: number, asked?: number | null): number {
-  if (asked && asked >= 1 && Number.isFinite(asked) && count / asked <= most && count / asked >= 1)
+export function perIcon(
+  count: number,
+  most: number,
+  asked?: number | null,
+): number {
+  if (
+    asked &&
+    asked >= 1 &&
+    Number.isFinite(asked) &&
+    count / asked <= most &&
+    count / asked >= 1
+  )
     return asked;
-  if (count <= most) return 1;
-  for (let power = 1; ; power *= 10)
+  if (!Number.isFinite(count) || count <= most || !(most >= 1)) return 1;
+  for (let power = 1; power < 1e16; power *= 10)
     for (const step of [1, 2, 5]) {
       const per = step * power;
       if (count / per <= most) return per;
     }
+  return 1e16;
 }
 
 /** A unit chart made sound, or null when it counts nothing. */
@@ -140,7 +151,13 @@ export const iconsStateNames = (spec: IconsSpec): string[] =>
 /** The colour a subset is picked out in: the first apart from the grid's own in every look. */
 export function highlightColourOf(base: PaletteToken | null): PaletteToken {
   const from: PaletteToken = base ?? 'chart0';
-  const candidates: PaletteToken[] = ['accent', 'chart3', 'chart1', 'chart2', 'chart5'];
+  const candidates: PaletteToken[] = [
+    'accent',
+    'chart3',
+    'chart1',
+    'chart2',
+    'chart5',
+  ];
   return (
     candidates.find(
       (one) => one !== from && !clashesInEveryTheme([from, one]).length,
@@ -201,11 +218,11 @@ export function renderIcons(
     : null;
   // The key, when an icon is more than one of what it counts: "= 1,000
   // soldiers", "= 1 billion dollars".
-  const scaled = /\b(?:thousand|million|billion|trillion|lakh|crore|bn|m|k)\b/i.test(
-    spec.unit ?? '',
-  );
-  const keyText =
-    per > 1 || scaled ? `= ${valueText(per, spec.unit)}` : null;
+  const scaled =
+    /\b(?:thousand|million|billion|trillion|lakh|crore|bn|m|k)\b/i.test(
+      spec.unit ?? '',
+    );
+  const keyText = per > 1 || scaled ? `= ${valueText(per, spec.unit)}` : null;
   const source = sourceText(spec.source);
   const below =
     (label ? label.lines.length * label.size * 1.2 + text * 0.5 : 0) +
@@ -288,12 +305,22 @@ export function renderIcons(
   }
   if (spec.highlight) {
     // The subset: the rest dimmed, its icons in their own colour, its words over the grid.
-    const many = Math.max(1, Math.min(n, Math.round(spec.highlight.count / per)));
+    const many = Math.max(
+      1,
+      Math.min(n, Math.round(spec.highlight.count / per)),
+    );
     const lits: string[] = [];
     for (let i = 0; i < many; i += 1) {
       const at = cellAt(i);
       lits.push(
-        iconUse(spec.icon, at.x, at.y, size, lit, `class="pop" style="${delayOf(0.1 + Math.min(0.6, i * 0.03))}"`),
+        iconUse(
+          spec.icon,
+          at.x,
+          at.y,
+          size,
+          lit,
+          `class="pop" style="${delayOf(0.1 + Math.min(0.6, i * 0.03))}"`,
+        ),
       );
     }
     const words = highlightLabel

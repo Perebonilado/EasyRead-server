@@ -79,21 +79,48 @@ describe('a show palette: told apart by colour-blind viewers', () => {
     // A theme's good and its second chart green are near twins.
     const clashes = tooClose(['chart2', 'good'], PAPER);
     expect(clashes).toHaveLength(1);
-    expect(clashes[0]).toMatchObject({ a: 'chart2', b: 'good', theme: 'paper' });
+    expect(clashes[0]).toMatchObject({
+      a: 'chart2',
+      b: 'good',
+      theme: 'paper',
+    });
     // The chart's own colours are kept apart in every look (theme-check).
     expect(
-      clashesInEveryTheme(['chart0', 'chart1', 'chart2', 'chart3', 'chart4', 'chart5']),
+      clashesInEveryTheme([
+        'chart0',
+        'chart1',
+        'chart2',
+        'chart3',
+        'chart4',
+        'chart5',
+      ]),
     ).toEqual([]);
   });
 
   it('gives five things five colours apart in every look, holding the chart red back', () => {
-    const { palette, held } = pickPalette(['North', 'West', 'East', 'Britain', 'Lagos']);
+    const { palette, held } = pickPalette([
+      'North',
+      'West',
+      'East',
+      'Britain',
+      'Lagos',
+    ]);
     expect(held).toBe(HELD_TOKEN);
-    expect(palette.map((p) => p.token)).toEqual(['chart0', 'chart1', 'chart2', 'chart4', 'chart5']);
+    expect(palette.map((p) => p.token)).toEqual([
+      'chart0',
+      'chart1',
+      'chart2',
+      'chart4',
+      'chart5',
+    ]);
     expect(palette.some((p) => p.token === held)).toBe(false);
-    expect(clashesInEveryTheme([...palette.map((p) => p.token), held])).toEqual([]);
+    expect(clashesInEveryTheme([...palette.map((p) => p.token), held])).toEqual(
+      [],
+    );
     // Never right or wrong's colour for a side.
-    expect(palette.some((p) => p.token === 'good' || p.token === 'bad')).toBe(false);
+    expect(palette.some((p) => p.token === 'good' || p.token === 'bad')).toBe(
+      false,
+    );
   });
 
   it('keeps what an earlier episode coloured, and gives a newcomer a free colour', () => {
@@ -113,9 +140,18 @@ describe('a show palette: told apart by colour-blind viewers', () => {
       { thing: 'East', token: 'bad' },
       { thing: 'Lagos', token: 'chart0' },
     ]);
-    expect(palette.map((p) => p.token)).toEqual(['chart0', 'chart1', 'chart2', 'chart4']);
+    expect(palette.map((p) => p.token)).toEqual([
+      'chart0',
+      'chart1',
+      'chart2',
+      'chart4',
+    ]);
     expect(mended).toHaveLength(3);
-    expect(freeTokens(palette)).toEqual(GIVE_ORDER.filter((t) => !['chart0', 'chart1', 'chart2', 'chart4', 'chart3'].includes(t)));
+    expect(freeTokens(palette)).toEqual(
+      GIVE_ORDER.filter(
+        (t) => !['chart0', 'chart1', 'chart2', 'chart4', 'chart3'].includes(t),
+      ),
+    );
   });
 });
 
@@ -143,38 +179,54 @@ describe('a show palette: put on what code draws', () => {
       },
     } as SceneThing;
     const coloured = applyPalette(thing, show);
-    expect(coloured.kind === 'seats' && coloured.seats.groups.map((g) => g.colour)).toEqual([
-      'chart0',
-      'chart2',
-      'chart1',
-    ]);
+    expect(
+      coloured.kind === 'seats' && coloured.seats.groups.map((g) => g.colour),
+    ).toEqual(['chart0', 'chart2', 'chart1']);
   });
 
   it("colours a chart's bars by their labels, and a name card by its person", () => {
-    const chart = applyPalette(
-      {
-        id: 'c',
-        kind: 'chart',
-        name: 'Seats',
-        chart: { kind: 'bar', unit: null, bars: [{ label: 'North', value: 3 }, { label: 'South', value: 2 }] },
-      } as SceneThing,
-      show,
-    );
-    expect(chart.kind === 'chart' && chart.chart.bars.map((b) => b.colour)).toEqual(['chart0', 'chart1']);
+    const bars: SceneThing = {
+      id: 'c',
+      kind: 'chart',
+      name: 'Seats',
+      chart: {
+        kind: 'bar',
+        unit: null,
+        bars: [
+          { label: 'North', value: 3 },
+          { label: 'South', value: 2 },
+        ],
+      },
+    };
+    const chart = applyPalette(bars, show);
+    expect(
+      chart.kind === 'chart' && chart.chart.bars.map((b) => b.colour),
+    ).toEqual(['chart0', 'chart1']);
     const card = applyPalette(
       {
         id: 'n',
         kind: 'namecard',
         name: '',
-        namecard: { name: 'Action Group', role: null, line: null, colour: 'chart5', bust: null },
-      } as SceneThing,
+        namecard: {
+          name: 'Action Group',
+          role: null,
+          line: null,
+          colour: 'chart5',
+          bust: null,
+        },
+      },
       show,
     );
     expect(card.kind === 'namecard' && card.namecard.colour).toBe('chart2');
   });
 
   it('leaves a thing with no colour as it was', () => {
-    const words = { id: 'w', kind: 'words', text: 'North', style: 'keyword' } as SceneThing;
+    const words = {
+      id: 'w',
+      kind: 'words',
+      text: 'North',
+      style: 'keyword',
+    } as SceneThing;
     expect(applyPalette(words, show)).toBe(words);
   });
 });

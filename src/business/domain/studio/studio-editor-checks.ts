@@ -558,9 +558,10 @@ export function promiseReturns(
 ): boolean {
   const asked = keyWords(promise);
   if (!asked.size || !rows.length) return true;
+  // Its payoff, then the open loop into the next: the last three rows.
   const end = keyWords(
     rows
-      .slice(-2)
+      .slice(-3)
       .map((r) => r.say)
       .join(' '),
   );
@@ -572,6 +573,58 @@ export function promiseReturns(
 
 /** The longest sentence a row may be, in words. */
 export const MOST_SENTENCE_WORDS = 22;
+
+/** A script, or an act, under this share of its word budget is short of its material. */
+export const SHORT_SHARE = 0.85;
+
+/** Words that say people are in a picture. */
+const PEOPLE_WORDS =
+  /\b(?:people|person|crowds?|man|men|woman|women|child|children|kids?|boys?|girls?|family|families|farmers?|workers?|students?|traders?|merchants?|sailors?|soldiers?|villagers?|townspeople|citizens|priests?|monks?|scholars?|astronomers?|officials?|clerks?|leaders?|king|queen|pope|emperor|doctors?|nurses?|scientists?|teachers?|crew|audience|delegates?|members?|hands?|someone|everyone|they|he|she)\b/iu;
+
+/**
+ * A script's scene rows held to what an illustrated scene is, silently: a
+ * scene row shows people in a place (the world's, or anyone), never a
+ * thing alone or a diagram, which is the lesson's ("why"); and a scene row
+ * alone between lesson rows joins their lesson, so the film is never cut
+ * into scraps.
+ */
+export function soundScenes(
+  rows: readonly EditorialRow[],
+  world: { places: { name: string }[]; people: { name: string }[] } | null,
+): { rows: EditorialRow[]; fixed: number } {
+  const names = [
+    ...(world?.people ?? []).flatMap((p) =>
+      p.name
+        .toLowerCase()
+        .split(/\s+/u)
+        .filter((w) => w.length > 3),
+    ),
+  ];
+  const peopled = (row: EditorialRow) => {
+    const said = `${row.show} ${row.say}`.toLowerCase();
+    return PEOPLE_WORDS.test(said) || names.some((n) => said.includes(n));
+  };
+  let fixed = 0;
+  const out = rows.map((row) => {
+    if (row.visual !== 'scene' || peopled(row)) return row;
+    fixed += 1;
+    return { ...row, visual: 'why' as const };
+  });
+  for (let k = 0; k < out.length; k += 1) {
+    if (out[k].visual !== 'scene') continue;
+    const alone =
+      out[k - 1]?.visual !== 'scene' &&
+      out[k + 1]?.visual !== 'scene' &&
+      // At an episode's edge a lone shot opens or closes it: kept.
+      k > 0 &&
+      k < out.length - 1;
+    if (alone) {
+      out[k] = { ...out[k], visual: 'why' };
+      fixed += 1;
+    }
+  }
+  return { rows: out, fixed };
+}
 
 /**
  * Words a fair film does not use (the playbook's sensitivity read), each
@@ -620,13 +673,14 @@ const HEDGED =
 /** A year, not a quantity: never softened. */
 const YEAR = /^(?:1[0-9]{3}|20[0-9]{2})$/u;
 
-/** A number said as not exact: "about" before its first quantity that is not a year. */
+/** A number said as not exact: "about" before its first quantity that is not a year, nor part of a word ("a 365-day year"). */
 export function softened(say: string): string {
   const found = /\b\d[\d,.]*\b/gu;
   let m: RegExpExecArray | null;
   while ((m = found.exec(say))) {
     const token = m[0].replace(/[.,]$/u, '');
     if (YEAR.test(token)) continue;
+    if (/^-\p{L}/u.test(say.slice(m.index + m[0].length))) continue;
     const before = say.slice(0, m.index);
     if (HEDGED.test(before)) return say;
     return `${before}about ${say.slice(m.index)}`;
@@ -801,7 +855,8 @@ export function scriptProblems(
         `Row ${n} shows nothing: write what is seen while it is said, or cut the line.`,
       );
   });
-  // Each act's words against its budget.
+  // Each act's words against its budget, and the whole episode's: its
+  // length is its material's, never cut short of what the plan gave it.
   for (const [k, act] of (ctx.beats?.acts ?? []).entries()) {
     const said = rows
       .filter((r) => r.act === k + 1)
@@ -810,7 +865,17 @@ export function scriptProblems(
       out.push(
         `Act ${k + 1} runs ${said} words; its budget is ${act.words}: keep the strongest.`,
       );
+    else if (act.words && said < act.words * SHORT_SHARE)
+      out.push(
+        `Act ${k + 1} runs only ${said} words of its ${act.words}: write it out in full, with this act's own material from the plan, a sentence a row.`,
+      );
   }
+  const budget = ctx.beats?.words ?? 0;
+  const total = rows.reduce((n, r) => n + count(r.say), 0);
+  if (budget && total < budget * SHORT_SHARE)
+    out.unshift(
+      `The script runs about ${total} words (${Math.round((total * 60) / Math.max(60, ctx.pace.wpm))} seconds); the beat sheet gives this episode about ${budget} (${Math.round(ctx.beats?.seconds ?? 0)} seconds): write every act out in full. Cut only what is weak, and put this episode's own material from the plan in its place; never make the episode shorter than its material.`,
+    );
   return out;
 }
 

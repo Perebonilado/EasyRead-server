@@ -17,6 +17,7 @@ import {
   softened,
   soundPackage,
   soundPlan,
+  soundScenes,
   splitLongActs,
   splitSentence,
   withPalette,
@@ -554,5 +555,89 @@ describe('the package and the palette, put right by code', () => {
       undefined,
       'chart5',
     ]);
+  });
+});
+
+describe('the script held to its length and its scenes', () => {
+  it('never softens a number that is part of a word', () => {
+    expect(softened('A fixed 365-day calendar slips by 6 hours.')).toBe(
+      'A fixed 365-day calendar slips by about 6 hours.',
+    );
+  });
+
+  it('says when the script, or an act, falls short of its material', () => {
+    const beats = budgetBeats(
+      beatsOf({
+        acts: [
+          { title: 'One', seconds: 60 },
+          { title: 'Two', seconds: 60 },
+        ],
+      }),
+      { wpm: 150 },
+    );
+    const rows = rowsOf(
+      [
+        { say: 'One short line here.', show: 'x', act: 1 },
+        { say: 'Another short line.', show: 'y', act: 2 },
+      ],
+      known,
+    );
+    const problems = scriptProblems(rows, { research, pace, beats });
+    expect(problems[0]).toMatch(/^The script runs about 7 words/);
+    expect(problems.join('\n')).toMatch(/Act 1 runs only 4 words of its 150/);
+  });
+
+  it('keeps scenes to people in places, and never a lone shot between diagrams', () => {
+    const rows = rowsOf(
+      [
+        {
+          say: 'Farmers sow too early.',
+          visual: 'scene',
+          show: 'A farmer in a field',
+          act: 1,
+        },
+        {
+          say: 'The year drifts.',
+          visual: 'why',
+          show: 'A drift line',
+          act: 1,
+        },
+        {
+          say: 'The calendar slips.',
+          visual: 'scene',
+          show: 'A desk with pages',
+          act: 1,
+        },
+        {
+          say: 'Clavius checks the sums.',
+          visual: 'scene',
+          show: 'Clavius at a table',
+          act: 1,
+        },
+        { say: 'Spring returns.', visual: 'why', show: 'A loop', act: 1 },
+        {
+          say: 'People celebrate.',
+          visual: 'scene',
+          show: 'A crowd in a square',
+          act: 1,
+        },
+        { say: 'The rule holds.', visual: 'why', show: 'A rule card', act: 1 },
+      ],
+      known,
+    );
+    const { rows: sound, fixed } = soundScenes(rows, {
+      places: [{ name: 'The square' }],
+      people: [{ name: 'Christopher Clavius' }],
+    });
+    expect(sound.map((r) => r.visual)).toEqual([
+      'scene',
+      'why',
+      'why',
+      'why',
+      'why',
+      'why',
+      'why',
+    ]);
+    expect(fixed).toBe(3);
   });
 });

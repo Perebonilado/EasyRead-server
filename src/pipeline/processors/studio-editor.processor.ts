@@ -77,6 +77,7 @@ import {
   scriptProblems,
   soundPackage,
   soundPlan,
+  soundScenes,
   splitLongActs,
   withPalette,
   type EditorPace,
@@ -777,9 +778,12 @@ export class StudioEditorProcessor {
       });
     }
     const hook = editorial.hook!;
+    // Its length, as the beat sheet gives it: the material's, in words and rows.
+    const perRow = Math.max(8, Math.min(14, pace.sentence[1] - 2));
     const scriptParts = [
       ...base,
       `The beat sheet:\n${describeBeats(beats)}`,
+      `Its length: about ${Math.round(beats.seconds)} seconds, about ${beats.words} spoken words, so about ${Math.round(beats.words / perRow)} rows of one sentence each (about ${perRow} words a row). Write every act out in full, to its words.`,
       `The hook (open with it, as written):\n${hook}`,
       `The research:\n${describeResearch(research)}`,
       world ? `The world:\n${describeWorld(world)}` : '',
@@ -836,7 +840,14 @@ export class StudioEditorProcessor {
         revised.length >= Math.ceil(editorial.rows.length * 0.6)
           ? revised
           : editorial.rows;
-      await keep({ rows: mendRows(rows, ctx).rows, notes, stage: 'read' });
+      // Mended silently: its sentences and words, and its scenes people in
+      // places, never a lone shot between lesson rows.
+      const scenes = soundScenes(mendRows(rows, ctx).rows, world ?? null);
+      if (scenes.fixed)
+        this.deps.logger.log(
+          `studio ${episode.id}: ${scenes.fixed} scene rows made the lesson's`,
+        );
+      await keep({ rows: scenes.rows, notes, stage: 'read' });
     }
 
     // The fact check: every claim the script uses, with the web.

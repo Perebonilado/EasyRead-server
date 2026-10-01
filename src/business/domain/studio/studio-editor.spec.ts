@@ -348,3 +348,38 @@ describe("a show's editor", () => {
     ).toBe('Caesar fixed it in 46 BC after Sosigenes advised him.');
   });
 });
+
+describe('how sure a claim is', () => {
+  it('is never sure of a number one source gives', () => {
+    const research = researchOf({
+      claims: [
+        {
+          id: 'c1',
+          text: 'About 5 million.',
+          kind: 'number',
+          confidence: 'high',
+          sources: ['https://a.example.com'],
+        },
+        {
+          id: 'c2',
+          text: 'About 6 million.',
+          kind: 'number',
+          confidence: 'high',
+          sources: ['https://a.example.com', 'https://b.example.com'],
+        },
+        {
+          id: 'c3',
+          text: 'In 1582.',
+          kind: 'date',
+          confidence: 'high',
+          sources: ['https://a.example.com'],
+        },
+      ],
+    });
+    expect(research.claims.map((c) => c.confidence)).toEqual([
+      'medium',
+      'high',
+      'high',
+    ]);
+  });
+});

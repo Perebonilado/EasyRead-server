@@ -358,16 +358,23 @@ export function researchOf(
         .slice(0, RESEARCH_LIMITS.sources);
       const contested = c.contested === true;
       const status = oneOf(CLAIM_STATUSES)(c.status);
+      const kind = oneOf(CLAIM_KINDS)(c.kind) ?? 'claim';
+      const said = oneOf(CONFIDENCES)(c.confidence) ?? 'medium';
       return [
         {
           id,
           text: claimText,
-          kind: oneOf(CLAIM_KINDS)(c.kind) ?? 'claim',
+          kind,
           sources,
-          // No source, no confidence: whatever the writer felt.
-          confidence: sources.length
-            ? (oneOf(CONFIDENCES)(c.confidence) ?? 'medium')
-            : 'low',
+          // No source, no confidence, whatever the writer felt; and a
+          // number is sure only when two sources agree on it.
+          confidence: !sources.length
+            ? 'low'
+            : kind === 'number' &&
+                said === 'high' &&
+                distinctSources(sources) < 2
+              ? 'medium'
+              : said,
           visual: plainText(c.visual, 240),
           contested,
           who: contested ? plainText(c.who, 120) || null : null,

@@ -11,8 +11,11 @@
  *   npm run editor:show -- --topic "Why do we have leap years" --audience adults --out <dir>
  *     [--tone calm] [--user <uuid>] [--searches <n>] [--boards]
  *   npm run editor:show -- --bench --out <dir> [--only <id>] [--searches <n>] [--lanes <n>]
+ *   npm run editor:show -- --board <episodeId> --out <dir>
  *
- * With --boards, the episode's scenes are boarded too (no film is made).
+ * With --boards, the episode's scenes are boarded too (no film is made);
+ * --board boards an episode written before, and writes what each scene's
+ * board came to (boards.md, boards.json).
  * With --bench, the editorial chain runs over eight topics of every kind
  * (a history story, how something works, numbers, geography, a science
  * process, a news explainer, a biography, a myth against the facts), and
@@ -552,6 +555,119 @@ function rubricWords(rubrics: Rubric[]): string {
   ].join('\n');
 }
 
+/** An episode written before, its scenes boarded with the real model, and what each came to written down. */
+async function boardEpisode(
+  deps: {
+    studio: StudioRepository;
+    llm: LlmGatewayPort;
+    ledger: AiCallLogRepository;
+  },
+  episodeId: string,
+  out: string,
+): Promise<void> {
+  const episode = await deps.studio.findEpisode(episodeId);
+  const show = episode ? await deps.studio.findShow(episode.showId) : null;
+  if (!episode || !show) throw new Error(`No episode ${episodeId}`);
+  const spent: AiCallLogInput[] = [];
+  const editor = new StudioEditorProcessor({
+    studio: deps.studio,
+    llm: deps.llm,
+    calls: {
+      record: async (call) => {
+        spent.push(call);
+        await deps.ledger.record(call);
+      },
+    },
+    queue: { enqueueStudio: () => Promise.resolve() },
+    setting: (name) => process.env[name],
+    material: null,
+    logger: {
+      log: (l) => console.log(`  · ${l}`),
+      warn: (l) => console.log(`  ! ${l}`),
+    },
+  });
+  const started = Date.now();
+  const count = await editor.boards(show, episode);
+  const rows = await deps.studio.listScenes(episode.id);
+  const outline = episode.outline;
+  const lines: string[] = [
+    `# Boards of "${outline?.title ?? episode.title}": ${count} scenes`,
+  ];
+  for (const row of rows) {
+    const scene = outline?.scenes[row.position];
+    const sheet = row.sheet;
+    lines.push(
+      `## ${row.position + 1}. ${scene?.kind === 'illustrated' ? '[scene] ' : ''}${scene?.title ?? ''}`,
+    );
+    if (sheet?.kind === 'story')
+      lines.push(
+        `Set ${sheet.set}, ${sheet.time}, crowd ${sheet.crowd}; on stage: ${sheet.onStage.map((p) => `${p.who} (${p.spot})`).join(', ') || 'no one'}`,
+        ...sheet.beats.map(
+          (b) =>
+            `- ${b.kind}${b.who ? ` ${b.who}` : ''}${b.do ? ` ${b.do}` : ''}: ${b.say}`,
+        ),
+        sheet.camera.length
+          ? `Camera: ${sheet.camera.map((c) => `${c.shot}@${c.beat}${c.on ? ` on ${c.on}` : ''}`).join(', ')}`
+          : '',
+      );
+    else if (sheet?.kind === 'explainer')
+      lines.push(
+        `Cast: ${sheet.draft.cast.map((t) => `${t.id} (${t.kind}${(t as { colour?: string }).colour ? `, ${(t as { colour?: string }).colour}` : ''})`).join(', ')}`,
+        ...sheet.draft.beats.map(
+          (b, k) =>
+            `${k + 1}. ${b.say}  →  ${sheet.draft.steps
+              .filter((st) => st.beat === k)
+              .map(
+                (st) =>
+                  `[${[...(st.show ?? [])].join(' ')}${st.effects?.length ? ` ${st.effects.map((e) => `${e.do}:${e.target}`).join(' ')}` : ''}]`,
+              )
+              .join(' ')}`,
+        ),
+      );
+    if (row.problems.length)
+      lines.push(
+        `Problems left: ${row.problems.map((p) => `${p.level} ${p.rule}: ${p.message}`).join(' | ')}`,
+      );
+  }
+  const dollars = spent.reduce(
+    (n, call) =>
+      n +
+      (call.costUsd ??
+        costOf({
+          task: call.task,
+          model: call.model,
+          tokensIn: call.tokensIn,
+          tokensOut: call.tokensOut,
+          tokensCached: call.tokensCached ?? null,
+        }) ??
+        0),
+    0,
+  );
+  lines.push(
+    `\n_${spent.length} calls, $${dollars.toFixed(2)}, ${Math.round((Date.now() - started) / 1000)}s._`,
+  );
+  mkdirSync(out, { recursive: true });
+  writeFileSync(
+    join(out, 'boards.md'),
+    `${lines.filter(Boolean).join('\n\n')}\n`,
+  );
+  writeFileSync(
+    join(out, 'boards.json'),
+    `${JSON.stringify(
+      rows.map((r) => ({
+        position: r.position,
+        sheet: r.sheet,
+        problems: r.problems,
+      })),
+      null,
+      2,
+    )}\n`,
+  );
+  console.log(
+    `${count} scenes boarded, $${dollars.toFixed(2)}: ${join(out, 'boards.md')}`,
+  );
+}
+
 async function main() {
   const out = resolve(option('--out') ?? 'editor-show');
   const bench = flag('--bench');
@@ -570,6 +686,11 @@ async function main() {
       llm: app.get<LlmGatewayPort>(LLM_GATEWAY),
       ledger: app.get<AiCallLogRepository>(AI_CALL_LOG_REPOSITORY),
     };
+    const boardOnly = option('--board');
+    if (boardOnly) {
+      await boardEpisode(deps, boardOnly, out);
+      return;
+    }
     if (!bench) {
       const topic = option('--topic');
       if (!topic) throw new Error('Say what the show is about: --topic "…"');

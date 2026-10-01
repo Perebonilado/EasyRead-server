@@ -287,16 +287,19 @@ export function fakeEditorAnswer(
         claims: ['c1'],
       };
     case 'script': {
+      // Two columns as a writer gives them: what is said, and apart from
+      // it, what is seen (never the same words: that is a direction).
       const row = (
         say: string,
         visual: string,
         act: number,
+        show: string,
         claims: string[] = [],
         extra: Record<string, unknown> = {},
       ) => ({
         say,
         visual,
-        show: `${visual} picture for: ${say.slice(0, 40)}`,
+        show,
         claims,
         act,
         plant: null,
@@ -308,35 +311,107 @@ export function fakeEditorAnswer(
       });
       return {
         rows: [
-          row(`In 1582, ten days vanished from ${topic}.`, 'scene', 1, ['c1'], {
-            delivery: 'hook',
-          }),
-          row('People woke up and the date had jumped.', 'scene', 1),
-          row('Nobody lost a minute of sleep.', 'scene', 1),
-          row('So where did the days go?', 'when', 1, [], {
-            delivery: 'question',
-          }),
-          row('The old count ran slightly too long each year.', 'why', 1),
-          row('Those leftover minutes piled up over centuries.', 'why', 1, [], {
-            plant: 'p1',
-          }),
-          row('About 4 million people feel it today.', 'how-many', 1, ['c2']),
-          row('A council met to settle it.', 'scene', 1, ['c3']),
-          row('Clavius stood and showed his sums.', 'scene', 1, ['c4']),
-          row('But nobody agreed on the fix.', 'why', 1, [], { hold: true }),
+          row(
+            `In 1582, ten days vanished from ${topic}.`,
+            'scene',
+            1,
+            'The town square at dawn: people read a notice',
+            ['c1'],
+            { delivery: 'hook' },
+          ),
+          row(
+            'People woke up and the date had jumped.',
+            'scene',
+            1,
+            'The town square: a crowd gathers round the notice',
+          ),
+          row(
+            'Nobody lost a minute of sleep.',
+            'scene',
+            1,
+            'The town square: a baker yawns and opens up',
+          ),
+          row(
+            'So where did the days go?',
+            'when',
+            1,
+            'A calendar with ten days missing',
+            [],
+            { delivery: 'question' },
+          ),
+          row(
+            'The old count ran slightly too long each year.',
+            'why',
+            1,
+            "A calendar bar longer than the sun's bar",
+          ),
+          row(
+            'Those leftover minutes piled up over centuries.',
+            'why',
+            1,
+            'Minutes stacking into a tower along a timeline',
+            [],
+            { plant: 'p1' },
+          ),
+          row(
+            'About 4 million people feel it today.',
+            'how-many',
+            1,
+            'Counter: "4 million"',
+            ['c2'],
+          ),
+          row(
+            'A council met to settle it.',
+            'scene',
+            1,
+            'The council hall: members argue across the table',
+            ['c3'],
+          ),
+          row(
+            'Clavius stood and showed his sums.',
+            'scene',
+            1,
+            'The council hall: Clavius points at a slate of sums',
+            ['c4'],
+          ),
+          row(
+            'But nobody agreed on the fix.',
+            'why',
+            1,
+            'Two arrows pulling apart',
+            [],
+            { hold: true },
+          ),
           row(
             'The new rule dropped three leap days every four centuries.',
             'why',
             2,
+            'Four century boxes, three crossed out',
             ['c4'],
           ),
-          row('That kept the seasons in their place.', 'when', 2, ['c1'], {
-            payoff: 'p1',
-          }),
-          row('Some say the change was rushed.', 'who', 2, ['c5']),
-          row('The ten days went to pay back the drift.', 'when', 2, ['c1'], {
-            delivery: 'key',
-          }),
+          row(
+            'That kept the seasons in their place.',
+            'when',
+            2,
+            'Seasons in a ring, each on its month',
+            ['c1'],
+            { payoff: 'p1' },
+          ),
+          row(
+            'Some say the change was rushed.',
+            'who',
+            2,
+            'Name card: "Some historians"',
+            ['c5'],
+          ),
+          row(
+            'The ten days went to pay back the drift.',
+            'when',
+            2,
+            'A calendar: 4 October, then 15 October',
+            ['c1'],
+            { delivery: 'key' },
+          ),
         ],
       };
     }

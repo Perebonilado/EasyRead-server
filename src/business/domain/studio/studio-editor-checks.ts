@@ -765,6 +765,8 @@ export interface ScriptContext {
   research: Pick<EditorResearch, 'claims'> | null;
   pace: EditorPace;
   beats?: EditorialBeats | null;
+  /** The world's people and places, by the names a script says them by. */
+  world?: WorldNames | null;
 }
 
 const claimsOf = (
@@ -790,6 +792,210 @@ const unsourcedQuote = (
 const unsureNumber = (claim: EditorClaim) =>
   claim.kind === 'number' &&
   (distinctSources(claim.sources) < 2 || claim.confidence === 'low');
+
+// ── Narration, never a direction ──────────────────────────────────────────
+
+/** A world's people and places as a script names them, each with the id code knows it by. */
+export interface WorldNames {
+  places: readonly { id: string; name: string }[];
+  people: readonly { id: string; name: string }[];
+}
+
+/** A run of words joined by hyphens, as a world's ids are: "a-calendar-user". */
+const ID_LIKE = /\b[a-z0-9]+(?:-[a-z0-9]+)+\b/giu;
+
+/** A world's ids a sentence could never say (those with a hyphen), each with its name. */
+function idNames(world: WorldNames | null | undefined): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const one of [...(world?.people ?? []), ...(world?.places ?? [])])
+    if (one.id.includes('-') && one.name)
+      out.set(one.id.toLowerCase(), one.name);
+  return out;
+}
+
+/** The world's ids a sentence uses, as they stand in it. */
+function idsIn(say: string, world: WorldNames | null | undefined): string[] {
+  const names = idNames(world);
+  if (!names.size) return [];
+  return [...say.matchAll(ID_LIKE)]
+    .map((m) => m[0])
+    .filter((id) => names.has(id.toLowerCase()));
+}
+
+/**
+ * Words with each world id said as its name: "a-calendar-user" is "a
+ * calendar user" mid-sentence, "A calendar user" opening one.
+ */
+export function namedText(
+  words: string,
+  world: WorldNames | null | undefined,
+): string {
+  const names = idNames(world);
+  if (!names.size) return words;
+  return words.replace(ID_LIKE, (found: string, at: number, whole: string) => {
+    const name = names.get(found.toLowerCase());
+    if (!name) return found;
+    const before = whole.slice(0, at);
+    const opens = !before.trim() || /[.!?:]\s*$/u.test(before);
+    return !opens && /^(?:A|An|The) \p{Ll}/u.test(name)
+      ? name[0].toLowerCase() + name.slice(1)
+      : name;
+  });
+}
+
+/** A script's rows with every world id in what is said and seen given as its name. */
+export function withNames(
+  rows: readonly EditorialRow[],
+  world: WorldNames | null | undefined,
+): EditorialRow[] {
+  if (!idNames(world).size) return [...rows];
+  return rows.map((row) => {
+    const say = namedText(row.say, world);
+    const show = namedText(row.show, world);
+    return say === row.say && show === row.show ? row : { ...row, say, show };
+  });
+}
+
+/** Light and time set down as a screenplay's heading sets them: "Dawn,", "Soft afternoon light,". */
+const SLUG =
+  /^(?:(?:soft|bright|hard|harsh|warm|cold|grey|gray|golden|pale|dim|early|late|morning|afternoon|evening|midday|winter|summer|autumn|spring)\s+)*(?:dawn|dusk|daylight|sunlight|lamplight|candlelight|light|night|nighttime|night-time|midday|noon|midnight|morning|afternoon|evening|sunrise|sunset|interior|exterior|int\.?|ext\.?)$/iu;
+
+/** Little words, and those that only place things, which say nothing of a row's meaning. */
+const PLACING = new Set(
+  'under above below beside behind through across around while same each every other some only also still even once onto upon near'.split(
+    ' ',
+  ),
+);
+
+/** A word as a script and its picture both say it: "unrolled" and "unroll" one word. */
+const stemOf = (word: string) => {
+  let w = word;
+  if (w.length > 4 && w.endsWith('s') && !w.endsWith('ss')) w = w.slice(0, -1);
+  if (w.length > 5 && w.endsWith('ing')) w = w.slice(0, -3);
+  else if (w.length > 4 && w.endsWith('ed')) w = w.slice(0, -2);
+  if (w.length > 4 && w.endsWith('e')) w = w.slice(0, -1);
+  return w;
+};
+
+/** The words that carry meaning, as stems: no little words, no numbers. */
+const meaningWords = (words: string) =>
+  new Set(
+    words
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+      .split(/\s+/u)
+      .filter(
+        (w) =>
+          w.length > 2 && !/\d/u.test(w) && !LITTLE.has(w) && !PLACING.has(w),
+      )
+      .map(stemOf),
+  );
+
+/** What a row's picture asks for, without the words it puts on screen ("…"). */
+const unquoted = (show: string) => show.replace(/["“][^"”]*["”]/gu, ' ');
+
+/** The opening a row sets down as a label: a place's name or its picture's first words, or the light. */
+function labelIn(
+  row: Pick<EditorialRow, 'say' | 'show'>,
+  world: WorldNames | null | undefined,
+): string | null {
+  const say = row.say.trim();
+  const comma = say.indexOf(',');
+  if (comma <= 0) return null;
+  const first = say.slice(0, comma).trim();
+  const bare = (words: string) =>
+    words
+      .replace(/^(?:the|a|an)\s+/iu, '')
+      .trim()
+      .toLowerCase();
+  const label = bare(first);
+  if (!label) return null;
+  const places = (world?.places ?? []).map((p) => bare(p.name));
+  const pictured = bare(unquoted(row.show).split(',')[0] ?? '');
+  return places.includes(label) || label === pictured || SLUG.test(first)
+    ? first
+    : null;
+}
+
+/**
+ * Why a row's words are a stage direction, not what a narrator says; null
+ * when they are narration. A direction names someone or somewhere by the
+ * world's id ("a-calendar-user"); sets a place or the light down as a
+ * label before its sentence ("Modern home office, …"); or reads out its
+ * own picture: most of its words are the ones its show asks to be drawn,
+ * at least two of them more than the names of the world's people and
+ * places (so a name card's line, which names who is shown, is narration).
+ */
+export function directionIn(
+  row: Pick<EditorialRow, 'say' | 'show'>,
+  world: WorldNames | null | undefined,
+): string | null {
+  const ids = idsIn(row.say, world);
+  if (ids.length)
+    return `it names ${ids.map((id) => `"${id}"`).join(' and ')} by an id: say the name, as the world says it`;
+  const label = labelIn(row, world);
+  if (label)
+    return `it opens on "${label}," set down as a label, as a direction does`;
+  const said = meaningWords(row.say);
+  if (said.size < 3) return null;
+  const shown = meaningWords(unquoted(row.show));
+  const names = meaningWords(
+    [...(world?.people ?? []), ...(world?.places ?? [])]
+      .map((one) => one.name)
+      .join(' '),
+  );
+  const shared = [...said].filter((w) => shown.has(w));
+  const plain = shared.filter((w) => !names.has(w));
+  return shared.length * 2 >= said.size && plain.length >= 2
+    ? `it reads out its own picture (${plain.join(', ')})`
+    : null;
+}
+
+/** A claim's words as a sentence the narrator says. */
+const sentenceOf = (words: string) => {
+  const said = words.trim().replace(/\s+/gu, ' ');
+  if (!said) return '';
+  return cap(/[.!?]["”]?$/u.test(said) ? said : `${said}.`);
+};
+
+/**
+ * A script's stage directions put right by code after the one revision,
+ * silently: every world id said as its name; a row still a direction
+ * said instead as the claim it rests on (one no other row says yet),
+ * its picture kept; else dropped. A direction is never voiced.
+ */
+export function withoutDirections(
+  given: readonly EditorialRow[],
+  ctx: ScriptContext,
+): { rows: EditorialRow[]; fixed: string[] } {
+  const world = ctx.world ?? null;
+  const rows = withNames(given, world);
+  const fixed: string[] = [];
+  const directions = new Set(
+    rows.flatMap((row, k) => (directionIn(row, world) ? [k] : [])),
+  );
+  if (!directions.size) return { rows, fixed };
+  // What the narration says already: the claims of the rows that stay.
+  const said = new Set(
+    rows.flatMap((row, k) => (directions.has(k) ? [] : row.claims)),
+  );
+  const most = longestRow(ctx.pace) + 8;
+  const out = rows.flatMap((row, k): EditorialRow[] => {
+    if (!directions.has(k)) return [row];
+    const claim = claimsOf(row, ctx.research).find(
+      (c) => !said.has(c.id) && count(c.text) <= most,
+    );
+    const say = claim ? sentenceOf(claim.text) : '';
+    if (claim && say && !directionIn({ say, show: row.show }, world)) {
+      said.add(claim.id);
+      fixed.push(`row ${k + 1}: a stage direction said as what it means`);
+      return [{ ...row, say, claims: [claim.id] }];
+    }
+    fixed.push(`row ${k + 1}: a stage direction dropped`);
+    return [];
+  });
+  return { rows: out, fixed };
+}
 
 /**
  * What the script's writer and the editor's read are told code found,
@@ -854,6 +1060,11 @@ export function scriptProblems(
       out.push(
         `Row ${n} shows nothing: write what is seen while it is said, or cut the line.`,
       );
+    const direction = directionIn(row, ctx.world);
+    if (direction)
+      out.push(
+        `Row ${n} is a stage direction, not narration ("${row.say}"): ${direction}. Say is only what the narrator speaks aloud: what the moment means and why it matters. The place, the light and what people do belong in show.`,
+      );
   });
   // Each act's words against its budget, and the whole episode's: its
   // length is its material's, never cut short of what the plan gave it.
@@ -897,6 +1108,14 @@ export function mendRows(
   for (const [k, original] of given.entries()) {
     const row = { ...original };
     const n = k + 1;
+    const named = {
+      say: namedText(row.say, ctx.world),
+      show: namedText(row.show, ctx.world),
+    };
+    if (named.say !== row.say || named.show !== row.show) {
+      Object.assign(row, named);
+      fixed.push(`row ${n}: an id said as its name`);
+    }
     if (/^and then,?\s+/iu.test(row.say)) {
       row.say = cap(row.say.replace(/^and then,?\s+/iu, ''));
       fixed.push(`row ${n}: "and then" taken out`);

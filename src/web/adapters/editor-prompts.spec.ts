@@ -1,4 +1,4 @@
-import { boardLessonPrompt } from './editor-prompts';
+import { EDITOR_PROMPTS, boardLessonPrompt } from './editor-prompts';
 import { INFOGRAPHIC_KINDS_CAST, MAP_GROUPS_GUIDE, PROMPTS } from './prompts';
 
 const count = (text: string, part: string) => text.split(part).length - 1;
@@ -30,5 +30,15 @@ describe("the editor's lesson board prompt", () => {
   it('keeps the narration as written, and teaches, never describes', () => {
     expect(prompt).toContain('word for word');
     expect(prompt).not.toMatch(/#[0-9a-f]{6}\b/i);
+  });
+});
+
+describe("the editor's script prompts", () => {
+  it('say plainly that say is spoken and show is seen, and people go by their names', () => {
+    expect(EDITOR_PROMPTS.script).toContain(
+      'say is only what the narrator speaks aloud; show is only what is',
+    );
+    expect(EDITOR_PROMPTS.script).toContain('never an id');
+    expect(EDITOR_PROMPTS.read).toContain('is a stage');
   });
 });

@@ -80,6 +80,7 @@ import {
   soundPlan,
   soundScenes,
   splitLongActs,
+  withoutDirections,
   type EditorPace,
 } from '../../business/domain/studio/studio-editor-checks';
 import {
@@ -799,7 +800,7 @@ export class StudioEditorProcessor {
         ? `The episodes before, for exact callbacks and the "last time" line:\n${describeEarlierScripts(earlier)}`
         : '',
     ];
-    const ctx = { research, pace, beats };
+    const ctx = { research, pace, beats, world: world ?? null };
 
     // The whole script, in one pass: two columns at once.
     if (editorial.stage === 'beats' || editorial.stage === 'hooks') {
@@ -847,9 +848,13 @@ export class StudioEditorProcessor {
         revised.length >= Math.ceil(editorial.rows.length * 0.6)
           ? revised
           : editorial.rows;
-      // Mended silently: its sentences and words, and its scenes people in
-      // places, never a lone shot between lesson rows.
-      const scenes = soundScenes(mendRows(rows, ctx).rows, world ?? null);
+      // Mended silently: a stage direction still in it said as what it
+      // means, or dropped, never voiced; its sentences and words; its
+      // scenes people in places, never a lone shot between lesson rows.
+      const plain = withoutDirections(rows, ctx);
+      if (plain.fixed.length)
+        this.deps.logger.log(`studio ${episode.id}: ${plain.fixed.join('; ')}`);
+      const scenes = soundScenes(mendRows(plain.rows, ctx).rows, world ?? null);
       if (scenes.fixed)
         this.deps.logger.log(
           `studio ${episode.id}: ${scenes.fixed} scene rows made the lesson's`,

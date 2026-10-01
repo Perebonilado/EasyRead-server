@@ -285,7 +285,14 @@ export function renderCounter(
   const room = roomOf(shape);
   const colour = colourOr(spec.colour, PAPER.accent);
   const main = counterText(spec.value, spec.places);
-  const later = spec.then !== null ? counterText(spec.then, spec.places) : null;
+  // A later number keeps its own figures: "8 billion" after "2.5 billion".
+  const later =
+    spec.then !== null
+      ? counterText(
+          spec.then,
+          Math.min(3, (String(spec.then).split('.')[1] ?? '').length),
+        )
+      : null;
   const most = shape === 'tall' ? 230 : 250;
   const laid = layOut(
     later ? [main, later] : [main],

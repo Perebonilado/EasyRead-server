@@ -2,7 +2,7 @@
  * Words struck out and replaced: a decision changed, a promise rewritten
  * ("IF" becomes "HOW"; "1956" becomes "AS SOON AS PRACTICABLE"). The words
  * that stood come on first; on the cue (the state "replaced"), a line
- * strikes through them, they dim, and the new words are written under
+ * strikes through them, they grey, and the new words are written under
  * them in the show's colour, as an editor corrects a page.
  */
 import { measureText } from './scene-font';
@@ -111,7 +111,6 @@ export function renderStrike(
     styleOf({
       rise: 'animation:ig-rise .45s cubic-bezier(.2,.8,.3,1) both',
       show: 'animation:ig-show .3s ease-out both',
-      dim: 'animation:ig-dim .35s ease-out both',
       strike: 'animation:ig-draw .4s cubic-bezier(.6,0,.4,1) both',
       write: 'animation:ig-wipe .55s cubic-bezier(.4,0,.2,1) both',
     }),
@@ -141,13 +140,11 @@ export function renderStrike(
     })
     .join('');
   const freshTop = oldTop + oldH + gap;
-  const oldW =
-    Math.max(...old.lines.map((l) => measureText(l, old.size, 700))) +
-    old.size * 0.4;
   out.push(
     `<g id="strike-new">` +
-      // The old words dimmed: the paper over them (no wider), part seen through.
-      `<rect class="dim" style="--dim:.5" opacity="0.5" x="${r1((width - oldW) / 2)}" y="${r1(oldTop)}" width="${r1(oldW)}" height="${r1(oldH + old.size * 0.1)}" fill="${PAPER.paper}"/>` +
+      // The old words greyed: the same words in the muted colour over them,
+      // so no patch of paper shows on a textured or dark ground.
+      `<g class="show">${textLines(old.lines, width / 2, oldTop + old.size * 0.86, old.size, { fill: PAPER.muted, leading: 1.1 })}</g>` +
       strikes +
       `<g class="write" style="${delayOf(0.45)}">${textLines(fresh.lines, width / 2, freshTop + fresh.size * 0.86, fresh.size, { fill: colour, leading: 1.1 })}</g>` +
       `</g>`,

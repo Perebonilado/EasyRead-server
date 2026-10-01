@@ -642,6 +642,12 @@ export interface EditorPlanEpisode {
   minutes: number;
   /** The episode made for it, once one is. */
   episodeId: string | null;
+  /**
+   * Under three minutes because the research holds no more for it (code's
+   * word, never the writer's): its beat sheet and script keep to its
+   * material, never padded. Absent, an episode runs three to five minutes.
+   */
+  short?: true;
 }
 
 export interface EditorPlan {
@@ -654,6 +660,8 @@ export interface EditorPlan {
   episodes: EditorPlanEpisode[];
   /** What was cut from the whole show: the description's "what we left out". */
   leftOut: string[];
+  /** What code noted as it put the plan right: an episode the research cannot fill to three minutes. */
+  notes?: string[];
 }
 
 export const PLAN_LIMITS = {
@@ -764,9 +772,11 @@ export function planOf(
             typeof e.episodeId === 'string' && e.episodeId
               ? e.episodeId.slice(0, 64)
               : null,
+          ...(e.short === true ? { short: true as const } : {}),
         },
       ];
     });
+  const notes = texts(said.notes, PLAN_LIMITS.episodes, 300);
   return {
     spine: texts(said.spine, PLAN_LIMITS.spine, 300),
     chain: list(said.chain)
@@ -785,6 +795,7 @@ export function planOf(
     fairness: texts(said.fairness, PLAN_LIMITS.fairness, 300),
     episodes,
     leftOut: texts(said.leftOut, PLAN_LIMITS.leftOut, 300),
+    ...(notes.length ? { notes } : {}),
   };
 }
 

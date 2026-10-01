@@ -201,6 +201,7 @@ interface Draft {
 export function soundPlan(
   given: EditorPlan,
   pace: Pick<EditorPace, 'wpm'> = PLAIN_PACE,
+  research: Pick<EditorResearch, 'claims'> | null = null,
 ): { plan: EditorPlan; fixed: string[] } {
   const fixed: string[] = [];
   const plan: EditorPlan = JSON.parse(JSON.stringify(given)) as EditorPlan;
@@ -265,6 +266,9 @@ export function soundPlan(
     pace.wpm,
     fixed,
   );
+  // Never under three minutes while the story has more to give: its own
+  // cut items with two yeses brought back, then the research's unused claims.
+  const { short, restored } = filled(live, plan, pace.wpm, research, fixed);
   const renumber = new Map<number, number>();
   live.forEach((d, k) => d.was.forEach((n) => renumber.set(n, k + 1)));
   const last = Math.max(1, live.length);
@@ -272,7 +276,7 @@ export function soundPlan(
     const number = k + 1;
     for (const item of d.items) plan.items[item].episode = number;
     const seconds = episodeSeconds(plan, d.items, number, pace.wpm);
-    return {
+    const episode: EditorPlanEpisode = {
       ...d.episode,
       number,
       covers: d.items,
@@ -286,7 +290,21 @@ export function soundPlan(
         return { ...plant, paidIn };
       }),
     };
+    if (short.has(k)) episode.short = true;
+    else delete episode.short;
+    return episode;
   });
+  // An episode the research cannot fill is said to be short, by its title.
+  const notes = plan.episodes
+    .filter((e) => e.short)
+    .map(
+      (e) =>
+        `"${e.title}" runs about ${e.minutes} minutes: the research holds no more for it.`,
+    );
+  if (notes.length) plan.notes = notes;
+  else delete plan.notes;
+  // What is brought back is no longer left out.
+  plan.leftOut = plan.leftOut.filter((l) => !restored.has(l.toLowerCase()));
   // Whatever was cut from the whole show is what the description leaves out.
   for (const item of plan.items)
     if (
@@ -302,8 +320,8 @@ export function soundPlan(
  * Episodes rebalanced to three to five minutes at their edges: one too
  * long gives its last item to the next (a new episode after the last);
  * one too short takes the next one's first item, or the next one whole
- * when the two fit in five minutes. Never padded: a single short episode
- * stays as it is.
+ * when the two fit in five minutes. One still short is filled after
+ * (filled), from the story's own material, never padded.
  */
 function rebalanced(
   drafts: Draft[],
@@ -407,7 +425,202 @@ function rebalanced(
   return drafts;
 }
 
+/** What a claim takes on screen as an item made of it: a line or two. */
+const claimItemSeconds = (claim: Pick<EditorClaim, 'text'>) =>
+  Math.max(
+    5,
+    Math.min(
+      COMPRESSED_SECONDS,
+      Math.round((count(claim.text) * 60) / ITEM_PACE_WPM) + 2,
+    ),
+  );
+
+/** A claim the research stands behind: sourced, and not found wanting. */
+const usable = (claim: EditorClaim) =>
+  claim.sources.length > 0 &&
+  claim.confidence !== 'low' &&
+  claim.status !== 'cut';
+
+/**
+ * Episodes still short of three minutes filled from the story, silently:
+ * first the items its writer cut in that episode's stretch of the story
+ * that have two yeses (brought back as a line or two, the strongest
+ * first), then the claims of the research no item uses, the surest first
+ * (each a line or two), never past five minutes. One the research cannot
+ * fill stays short (`short`, by position), its material its length.
+ */
+function filled(
+  drafts: Draft[],
+  plan: EditorPlan,
+  wpm: number,
+  research: Pick<EditorResearch, 'claims'> | null,
+  fixed: string[],
+): { short: Set<number>; restored: Set<string> } {
+  const [least, most] = EPISODE_SECONDS;
+  const secs = (d: Draft, at: number) =>
+    episodeSeconds(plan, d.items, at + 1, wpm);
+  const short = new Set<number>();
+  const restored = new Set<string>();
+  const used = new Set(plan.items.flatMap((i) => i.claims));
+  drafts.forEach((d, at) => {
+    if (secs(d, at) >= least) return;
+    // Its stretch of the story: after the episode before's last item, up to the next one's first.
+    const before = drafts[at - 1]?.items ?? [];
+    const after = drafts[at + 1]?.items ?? [];
+    const from = before.length ? Math.max(...before) + 1 : 0;
+    const to = after.length ? Math.min(...after) : plan.items.length;
+    const back = plan.items
+      .map((item, k) => ({ item, k }))
+      .filter(
+        ({ item, k }) =>
+          k >= from && k < to && item.decision === 'cut' && yeses(item) >= 2,
+      )
+      .sort((a, b) => yeses(b.item) - yeses(a.item) || a.k - b.k);
+    for (const { item, k } of back) {
+      if (secs(d, at) >= least) break;
+      item.decision = 'compress';
+      d.items.push(k);
+      if (secs(d, at) > most) {
+        d.items.pop();
+        item.decision = 'cut';
+        continue;
+      }
+      restored.add(item.item.toLowerCase());
+      fixed.push(`"${item.item}" brought back for episode ${at + 1}`);
+    }
+    const left = (research?.claims ?? [])
+      .filter((c) => usable(c) && !used.has(c.id))
+      .sort(
+        (a, b) =>
+          Number(b.confidence === 'high') - Number(a.confidence === 'high'),
+      );
+    let added = 0;
+    for (const claim of left) {
+      if (secs(d, at) >= least || plan.items.length >= PLAN_LIMITS.items) break;
+      plan.items.push({
+        item: claim.text.slice(0, 300),
+        claims: [claim.id],
+        moves: true,
+        setsUp: false,
+        visual: true,
+        surprise: false,
+        decision: 'compress',
+        episode: null,
+        seconds: claimItemSeconds(claim),
+        reason: 'from the research, for a full episode',
+      });
+      d.items.push(plan.items.length - 1);
+      if (secs(d, at) > most) {
+        d.items.pop();
+        plan.items.pop();
+        break;
+      }
+      used.add(claim.id);
+      added += 1;
+    }
+    if (added)
+      fixed.push(
+        `${added} of the research's claims added to episode ${at + 1}`,
+      );
+    d.items.sort((a, b) => a - b);
+    if (secs(d, at) < least) short.add(at);
+  });
+  return { short, restored };
+}
+
+/** The length the playbook aims an episode at: about four minutes. */
+export const EPISODE_AIM_SECONDS = 240;
+
+/**
+ * What the plan's writer is told, once, when its first episode runs under
+ * three minutes after code's own pulling and bringing back, while the
+ * research holds more: keep more of what serves its question, and give
+ * the rest of the strong material to later episodes.
+ */
+export function planLengthProblems(
+  plan: EditorPlan,
+  pace: Pick<EditorPace, 'wpm'>,
+  research: Pick<EditorResearch, 'claims'> | null,
+): string[] {
+  const [least] = EPISODE_SECONDS;
+  const sound = soundPlan(plan, pace).plan;
+  const first = sound.episodes[0];
+  if (!first || !research) return [];
+  const seconds = Math.round(episodeSeconds(sound, first.covers, 1, pace.wpm));
+  if (seconds >= least) return [];
+  const used = new Set(
+    sound.items.filter((i) => i.decision !== 'cut').flatMap((i) => i.claims),
+  );
+  const left = research.claims.filter((c) => usable(c) && !used.has(c.id));
+  const more = left.reduce(
+    (n, c) =>
+      n + (claimItemSeconds(c) * ITEM_PACE_WPM) / Math.max(60, pace.wpm),
+    0,
+  );
+  // The research truly holds no more: a short episode is its length.
+  if (seconds + more < least) return [];
+  return [
+    `Episode 1 runs about ${seconds} seconds of material; an episode runs three to five minutes, about four. Keep more of the research that serves its question, as items of its own (about ${Math.max(15, EPISODE_AIM_SECONDS - seconds)} seconds more), and give the rest of the strong material to later episodes, each with its own question. Claims no kept item uses yet: ${left
+      .slice(0, 30)
+      .map((c) => c.id)
+      .join(', ')}.`,
+  ];
+}
+
+/**
+ * The seconds an episode's beat sheet and script are written to: its
+ * material's at the audience's pace, three to five minutes, under three
+ * only when the plan says the research holds no more for it (`short`).
+ */
+export function episodeTarget(
+  plan: EditorPlan,
+  number: number,
+  wpm: number,
+): { seconds: number; short: boolean } | null {
+  const episode = plan.episodes.find((e) => e.number === number);
+  if (!episode) return null;
+  const [least, most] = EPISODE_SECONDS;
+  const seconds = episodeSeconds(plan, episode.covers, number, wpm);
+  const short = episode.short === true;
+  return {
+    seconds: Math.round(
+      Math.min(most, short ? seconds : Math.max(least, seconds)),
+    ),
+    short,
+  };
+}
+
 // ── The beat sheet ────────────────────────────────────────────────────────
+
+/**
+ * A beat sheet laid out to its episode's planned length, by code: acts
+ * that add up to much less than it scaled up to it together (each act
+ * keeping its share), and acts past five minutes (past its material, for
+ * a short episode) scaled down; within those, its seconds are its own.
+ */
+export function fitBeats(
+  beats: EditorialBeats,
+  target: { seconds: number; short: boolean } | null,
+): EditorialBeats {
+  if (!target || !beats.acts.length) return beats;
+  const total = beats.acts.reduce((n, a) => n + a.seconds, 0);
+  if (!total) return beats;
+  const most = target.short ? target.seconds * 1.15 : EPISODE_SECONDS[1];
+  const to =
+    total < target.seconds * 0.9
+      ? target.seconds
+      : total > most
+        ? target.short
+          ? target.seconds
+          : EPISODE_SECONDS[1]
+        : null;
+  if (to === null) return beats;
+  const acts = beats.acts.map((a) => ({
+    ...a,
+    seconds: Math.max(10, Math.round((a.seconds * to) / total)),
+  }));
+  return { ...beats, acts, seconds: acts.reduce((n, a) => n + a.seconds, 0) };
+}
 
 /** A grave act is told slower: its words at this share of the pace. */
 export const GRAVE_PACE = 0.85;
@@ -760,6 +973,10 @@ export function splitSentence(say: string): [string, string] | null {
 export const longestRow = (pace: Pick<EditorPace, 'sentence'>) =>
   Math.min(MOST_SENTENCE_WORDS, Math.max(12, pace.sentence[1] + 4));
 
+/** The words a script's row runs, for its length in rows: one sentence each. */
+export const rowWords = (pace: Pick<EditorPace, 'sentence'>) =>
+  Math.max(8, Math.min(14, pace.sentence[1] - 2));
+
 /** Context the script is checked in: the show's research and the audience's pace. */
 export interface ScriptContext {
   research: Pick<EditorResearch, 'claims'> | null;
@@ -1083,10 +1300,12 @@ export function scriptProblems(
   }
   const budget = ctx.beats?.words ?? 0;
   const total = rows.reduce((n, r) => n + count(r.say), 0);
-  if (budget && total < budget * SHORT_SHARE)
+  if (budget && total < budget * SHORT_SHARE) {
+    const more = budget - total;
     out.unshift(
-      `The script runs about ${total} words (${Math.round((total * 60) / Math.max(60, ctx.pace.wpm))} seconds); the beat sheet gives this episode about ${budget} (${Math.round(ctx.beats?.seconds ?? 0)} seconds): write every act out in full. Cut only what is weak, and put this episode's own material from the plan in its place; never make the episode shorter than its material.`,
+      `The script runs about ${total} words (${Math.round((total * 60) / Math.max(60, ctx.pace.wpm))} seconds); the beat sheet gives this episode about ${budget} (${Math.round(ctx.beats?.seconds ?? 0)} seconds). It needs about ${more} more words: about ${Math.ceil(more / rowWords(ctx.pace))} more rows of about ${rowWords(ctx.pace)} words. Write every act out in full. Cut only what is weak, and put this episode's own material from the plan in its place; never make the episode shorter than its material.`,
     );
+  }
   return out;
 }
 

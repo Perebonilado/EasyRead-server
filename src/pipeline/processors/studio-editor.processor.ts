@@ -81,6 +81,10 @@ import {
   soundScenes,
   splitLongActs,
   withoutDirections,
+  episodeTarget,
+  fitBeats,
+  planLengthProblems,
+  rowWords,
   type EditorPace,
 } from '../../business/domain/studio/studio-editor-checks';
 import {
@@ -423,8 +427,8 @@ export class StudioEditorProcessor {
       `The research:\n${describeResearch(editor.research)}`,
       describePace(pace),
     ];
-    const plan = await this.writePlan(parts, editor.research, episode.id);
-    const sound = soundPlan(plan, pace);
+    const plan = await this.writePlan(parts, editor.research, episode.id, pace);
+    const sound = soundPlan(plan, pace, editor.research);
     if (sound.fixed.length)
       this.deps.logger.log(
         `studio ${episode.id}: plan put right by code: ${sound.fixed.join('; ')}`,
@@ -458,16 +462,27 @@ export class StudioEditorProcessor {
     await this.next(show, episode, 'world');
   }
 
-  /** The plan written, and sent back once with what code found wrong; the better kept. */
+  /**
+   * The plan written, and sent back once with what code found wrong (a
+   * first episode short of three minutes while the research holds more,
+   * among it); the better kept. `fill` is the research its episodes may
+   * still draw on: all of it, or what the episodes made have not used.
+   */
   private async writePlan(
     parts: string[],
     research: EditorResearch,
     episodeId: string,
+    pace: EditorPace,
+    fill: Pick<EditorResearch, 'claims'> = research,
   ): Promise<EditorPlan> {
+    const wrong = (plan: EditorPlan) => [
+      ...planProblems(plan),
+      ...planLengthProblems(plan, pace, fill),
+    ];
     const first = await this.llm.editorWrite({ step: 'plan', parts });
     await this.record(episodeId, first.usage, 'explainer_edit');
     let plan = planOf(first.value, research);
-    const problems = planProblems(plan);
+    const problems = wrong(plan);
     if (problems.length) {
       this.deps.logger.log(
         `studio ${episodeId}: the plan goes back: ${problems.join(' ')}`,
@@ -480,10 +495,7 @@ export class StudioEditorProcessor {
       });
       await this.record(episodeId, again.usage, 'explainer_edit');
       const second = planOf(again.value, research);
-      if (
-        second.episodes.length &&
-        planProblems(second).length <= problems.length
-      )
+      if (second.episodes.length && wrong(second).length <= problems.length)
         plan = second;
     }
     if (!plan.episodes.length && !plan.items.length)
@@ -610,6 +622,13 @@ export class StudioEditorProcessor {
     progressNow({ says: 'Planning the next episodes' });
     const kept = editor.plan.episodes.filter((e) => e.episodeId);
     const pace = editorPace(show.brief);
+    // What the episodes made have said already is not theirs to fill with.
+    const said = new Set(
+      kept.flatMap((e) =>
+        e.covers.flatMap((k) => editor.plan!.items[k]?.claims ?? []),
+      ),
+    );
+    const fill = { claims: research.claims.filter((c) => !said.has(c.id)) };
     const plan = await this.writePlan(
       [
         `The brief:\n${describeEditorBrief(show.brief)}`,
@@ -624,8 +643,10 @@ export class StudioEditorProcessor {
       ],
       research,
       episode.id,
+      pace,
+      fill,
     );
-    const fresh = soundPlan(plan, pace).plan;
+    const fresh = soundPlan(plan, pace, fill).plan;
     const joined = withEpisode(
       joinedPlan(editor.plan, fresh),
       kept.length + 1,
@@ -708,6 +729,9 @@ export class StudioEditorProcessor {
       `This episode:\n${describePlannedEpisode(plan, number)}`,
     ];
 
+    // The length it is written to: its material's, three to five minutes.
+    const target = episodeTarget(plan, number, pace.wpm);
+
     // The beat sheet: acts, seconds from the material, words by code.
     if (!editorial.beats) {
       progressNow({ says: 'Laying out the beat sheet' });
@@ -718,7 +742,13 @@ export class StudioEditorProcessor {
           .flatMap((e) => e.plants.filter((p) => p.paidIn === number))
           .map((p) => p.id),
       };
-      const parts = [...base, describePace(pace)];
+      const parts = [
+        ...base,
+        target
+          ? `Its length: about ${target.seconds} seconds of material (about ${Math.round((target.seconds / 60) * 2) / 2} minutes): lay the acts out to it, their seconds adding up to about ${target.seconds}.`
+          : '',
+        describePace(pace),
+      ];
       const first = await this.llm.editorWrite({ step: 'beats', parts });
       await this.record(episode.id, first.usage, 'explainer_edit');
       let beats = budgetBeats(beatsOf(first.value), pace);
@@ -739,8 +769,9 @@ export class StudioEditorProcessor {
           beats = second;
       }
       if (!beats.acts.length) throw new Error('The beat sheet came back empty');
+      // Laid out to the episode's planned length by code, then its words.
       await keep({
-        beats: budgetBeats(splitLongActs(beats), pace),
+        beats: budgetBeats(splitLongActs(fitBeats(beats, target)), pace),
         stage: 'beats',
       });
     }
@@ -787,7 +818,7 @@ export class StudioEditorProcessor {
     }
     const hook = editorial.hook!;
     // Its length, as the beat sheet gives it: the material's, in words and rows.
-    const perRow = Math.max(8, Math.min(14, pace.sentence[1] - 2));
+    const perRow = rowWords(pace);
     const scriptParts = [
       ...base,
       `The beat sheet:\n${describeBeats(beats)}`,
@@ -1521,6 +1552,7 @@ export function joinedPlan(old: EditorPlan, fresh: EditorPlan): EditorPlan {
       })),
     ],
     leftOut: [...new Set([...old.leftOut, ...fresh.leftOut])].slice(0, 12),
+    ...(fresh.notes?.length ? { notes: fresh.notes } : {}),
   };
 }
 

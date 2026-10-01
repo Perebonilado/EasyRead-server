@@ -346,7 +346,7 @@ function planWords({ editor }: Made): string {
     plan ? '## The episodes' : '',
     ...(plan?.episodes.map(
       (e) =>
-        `${e.number}. **${e.title}**: ${e.question} (${e.minutes} min)${e.endsOn ? ` Ends on: ${e.endsOn}` : ''}${e.plants.length ? ` Plants: ${e.plants.map((p) => `${p.id} "${p.text}" → ep ${p.paidIn}`).join('; ')}` : ''}`,
+        `${e.number}. **${e.title}**: ${e.question} (${e.minutes} min${e.short ? ', short: the research holds no more' : ''})${e.endsOn ? ` Ends on: ${e.endsOn}` : ''}${e.plants.length ? ` Plants: ${e.plants.map((p) => `${p.id} "${p.text}" → ep ${p.paidIn}`).join('; ')}` : ''}`,
     ) ?? []),
     plan?.cast.length ? '## The cast' : '',
     ...(plan?.cast.map(
@@ -360,6 +360,7 @@ function planWords({ editor }: Made): string {
       (i) =>
         `- [${i.decision}${i.episode ? `, ep ${i.episode}` : ''}, ${[i.moves && 'moves', i.setsUp && 'sets up', i.visual && 'visual', i.surprise && 'surprise'].filter(Boolean).join('/') || 'no yeses'}] ${i.item}${i.reason ? ` — ${i.reason}` : ''}`,
     ) ?? []),
+    plan?.notes?.length ? `Notes: ${plan.notes.join(' ')}` : '',
     plan?.leftOut.length ? '## Left out' : '',
     ...(plan?.leftOut.map((l) => `- ${l}`) ?? []),
     world ? '## The world' : '',

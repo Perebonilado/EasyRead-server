@@ -5,15 +5,18 @@
  * to <out dir>/vaccine-s<n>[-tall]/scene.json for the stage lab
  * (/dev/stage?scene=vaccine-s1&tall=1&safe=1), and reports the tall
  * text checks (scene-lesson-check). --adolescent and --water add the
- * Adolescent Health film and the water-cycle build.
+ * Adolescent Health film and the water-cycle build; --maps the
+ * sleeping-sickness piece, its maps drawn by code (scene-map), and
+ * --only-maps that alone.
  *
- *   npx ts-node --transpile-only -r tsconfig-paths/register scripts/vertical-lesson.ts <out dir> [--adolescent] [--water]
+ *   npx ts-node --transpile-only -r tsconfig-paths/register scripts/vertical-lesson.ts <out dir> [--adolescent] [--water] [--maps | --only-maps]
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { composeVaccine } from '../src/business/domain/studio/__fixtures__/vaccine';
 import { composeAdolescentFilm } from '../src/business/domain/studio/__fixtures__/adolescent-health';
 import { composeWaterBuild } from '../src/business/domain/__fixtures__/water-cycle-scenes';
+import { composeSleepingSickness } from '../src/business/domain/studio/__fixtures__/sleeping-sickness';
 import { lessonTextFaults } from '../src/business/domain/scene-lesson-check';
 
 async function main() {
@@ -24,7 +27,9 @@ async function main() {
     string,
     (shape: 'wide' | 'tall') => ReturnType<typeof composeVaccine>,
   ][] = [
-    ['vaccine', composeVaccine],
+    ...(process.argv.includes('--only-maps')
+      ? []
+      : [['vaccine', composeVaccine] as [string, typeof composeVaccine]]),
     ...(process.argv.includes('--adolescent')
       ? [
           [
@@ -44,6 +49,10 @@ async function main() {
               >,
           ] as [string, typeof composeVaccine],
         ]
+      : []),
+    // --maps: the sleeping-sickness piece, as maps-s<n>.
+    ...(process.argv.includes('--maps') || process.argv.includes('--only-maps')
+      ? [['maps', composeSleepingSickness] as [string, typeof composeVaccine]]
       : []),
   ];
   for (const [name, compose] of pieces)

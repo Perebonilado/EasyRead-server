@@ -74,6 +74,7 @@ import {
   genderOf,
   mendScript,
   quietStretches,
+  wordsAloneStretches,
   type SceneScript,
 } from '../scene-script';
 import type { LearningStage } from '../scene-stage';
@@ -123,6 +124,7 @@ import {
   timeQuiet,
 } from './studio-stage';
 import { screenTalkIn } from './studio-screen-talk';
+import { realMapIn } from '../scene-map-places';
 import { exactAskMessage, exactPictureIn, type ExactAsk } from '../scene-exact';
 
 export interface SheetProblem {
@@ -3450,6 +3452,15 @@ export function pictureMismatches(sheet: ExplainerSheet): PictureMismatch[] {
   );
 }
 
+/** The drawings of an explainer's sheet that are maps of real places, by id. */
+export function realMapDrawings(sheet: ExplainerSheet): string[] {
+  return sheet.draft.cast.flatMap((thing) =>
+    thing.kind === 'drawing' && realMapIn(thing.name ?? '', thing.brief ?? '')
+      ? [thing.id]
+      : [],
+  );
+}
+
 /** The drawings of an explainer's sheet that are pictures code draws exactly (a flag, an equation, a molecule, a flow), with what each is. */
 export function exactDrawings(
   sheet: ExplainerSheet,
@@ -3492,6 +3503,7 @@ export function checkExplainer(
     })),
     ...[
       ...quietStretches(mended.script, STILL_WORDS),
+      ...wordsAloneStretches(mended.script),
       ...fewStageChanges(mended.script),
     ].map((message) => ({
       rule: 'storyboard' as const,
@@ -3521,6 +3533,16 @@ export function checkExplainer(
         wrong.why === 'comparison'
           ? `The drawing "${wrong.id}" is labelled "${wrong.name}" but draws the comparison the voice makes (${wrong.with}), not ${wrong.name} itself: draw what its label says, or show it as a keyword card.`
           : `The drawing "${wrong.id}" is labelled "${wrong.name}" but is drawn just as "${wrong.with}" is: draw what its label says, or show it as a keyword card.`,
+      beat: null,
+      level: 'warning',
+    });
+  // A real place's map asked of the artist goes back once: the map kind
+  // draws it from real data. Should it come back the same, code draws it
+  // as a map anyway (mendScript), never freehand.
+  for (const id of realMapDrawings(sheet))
+    problems.push({
+      rule: 'storyboard',
+      message: `The drawing "${id}" is a map of a real place: show it as kind "map" (map.region, map.highlight, map.places, by name), drawn by code from real geographic data. A drawing's map is only for a made-up place.`,
       beat: null,
       level: 'warning',
     });
@@ -3655,7 +3677,7 @@ export function repairedWith(
 
 /**
  * An explainer scene made sound whatever its writer left wrong: a chart,
- * a timeline, a graph or a quotation the check turns down is shown as its
+ * a timeline, a graph, a map or a quotation the check turns down is shown as its
  * name in type instead, so nothing made up is drawn, and the film is made.
  */
 export function repairExplainer(
@@ -3665,7 +3687,7 @@ export function repairExplainer(
   const refused = new Set(
     errorsIn(checkExplainer(sheet, options).problems).flatMap((p) => {
       const named =
-        /^The (?:chart|timeline|graph|quotation|flow|equation) "([^"]+)"/.exec(
+        /^The (?:chart|timeline|graph|quotation|map|flow|equation) "([^"]+)"/.exec(
           p.message,
         );
       return named ? [named[1]] : [];
@@ -3692,6 +3714,7 @@ export function repairExplainer(
               quote: null,
               phrases: null,
               lines: null,
+              map: null,
               flag: null,
               equation: null,
               flow: null,

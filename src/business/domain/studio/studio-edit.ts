@@ -124,6 +124,7 @@ const SET_BY_CODE: ReadonlySet<Cast['kind']> = new Set([
   'chart',
   'plot',
   'timeline',
+  'map',
   'math',
   'stat',
   'flag',

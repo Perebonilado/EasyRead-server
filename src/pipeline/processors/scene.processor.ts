@@ -309,10 +309,11 @@ const MATERIAL_CHARS = 14_000;
 const PROFILE_SAMPLE_CHARS = 6_000;
 /** A page with fewer words than this has too little to teach. */
 const THIN_PAGE_WORDS = 40;
-/** What code draws again for a tall film's frame: charts, graphs, flags, flows and molecules. */
+/** What code draws again for a tall film's frame: charts, graphs, maps, flags, flows and molecules. */
 const DRAWN_FOR_SHAPE: ReadonlySet<string> = new Set([
   'chart',
   'plot',
+  'map',
   'flag',
   'flow',
   'molecule',
@@ -1190,7 +1191,7 @@ export class SceneProcessor {
   }
 
   /**
-   * A tall film's charts, graphs, flags, flows and molecules drawn again for its frame, and a story
+   * A tall film's charts, graphs, maps, flags, flows and molecules drawn again for its frame, and a story
    * clip's card as a frame of its shape (studio-vertical-plan §4.2, §4.7):
    * code's own, so nothing is asked of a model. One that cannot be drawn
    * so stays as it was.

@@ -628,6 +628,7 @@ export const sceneScriptSchema = z.object({
           'quote',
           'timeline',
           'chart',
+          'map',
           'flag',
           'equation',
           'flow',
@@ -697,6 +698,34 @@ export const sceneScriptSchema = z.object({
           bars: z.array(z.object({ label: z.string(), value: z.number() })),
         })
         .nullable(),
+      // A real place's map, by names only; code looks each up (scene-map).
+      map: z
+        .object({
+          region: z.string().catch(''),
+          highlight: z
+            .array(
+              z.object({
+                name: z.string(),
+                label: z.boolean().nullable().catch(null),
+                group: z.string().nullable().catch(null),
+              }),
+            )
+            .nullable()
+            .catch(null),
+          places: z.array(z.string()).nullable().catch(null),
+          routes: z
+            .array(
+              z.object({
+                from: z.string(),
+                to: z.string(),
+                name: z.string().nullable().catch(null),
+              }),
+            )
+            .nullable()
+            .catch(null),
+        })
+        .nullable()
+        .catch(null),
       // The exact pictures code draws (scene-exact), each by names only:
       // a country's flag, an equation's LaTeX, a flow's steps, a molecule
       // by its common name. A stray value is null, never a lost scene.

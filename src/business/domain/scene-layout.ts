@@ -101,13 +101,14 @@ export type LaidThing =
         ends?: { left: [number, number]; right: [number, number] };
       }[];
       viewBox?: [number, number, number, number];
-      /** Drawn by code: working, a graph or a passage, set in the middle of its room. */
+      /** Drawn by code: working, a graph, a passage, a timeline, a chart, a map, flags, a flow or a molecule. */
       source?:
         | 'math'
         | 'plot'
         | 'quote'
         | 'timeline'
         | 'chart'
+        | 'map'
         | 'flag'
         | 'flow'
         | 'molecule';
@@ -563,7 +564,10 @@ export function fitInSlot(
     // beside them needs its caption lined up with theirs.
     const y = captionOnTop
       ? art.y
-      : thing.source && thing.source !== 'plot' && thing.source !== 'chart'
+      : thing.source &&
+          thing.source !== 'plot' &&
+          thing.source !== 'chart' &&
+          thing.source !== 'map'
         ? art.y + (art.h - h - below) / 2
         : art.y + (art.h - h);
     const place: Place = { x: round(x), y: round(y), w: round(w), h: round(h) };

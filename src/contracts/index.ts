@@ -1191,13 +1191,14 @@ export type SceneThingDto =
       callouts?: Record<string, string>;
       /** Of those, the parts whose label waits until the voice points at the part. */
       calloutsLater?: string[];
-      /** Drawn by code, not by the artist: working, a graph, the text's own words, a timeline, a chart, flags, a flow or a molecule. */
+      /** Drawn by code, not by the artist: working, a graph, the text's own words, a timeline, a chart, a map, flags, a flow or a molecule. */
       source?:
         | 'math'
         | 'plot'
         | 'quote'
         | 'timeline'
         | 'chart'
+        | 'map'
         | 'flag'
         | 'flow'
         | 'molecule';

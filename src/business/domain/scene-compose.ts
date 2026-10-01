@@ -399,6 +399,7 @@ export function thingDto(
         flag: 'Flag',
         flow: 'Steps',
         molecule: 'Molecule',
+        map: 'Map',
       } as Record<string, string>
     )[thing.kind] ||
     thing.id;

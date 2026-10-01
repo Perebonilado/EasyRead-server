@@ -2909,7 +2909,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
       typeof ai.generateText
     >[0]['tools'];
     try {
-      const result = await ai.generateText({
+      const result = await this.streamedSearch(ai, {
         model,
         system,
         prompt,
@@ -2918,15 +2918,14 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
         output: ai.Output.object({ schema }),
         maxRetries: this.maxRetries(),
       });
-      const searched = result as unknown as Parameters<typeof foundOf>[0];
       return {
         value: {
           value: (result.output ?? {}) as Record<string, unknown>,
-          found: foundOf(searched),
+          found: foundOf(result.searched),
         },
         usage: {
-          ...this.usage(ref, result.totalUsage ?? result.usage, started),
-          searches: searchesOf(searched),
+          ...this.usage(ref, result.usage, started),
+          searches: searchesOf(result.searched),
         },
       };
     } catch (error) {
@@ -2935,7 +2934,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
         `the ${input.step} answer did not take its shape beside the search; searched as notes, then shaped${misfit(error)}`,
       );
     }
-    const notes = await ai.generateText({
+    const notes = await this.streamedSearch(ai, {
       model,
       system,
       prompt: `${prompt}\n\nWrite your findings as notes in plain text, each with the address of the page it came from.`,
@@ -2943,7 +2942,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
       providerOptions: options,
       maxRetries: this.maxRetries(),
     });
-    const searched = notes as unknown as Parameters<typeof foundOf>[0];
+    const searched = notes.searched;
     const found = foundOf(searched);
     const shaped = await this.againIfMisshapen(() =>
       ai.generateObject({
@@ -2963,13 +2962,59 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     return {
       value: { value: shaped.object as Record<string, unknown>, found },
       usage: {
-        ...this.usage(
-          ref,
-          usageOf(notes.totalUsage ?? notes.usage, shaped.usage),
-          started,
-        ),
+        ...this.usage(ref, usageOf(notes.usage, shaped.usage), started),
         searches: searchesOf(searched),
       },
+    };
+  }
+
+  /**
+   * A search streamed: its answer comes as it is written, so a long search
+   * (a deep research log can take many minutes) never waits past the HTTP
+   * client's five minutes for its first byte, as a generated one did
+   * ("Headers Timeout Error", three times over). What it found, what it
+   * wrote and what it cost, read as a generated result reads them.
+   */
+  private async streamedSearch(
+    ai: typeof import('ai'),
+    request: Record<string, unknown>,
+  ): Promise<{
+    output: unknown;
+    text: string;
+    searched: Parameters<typeof foundOf>[0];
+    usage: LanguageModelUsage;
+  }> {
+    // What went wrong while it streamed, kept for after: the first error.
+    const seen: { error?: Error } = {};
+    const result = ai.streamText({
+      ...(request as Parameters<typeof ai.streamText>[0]),
+      onError: ({ error }: { error: unknown }) => {
+        seen.error ??=
+          error instanceof Error ? error : new Error(String(error));
+      },
+    });
+    await result.consumeStream();
+    if (seen.error) throw seen.error;
+    const [steps, sources, toolCalls, toolResults, text, usage] =
+      await Promise.all([
+        result.steps,
+        result.sources,
+        result.toolCalls,
+        result.toolResults,
+        result.text,
+        result.totalUsage,
+      ]);
+    const output: unknown = request.output ? await result.output : undefined;
+    return {
+      output,
+      text,
+      searched: {
+        steps,
+        sources,
+        toolCalls,
+        toolResults,
+      } as unknown as Parameters<typeof foundOf>[0],
+      usage,
     };
   }
 

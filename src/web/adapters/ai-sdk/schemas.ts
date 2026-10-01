@@ -39,6 +39,10 @@ import {
   LEARNING_STAGES,
   STAGE_SURENESS,
 } from '../../../business/domain/scene-stage';
+import { ICON_NAMES } from '../../../business/domain/scene-icon-set';
+import { PALETTE_TOKENS } from '../../../business/domain/scene-palette';
+import { SEAT_LAYOUTS } from '../../../business/domain/scene-seats';
+import { DOCUMENT_STYLES } from '../../../business/domain/scene-document';
 import {
   BOTTOMS,
   CLOTH_COLOURS,
@@ -594,6 +598,129 @@ const fraction = z.number().min(0).max(1);
 /** Short enough that the name label the layout adds under a picture still fits the id rule. */
 
 /** The tutor's live sketch: one template, and the fields that template reads; the rest null. */
+
+/** A number as a model may write it: 45, or "45", or "1,500". Code reads it (scene-counter numberOf). */
+const looseNumber = z.union([z.number(), z.string()]).nullable().catch(null);
+const maybeText = z.string().nullable().catch(null);
+const iconName = z.enum(ICON_NAMES as [string, ...string[]]).nullable().catch(null);
+
+/**
+ * The infographic kinds (scene-counter … scene-split), each by what it
+ * shows and nothing about where: code lays each out, times its motion and
+ * colours it. A stray value is null, never a lost scene.
+ */
+export const infographicFields = {
+  counter: z
+    .object({
+      value: looseNumber,
+      unit: maybeText,
+      prefix: maybeText,
+      label: maybeText,
+      then: looseNumber,
+    })
+    .nullable()
+    .catch(null),
+  icons: z
+    .object({
+      icon: iconName,
+      count: looseNumber,
+      per: z.number().nullable().catch(null),
+      unit: maybeText,
+      label: maybeText,
+      highlight: looseNumber,
+      highlightLabel: maybeText,
+    })
+    .nullable()
+    .catch(null),
+  namecard: z
+    .object({ name: maybeText, role: maybeText, line: maybeText })
+    .nullable()
+    .catch(null),
+  calendar: z
+    .object({
+      calendars: z
+        .array(
+          z.object({
+            label: maybeText,
+            dates: z.array(z.string()).nullable().catch(null),
+          }),
+        )
+        .nullable()
+        .catch(null),
+      merge: maybeText,
+    })
+    .nullable()
+    .catch(null),
+  seats: z
+    .object({
+      layout: z.enum(SEAT_LAYOUTS).nullable().catch(null),
+      groups: z
+        .array(
+          z.object({
+            name: z.string().catch(''),
+            seats: z.union([z.number(), z.string()]).catch(0),
+            colour: z.enum(PALETTE_TOKENS).nullable().catch(null),
+          }),
+        )
+        .nullable()
+        .catch(null),
+      majority: z.boolean().nullable().catch(null),
+      label: maybeText,
+    })
+    .nullable()
+    .catch(null),
+  strike: z
+    .object({ from: maybeText, to: maybeText, label: maybeText })
+    .nullable()
+    .catch(null),
+  transfer: z
+    .object({
+      from: maybeText,
+      to: maybeText,
+      token: iconName,
+      label: maybeText,
+      shut: z.boolean().nullable().catch(null),
+    })
+    .nullable()
+    .catch(null),
+  document: z
+    .object({
+      style: z.enum(DOCUMENT_STYLES).nullable().catch(null),
+      title: maybeText,
+      headline: maybeText,
+      stamp: maybeText,
+    })
+    .nullable()
+    .catch(null),
+  split: z
+    .object({
+      sides: z
+        .array(
+          z.object({
+            label: maybeText,
+            items: z.array(z.string()).nullable().catch(null),
+            icon: iconName,
+          }),
+        )
+        .nullable()
+        .catch(null),
+      change: z
+        .object({
+          side: z.number().int().nullable().catch(null),
+          label: maybeText,
+          items: z.array(z.string()).nullable().catch(null),
+        })
+        .nullable()
+        .catch(null),
+    })
+    .nullable()
+    .catch(null),
+  // A data picture's source, written small under it; its colour, a theme
+  // token's name, never a hex.
+  source: maybeText,
+  colour: z.enum(PALETTE_TOKENS).nullable().catch(null),
+};
+
 /**
  * A page as an animated explainer: the narration, the cast and the
  * storyboard. Flat, every field present and null where a kind does not
@@ -613,6 +740,8 @@ export const sceneScriptSchema = z.object({
       speaker: z.string().nullable(),
       music: z.enum(SCENE_MUSIC).nullable().catch(null),
       energy: z.enum(['low', 'high']).nullable().catch(null),
+      // A deliberate hold: the picture stays as it is while this is said.
+      hold: z.boolean().nullable().catch(null),
     }),
   ),
   cast: z.array(
@@ -636,6 +765,15 @@ export const sceneScriptSchema = z.object({
           'character',
           'person',
           'place',
+          'counter',
+          'icons',
+          'namecard',
+          'calendar',
+          'seats',
+          'strike',
+          'transfer',
+          'document',
+          'split',
         ])
         .catch('drawing'),
       name: z.string(),
@@ -759,6 +897,7 @@ export const sceneScriptSchema = z.object({
         .nullable()
         .catch(null),
       molecule: z.string().nullable().catch(null),
+      ...infographicFields,
     }),
   ),
   steps: z.array(
@@ -781,6 +920,8 @@ export const sceneScriptSchema = z.object({
         .array(z.object({ target: z.string(), do: z.enum(SCENE_EFFECTS) }))
         .nullable()
         .catch(null),
+      // A deliberate hold: what this shows stays still, and is no fault.
+      hold: z.boolean().nullable().catch(null),
     }),
   ),
 });

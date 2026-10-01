@@ -17,8 +17,82 @@ import { renderPlot } from './scene-plot';
 import { renderQuote } from './scene-quote';
 import { renderTimeline } from './scene-timeline';
 import { renderSvg } from './scene-raster';
-import type { CodeThing } from './scene-script';
+import type { CodeThing, InfographicThing } from './scene-script';
 import { framedBox, type GatedDrawing } from './scene-svg';
+import { renderCounter } from './scene-counter';
+import { renderIcons } from './scene-icons';
+import { renderNamecard } from './scene-namecard';
+import { renderCalendar } from './scene-calendar';
+import { renderSeats } from './scene-seats';
+import { renderStrike } from './scene-strike';
+import { renderTransfer } from './scene-transfer';
+import { renderDocument } from './scene-document';
+import { renderSplit } from './scene-split';
+import {
+  TEXT_FLOOR,
+  sourceText,
+  withSourceLine,
+  type InfographicDrawing,
+} from './scene-infographic-style';
+
+/** The kinds the infographic modules draw (scene-counter … scene-split). */
+const INFOGRAPHIC: ReadonlySet<string> = new Set([
+  'counter',
+  'icons',
+  'namecard',
+  'calendar',
+  'seats',
+  'strike',
+  'transfer',
+  'document',
+  'split',
+]);
+const isInfographic = (thing: CodeThing): thing is InfographicThing =>
+  INFOGRAPHIC.has(thing.kind);
+
+/**
+ * One of the infographic kinds drawn for the film's shape at its
+ * audience's text size: each module's own renderX(spec, shape, text).
+ */
+export function drawInfographic(
+  thing: InfographicThing,
+  shape: 'wide' | 'tall' = 'wide',
+): InfographicDrawing {
+  const text = thing.text ?? TEXT_FLOOR;
+  switch (thing.kind) {
+    case 'counter':
+      return renderCounter(thing.counter, shape, text);
+    case 'icons':
+      return renderIcons(thing.icons, shape, text);
+    case 'namecard':
+      return renderNamecard(thing.namecard, shape, text);
+    case 'calendar':
+      return renderCalendar(thing.calendar, shape, text);
+    case 'seats':
+      return renderSeats(thing.seats, shape, text);
+    case 'strike':
+      return renderStrike(thing.strike, shape, text);
+    case 'transfer':
+      return renderTransfer(thing.transfer, shape, text);
+    case 'document':
+      return renderDocument(thing.document, shape, text);
+    case 'split':
+      return renderSplit(thing.split, shape, text);
+  }
+}
+
+/** A chart's, a graph's or a timeline's source, written small under it. */
+function sourceOf(thing: CodeThing): string | null {
+  const said =
+    thing.kind === 'chart'
+      ? thing.chart.source
+      : thing.kind === 'plot'
+        ? thing.plot.source
+        : thing.kind === 'timeline'
+          ? thing.timeline.source
+          : null;
+  return sourceText(said);
+}
 
 /**
  * A thing drawn by code: rendered, measured, and framed to its ink. In a
@@ -74,6 +148,12 @@ export async function drawByCode(
       thing.text,
     ));
     moves = true;
+  } else if (isInfographic(thing)) {
+    // A counter, a unit chart, a name card, a calendar, a chamber's seats,
+    // words struck out, things moving, a document, a split screen: each
+    // comes in by its own motion, and its later looks are states.
+    ({ svg, viewBox, parts, states } = drawInfographic(thing, shape));
+    moves = true;
   } else if (thing.kind === 'map') {
     // Drawn from real data and fitted to the film's frame; its countries
     // come in one after another and its routes draw themselves.
@@ -86,6 +166,12 @@ export async function drawByCode(
     const quote = renderQuote({ text: thing.text, phrases: thing.phrases });
     ({ svg, viewBox, parts, callouts } = quote);
     words = { size: quote.size };
+  }
+  // A data picture's source, small and muted under it.
+  const source = sourceOf(thing);
+  if (source) {
+    ({ svg, viewBox } = withSourceLine(svg, viewBox, source));
+    parts = { ...parts, source: 'source' };
   }
   const measured = await renderSvg(svg, undefined, {
     grid: { svg, cols: 48 },

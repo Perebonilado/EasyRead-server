@@ -122,6 +122,7 @@ import {
   quietRuns,
   timeQuiet,
 } from './studio-stage';
+import { screenTalkIn } from './studio-screen-talk';
 
 export interface SheetProblem {
   /** Which rule: for the card's icon and for tests. */
@@ -145,7 +146,9 @@ export interface SheetProblem {
     /** A drawing whose picture is not what its label says (scene-picture-label): set in type by code; rides along on a send-back, never one alone. */
     | 'picture'
     /** A first scene that does not open on a question, a surprise or a situation (studio-cold-open): rides along. */
-    | 'cold-open';
+    | 'cold-open'
+    /** An explainer's voice saying where things are on the screen, or what the learner can see, instead of teaching (studio-screen-talk): sent back once. */
+    | 'screen';
   /** In plain words, for the writer. */
   message: string;
   /** The beat it is about, from 0; null for the whole scene. */
@@ -3505,6 +3508,13 @@ export function checkExplainer(
       beat: null,
       level: 'warning',
     });
+  for (const talk of screenTalkIn(sheet.draft.beats))
+    problems.push({
+      rule: 'screen',
+      message: `Line ${talk.beat + 1} talks about the screen ("${talk.words}"): the voice teaches what things mean (why, how, what follows), never where they stand or what can be seen; the picture is laid out by code, and the same voice plays under a wide and a vertical film. Name the thing instead.`,
+      beat: talk.beat,
+      level: 'warning',
+    });
   const seconds = secondsOf(sheet);
   if (options.planned && seconds > options.planned * LONGEST)
     problems.push({
@@ -3677,6 +3687,7 @@ export const sentBackFor = (problems: readonly SheetProblem[]) =>
       p.rule === 'length' ||
       p.rule === 'quiet' ||
       p.rule === 'storyboard' ||
+      p.rule === 'screen' ||
       p.rule === 'kept',
   );
 

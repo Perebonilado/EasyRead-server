@@ -8,6 +8,9 @@
  */
 import type { Callout } from './scene-callouts';
 import { renderChart } from './scene-chart';
+import { renderFlags } from './scene-flag';
+import { renderFlow } from './scene-flow';
+import { renderMolecule } from './scene-molecule';
 import { renderMath } from './scene-math';
 import { renderPlot } from './scene-plot';
 import { renderQuote } from './scene-quote';
@@ -19,7 +22,8 @@ import { framedBox, type GatedDrawing } from './scene-svg';
 /**
  * A thing drawn by code: rendered, measured, and framed to its ink. In a
  * tall film a chart is taller than wide with fewer bars, and a graph
- * square (studio-vertical-plan §4.2).
+ * square (studio-vertical-plan §4.2); flags, a flow and a molecule are
+ * drawn for the frame's room, at their audience's text size.
  */
 export async function drawByCode(
   thing: CodeThing,
@@ -47,6 +51,25 @@ export async function drawByCode(
   } else if (thing.kind === 'chart') {
     // Its bars grow, or its line draws itself.
     ({ svg, viewBox, parts } = renderChart(thing.chart, shape));
+    moves = true;
+  } else if (thing.kind === 'flag') {
+    // Each country's true flag; several come in one after another.
+    ({ svg, viewBox, parts, moves } = renderFlags(
+      { flags: thing.flags },
+      shape,
+      thing.text,
+    ));
+  } else if (thing.kind === 'flow') {
+    // Its steps come in along the flow, and its arrows draw themselves.
+    ({ svg, viewBox, parts } = renderFlow(thing.flow, shape, thing.text));
+    moves = true;
+  } else if (thing.kind === 'molecule') {
+    // Its bonds, then its atoms.
+    ({ svg, viewBox, parts } = await renderMolecule(
+      thing.molecule,
+      shape,
+      thing.text,
+    ));
     moves = true;
   } else {
     const quote = renderQuote({ text: thing.text, phrases: thing.phrases });

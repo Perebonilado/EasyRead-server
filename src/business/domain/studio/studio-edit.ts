@@ -126,6 +126,10 @@ const SET_BY_CODE: ReadonlySet<Cast['kind']> = new Set([
   'timeline',
   'math',
   'stat',
+  'flag',
+  'equation',
+  'flow',
+  'molecule',
 ]);
 
 /** A list's place in its order, from a scene's title: "Step 2", "Part three", "3. …", "Second, …". */

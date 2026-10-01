@@ -102,7 +102,15 @@ export type LaidThing =
       }[];
       viewBox?: [number, number, number, number];
       /** Drawn by code: working, a graph or a passage, set in the middle of its room. */
-      source?: 'math' | 'plot' | 'quote' | 'timeline' | 'chart';
+      source?:
+        | 'math'
+        | 'plot'
+        | 'quote'
+        | 'timeline'
+        | 'chart'
+        | 'flag'
+        | 'flow'
+        | 'molecule';
       /** A passage: the size of its words, in its own units. */
       words?: { size: number };
       /**

@@ -33,6 +33,9 @@ import type {
   StudioCheckVerdict,
   StudioRevision,
   StudioTurnDraft,
+  EditorFound,
+  EditorSearchStep,
+  EditorWriteStep,
 } from '../../../business/ports/llm.port';
 import {
   groupId,
@@ -64,6 +67,34 @@ import {
   studioTurnSchema,
 } from './studio-schemas';
 import { ModelRegistry, type ModelRef } from './models';
+import {
+  editorAnglesSchema,
+  editorBeatsSchema,
+  editorFactsSchema,
+  editorHooksSchema,
+  editorPackageSchema,
+  editorPlanSchema,
+  editorReadSchema,
+  editorResearchSchema,
+  editorScriptSchema,
+  editorWorldSchema,
+} from './editor-schemas';
+import {
+  EDITOR_PROMPTS,
+  boardIllustratedPrompt,
+  boardLessonPrompt,
+} from '../editor-prompts';
+import {
+  effortOptions,
+  filled,
+  foundOf,
+  lenient,
+  misshapen,
+  revisedPrompt,
+  searchesOf,
+  usageOf,
+  type Effort,
+} from './editor-calls';
 import {
   blocksSchema,
   mathsBlocksSchema,
@@ -2744,6 +2775,206 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
       );
       return { flagged: false, categories: [] };
     }
+  }
+
+  // ── The editor's desk (infographic-editor-plan) ───────────────────────
+
+  /** A task's reasoning, as its setting says: OpenAI's effort, DeepSeek's thinking. */
+  private effort(ref: ModelRef, setting: string, otherwise: Effort) {
+    return effortOptions(
+      ref.provider,
+      this.config.get<string>(setting) ?? undefined,
+      otherwise,
+    );
+  }
+
+  /** One step of a show's planning or an episode's editing, on the editor model (explainer_edit). */
+  async editorWrite(
+    input: { step: EditorWriteStep; parts: string[] } & StudioRevision,
+  ): Promise<LlmResult<Record<string, unknown>>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('explainer_edit');
+    const schema = {
+      plan: editorPlanSchema,
+      world: editorWorldSchema,
+      beats: editorBeatsSchema,
+      hooks: editorHooksSchema,
+      script: editorScriptSchema,
+      read: editorReadSchema,
+      package: editorPackageSchema,
+    }[input.step];
+    const result = await this.againIfMisshapen(() =>
+      generateObject({
+        model,
+        schema: schema as z.ZodTypeAny,
+        system: EDITOR_PROMPTS[input.step],
+        prompt: revisedPrompt(input.parts, input),
+        maxRetries: this.maxRetries(),
+        ...this.effort(ref, 'EXPLAINER_EDIT_EFFORT', 'medium'),
+      }),
+    );
+    return {
+      value: result.object as Record<string, unknown>,
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
+  /**
+   * A step that searches the web (explainer_research): the model searches
+   * with OpenAI's own tool and answers in its shape in the same call; an
+   * answer that will not take its shape so is searched as notes and shaped
+   * after. Only the pages the searches found may stand as a claim's
+   * source. A provider with no search answers from what it knows.
+   */
+  async editorSearch(input: {
+    step: EditorSearchStep;
+    parts: string[];
+    searches?: number;
+  }): Promise<
+    LlmResult<{ value: Record<string, unknown>; found: EditorFound[] }>
+  > {
+    const started = Date.now();
+    const ai = await this.registry.modules();
+    const { model, ref } =
+      await this.registry.languageModel('explainer_research');
+    const schema = {
+      angles: editorAnglesSchema,
+      research: editorResearchSchema,
+      facts: editorFactsSchema,
+    }[input.step] as z.ZodTypeAny;
+    const system = EDITOR_PROMPTS[input.step];
+    const prompt = input.parts.filter(Boolean).join('\n\n');
+    const effort = this.effort(ref, 'EXPLAINER_RESEARCH_EFFORT', 'low');
+    const most = Math.max(
+      1,
+      input.searches ??
+        Number(this.config.get<string>('EXPLAINER_RESEARCH_SEARCHES', '30')),
+    );
+    const said = this.config.get<string>(
+      'EXPLAINER_RESEARCH_CONTEXT',
+      'medium',
+    );
+    const searchContextSize =
+      said === 'low' || said === 'high' ? said : ('medium' as const);
+    const search = await this.registry.webSearch('explainer_research', {
+      searchContextSize,
+    });
+    if (!search) {
+      const result = await this.againIfMisshapen(() =>
+        ai.generateObject({
+          model,
+          schema,
+          system,
+          prompt,
+          maxRetries: this.maxRetries(),
+          ...effort,
+        }),
+      );
+      return {
+        value: { value: result.object as Record<string, unknown>, found: [] },
+        usage: this.usage(ref, result.usage, started),
+      };
+    }
+    const options = {
+      openai: { ...(effort.providerOptions?.openai ?? {}), maxToolCalls: most },
+    };
+    // The provider's own tool, as it made it: run by OpenAI, never by us.
+    const tools = { web_search: search } as unknown as Parameters<
+      typeof ai.generateText
+    >[0]['tools'];
+    try {
+      const result = await ai.generateText({
+        model,
+        system,
+        prompt,
+        tools,
+        providerOptions: options,
+        output: ai.Output.object({ schema }),
+        maxRetries: this.maxRetries(),
+      });
+      const searched = result as unknown as Parameters<typeof foundOf>[0];
+      return {
+        value: {
+          value: (result.output ?? {}) as Record<string, unknown>,
+          found: foundOf(searched),
+        },
+        usage: {
+          ...this.usage(ref, result.totalUsage ?? result.usage, started),
+          searches: searchesOf(searched),
+        },
+      };
+    } catch (error) {
+      if (!misshapen(error)) throw error;
+      this.logger.warn(
+        `the ${input.step} answer did not take its shape beside the search; searched as notes, then shaped${misfit(error)}`,
+      );
+    }
+    const notes = await ai.generateText({
+      model,
+      system,
+      prompt: `${prompt}\n\nWrite your findings as notes in plain text, each with the address of the page it came from.`,
+      tools,
+      providerOptions: options,
+      maxRetries: this.maxRetries(),
+    });
+    const searched = notes as unknown as Parameters<typeof foundOf>[0];
+    const found = foundOf(searched);
+    const shaped = await this.againIfMisshapen(() =>
+      ai.generateObject({
+        model,
+        schema,
+        system,
+        prompt: [
+          prompt,
+          `Your research notes:\n${notes.text}`,
+          `The pages your searches found (the only ones a source may be):\n${found.map((f) => `- ${f.title} ${f.url}`).join('\n') || '- none'}`,
+          'Answer in the shape asked, from these notes alone.',
+        ].join('\n\n'),
+        maxRetries: this.maxRetries(),
+        ...effort,
+      }),
+    );
+    return {
+      value: { value: shaped.object as Record<string, unknown>, found },
+      usage: {
+        ...this.usage(
+          ref,
+          usageOf(notes.totalUsage ?? notes.usage, shaped.usage),
+          started,
+        ),
+        searches: searchesOf(searched),
+      },
+    };
+  }
+
+  /** A scene's board on the written script (explainer_board): a lesson's storyboard, or an illustrated scene's shots. */
+  async editorBoard(
+    input: { kind: 'lesson' | 'illustrated'; parts: string[] } & StudioRevision,
+  ): Promise<LlmResult<Record<string, unknown>>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('explainer_board');
+    const lesson = input.kind === 'lesson';
+    // The lesson writer's own schema, or a story's sheet's, read leniently:
+    // a key the board leaves out is given what the schema would give it.
+    const full = (
+      lesson ? sceneScriptSchema : studioSceneSchema
+    ) as z.ZodTypeAny;
+    const result = await this.againIfMisshapen(() =>
+      generateObject({
+        model,
+        schema: lenient(full),
+        system: lesson ? boardLessonPrompt() : boardIllustratedPrompt(),
+        prompt: revisedPrompt(input.parts, input),
+        maxRetries: this.maxRetries(),
+        ...this.effort(ref, 'EXPLAINER_BOARD_EFFORT', 'low'),
+      }),
+    );
+    return {
+      value: filled(result.object, full) as Record<string, unknown>,
+      usage: this.usage(ref, result.usage, started),
+    };
   }
 
   /** Recorded per call, so cost is answerable per document and per task. */

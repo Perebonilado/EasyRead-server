@@ -303,7 +303,16 @@ export interface StudioJobData {
     | 'redraw'
     | 'repace'
     /** One scene of a twin episode composed from its lead's, in the twin's shape (studio-vertical-plan §1.4). */
-    | 'twin';
+    | 'twin'
+    // The editor's desk (studio-editor): the show's questions, research,
+    // plan and world, and an episode's script edited; a re-plan of the
+    // episodes not made yet around something the maker asks for.
+    | 'angles'
+    | 'research'
+    | 'plan'
+    | 'world'
+    | 'edit'
+    | 'replan';
   /** For 'repace': the maker's pace (scene-pace makerRate) every made lesson scene's voice is played at now, stretched to it from its own. */
   pace?: number;
   /** For 'draw': the characters the artist draws at the cast step; for 'redraw', the one drawn again as the maker asks. */
@@ -323,4 +332,6 @@ export interface StudioJobData {
   story?: boolean;
   /** A maker's request for a change to a made scene: written, made again and checked. */
   ask?: StudioAsk;
+  /** For an editor's 'script': its boards written, the film is made straight after ("Make it"). */
+  make?: boolean;
 }

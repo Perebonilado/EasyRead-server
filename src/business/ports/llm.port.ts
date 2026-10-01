@@ -62,6 +62,12 @@ export type LlmTask =
   | 'studio_write'
   // Whether a scene made again as the maker asked now shows what they asked for.
   | 'studio_check'
+  // The editor's desk (infographic-editor-plan): an explainer show planned
+  // and an episode written as an editor does; the research and the fact
+  // check, with the web; and each scene's board on the written script.
+  | 'explainer_edit'
+  | 'explainer_research'
+  | 'explainer_board'
   | 'topic_quiz'
   | 'item_write'
   | 'item_verify'
@@ -96,6 +102,21 @@ export interface LlmUsage {
   latencyMs: number;
   /** Of `tokensIn`, those the provider served from its cache, priced lower; absent when it did not say. */
   tokensCached?: number;
+  /** Web searches the call made, billed by the search; absent for none. */
+  searches?: number;
+}
+
+/** A step of the editor's desk the editor model writes (explainer_edit). */
+export type EditorWriteStep =
+  'plan' | 'world' | 'beats' | 'hooks' | 'script' | 'read' | 'package';
+
+/** A step of the editor's desk that searches the web (explainer_research). */
+export type EditorSearchStep = 'angles' | 'research' | 'facts';
+
+/** A page a search found: where a claim may come from. */
+export interface EditorFound {
+  url: string;
+  title: string;
 }
 
 export interface LlmResult<T> {
@@ -946,6 +967,40 @@ export interface LlmGatewayPort {
     scene?: number;
     others?: number[];
   }): Promise<LlmResult<StudioCheckVerdict>>;
+
+  /**
+   * The editor's desk (infographic-editor-plan): one step of a show's
+   * planning or an episode's editing, by the editor model (explainer_edit),
+   * its prompt's parts said by the caller (studio-editor-words). Made sound
+   * by the step's own sanitizer (studio-editor, studio-editorial).
+   */
+  editorWrite(
+    input: { step: EditorWriteStep; parts: string[] } & StudioRevision,
+  ): Promise<LlmResult<Record<string, unknown>>>;
+
+  /**
+   * A step that searches the web (explainer_research): the angles' quick
+   * look round, the research, the fact check. With the pages the searches
+   * really found, the only ones a claim may cite; none where the model has
+   * no search, which then answers from what it knows.
+   */
+  editorSearch(input: {
+    step: EditorSearchStep;
+    parts: string[];
+    /** The most searches it may make; absent, the setting's. */
+    searches?: number;
+  }): Promise<
+    LlmResult<{ value: Record<string, unknown>; found: EditorFound[] }>
+  >;
+
+  /**
+   * A scene's board (explainer_board) on the editor's written script: a
+   * lesson scene's storyboard (sceneScriptSchema), its narration given;
+   * or an illustrated scene's shots (a story's sheet), its narration given.
+   */
+  editorBoard(
+    input: { kind: 'lesson' | 'illustrated'; parts: string[] } & StudioRevision,
+  ): Promise<LlmResult<Record<string, unknown>>>;
 
   /** Whether text asks for what no one should be made: flagged, with the categories. */
   moderate(input: {

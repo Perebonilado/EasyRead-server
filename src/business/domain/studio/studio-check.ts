@@ -76,6 +76,7 @@ import {
   mendScript,
   quietStretches,
   wordsAloneStretches,
+  type MendOptions,
   type SceneScript,
 } from '../scene-script';
 import type { LearningStage } from '../scene-stage';
@@ -3485,12 +3486,18 @@ export function checkExplainer(
     stage: LearningStage | null;
     maths: boolean;
     planned: number | null;
+    /** An editor's show: its world's colours, each thing it names kept in its token, and the one it holds back. */
+    palette?: MendOptions['palette'];
+    held?: MendOptions['held'];
   },
 ): { script: SceneScript; problems: SheetProblem[] } {
   const mended = mendScript(sheet.draft, {
     material: studioMaterial(sheet, options.teach, options.source ?? null),
     formats: options.maths ? ['explainer', 'maths'] : ['explainer'],
     stage: options.stage,
+    ...(options.palette?.length
+      ? { palette: options.palette, held: options.held ?? null }
+      : {}),
   });
   // What the storyboard gets wrong keeps the scene from being made; a
   // picture that sits still a while is sent back to the writer once, and

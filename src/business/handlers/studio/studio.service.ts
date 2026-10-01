@@ -1273,8 +1273,19 @@ export class StudioService {
     }
     if (editor.stage === 'angles' && !editor.question)
       return 'Pick one of the questions on the card first, or tell me to choose.';
-    if (!editor.plan || !editor.world)
-      return 'I am still planning the show: the first episode’s script comes straight after.';
+    // Planning that stopped (a job given up on) carries on where it stopped;
+    // planning under way is left to finish.
+    if (!editor.research || !editor.plan || !editor.world) {
+      const kind = !editor.research
+        ? 'research'
+        : !editor.plan
+          ? 'plan'
+          : 'world';
+      if (!(await this.studio.claimEpisode(episode.id, kind)))
+        return 'I am still planning the show: the first episode’s script comes straight after.';
+      await this.enqueue(show, episode, { kind });
+      return null;
+    }
     if (episode.editorial) {
       if (!(await this.studio.claimEpisode(episode.id, 'edit'))) return busy;
       await this.enqueue(show, episode, {

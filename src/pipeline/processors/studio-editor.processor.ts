@@ -101,7 +101,6 @@ import {
   recipeOf,
   stageOf,
 } from '../../business/domain/studio/studio-audience';
-import { describeScene } from '../../business/domain/studio/studio-words';
 import {
   checkExplainer,
   checkSheet,
@@ -1067,11 +1066,8 @@ export class StudioEditorProcessor {
     const parts = [
       `Document: ${show.title}`,
       `Chapter: ${outline.title}`,
-      describeScene(
-        stage,
-        scene.seconds,
-        recipe ? { recipe, check: false } : null,
-      ),
+      // Whom it is for: the narration is written, so no word budget.
+      `Whom it teaches: ${show.brief.audience ?? 'adults'}${recipe ? `. ${recipe.pictures}` : ''}`,
       `This is scene ${k + 1} of ${outline.scenes.length} of "${outline.title}", about ${scene.seconds} seconds.${k === 0 ? ' It opens the episode.' : ''}`,
       `The lines, one beat each, word for word, with what the editor wants seen:\n${lines.map((r, i) => `${i + 1}. SAY: ${r.say}\n   SHOW: ${r.show || '(your choice)'} [${r.visual}]`).join('\n')}`,
       world ? `The show's world and colours:\n${describeWorld(world)}` : '',

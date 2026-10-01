@@ -410,3 +410,23 @@ describe("the editor's desk in the Studio", () => {
     expect(show.editor?.plan?.episodes).toHaveLength(2);
   });
 });
+
+describe('planning that stopped', () => {
+  it('carries on where it stopped when the maker asks again, and waits while it runs', async () => {
+    const d = desk({
+      ...EMPTY_EDITOR,
+      stage: 'angles',
+      question: 'Where did ten days go?',
+      angles: anglesOf([{ question: 'Where did ten days go?' }]),
+    });
+    d.answer.action = 'outline';
+    await turn(d, 'try again');
+    expect(d.jobs).toEqual([
+      expect.objectContaining({ kind: 'research', episodeId: 'e1' }),
+    ]);
+    // Running now: asked again, it is left to finish.
+    const { message } = await turn(d, 'go on');
+    expect(message.content).toMatch(/still planning the show/);
+    expect(d.jobs).toHaveLength(1);
+  });
+});

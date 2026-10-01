@@ -31,6 +31,7 @@ import {
   type EditorPlan,
   type EditorPlanEpisode,
   type EditorResearch,
+  type EditorWorld,
   type StudioEditor,
   ANGLES_OFFERED,
   PLAN_LIMITS,
@@ -99,6 +100,70 @@ export function withAngle(
     pitch: picked.angle.pitch || null,
     subThemes: picked.subThemes,
   };
+}
+
+// ── The research, deep enough to show ─────────────────────────────────────
+
+const MONTHS =
+  'January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sept?|Oct|Nov|Dec';
+/** A date with a year in it: "1953", "12 December 1959", "46 BCE". */
+const DATED = /\b(?:1[0-9]{3}|20[0-9]{2})\b|\b\d{1,4}\s*(?:BCE|BC|CE|AD)\b/u;
+/** A date with its day or month, not a year alone. */
+const EXACT_DATE = new RegExp(
+  `\\b(?:${MONTHS})\\b|\\b\\d{1,2}[/.-]\\d{1,2}[/.-]\\d{2,4}\\b`,
+  'iu',
+);
+
+/** The fewest dated events, numbers and turning points a log needs before the editor plans from it. */
+export const RESEARCH_FLOOR = { dated: 5, numbers: 2, moments: 3 } as const;
+
+/**
+ * What a thin research log is sent back once for, to be searched again
+ * and added to: fewer than five dated events, the key events without
+ * their exact dates or places; no numbers that can be shown, or none
+ * checked against two sources; no people who drive the story, or one with
+ * no claim; fewer than three turning points told as scenes.
+ */
+export function researchProblems(research: EditorResearch): string[] {
+  const out: string[] = [];
+  const dated = research.timeline.filter((e) => DATED.test(e.date));
+  if (dated.length < RESEARCH_FLOOR.dated)
+    out.push(
+      `The timeline has ${dated.length} dated event${dated.length === 1 ? '' : 's'}: find at least ${RESEARCH_FLOOR.dated} key events, each with its exact date (day, month and year where sources give them) and its place.`,
+    );
+  else {
+    const exact = dated.filter((e) => EXACT_DATE.test(e.date)).length;
+    const placed = dated.filter((e) => e.place).length;
+    if (exact * 2 < dated.length || placed * 2 < dated.length)
+      out.push(
+        `Of the ${dated.length} key events, ${exact} have a day or a month and ${placed} a place: give each its exact date where sources give it, and its place (a city, a building, a region).`,
+      );
+  }
+  const checked = research.numbers.filter((n) => n.checked).length;
+  if (!research.numbers.length)
+    out.push(
+      'No numbers: find the ones that can be shown (seats, votes, populations, money, counts, distances), each checked against two sources.',
+    );
+  else if (checked < RESEARCH_FLOOR.numbers)
+    out.push(
+      `Only ${checked} of the ${research.numbers.length} numbers have two sources: find the numbers that can be shown (seats, votes, populations, money, counts) and check each against a second source.`,
+    );
+  const people = research.people ?? [];
+  if (!people.length)
+    out.push(
+      'Name the people who drive the story: each with what they wanted and one concrete thing they did or said, with its claim.',
+    );
+  const unclaimed = people.filter((p) => !p.claims.length).map((p) => p.name);
+  if (unclaimed.length)
+    out.push(
+      `${unclaimed.slice(0, 6).join(', ')} ${unclaimed.length === 1 ? 'has' : 'have'} no claim: find one concrete thing each did or said, with its source.`,
+    );
+  const moments = research.moments ?? [];
+  if (moments.length < RESEARCH_FLOOR.moments)
+    out.push(
+      `${moments.length ? `Only ${moments.length} turning point${moments.length === 1 ? ' is' : 's are'} told as a scene` : 'No turning point is told as a scene'}: find at least ${RESEARCH_FLOOR.moments}, each with who was there, where, when, what happened and what it looked like.`,
+    );
+  return out;
 }
 
 // ── The plan ──────────────────────────────────────────────────────────────
@@ -709,13 +774,69 @@ const GREETING =
 const VIDEO_TALK =
   /\b(?:in (?:this|today'?s) (?:video|episode|film|lesson)|today,? we(?:'ll| will| are going to)|let'?s (?:talk|dive|explore|look)|(?:don'?t forget to )?(?:like and )?subscribe)\b/iu;
 
-/** What breaks the playbook's hook rules: a greeting, talk of the video, a claim that is not sure. */
+/**
+ * Words that make narration a lecture: abstractions no one can picture.
+ * The playbook says what people did, where and when, with the numbers.
+ */
+export const ABSTRACT_WORDS =
+  /\b(?:leverage[ds]?|mechanisms?|frameworks?|institutional(?:ly)?|institutionali[sz]\w*|constitutional order|political order|dynamics|arenas?|bargaining(?: power| position| chips?)?|paradigms?|discourses?|structural(?:ly)?|systemic(?:ally)?|stakeholders?|narratives?|trajector(?:y|ies)|apparatus|governance|polity|consolidat\w+|mobili[sz]ation|modalit(?:y|ies)|interplay|nexus|salience|contestation|hegemon\w*|party machines?|power[- ]sharing|geopolitic\w*|socio-?economic|imperatives?|configurations?|factors)\b/giu;
+
+/** The lecture words a sentence uses, as it says them. */
+export const abstractIn = (say: string): string[] =>
+  [...say.matchAll(ABSTRACT_WORDS)].map((m) => m[0].toLowerCase());
+
+/** A time a picture is set at: a year, a month, the time of day. */
+const WHEN_SEEN =
+  /\b(?:1[0-9]{3}|20[0-9]{2})\b|\b\d{1,4}\s*(?:BCE|BC|CE|AD)\b|\b(?:January|February|March|April|May|June|July|August|September|October|November|December|dawn|dusk|midnight|noon|morning|afternoon|evening|night)\b/iu;
+/** A place a picture is set in: "in Lagos", "at the harbour", "outside the hall". */
+const WHERE_SEEN =
+  /\b(?:in|at|on|outside|inside|across|near|into|onto|through)\s+(?:the\s+)?(?:\p{Lu}[\p{L}'-]+|(?:hall|room|street|square|market|harbou?r|port|field|chamber|house|palace|court|station|camp|ship|road|river|city|town|village|office|school|church|mosque|temple|stadium|parliament|assembly))\b/u;
+
+/** The first sentence of words, to its full stop, question or exclamation mark. */
+const firstSentence = (words: string) =>
+  (/^[^.!?]*[.!?]?/u.exec(words.trim())?.[0] ?? '').trim();
+
+/**
+ * Why a hook's first sentence is not a picture, or null when it is: one
+ * moment someone could film. No lecture word; a time or a place (a year,
+ * a month, "in Lagos", "at the harbour"); and, in a story driven by
+ * people, someone in it (one of the research's people, or people).
+ */
+export function hookPictureProblem(
+  hook: string,
+  people: readonly string[] = [],
+): string | null {
+  const first = firstSentence(hook);
+  if (!first) return null;
+  const lecture = abstractIn(first);
+  const placed = WHEN_SEEN.test(first) || WHERE_SEEN.test(first);
+  const peopled =
+    !people.length ||
+    PEOPLE_WORDS.test(first) ||
+    people.some((name) =>
+      nameWords(name).some((w) => new RegExp(`\\b${w}\\b`, 'u').test(first)),
+    );
+  if (!lecture.length && placed && peopled) return null;
+  return `The hook opens on "${first}", not a picture: open on one moment someone could film (who, where, when, what is seen), then the twist, then the question; never an abstraction.`;
+}
+
+/** What breaks the playbook's hook rules: a greeting, talk of the video, a claim that is not sure, no picture first, no question last. */
 export function hookProblems(
   hook: string,
   claims: readonly string[],
-  research: Pick<EditorResearch, 'claims'> | null,
+  research:
+    | (Pick<EditorResearch, 'claims'> & Pick<Partial<EditorResearch>, 'people'>)
+    | null,
+  /** Who drives the story, by name; absent, the research's people. */
+  people: readonly string[] = (research?.people ?? []).map((p) => p.name),
 ): string[] {
   const out: string[] = [];
+  const picture = hookPictureProblem(hook, people);
+  if (picture) out.push(picture);
+  if (hook.trim() && !hook.includes('?'))
+    out.push(
+      'The hook ends without its question: end on the question the episode answers.',
+    );
   if (GREETING.test(hook.trim()))
     out.push(
       'The hook greets the viewer: start on the picture, never a hello.',
@@ -1027,6 +1148,8 @@ export interface ScriptContext {
   beats?: EditorialBeats | null;
   /** The world's people and places, by the names a script says them by. */
   world?: WorldNames | null;
+  /** What makes it concrete: the episode's cast, the names, the places, the numbers. */
+  concrete?: ConcreteContext | null;
 }
 
 const claimsOf = (
@@ -1288,6 +1411,170 @@ export function withoutRepeats(given: readonly EditorialRow[]): {
   return { rows: out, fixed };
 }
 
+/** Words of a name that are no one's in particular: titles. */
+const NAME_TITLES = new Set(
+  'sir dame lord lady chief alhaji mallam dr doctor mr mrs ms miss pope king queen prince princess emperor president prime minister general colonel captain saint st sheikh rev reverend professor prof of the de da van von bin ibn al el'.split(
+    ' ',
+  ),
+);
+
+/** The words a name is known by in a sentence: its own, not its titles ("Balewa", "Abubakar"). */
+export const nameWords = (name: string): string[] =>
+  name
+    .replace(/[^\p{L}\s'-]/gu, ' ')
+    .split(/\s+/u)
+    .filter((w) => w.length > 2 && !NAME_TITLES.has(w.toLowerCase()))
+    .filter((w) => /^\p{Lu}/u.test(w));
+
+/** Whether a sentence names someone, by any word of their name that is theirs. */
+const names = (say: string, name: string) =>
+  nameWords(name).some((w) => new RegExp(`\\b${w}\\b`, 'u').test(say));
+
+/** A number shown as a number: a quantity, never a year alone. */
+const QUANTITY = /\b\d[\d,.]*\b/gu;
+const quantityIn = (say: string) =>
+  [...say.matchAll(QUANTITY)].some(
+    (m) => !/^(?:1[0-9]{3}|20[0-9]{2})$/u.test(m[0]),
+  );
+
+/** What makes a script concrete, from the research, the plan and the world. */
+export interface ConcreteContext {
+  /** The recurring people of this episode, by name: each named where they act. */
+  cast: string[];
+  /** Everyone a line may name: the research's people, the cast, the world's. */
+  people: string[];
+  /** Places a moment may be set in, by name. */
+  places: string[];
+  /** The research's numbers, as they would be said ("174 of 312 seats"). */
+  numbers: string[];
+}
+
+/** A line a viewer can picture: a number or a date, a quote, a scene, someone named, or a place named. */
+function concreteRow(
+  row: Pick<EditorialRow, 'say' | 'visual'>,
+  ctx: ConcreteContext,
+): boolean {
+  if (/\d/u.test(row.say) || /["“]/u.test(row.say)) return true;
+  if (row.visual === 'scene') return true;
+  if (ctx.people.some((name) => names(row.say, name))) return true;
+  return ctx.places.some((place) => names(row.say, place));
+}
+
+/** A moment: a scene of people in a place, or a dated event with its place. */
+function momentRow(
+  row: Pick<EditorialRow, 'say' | 'visual'>,
+  ctx: ConcreteContext,
+): boolean {
+  if (row.visual === 'scene') return true;
+  if (!WHEN_SEEN.test(row.say)) return false;
+  return (
+    WHERE_SEEN.test(row.say) ||
+    ctx.places.some((place) => names(row.say, place))
+  );
+}
+
+/**
+ * The recurring people of an episode: the plan's recurring cast whose
+ * claims the episode's items use, or whose name its items say.
+ */
+export function episodeCast(plan: EditorPlan, number: number): string[] {
+  const episode = plan.episodes.find((e) => e.number === number);
+  if (!episode) return [];
+  const items = episode.covers.map((k) => plan.items[k]).filter(Boolean);
+  const claims = new Set(items.flatMap((i) => i.claims));
+  const words = items.map((i) => i.item).join(' ');
+  return plan.cast
+    .filter(
+      (c) =>
+        c.recurring &&
+        (c.claims.some((id) => claims.has(id)) || names(words, c.name)),
+    )
+    .map((c) => c.name);
+}
+
+/** What makes an editor's script concrete, from its research, its plan and its world. */
+export function concreteContext(
+  research: Pick<EditorResearch, 'numbers' | 'timeline'> &
+    Pick<Partial<EditorResearch>, 'people' | 'moments'>,
+  plan: EditorPlan,
+  number: number,
+  world: Pick<EditorWorld, 'people' | 'places'> | null,
+): ConcreteContext {
+  const unique = (list: string[]) => [
+    ...new Set(list.map((n) => n.trim()).filter(Boolean)),
+  ];
+  return {
+    cast: episodeCast(plan, number),
+    people: unique([
+      ...(research.people ?? []).map((p) => p.name),
+      ...plan.cast.map((c) => c.name),
+      ...(world?.people ?? []).map((p) => p.name),
+    ]),
+    places: unique([
+      ...(world?.places ?? []).map((p) => p.name),
+      ...research.timeline.map((e) => e.place ?? ''),
+      ...(research.moments ?? []).map((m) => m.where),
+    ]),
+    // Quantities that can be shown, the checked first; a date is no number.
+    numbers: [...research.numbers]
+      .filter((n) => quantityIn(n.value) && !EXACT_DATE.test(n.value))
+      .sort((a, b) => Number(b.checked) - Number(a.checked))
+      .map((n) => `${n.label}: ${n.value}`),
+  };
+}
+
+/** Lecture words an act may use before it is sent back: a few. */
+export const ABSTRACT_PER_ACT = 3;
+
+/**
+ * What the one revision is told when a script lectures: an act leaning on
+ * abstract words (more than a few, the rows named); an abstract line with
+ * nothing concrete (a moment, a number, someone named) in it or the two
+ * rows before it; a recurring person of the episode never named; an act
+ * with no moment, or no number when the research has numbers.
+ */
+export function concreteProblems(
+  rows: readonly EditorialRow[],
+  ctx: ConcreteContext,
+): string[] {
+  const out: string[] = [];
+  const acts = [...new Set(rows.map((r) => r.act))].sort((a, b) => a - b);
+  for (const act of acts) {
+    const at = rows.flatMap((r, k) => (r.act === act ? [k] : []));
+    const lecture = at.flatMap((k) =>
+      abstractIn(rows[k].say).map((word) => ({ k, word })),
+    );
+    if (lecture.length > ABSTRACT_PER_ACT)
+      out.push(
+        `Act ${act} lectures: ${lecture.length} abstract words (${[...new Set(lecture.map((l) => `row ${l.k + 1} "${l.word}"`))].join(', ')}). Say what people did, where and when, and the numbers, instead.`,
+      );
+    if (!at.some((k) => momentRow(rows[k], ctx)))
+      out.push(
+        `Act ${act} has no moment: give it one, a scene of people in a place, or a dated event with its place (who did what, where, when).`,
+      );
+    if (ctx.numbers.length && !at.some((k) => quantityIn(rows[k].say)))
+      out.push(
+        `Act ${act} shows no number: give it one the research has (${ctx.numbers.slice(0, 3).join('; ')}).`,
+      );
+  }
+  let abstract = 0;
+  rows.forEach((row, k) => {
+    if (!abstractIn(row.say).length || abstract >= 8) return;
+    const before = rows.slice(Math.max(0, k - 2), k + 1);
+    if (before.some((r) => concreteRow(r, ctx))) return;
+    abstract += 1;
+    out.push(
+      `Row ${k + 1} is abstract ("${row.say}"): put a concrete moment or a number before it, in it or the two rows before (who did what, where, when; or the number): concrete before abstract.`,
+    );
+  });
+  for (const name of ctx.cast)
+    if (!rows.some((r) => names(r.say, name)))
+      out.push(
+        `${name} is never named: name them where they act ("${nameWords(name).at(-1) ?? name} wanted…", "${nameWords(name).at(-1) ?? name} did…"), at least once.`,
+      );
+  return out;
+}
+
 /** A claim's words as a sentence the narrator says. */
 const sentenceOf = (words: string) => {
   const said = words.trim().replace(/\s+/gu, ' ');
@@ -1427,6 +1714,7 @@ export function scriptProblems(
         `Act ${k + 1} runs only ${said} words of its ${act.words}: write it out in full, with this act's own material from the plan, a sentence a row.`,
       );
   }
+  if (ctx.concrete) out.push(...concreteProblems(rows, ctx.concrete));
   const budget = ctx.beats?.words ?? 0;
   const total = rows.reduce((n, r) => n + count(r.say), 0);
   if (budget && total < budget * SHORT_SHARE) {

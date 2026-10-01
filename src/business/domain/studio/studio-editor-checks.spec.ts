@@ -8,6 +8,7 @@ import {
   episodeSeconds,
   episodeTarget,
   fitBeats,
+  hookPictureProblem,
   hookProblems,
   isFactual,
   mendHook,
@@ -452,17 +453,69 @@ describe('the beat sheet', () => {
 describe('the hook', () => {
   it('may not greet, talk of the video, or rest on what is not sure', () => {
     const problems = hookProblems(
-      'Hi everyone! In this video, 5 million people share a birthday.',
+      'Hi everyone! In this video, 5 million people share a birthday. Why?',
       ['c2'],
       research,
     );
-    expect(problems).toHaveLength(3);
+    expect(problems.join('\n')).toMatch(/greets the viewer/);
+    expect(problems.join('\n')).toMatch(/talks about the video/);
+    expect(problems.join('\n')).toMatch(/rests on c2/);
     expect(
-      hookProblems('In 1582, ten days vanished.', ['c1'], research),
+      hookProblems(
+        'In 1582, ten days vanished. Where did they go?',
+        ['c1'],
+        research,
+      ),
     ).toEqual([]);
     expect(
-      hookProblems('In 1582, ten days vanished.', [], research),
-    ).toHaveLength(1);
+      hookProblems(
+        'In 1582, ten days vanished. Where did they go?',
+        [],
+        research,
+      ),
+    ).toEqual(['The hook states a number or a date with no claim: cite it.']);
+  });
+
+  it('opens on a picture, someone in it when people drive the story, and ends on its question', () => {
+    const people = {
+      ...research,
+      people: researchOf({
+        people: [
+          { name: 'Sir Abubakar Tafawa Balewa' },
+          { name: 'Ahmadu Bello' },
+        ],
+      }).people,
+    };
+    // An abstraction, or a place with no one in it, is no picture.
+    for (const hook of [
+      'Three regions. One country. Why did independence take so long?',
+      'After the 1945 strikes, colonial Nigeria began shifting power into regional legislatures. Why?',
+      'In 1953, regional bargaining power reshaped the timetable. Why?',
+    ])
+      expect(hookProblems(hook, [], people).join('\n')).toMatch(
+        /not a picture: open on one moment someone could film/,
+      );
+    // One moment, with someone in it, at a time and in a place.
+    for (const hook of [
+      'On 31 March 1953, in Lagos, Ahmadu Bello led the Northern members out of the House. Why did they walk out?',
+      'In 1957, Balewa stood in the House in Lagos. What would he ask for?',
+      'At dawn, delegates crowded the hall in London. Who would speak first?',
+    ])
+      expect(
+        hookPictureProblem(
+          hook,
+          people.people!.map((p) => p.name),
+        ),
+      ).toBeNull();
+    // A story with no people: a time or a place is enough.
+    expect(
+      hookPictureProblem('In 1582, ten days vanished from the calendar.'),
+    ).toBeNull();
+    expect(
+      hookProblems('In 1582, ten days vanished.', ['c1'], research),
+    ).toEqual([
+      'The hook ends without its question: end on the question the episode answers.',
+    ]);
   });
 
   it('loses its greeting and its talk of the video, by code', () => {

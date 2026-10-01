@@ -2864,7 +2864,13 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     }[input.step] as z.ZodTypeAny;
     const system = EDITOR_PROMPTS[input.step];
     const prompt = input.parts.filter(Boolean).join('\n\n');
-    const effort = this.effort(ref, 'EXPLAINER_RESEARCH_EFFORT', 'low');
+    // The research is thought through (it decides how widely to search);
+    // the angles' look round and the fact check stay quick.
+    const effort = this.effort(
+      ref,
+      'EXPLAINER_RESEARCH_EFFORT',
+      input.step === 'research' ? 'medium' : 'low',
+    );
     const most = Math.max(
       1,
       input.searches ??

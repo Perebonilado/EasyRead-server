@@ -480,6 +480,57 @@ describe("the editor's desk on the worker", () => {
   });
 });
 
+describe('research deep enough to show', () => {
+  it('searches a thin log again once, with what it lacks, and adds what it finds', async () => {
+    const d = desk({ ...EMPTY_EDITOR, question: 'Why did it happen?' });
+    const fake = new FakeLlmAdapter();
+    const told: string[][] = [];
+    // The first search comes back thin: years alone, no people, no scenes, no numbers.
+    (d.llm as { editorSearch: unknown }).editorSearch = async (input: {
+      step: 'research';
+      parts: string[];
+    }) => {
+      d.asked.push(input.step);
+      told.push(input.parts);
+      const answer = await fake.editorSearch(input);
+      if (told.length > 1) return answer;
+      const found = answer.value.found;
+      return {
+        ...answer,
+        value: {
+          found,
+          value: {
+            claims: [
+              {
+                id: 'c1',
+                text: 'It began in 1582.',
+                kind: 'date',
+                confidence: 'high',
+                sources: [found[0].url, found[1].url],
+              },
+            ],
+            timeline: [{ date: '1582', event: 'The change', claims: ['c1'] }],
+          },
+        },
+      };
+    };
+    await d.processor.run({ kind: 'research' }, d.show(), d.ep());
+    expect(d.asked).toEqual(['research', 'research']);
+    const again = told[1].join('\n');
+    expect(again).toMatch(/It is thin\. Search for what it lacks/);
+    expect(again).toMatch(/The timeline has 1 dated event: find at least 5/);
+    expect(again).toMatch(/No numbers/);
+    expect(again).toMatch(/number new claims from c2/);
+    // What the deeper search found is added to the log, its claims after the first.
+    const research = d.show().editor!.research!;
+    expect(research.claims[0].text).toBe('It began in 1582.');
+    expect(research.claims.length).toBeGreaterThan(1);
+    expect(research.people?.map((p) => p.name)).toEqual(['Clavius']);
+    expect(research.moments).toHaveLength(3);
+    expect(d.queued.map((j) => j.kind)).toEqual(['plan']);
+  });
+});
+
 describe('an episode of three to five minutes', () => {
   it('sends a plan whose first episode is short back once, then fills it from the research', async () => {
     // A deep research: twenty-four sure claims of about fifteen words.

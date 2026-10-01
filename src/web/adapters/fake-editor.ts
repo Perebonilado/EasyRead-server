@@ -80,9 +80,55 @@ export function fakeEditorAnswer(
           contested: k === 4,
           who: k === 4 ? 'some historians' : null,
         })),
-        timeline: [{ date: '1582', event: 'The change', claims: ['c1'] }],
+        // Deep enough to plan from (studio-editor-checks researchProblems):
+        // dated events with their places, people with what they did, the
+        // turning points as scenes, numbers with two sources.
+        timeline: [
+          ['1572', 'Rome', 'Gregory XIII becomes pope'],
+          ['24 February 1582', 'Frascati', 'The papal bull is signed'],
+          ['4 October 1582', 'Rome', 'The last day of the old count'],
+          ['15 October 1582', 'Rome', 'The first day of the new count'],
+          ['December 1582', 'Paris', 'France makes the change'],
+        ].map(([date, place, event]) => ({
+          date,
+          place,
+          event,
+          claims: ['c1'],
+        })),
+        people: [
+          {
+            name: 'Clavius',
+            role: 'the astronomer',
+            wanted: 'a calendar that kept to the sun',
+            did: 'worked out the rule',
+            claims: ['c4'],
+          },
+        ],
+        moments: [
+          ['4 October 1582', 'Rome', 'the council', 'The old count ends'],
+          [
+            '15 October 1582',
+            'Rome',
+            'the townspeople',
+            'People wake ten days on',
+          ],
+          ['1582', 'The council hall', 'Clavius', 'Clavius shows his sums'],
+        ].map(([when, where, who, what]) => ({
+          when,
+          where,
+          who,
+          what,
+          looked: 'a crowd at a notice board',
+          claims: ['c1'],
+        })),
         numbers: [
           { label: 'People affected', value: '4 million', claims: ['c2'] },
+          { label: 'Days dropped', value: '10 days', claims: ['c1'] },
+          {
+            label: 'Leap days skipped',
+            value: '3 in 400 years',
+            claims: ['c4'],
+          },
         ],
         myths: [
           {
@@ -283,7 +329,7 @@ export function fakeEditorAnswer(
           verdict: 'good',
           claims: ['c1'],
         })),
-        hook: `In 1582, ten days vanished from ${topic}. So where did they go?`,
+        hook: `In 1582, in Rome, Clavius watched ten days vanish from ${topic}. So where did they go?`,
         claims: ['c1'],
       };
     case 'script': {

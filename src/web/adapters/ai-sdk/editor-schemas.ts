@@ -87,7 +87,37 @@ export const editorResearchSchema = z.object({
     )
     .catch([]),
   timeline: z
-    .array(z.object({ date: words(), event: words(), claims: ids() }))
+    .array(
+      z.object({
+        date: words(),
+        place: z.string().nullable().catch(null),
+        event: words(),
+        claims: ids(),
+      }),
+    )
+    .catch([]),
+  people: z
+    .array(
+      z.object({
+        name: words(),
+        role: words(),
+        wanted: words(),
+        did: words(),
+        claims: ids(),
+      }),
+    )
+    .catch([]),
+  moments: z
+    .array(
+      z.object({
+        when: words(),
+        where: words(),
+        who: words(),
+        what: words(),
+        looked: words(),
+        claims: ids(),
+      }),
+    )
     .catch([]),
   numbers: z
     .array(z.object({ label: words(), value: words(), claims: ids() }))

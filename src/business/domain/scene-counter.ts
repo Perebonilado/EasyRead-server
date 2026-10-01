@@ -147,13 +147,16 @@ interface Laid {
  * reading font's widest digit (its 0, whose advance carries room either
  * side), so a number reads as one word and not as spaced figures.
  */
-const digitWidth = (size: number) => size * 0.66;
+const digitWidth = (size: number) => size * 0.62;
+/** A separator's room between wheels ("," "."): a little under its own advance, as figures set close. */
+const markWidth = (ch: string, size: number) =>
+  measureText(ch, size, 700) * 0.8;
 
 /** How wide a number is as its wheels set it: digits at one width, the rest as they are. */
 function wheelsWidth(text: string, size: number): number {
   let w = 0;
   for (const ch of text)
-    w += /\d/.test(ch) ? digitWidth(size) : measureText(ch, size, 700);
+    w += /\d/.test(ch) ? digitWidth(size) : markWidth(ch, size);
   return w;
 }
 
@@ -232,7 +235,7 @@ function wheels(
   const out: string[] = [];
   digits.forEach((ch) => {
     if (!/\d/.test(ch)) {
-      const w = measureText(ch, size, 700);
+      const w = markWidth(ch, size);
       out.push(
         `<text x="${r1(x + w / 2)}" y="${r1(baseline)}" font-size="${r1(size)}" font-weight="700" fill="${fill}" text-anchor="middle">${escapeXml(ch)}</text>`,
       );
@@ -375,10 +378,12 @@ export function renderCounter(
     );
   }
   if (later) {
-    // Its later value: the old number covered, its wheels turning on.
+    // Its later value: the old number covered (no wider than the wider of
+    // the two), its wheels turning on.
+    const coverW = Math.max(lineW(main), lineW(later)) + size * 0.2;
     states[COUNTER_THEN] = 'counter-then';
     out.push(
-      `<g id="counter-then"><rect class="cover" x="0" y="${r1(bandTop)}" width="${r1(width)}" height="${r1(bandH)}" fill="${PAPER.paper}"/>` +
+      `<g id="counter-then"><rect class="cover" x="${r1((width - coverW) / 2)}" y="${r1(bandTop)}" width="${r1(coverW)}" height="${r1(bandH)}" fill="${PAPER.paper}"/>` +
         `<g clip-path="url(#counter-window)">${line(later, main, 0.05)}</g></g>`,
     );
   }
@@ -388,5 +393,13 @@ export function renderCounter(
     width,
     r1(height - bandTop + text * 0.2),
   ];
-  return { svg: svgOf(viewBox, out.join('')), viewBox, parts, states };
+  const svg = svgOf(viewBox, out.join(''));
+  // Its ink measured with each wheel at its own digit only: the digits
+  // turning above the window are cut by its clip, which the measure does
+  // not see.
+  const ink = svg.replace(
+    /<g class="roll"[^>]*>((?:<text[^>]*>\d<\/text>)+)<\/g>/g,
+    (_all, strip: string) => strip.match(/<text[^>]*>\d<\/text>/g)?.pop() ?? '',
+  );
+  return { svg, viewBox, parts, states, ink };
 }

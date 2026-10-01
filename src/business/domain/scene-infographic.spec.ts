@@ -35,6 +35,7 @@ import {
   type InfographicDrawing,
 } from './scene-infographic-style';
 import { sanitizeTree } from './scene-svg';
+import { drawByCode } from './scene-code';
 import { PAPER, codeColour } from './scene-themes';
 
 /** What every infographic drawing keeps to: safe, its parts and states its own groups, in the theme's tokens, readable, small. */
@@ -763,4 +764,52 @@ describe('split', () => {
       else expect(Number(b[2])).toBeGreaterThan(Number(a[2]));
     },
   );
+});
+
+describe('drawn for the stage', () => {
+  it('frames a counter by its digits as they stand, not by the wheels turning out of sight', async () => {
+    const counter = readCounter(
+      {
+        value: 2.5,
+        unit: 'billion',
+        prefix: 'about',
+        label: 'people on Earth',
+        then: 8,
+      },
+      { source: 'UN, 2024' },
+    )!;
+    const d = renderCounter(counter);
+    expect(d.ink).toBeDefined();
+    expect(d.ink).not.toContain('class="roll"');
+    const drawn = await drawByCode(
+      { id: 'n', kind: 'counter', name: '', counter, text: TEXT_FLOOR },
+      'wide',
+    );
+    expect(drawn.aspect).toBeGreaterThan(1.5);
+    expect(drawn.viewBox[3]).toBeLessThan(800);
+    expect(drawn.states).toEqual({ then: 'counter-then' });
+    expect(drawn.moves).toBe(true);
+  }, 30_000);
+
+  it("writes a chart's source under it, a part of its own", async () => {
+    const drawn = await drawByCode(
+      {
+        id: 'c',
+        kind: 'chart',
+        name: 'Seats',
+        chart: {
+          kind: 'bar',
+          unit: null,
+          bars: [
+            { label: 'A', value: 3 },
+            { label: 'B', value: 5 },
+          ],
+          source: 'K.W.J. Post, 1963',
+        },
+      },
+      'wide',
+    );
+    expect(drawn.parts.source).toBe('source');
+    expect(drawn.svg).toContain('Source: K.W.J. Post, 1963');
+  }, 30_000);
 });

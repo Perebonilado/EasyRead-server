@@ -126,8 +126,11 @@ export function renderTransfer(
   const c1 = { x: ax + boxW * 0.7, y: top - arcH * 1.25 };
   const c2 = { x: bx + boxW * 0.3, y: top - arcH * 1.25 };
   const arc = `M${r1(start.x)} ${r1(start.y)}C${r1(c1.x)} ${r1(c1.y)} ${r1(c2.x)} ${r1(c2.y)} ${r1(end.x)} ${r1(end.y)}`;
-  // The tokens ride the arc centred: their own box's middle on it.
-  const motion = `M${r1(start.x - tokenSize / 2)} ${r1(start.y - tokenSize / 2)}C${r1(c1.x - tokenSize / 2)} ${r1(c1.y - tokenSize / 2)} ${r1(c2.x - tokenSize / 2)} ${r1(c2.y - tokenSize / 2)} ${r1(end.x - tokenSize / 2)} ${r1(end.y - tokenSize / 2)}`;
+  // The tokens ride the arc from where it starts, inside the first box:
+  // each drawn there, and its path the arc's, from there.
+  const rel = (p: { x: number; y: number }) =>
+    `${r1(p.x - start.x)} ${r1(p.y - start.y)}`;
+  const motion = `M0 0C${rel(c1)} ${rel(c2)} ${rel(end)}`;
   const arcTop = top - arcH * 0.95;
   const out: string[] = [
     styleOf({
@@ -150,7 +153,13 @@ export function renderTransfer(
     tokens.push(
       `<g opacity="0"><set attributeName="opacity" to="1" begin="${begin.toFixed(2)}s" fill="freeze"/>` +
         `<animateMotion dur="${TRANSFER_SECONDS}s" begin="${begin.toFixed(2)}s" repeatCount="indefinite" path="${motion}" calcMode="spline" keyPoints="0;1" keyTimes="0;1" keySplines=".45 .05 .55 .95"/>` +
-        iconUse(spec.token, 0, 0, tokenSize, tokenColour) +
+        iconUse(
+          spec.token,
+          start.x - tokenSize / 2,
+          start.y - tokenSize / 2,
+          tokenSize,
+          tokenColour,
+        ) +
         `</g>`,
     );
   }

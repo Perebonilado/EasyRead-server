@@ -113,6 +113,8 @@ export async function drawByCode(
   let callouts: Callout[] = [];
   let moves = false;
   let words: { size: number } | undefined;
+  /** What the ink is measured by, when not the drawing itself. */
+  let ink: string | undefined;
   if (thing.kind === 'math') {
     const set = renderMath(thing.lines, thing.picture ?? null);
     ({ svg, viewBox, parts, states } = set);
@@ -152,7 +154,7 @@ export async function drawByCode(
     // A counter, a unit chart, a name card, a calendar, a chamber's seats,
     // words struck out, things moving, a document, a split screen: each
     // comes in by its own motion, and its later looks are states.
-    ({ svg, viewBox, parts, states } = drawInfographic(thing, shape));
+    ({ svg, viewBox, parts, states, ink } = drawInfographic(thing, shape));
     moves = true;
   } else if (thing.kind === 'map') {
     // Drawn from real data and fitted to the film's frame; its countries
@@ -173,8 +175,9 @@ export async function drawByCode(
     ({ svg, viewBox } = withSourceLine(svg, viewBox, source));
     parts = { ...parts, source: 'source' };
   }
-  const measured = await renderSvg(svg, undefined, {
-    grid: { svg, cols: 48 },
+  const measuredSvg = ink ?? svg;
+  const measured = await renderSvg(measuredSvg, undefined, {
+    grid: { svg: measuredSvg, cols: 48 },
   });
   const framed = measured.ink ? framedBox(viewBox, measured.ink) : viewBox;
   const framedSvg = svg.replace(

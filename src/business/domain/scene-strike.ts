@@ -141,10 +141,13 @@ export function renderStrike(
     })
     .join('');
   const freshTop = oldTop + oldH + gap;
+  const oldW =
+    Math.max(...old.lines.map((l) => measureText(l, old.size, 700))) +
+    old.size * 0.4;
   out.push(
     `<g id="strike-new">` +
-      // The old words dimmed: the paper over them, part seen through.
-      `<rect class="dim" style="--dim:.5" opacity="0.5" x="0" y="${r1(oldTop)}" width="${r1(width)}" height="${r1(oldH + old.size * 0.1)}" fill="${PAPER.paper}"/>` +
+      // The old words dimmed: the paper over them (no wider), part seen through.
+      `<rect class="dim" style="--dim:.5" opacity="0.5" x="${r1((width - oldW) / 2)}" y="${r1(oldTop)}" width="${r1(oldW)}" height="${r1(oldH + old.size * 0.1)}" fill="${PAPER.paper}"/>` +
       strikes +
       `<g class="write" style="${delayOf(0.45)}">${textLines(fresh.lines, width / 2, freshTop + fresh.size * 0.86, fresh.size, { fill: colour, leading: 1.1 })}</g>` +
       `</g>`,

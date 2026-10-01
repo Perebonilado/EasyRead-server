@@ -278,5 +278,14 @@ export function renderNamecard(
     r1(cardW + text * 0.6),
     r1(cardH + text * 0.6),
   ];
-  return { svg: svgOf(viewBox, out.join('')), viewBox, parts, states: {} };
+  const svg = svgOf(viewBox, out.join(''));
+  // A bust is cut to its circle, which the measure of its ink does not
+  // see: the card is measured as it is, the bust's own drawing left out.
+  const ink = spec.bust
+    ? svg.replace(
+        /<g clip-path="url\(#card-portrait-clip\)">[\s\S]*?<\/svg><\/g>/,
+        '',
+      )
+    : undefined;
+  return { svg, viewBox, parts, states: {}, ...(ink ? { ink } : {}) };
 }

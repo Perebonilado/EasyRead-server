@@ -31,6 +31,13 @@ export interface InfographicDrawing {
   parts: Record<string, string>;
   /** State name to the id of its group: hidden until shown. */
   states: Record<string, string>;
+  /**
+   * What its ink is measured by, when the drawing itself would mislead the
+   * measure (resvg's bounding box takes no account of a clip): a counter's
+   * wheels without the digits turning out of their window, a name card
+   * without the bust cut to its circle. Absent, the drawing.
+   */
+  ink?: string;
 }
 
 /**

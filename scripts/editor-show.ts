@@ -71,6 +71,7 @@ import {
 } from '../src/business/domain/studio/studio-editor';
 import type { StudioEditorial } from '../src/business/domain/studio/studio-editorial';
 import {
+  directionIn,
   hookProblems,
   isFactual,
   promiseReturns,
@@ -472,6 +473,8 @@ interface Rubric {
   promiseKept: boolean;
   chain: { but: number; therefore: number; andThen: number };
   andThenRows: number;
+  /** Rows whose narration is still a stage direction (code's check): none, after the repairs. */
+  directions: number;
   factual: number;
   sourced: number;
   secondsPerPicture: { mean: number; most: number };
@@ -516,6 +519,7 @@ function rubricOf(made: Made, id = 'show'): Rubric {
       andThen: chain.filter((c) => c.link === 'and then').length,
     },
     andThenRows: rows.filter((r) => /^and then\b/iu.test(r.say)).length,
+    directions: rows.filter((r) => directionIn(r, editor.world)).length,
     factual: factual.length,
     sourced: sourced.length,
     secondsPerPicture: {
@@ -552,11 +556,11 @@ function rubricWords(rubrics: Rubric[]): string {
   return [
     '# The editor’s bench: code’s rubric',
     'Each row is a show’s first episode, written by the editor’s desk and checked by code (no film made). Seconds a picture: each row is one sentence, one new thing seen; the playbook asks for three to five. Still rows: past six seconds without a hold.',
-    '| Show | Hook rules | Promise kept | Chain but/therefore/and then | "And then" rows | Factual rows sourced | Seconds a picture (mean, most) | Still rows | Words on screen (most, rows over 8) | Episode min | Plan min | Episodes | Rows | Scenes (illustrated) | Claims | Searches | $ | Time |',
-    '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|',
+    '| Show | Hook rules | Promise kept | Chain but/therefore/and then | "And then" rows | Direction rows | Factual rows sourced | Seconds a picture (mean, most) | Still rows | Words on screen (most, rows over 8) | Episode min | Plan min | Episodes | Rows | Scenes (illustrated) | Claims | Searches | $ | Time |',
+    '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|',
     ...rubrics.map(
       (r) =>
-        `| ${r.id} | ${r.hookRules ? 'pass' : 'FAIL'} | ${r.promiseKept ? 'yes' : 'no'} | ${r.chain.but}/${r.chain.therefore}/${r.chain.andThen} | ${r.andThenRows} | ${r.sourced}/${r.factual} (${pct(r.sourced, r.factual)}) | ${r.secondsPerPicture.mean}, ${r.secondsPerPicture.most} | ${r.stillRows} | ${r.screenWords.most}, ${r.screenWords.over} | ${r.episodeMinutes} | ${r.planMinutes.join(', ')} | ${r.episodes} | ${r.rows} | ${r.scenes} (${r.illustrated}) | ${r.claims} | ${r.searched} | ${r.dollars.toFixed(2)} | ${Math.round(r.seconds / 60)}m |`,
+        `| ${r.id} | ${r.hookRules ? 'pass' : 'FAIL'} | ${r.promiseKept ? 'yes' : 'no'} | ${r.chain.but}/${r.chain.therefore}/${r.chain.andThen} | ${r.andThenRows} | ${r.directions} | ${r.sourced}/${r.factual} (${pct(r.sourced, r.factual)}) | ${r.secondsPerPicture.mean}, ${r.secondsPerPicture.most} | ${r.stillRows} | ${r.screenWords.most}, ${r.screenWords.over} | ${r.episodeMinutes} | ${r.planMinutes.join(', ')} | ${r.episodes} | ${r.rows} | ${r.scenes} (${r.illustrated}) | ${r.claims} | ${r.searched} | ${r.dollars.toFixed(2)} | ${Math.round(r.seconds / 60)}m |`,
     ),
     '',
     rubrics.length > 1

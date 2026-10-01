@@ -208,6 +208,7 @@ import {
   withStill,
 } from '../../business/domain/studio/studio-clip';
 import { coldOpen } from '../../business/domain/studio/studio-cold-open';
+import { chainProblem } from '../../business/domain/studio/studio-chain';
 import {
   hostIn,
   hostLooks,
@@ -2532,7 +2533,9 @@ export class StudioProcessor {
     // stiff words made plain; what is still too hard rides along on the
     // one send-back, if there is one, and is otherwise only logged.
     // The first scene's cold open (studio-cold-open): one that does not
-    // open on a hook rides along on the one send-back, if any.
+    // open on a hook rides along on the one send-back, if any. So does a
+    // scene whose lines read as a list of facts rather than one chain of
+    // cause and effect (studio-chain).
     const plainOf = (draft: unknown) => {
       const written = explainerSheetOf({
         kind: 'explainer',
@@ -2550,7 +2553,11 @@ export class StudioProcessor {
         : { sheet: written, fixes: [], problems: [], measure: null };
       const cold =
         k === 0 ? coldOpen(plain.sheet.draft.beats, recipe?.wpm ?? 150) : null;
-      return cold ? { ...plain, problems: [...plain.problems, cold] } : plain;
+      const chain = chainProblem(plain.sheet.draft.beats);
+      const more = [cold, chain].filter((p): p is SheetProblem => p !== null);
+      return more.length
+        ? { ...plain, problems: [...plain.problems, ...more] }
+        : plain;
     };
     let plain = plainOf(first.value);
     let sheet = plain.sheet;

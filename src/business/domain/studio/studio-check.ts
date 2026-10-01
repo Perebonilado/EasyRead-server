@@ -148,7 +148,9 @@ export interface SheetProblem {
     /** A first scene that does not open on a question, a surprise or a situation (studio-cold-open): rides along. */
     | 'cold-open'
     /** An explainer's voice saying where things are on the screen, or what the learner can see, instead of teaching (studio-screen-talk): sent back once. */
-    | 'screen';
+    | 'screen'
+    /** An explainer whose lines mostly start cold, a list of facts rather than one chain of cause and effect (studio-chain): rides along on a send-back, never one alone. */
+    | 'chain';
   /** In plain words, for the writer. */
   message: string;
   /** The beat it is about, from 0; null for the whole scene. */

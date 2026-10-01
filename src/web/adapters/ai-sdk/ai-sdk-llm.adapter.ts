@@ -1016,8 +1016,12 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     setting = 'SCENE_WRITE_THINKING',
     otherwise: 'on' | 'off' = 'off',
   ) {
-    if (ref.provider !== 'deepseek') return {};
     const on = this.config.get<string>(setting, otherwise) === 'on';
+    // On a GPT mini (the Studio's words since 2026-10-01) the setting is
+    // its reasoning effort: off is low, so the producer answers quickly.
+    if (ref.provider === 'openai')
+      return effortOptions('openai', undefined, on ? 'medium' : 'low');
+    if (ref.provider !== 'deepseek') return {};
     return {
       providerOptions: {
         deepseek: { thinking: { type: on ? 'enabled' : 'disabled' } },

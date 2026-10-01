@@ -154,13 +154,16 @@ const TASK_DEFAULT: Partial<Record<LlmTask, string>> = {
   // the cave with her two readings in three), at about five times the
   // cost: the small model by choice, 4.1 by setting AI_MODEL_SCENE_STORY.
   scene_story: 'openai:gpt-4.1-mini',
-  // The Studio on DeepSeek, as the video writer is: never gpt-4.1 for the
-  // writer (Richard, 2026-09-25). Thinking: STUDIO_WRITE_THINKING.
-  studio_chat: 'deepseek:deepseek-flash',
-  studio_write: 'deepseek:deepseek-flash',
-  // The check of a scene made again as asked: a few thousand tokens in, a
-  // verdict out, thinking off (STUDIO_CHECK_THINKING).
-  studio_check: 'deepseek:deepseek-flash',
+  // The Studio's words on a GPT mini, Richard's choice (2026-10-01:
+  // "DeepSeek is trash at writing"; "we agreed to switch to gpt 5 mini for
+  // these tasks"): the producer's chat, a story's writing and the check of
+  // a scene made again. Never gpt-4.1. The thinking settings
+  // (STUDIO_CHAT_THINKING, STUDIO_WRITE_THINKING, STUDIO_CHECK_THINKING)
+  // become its reasoning effort: off is low, on is medium. DeepSeek still
+  // draws (scene_draw, cast_draw, set_paint), with GPT mini as its backup.
+  studio_chat: 'openai:gpt-5.4-mini',
+  studio_write: 'openai:gpt-5.4-mini',
+  studio_check: 'openai:gpt-5.4-mini',
   // The editor's desk on a GPT mini, Richard's choice (2026-10-01): DeepSeek
   // leaves the explainer's writing. GPT-5.4 mini, the newest "mini", at
   // $0.75 / $4.50 a million; its reasoning effort is EXPLAINER_EDIT_EFFORT
@@ -258,51 +261,122 @@ export interface BackedModel {
 
 /**
  * A model whose two calls fall back to another's: a call the first fails,
- * or leaves unanswered past `after` ms, is made again on `backup`. A call
- * the caller cancelled is never made again. Everything else about the
- * model (its id, its provider, what it accepts) stays the first's own.
+ * or leaves unanswered past `after` ms, is made again on `backup`; a
+ * stream that opens but says nothing within `first` ms (DeepSeek's outage
+ * of 2026-10-01 answered, then went silent) is cancelled and streamed
+ * from `backup` instead. Once an answer is coming its clock stops, so a
+ * long answer is never cut off. A call the caller cancelled is never made
+ * again. Everything else about the model stays the first's own.
  */
 export function backedBy(
   first: BackedModel,
   backup: BackedModel,
   after: number,
   said: (why: string) => void = () => undefined,
+  firstWords = Math.min(after, 20_000),
 ): BackedModel {
-  const tryFirst = async <R>(
-    options: BackedOptions,
-    call: (o: BackedOptions) => PromiseLike<R>,
-    again: (o: BackedOptions) => PromiseLike<R>,
-  ): Promise<R> => {
+  /** A call with its own clock, which the caller's cancelling also stops. */
+  const clocked = (options: BackedOptions, ms: number) => {
     const asked = options.abortSignal;
-    const timer = AbortSignal.timeout(after);
+    const own = new AbortController();
+    let late = false;
+    const timer = setTimeout(() => {
+      late = true;
+      own.abort(new Error('no answer in time'));
+    }, ms);
+    const cancel = () => own.abort(asked?.reason);
+    asked?.addEventListener('abort', cancel, { once: true });
+    return {
+      options: { ...options, abortSignal: own.signal },
+      stop: () => {
+        clearTimeout(timer);
+        asked?.removeEventListener('abort', cancel);
+      },
+      late: () => late,
+      asked: () => Boolean(asked?.aborted),
+      ms,
+    };
+  };
+  const why = (error: unknown, late: boolean, ms: number) =>
+    late
+      ? `gave no answer in ${Math.round(ms / 1000)}s`
+      : `failed (${error instanceof Error ? error.message.slice(0, 120) : 'error'})`;
+
+  const backed = Object.create(first) as BackedModel;
+  backed.doGenerate = async (options) => {
+    const call = clocked(options, after);
     try {
-      return await call({
-        ...options,
-        abortSignal: asked ? AbortSignal.any([asked, timer]) : timer,
-      });
+      return await first.doGenerate(call.options);
     } catch (error) {
-      if (asked?.aborted) throw error;
-      said(
-        timer.aborted
-          ? `gave no answer in ${Math.round(after / 1000)}s`
-          : `failed (${error instanceof Error ? error.message.slice(0, 120) : 'error'})`,
-      );
-      return again(options);
+      if (call.asked()) throw error;
+      said(why(error, call.late(), call.ms));
+      return backup.doGenerate(options);
+    } finally {
+      call.stop();
     }
   };
-  const backed = Object.create(first) as BackedModel;
-  backed.doGenerate = (options) =>
-    tryFirst(
-      options,
-      (o) => first.doGenerate(o),
-      (o) => backup.doGenerate(o),
-    );
-  backed.doStream = (options) =>
-    tryFirst(
-      options,
-      (o) => first.doStream(o),
-      (o) => backup.doStream(o),
-    );
+  backed.doStream = async (options) => {
+    const call = clocked(options, firstWords);
+    try {
+      const opened = (await first.doStream(call.options)) as {
+        stream: ReadableStream<{ type?: string; error?: unknown }>;
+      } & Record<string, unknown>;
+      const reader = opened.stream.getReader();
+      // What came before the first words (the stream's own start, its
+      // metadata) is kept to be passed on; the clock runs until words come.
+      const before: { type?: string; error?: unknown }[] = [];
+      // A stream that will not hear its cancelling still loses the race.
+      const silent = new Promise<never>((_, reject) => {
+        const signal = call.options.abortSignal;
+        const fail = () => {
+          void reader.cancel().catch(() => undefined);
+          reject(new Error('no answer in time'));
+        };
+        if (signal.aborted) fail();
+        else signal.addEventListener('abort', fail, { once: true });
+      });
+      // Lost after the words came, it is no one's error.
+      silent.catch(() => undefined);
+      for (;;) {
+        const part = await Promise.race([reader.read(), silent]);
+        if (part.done) throw new Error('ended before any answer');
+        if (part.value.type === 'error') {
+          const said = part.value.error;
+          throw said instanceof Error
+            ? said
+            : new Error(String(said ?? 'error'));
+        }
+        before.push(part.value);
+        if (
+          part.value.type !== 'stream-start' &&
+          part.value.type !== 'response-metadata'
+        )
+          break;
+      }
+      call.stop();
+      return {
+        ...opened,
+        stream: new ReadableStream({
+          start(controller) {
+            for (const part of before) controller.enqueue(part);
+          },
+          async pull(controller) {
+            const part = await reader.read();
+            if (part.done) controller.close();
+            else controller.enqueue(part.value);
+          },
+          cancel(reason) {
+            return reader.cancel(reason);
+          },
+        }),
+      };
+    } catch (error) {
+      call.stop();
+      if (call.asked()) throw error;
+      said(why(error, call.late(), call.ms));
+      return backup.doStream(options);
+    }
+  };
   return backed;
 }
 

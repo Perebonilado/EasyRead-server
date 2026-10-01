@@ -39,6 +39,8 @@ export async function drawByCode(
   let callouts: Callout[] = [];
   let moves = false;
   let words: { size: number } | undefined;
+  /** Drawn exactly into the show's map's frame: kept so, for the next scene's map to line up with it. */
+  let framed = false;
   if (thing.kind === 'math') {
     const set = renderMath(thing.lines, thing.picture ?? null);
     ({ svg, viewBox, parts, states } = set);
@@ -75,12 +77,12 @@ export async function drawByCode(
     ));
     moves = true;
   } else if (thing.kind === 'map') {
-    // Drawn from real data and fitted to the film's frame; its countries
-    // come in one after another and its routes draw themselves.
-    ({ svg, viewBox, parts, labels, callouts } = await renderMap(
-      thing.map,
-      shape,
-    ));
+    // Drawn from real data and fitted to the film's frame (a show's maps
+    // to the show's one frame); its countries come in one after another
+    // and its routes draw themselves.
+    const map = await renderMap(thing.map, shape, thing.text);
+    ({ svg, viewBox, parts, labels, callouts } = map);
+    framed = map.framed;
     moves = true;
   } else {
     const quote = renderQuote({ text: thing.text, phrases: thing.phrases });
@@ -90,15 +92,16 @@ export async function drawByCode(
   const measured = await renderSvg(svg, undefined, {
     grid: { svg, cols: 48 },
   });
-  const framed = measured.ink ? framedBox(viewBox, measured.ink) : viewBox;
+  const box =
+    measured.ink && !framed ? framedBox(viewBox, measured.ink) : viewBox;
   const framedSvg = svg.replace(
     /viewBox="[^"]*"/,
-    `viewBox="${framed.join(' ')}"`,
+    `viewBox="${box.join(' ')}"`,
   );
   return {
     svg: framedSvg,
-    viewBox: framed,
-    aspect: Math.min(4, Math.max(0.4, framed[2] / framed[3])),
+    viewBox: box,
+    aspect: Math.min(4, Math.max(0.4, box[2] / box[3])),
     parts,
     labels,
     states,

@@ -488,6 +488,8 @@ export interface MapThing {
   /** Its caption. */
   name: string;
   map: MapSpec;
+  /** The smallest text its audience reads, in stage units: what its names are written at, at least. */
+  text?: number;
 }
 
 /** A thing drawn by code and not by the artist. */
@@ -2827,7 +2829,13 @@ function codeThing(
       return words('a map of nowhere known');
     }
     return {
-      thing: { id, kind: 'map', name: clean(raw.name), map: spec },
+      thing: {
+        id,
+        kind: 'map',
+        name: clean(raw.name),
+        map: spec,
+        ...(textFloor ? { text: textFloor } : {}),
+      },
       problems,
       mended,
     };

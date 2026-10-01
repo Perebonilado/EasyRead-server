@@ -21,6 +21,7 @@ import {
 import {
   bibleOf,
   explainerSheetOf,
+  isIllustrated,
   outlineOf,
   secondsOf,
   FULLEST,
@@ -243,6 +244,8 @@ import {
   TwinNeedsRemake,
 } from '../../business/handlers/studio/studio-twins';
 import { partsFromFilm } from '../../business/domain/scene-film-parts';
+import { StudioEditorProcessor, isEditorJob } from './studio-editor.processor';
+import { withWorldPlaces } from '../../business/domain/studio/studio-editor-world';
 
 /** How wide a still the picture check looks at is: enough to tell a bus from an ark, at about 0.4 cents a look. */
 const STILL_PX = 960;
@@ -349,9 +352,16 @@ export function studioMakeOf(
   gestures: ReadonlySet<string> = new Set(),
 ): Omit<Parameters<SceneProcessor['make']>[0], 'base' | 'who'> {
   const story = row.sheet?.kind === 'story';
+  // An editor's illustrated scene (studio-editor-cut): a story's sheet
+  // narrated throughout in the lesson's voice, in one of the world's
+  // places; never a clip, so no freeze and no card after it.
+  const illustrated =
+    story &&
+    show.brief.format === 'explainer' &&
+    isIllustrated(episode.outline?.scenes[row.position]);
   // A story's scene in an explainer is one of its story clips (studio-clip):
   // staged as a story is, with a light narrator in the lesson's voice.
-  const clip = story && show.brief.format === 'explainer';
+  const clip = story && show.brief.format === 'explainer' && !illustrated;
   const stage = stageOf(show.brief);
   const lesson = {
     teach: episode.outline?.scenes[row.position]?.teach ?? null,
@@ -364,10 +374,10 @@ export function studioMakeOf(
   // always one the stage can play: carrying on from how the scene before
   // left things, on its set with every feature its words name.
   const before = endBefore(rows, row.position, bible);
-  const narrator = narratorRuleOf(
-    clip ? clipBrief(show.brief) : show.brief,
-    bible,
-  );
+  // An illustrated scene's narration is all of it: no narrator's share to keep to.
+  const narrator = illustrated
+    ? null
+    : narratorRuleOf(clip ? clipBrief(show.brief) : show.brief, bible);
   const sheet = story
     ? repairSheet(row.sheet as StorySheet, bible, before, narrator)
     : null;
@@ -391,11 +401,12 @@ export function studioMakeOf(
     ...(energy ? { energy: { cut: energy.cut, push: energy.push } } : {}),
   });
   // A clip's set in the explainer's look; a story's in its style.
-  const look = clip
-    ? clipLook(showTheme(show.brief, bible))
-    : story
-      ? setLookOf(show.brief)
-      : null;
+  const look =
+    clip || illustrated
+      ? clipLook(showTheme(show.brief, bible))
+      : story
+        ? setLookOf(show.brief)
+        : null;
   const staged = sheet
     ? withFound(bible, sheet.set, mendSheet(sheet, bible, before))
     : bible;
@@ -403,7 +414,10 @@ export function studioMakeOf(
   // clip's last frame, shrunk onto its stage, the diagram built round it.
   const clipBefore = !story
     ? rows.find(
-        (r) => r.position === row.position - 1 && r.sheet?.kind === 'story',
+        (r) =>
+          r.position === row.position - 1 &&
+          r.sheet?.kind === 'story' &&
+          !isIllustrated(episode.outline?.scenes[r.position]),
       )
     : undefined;
   // An explainer's scene in a continuous build is laid out on the board
@@ -504,10 +518,16 @@ export function studioMakeOf(
     profile,
     story: story
       ? {
-          // A clip's places from code's layouts where it has them.
-          bible: clip
-            ? withPresets(storyBibleFor(bible, sheets, show.title))
-            : storyBibleFor(bible, sheets, show.title),
+          // A clip's places from code's layouts where it has them; an
+          // illustrated scene's from the world's (studio-editor-world).
+          bible: illustrated
+            ? withWorldPlaces(
+                storyBibleFor(bible, sheets, show.title),
+                show.editor?.world,
+              )
+            : clip
+              ? withPresets(storyBibleFor(bible, sheets, show.title))
+              : storyBibleFor(bible, sheets, show.title),
           page: row.position + 1,
           castKey: studioCastKey(show.id),
           setsKey: studioSetsKey(show.id),
@@ -670,7 +690,20 @@ export class StudioProcessor {
     @Optional() private readonly config?: ConfigService,
     /** An explainer made from a document: its pages, as notes or as they are (studio-material). */
     @Optional() private readonly material?: StudioMaterialService,
-  ) {}
+  ) {
+    this.editor = new StudioEditorProcessor({
+      studio: this.studio,
+      llm: this.llm,
+      calls: this.calls,
+      queue: this.queue,
+      setting: (name) => this.config?.get<string>(name) ?? process.env[name],
+      material: this.material ?? null,
+      logger: this.logger,
+    });
+  }
+
+  /** The editor's desk (studio-editor.processor): an explainer show planned, and its episodes written, as an editor does. */
+  private readonly editor: StudioEditorProcessor;
 
   /** How a story's script is written and read (studio-script-writer): fast and cheap unless a setting says otherwise. */
   private scriptSettings(): ScriptSettings {
@@ -722,8 +755,18 @@ export class StudioProcessor {
           key,
           job.story === true,
         );
+      else if (
+        job.kind === 'script' &&
+        episode.editorial &&
+        episode.outline?.editor
+      )
+        // An editor's episode: each scene boarded on its written rows, and,
+        // made with "Make it", the film made straight after.
+        await this.boardEditorScenes(show, episode, key, job.make === true);
       else if (job.kind === 'script')
         await this.writeScript(show, episode, key);
+      else if (isEditorJob(job.kind))
+        await this.editor.run(job, show, episode, key);
       else if (job.kind === 'scene' && job.sceneId)
         await this.rewriteScene(
           show,
@@ -862,6 +905,11 @@ export class StudioProcessor {
         return;
       }
       if (!last) throw error;
+      // The editor's desk's own: said in the thread, the episode free.
+      if (isEditorJob(job.kind)) {
+        await this.editor.failed(show, episode, job.kind, failed);
+        return;
+      }
       // The Studio's own try again at a maker's change that could not be
       // written: the film made on the first try stands, and what its check
       // found is what the maker is told. Never a failure of theirs.
@@ -1888,6 +1936,84 @@ export class StudioProcessor {
     await this.scriptWritten(show, episode, rows.length, key);
   }
 
+  /**
+   * An editor's episode boarded (studio-editor.processor boards): every
+   * scene's board on its written rows; said in the thread; and, made with
+   * "Make it", the film made straight after, as making it would.
+   */
+  private async boardEditorScenes(
+    show: StudioShowRecord,
+    episode: StudioEpisodeRecord,
+    key?: string,
+    make = false,
+  ): Promise<void> {
+    const count = await this.editor.boards(show, episode);
+    await this.log(
+      show,
+      episode,
+      { what: 'scenes', step: 'script', line: EVENT_LINES.scenes(count) },
+      key,
+    );
+    if (!make) {
+      await this.studio.updateEpisode(episode.id, { busy: null, error: null });
+      return;
+    }
+    // Made as the make button makes it: what is ready, within the month's
+    // film, the cast drawn first, then every scene at once.
+    const now = (await this.studio.findShow(show.id)) ?? show;
+    const rows = (await this.studio.listScenes(episode.id)).filter(
+      (r) => r.sheet && r.status === 'ready',
+    );
+    const seconds = rows.reduce(
+      (n, r) => n + (r.sheet ? secondsOf(r.sheet) : 0),
+      0,
+    );
+    try {
+      (await this.entitlements.forUser(episode.userId)).assertStudioAvailable(
+        seconds,
+      );
+    } catch (error) {
+      await this.log(
+        now,
+        episode,
+        {
+          what: 'failed',
+          step: 'made',
+          line: (error as Error).message,
+        },
+        key && `${key}:allowance`,
+      );
+      await this.studio.updateEpisode(episode.id, { busy: null, error: null });
+      return;
+    }
+    await this.studio.updateEpisode(episode.id, { busy: 'make', error: null });
+    for (const row of rows)
+      await this.studio.updateScene(row.id, {
+        status: 'making',
+        step: null,
+        error: null,
+      });
+    await this.log(
+      now,
+      episode,
+      {
+        what: 'make',
+        step: 'made',
+        line: EVENT_LINES.make(rows.length, seconds),
+      },
+      key && `${key}:make`,
+    );
+    await this.queue.enqueueStudio([
+      {
+        kind: 'prepare',
+        showId: show.id,
+        episodeId: episode.id,
+        userId: episode.userId,
+        sceneIds: rows.map((r) => r.id),
+      },
+    ]);
+  }
+
   /** The script said written in the thread, and the episode free. */
   private async scriptWritten(
     show: StudioShowRecord,
@@ -2720,8 +2846,15 @@ export class StudioProcessor {
       const look = clips ? clipLook(showTheme(show.brief, bible)) : null;
       await this.scenes.prepareStory(
         {
+          // An editor's illustrated scenes: the world's places built from
+          // their layouts (studio-editor-world), the rest as a clip's.
           bible: clips
-            ? withPresets(storyBibleFor(bible, sheets, show.title))
+            ? show.editor?.world
+              ? withWorldPlaces(
+                  storyBibleFor(bible, sheets, show.title),
+                  show.editor.world,
+                )
+              : withPresets(storyBibleFor(bible, sheets, show.title))
             : storyBibleFor(bible, sheets, show.title),
           page: 1,
           castKey: studioCastKey(show.id),
@@ -3070,7 +3203,12 @@ export class StudioProcessor {
         who,
       );
     // A clip's still is its last frame: the card the next lesson opens on.
-    if (row.sheet.kind === 'story' && show.brief.format === 'explainer')
+    // An editor's illustrated scene is no clip: no card follows it.
+    if (
+      row.sheet.kind === 'story' &&
+      show.brief.format === 'explainer' &&
+      !isIllustrated(episode.outline?.scenes[row.position])
+    )
       await this.clipStill(scene, thumbKey, who);
     // The files it was made from before are no one's now.
     for (const key of [
@@ -3735,6 +3873,18 @@ export class StudioProcessor {
         `made:${rows.flatMap((r) => (r.sceneKey ? [r.sceneKey] : [])).join(',')}`,
       );
     await this.studio.updateEpisode(episodeId, { busy: null, ...settled });
+    // An editor's episode made: the plan's next episodes offered.
+    if (made.length && !asked && show.editor && episode.editorial)
+      await this.editor.afterMade(
+        (await this.studio.findShow(show.id)) ?? show,
+        episode,
+        createHash('sha1')
+          .update(
+            rows.flatMap((r) => (r.sceneKey ? [r.sceneKey] : [])).join(','),
+          )
+          .digest('hex')
+          .slice(0, 16),
+      );
   }
 
   /** Something that happened, recorded in the thread, once for its key: never in the way of the work. */

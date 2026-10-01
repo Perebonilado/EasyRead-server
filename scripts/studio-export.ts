@@ -4,6 +4,9 @@
  *
  *   npm run studio:export -- --worker       consume the studio-export queue, one video at a time
  *   npm run studio:export -- <exportId>     make one video now, in this process
+ *   npm run studio:export -- --episode <id> --user <id> [--shape tall] [--show] [--no-captions]
+ *                                           ask for a video as the maker's Download does,
+ *                                           and make it now, in this process
  *
  * The whole worker sweeps the database as it boots (purges, lost pages
  * queued again, short pages written again); this runs nothing but the
@@ -23,6 +26,7 @@ import { Worker } from 'bullmq';
 import Redis from 'ioredis';
 import { CoreModule } from '../src/core.module';
 import { StudioExportProcessor } from '../src/pipeline/processors/studio-export.processor';
+import { StudioExportService } from '../src/business/handlers/studio/studio-export.service';
 import {
   QUEUE,
   QUEUE_SETTINGS,
@@ -31,7 +35,7 @@ import {
 
 @Module({
   imports: [ConfigModule.forRoot({ isGlobal: true }), CoreModule],
-  providers: [StudioExportProcessor],
+  providers: [StudioExportProcessor, StudioExportService],
 })
 class ExportModule {}
 
@@ -42,6 +46,39 @@ async function main(): Promise<void> {
   });
   app.enableShutdownHooks();
   const processor = app.get(StudioExportProcessor);
+  const flag = (name: string) => {
+    const at = process.argv.indexOf(name);
+    return at >= 0 ? (process.argv[at + 1] ?? null) : null;
+  };
+
+  // A video asked for as the maker's Download asks, then made here.
+  const episodeId = flag('--episode');
+  if (episodeId) {
+    const userId = flag('--user');
+    if (!userId) throw new Error('--episode needs --user, the maker');
+    const asked = await app
+      .get(StudioExportService)
+      .request(userId, episodeId, {
+        scope: process.argv.includes('--show') ? 'show' : 'episode',
+        shape: flag('--shape') === 'tall' ? 'tall' : 'wide',
+        captions: !process.argv.includes('--no-captions'),
+      });
+    logger.log(
+      `${asked.id}: ${asked.status}${asked.url ? ` ${asked.url}` : ''}`,
+    );
+    if (asked.status !== 'done')
+      await processor.process(
+        { exportId: asked.id },
+        { attemptsMade: 1, isFinalAttempt: true },
+      );
+    const done = await app.get(StudioExportService).get(userId, asked.id);
+    logger.log(
+      `${done.id}: ${done.status} ${done.bytes ?? 0} bytes ${done.url ?? ''}`,
+    );
+    await app.close();
+    return;
+  }
+
   const [asked] = process.argv.slice(2).filter((arg) => !arg.startsWith('--'));
 
   if (!process.argv.includes('--worker')) {

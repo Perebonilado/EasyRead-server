@@ -246,6 +246,66 @@ export function normaliseBaseUrlVars(
  * Only providers actually named by the configuration are constructed, so
  * running entirely on OpenAI never requires an Anthropic key to exist.
  */
+/** A language model's two calls, as a backup wraps them: their options carry the caller's abort signal. */
+export type BackedOptions = { abortSignal?: AbortSignal } & Record<
+  string,
+  unknown
+>;
+export interface BackedModel {
+  doGenerate(options: BackedOptions): PromiseLike<unknown>;
+  doStream(options: BackedOptions): PromiseLike<unknown>;
+}
+
+/**
+ * A model whose two calls fall back to another's: a call the first fails,
+ * or leaves unanswered past `after` ms, is made again on `backup`. A call
+ * the caller cancelled is never made again. Everything else about the
+ * model (its id, its provider, what it accepts) stays the first's own.
+ */
+export function backedBy(
+  first: BackedModel,
+  backup: BackedModel,
+  after: number,
+  said: (why: string) => void = () => undefined,
+): BackedModel {
+  const tryFirst = async <R>(
+    options: BackedOptions,
+    call: (o: BackedOptions) => PromiseLike<R>,
+    again: (o: BackedOptions) => PromiseLike<R>,
+  ): Promise<R> => {
+    const asked = options.abortSignal;
+    const timer = AbortSignal.timeout(after);
+    try {
+      return await call({
+        ...options,
+        abortSignal: asked ? AbortSignal.any([asked, timer]) : timer,
+      });
+    } catch (error) {
+      if (asked?.aborted) throw error;
+      said(
+        timer.aborted
+          ? `gave no answer in ${Math.round(after / 1000)}s`
+          : `failed (${error instanceof Error ? error.message.slice(0, 120) : 'error'})`,
+      );
+      return again(options);
+    }
+  };
+  const backed = Object.create(first) as BackedModel;
+  backed.doGenerate = (options) =>
+    tryFirst(
+      options,
+      (o) => first.doGenerate(o),
+      (o) => backup.doGenerate(o),
+    );
+  backed.doStream = (options) =>
+    tryFirst(
+      options,
+      (o) => first.doStream(o),
+      (o) => backup.doStream(o),
+    );
+  return backed;
+}
+
 export class ModelRegistry {
   private readonly logger = new Logger(ModelRegistry.name);
   private readonly clients = new Map<ProviderName, Providers[ProviderName]>();
@@ -286,6 +346,11 @@ export class ModelRegistry {
       useChat && provider.chat
         ? provider.chat(ref.modelId)
         : provider.languageModel(ref.modelId);
+    if (ref.provider === 'deepseek')
+      return {
+        model: await this.withBackup(model as LanguageModel, task),
+        ref,
+      };
     if (ref.provider !== 'openai')
       return { model: model as LanguageModel, ref };
 
@@ -306,6 +371,47 @@ export class ModelRegistry {
       }),
       ref,
     };
+  }
+
+  /**
+   * DeepSeek with a backup (Richard, 2026-10-01, when DeepSeek's API went
+   * down mid-film: "Use GPT mini as backup"): a call DeepSeek fails, or
+   * leaves unanswered past LLM_BACKUP_AFTER_MS (two minutes), is made
+   * again on LLM_BACKUP (GPT-5.4 mini), so an outage never stalls a film
+   * or the producer's chat. DeepSeek stays first for every call; a call
+   * the caller cancelled is never made again. LLM_BACKUP=off turns it off,
+   * and so does having no OpenAI key. The ledger still names DeepSeek for
+   * a call the backup answered (the log says so).
+   */
+  private async withBackup(
+    primary: LanguageModel,
+    task: LlmTask,
+  ): Promise<LanguageModel> {
+    const spec = this.config.get<string>('LLM_BACKUP', 'openai:gpt-5.4-mini');
+    if (!spec || spec === 'off') return primary;
+    const [backupProvider, ...rest] = spec.split(':');
+    const backupId = rest.join(':');
+    if (backupProvider !== 'openai' || !backupId || !this.keyOf('openai'))
+      return primary;
+    const after = Math.max(
+      5_000,
+      Number(this.config.get<string>('LLM_BACKUP_AFTER_MS', '120000')) ||
+        120_000,
+    );
+    const openai = await this.client('openai');
+    const { wrapLanguageModel, defaultSettingsMiddleware } =
+      await this.modules();
+    const backup = wrapLanguageModel({
+      model: openai.languageModel(backupId) as Parameters<
+        typeof wrapLanguageModel
+      >[0]['model'],
+      middleware: defaultSettingsMiddleware({
+        settings: { providerOptions: { openai: { strictJsonSchema: false } } },
+      }),
+    }) as unknown as BackedModel;
+    return backedBy(primary as unknown as BackedModel, backup, after, (why) =>
+      this.logger.warn(`${task}: DeepSeek ${why}; asking ${backupId} instead`),
+    ) as unknown as LanguageModel;
   }
 
   async embeddingModel(): Promise<{ model: EmbeddingModel; ref: ModelRef }> {

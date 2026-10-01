@@ -1,6 +1,8 @@
 import {
   EMPTY_EDITOR,
   anglesOf,
+  claimIdIn,
+  claimIds,
   editorOf,
   editorSwitchOn,
   eraNamed,
@@ -414,6 +416,30 @@ describe('a source cited without its query', () => {
         url: 'https://blogs.loc.gov/law/2013/01/tea/?loclr=bloglaw',
         title: 'Tea',
       },
+    ]);
+  });
+});
+
+describe('a claim named by its writer', () => {
+  const known = new Set(['c4', 'c45', 'leap-rule']);
+
+  it.each([
+    ['c4', 'c4'],
+    [' C4 ', 'c4'],
+    ['c4: The Gregorian calendar skips three leap days in 400 years.', 'c4'],
+    ['[c45] Earth takes about 365.2422 days', 'c45'],
+    ['claim leap-rule', 'leap-rule'],
+    ['c46', null],
+    ['The Gregorian calendar, c4', null],
+    [4, null],
+  ])('reads %p as %p', (said, id) => {
+    expect(claimIdIn(said, known)).toBe(id);
+  });
+
+  it('keeps each named claim once, and none it does not know', () => {
+    expect(claimIds(['c4: words', 'c4', 'c45', 'c9', null], known)).toEqual([
+      'c4',
+      'c45',
     ]);
   });
 });

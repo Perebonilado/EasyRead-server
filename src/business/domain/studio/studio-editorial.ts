@@ -24,6 +24,7 @@ import {
 } from '../scene-script';
 import { text } from './studio';
 import {
+  claimIdIn,
   claimIds,
   plainText,
   sourceUrl,
@@ -308,8 +309,8 @@ export function factsOf(
   return list(said.checks)
     .flatMap((one): EditorialFact[] => {
       const f = record(one);
-      const claim = text(f.claim, 16).toLowerCase();
-      if (!known.has(claim) || seen.has(claim)) return [];
+      const claim = claimIdIn(f.claim, known);
+      if (!claim || seen.has(claim)) return [];
       seen.add(claim);
       return [
         {

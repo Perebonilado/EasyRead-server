@@ -148,6 +148,18 @@ describe("an episode's editorial, made sound", () => {
       ['c1', 'soften', 1, 0],
       ['c2', 'verified', 0, 1],
     ]);
+    // A search's answer names its claims with their words after the id.
+    expect(
+      factsOf(
+        {
+          checks: [
+            { claim: 'c2: Ten days went in 1582.', verdict: 'verified' },
+          ],
+        },
+        known,
+        2,
+      ).map((f) => f.claim),
+    ).toEqual(['c2']);
   });
 
   it('reads the package: hashtags tidy, a thumbnail of four words at most', () => {

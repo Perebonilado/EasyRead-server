@@ -16,7 +16,9 @@
  * With --make, the film is then made as "Make it" makes it: its script job
  * set going on the real queue (REDIS_URL), for a worker running beside it
  * to board and make (SCENE_VOICE_FORCE=kokoro on the worker for a local
- * test), followed here until it is made.
+ * test), followed here until it is made. A film's minutes are counted to
+ * its maker, so --make needs --user (or EDITOR_USER_ID) to be a real user.
+ *   npm run editor:show -- --make-episode <episodeId>   (one written before)
  * With --boards, the episode's scenes are boarded too (no film is made);
  * --board boards an episode written before, and writes what each scene's
  * board came to (boards.md, boards.json).
@@ -39,11 +41,13 @@ import { NestFactory } from '@nestjs/core';
 import { CoreModule } from '../src/core.module';
 import type { LlmGatewayPort } from '../src/business/ports/llm.port';
 import { JOB_QUEUE, LLM_GATEWAY } from '../src/business/ports/tokens';
+import type { UserRepository } from '../src/business/repositories/user.repository';
 import type { JobQueuePort } from '../src/business/ports/job-queue.port';
 import type { StudioJobData } from '../src/pipeline/queues';
 import {
   AI_CALL_LOG_REPOSITORY,
   STUDIO_REPOSITORY,
+  USER_REPOSITORY,
 } from '../src/business/repositories/tokens';
 import type {
   StudioEpisodeRecord,
@@ -762,7 +766,18 @@ async function main() {
       await boardEpisode(deps, boardOnly, out);
       return;
     }
+    // A film is made for someone: its minutes are counted to its maker,
+    // so a show to make is a real user's (--user or EDITOR_USER_ID).
     const makeOnly = option('--make-episode');
+    if (flag('--make') || makeOnly) {
+      const owner = makeOnly
+        ? ((await deps.studio.findEpisode(makeOnly))?.userId ?? '')
+        : userId;
+      if (!(await app.get<UserRepository>(USER_REPOSITORY).findById(owner)))
+        throw new Error(
+          `A film is made for a user and counted to them: "${owner}" is no user here. Make the show with --user <a local user's id> (or EDITOR_USER_ID).`,
+        );
+    }
     if (makeOnly) {
       await makeFilm(
         { studio: deps.studio, queue: app.get<JobQueuePort>(JOB_QUEUE) },

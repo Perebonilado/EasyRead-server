@@ -307,11 +307,28 @@ export const distinctSources = (sources: readonly EditorSource[]) =>
 export function claimIds(raw: unknown, known: ReadonlySet<string>): string[] {
   return [
     ...new Set(
-      list(raw)
-        .map((id) => text(id, 16).toLowerCase())
-        .filter((id) => known.has(id)),
+      list(raw).flatMap((id) => {
+        const one = claimIdIn(id, known);
+        return one ? [one] : [];
+      }),
     ),
   ];
+}
+
+/**
+ * The claim a writer named, as the log has it: its id alone ("c4"), or
+ * its id before its words ("c4: The Gregorian calendar…", "[c4]",
+ * "claim c4"), as a search's answer often gives it; none it knows, none.
+ */
+export function claimIdIn(
+  raw: unknown,
+  known: ReadonlySet<string>,
+): string | null {
+  if (typeof raw !== 'string') return null;
+  const said = raw.trim().toLowerCase();
+  if (known.has(said)) return said;
+  const lead = /^[\s[(#]*(?:claim\s+)?([a-z0-9-]+)/u.exec(said)?.[1];
+  return lead && known.has(lead) ? lead : null;
 }
 
 /**

@@ -746,6 +746,9 @@ async function makeFilm(
   }
 }
 
+/** What the CLI will not do as asked, said as a sentence, not a stack. */
+class RefusedError extends Error {}
+
 async function main() {
   const out = resolve(option('--out') ?? 'editor-show');
   const bench = flag('--bench');
@@ -769,16 +772,20 @@ async function main() {
       await boardEpisode(deps, boardOnly, out);
       return;
     }
-    // A film is made for someone: its minutes are counted to its maker,
-    // so a show to make is a real user's (--user or EDITOR_USER_ID).
+    // A film is made for someone: its seconds are counted to the show's
+    // owner, so a show to make is a real user's (--user or EDITOR_USER_ID),
+    // checked before anything is spent.
     const makeOnly = option('--make-episode');
     if (flag('--make') || makeOnly) {
       const owner = makeOnly
-        ? ((await deps.studio.findEpisode(makeOnly))?.userId ?? '')
+        ? (await deps.studio.findEpisode(makeOnly))?.userId
         : userId;
+      if (!owner) throw new RefusedError(`No episode ${makeOnly} here.`);
       if (!(await app.get<UserRepository>(USER_REPOSITORY).findById(owner)))
-        throw new Error(
-          `A film is made for a user and counted to them: "${owner}" is no user here. Make the show with --user <a local user's id> (or EDITOR_USER_ID).`,
+        throw new RefusedError(
+          makeOnly
+            ? `Episode ${makeOnly} belongs to "${owner}", who is not a user in this database, and a made film's seconds are counted to its owner. Make the show again with --user <a local user's id> (or EDITOR_USER_ID=<id>) and --make.`
+            : `--make needs a real user: a made film's seconds are counted to the show's owner, and "${owner}" is not a user in this database. Run again with --user <a local user's id> (or EDITOR_USER_ID=<id>).`,
         );
     }
     if (makeOnly) {
@@ -790,7 +797,8 @@ async function main() {
     }
     if (!bench) {
       const topic = option('--topic');
-      if (!topic) throw new Error('Say what the show is about: --topic "…"');
+      if (!topic)
+        throw new RefusedError('Say what the show is about: --topic "…"');
       const made = await makeShow(deps, {
         topic,
         audience: (option('--audience') as StudioAudience) ?? 'adults',
@@ -862,6 +870,7 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error(error);
+  // A refusal is said plainly; anything else with its stack.
+  console.error(error instanceof RefusedError ? error.message : error);
   process.exit(1);
 });

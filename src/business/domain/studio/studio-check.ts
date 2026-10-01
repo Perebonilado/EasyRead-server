@@ -69,8 +69,9 @@ import {
   type OwnWord,
 } from '../scene-own';
 import {
-  STILL_WORDS,
   fewStageChanges,
+  stageWordsFor,
+  stillWordsFor,
   genderOf,
   mendScript,
   quietStretches,
@@ -3501,10 +3502,18 @@ export function checkExplainer(
       beat: null,
       level: 'error' as const,
     })),
+    // An editor's episode is held to the playbook's pace (three to five
+    // seconds), a lesson to its own.
     ...[
-      ...quietStretches(mended.script, STILL_WORDS),
+      ...quietStretches(
+        mended.script,
+        stillWordsFor(mended.script, options.stage),
+      ),
       ...wordsAloneStretches(mended.script),
-      ...fewStageChanges(mended.script),
+      ...fewStageChanges(
+        mended.script,
+        stageWordsFor(mended.script, options.stage),
+      ),
     ].map((message) => ({
       rule: 'storyboard' as const,
       message,
@@ -3687,7 +3696,7 @@ export function repairExplainer(
   const refused = new Set(
     errorsIn(checkExplainer(sheet, options).problems).flatMap((p) => {
       const named =
-        /^The (?:chart|timeline|graph|quotation|map|flow|equation) "([^"]+)"/.exec(
+        /^The (?:chart|timeline|graph|quotation|map|flow|equation|counter|icons|seats) "([^"]+)"/.exec(
           p.message,
         );
       return named ? [named[1]] : [];
@@ -3719,6 +3728,9 @@ export function repairExplainer(
               equation: null,
               flow: null,
               molecule: null,
+              counter: null,
+              icons: null,
+              seats: null,
             }
           : thing,
       ),

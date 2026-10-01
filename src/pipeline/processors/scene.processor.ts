@@ -309,7 +309,12 @@ const MATERIAL_CHARS = 14_000;
 const PROFILE_SAMPLE_CHARS = 6_000;
 /** A page with fewer words than this has too little to teach. */
 const THIN_PAGE_WORDS = 40;
-/** What code draws again for a tall film's frame: charts, graphs, maps, flags, flows and molecules. */
+/**
+ * What code draws again for a tall film's frame: charts, graphs, maps,
+ * flags, flows and molecules, and every infographic kind (each laid out
+ * for its frame: a calendar's pages two to a row, a split screen's sides
+ * one over the other).
+ */
 const DRAWN_FOR_SHAPE: ReadonlySet<string> = new Set([
   'chart',
   'plot',
@@ -317,6 +322,15 @@ const DRAWN_FOR_SHAPE: ReadonlySet<string> = new Set([
   'flag',
   'flow',
   'molecule',
+  'counter',
+  'icons',
+  'namecard',
+  'calendar',
+  'seats',
+  'strike',
+  'transfer',
+  'document',
+  'split',
 ]);
 /** A story page's own text with fewer words than this is too little to write from: its note is used. */
 const STORY_OWN_WORDS = 20;

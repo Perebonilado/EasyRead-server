@@ -14,6 +14,8 @@ import {
 import { landmarkBrief } from '../../business/domain/scene-set-landmarks';
 import { MAX_REVERSE } from '../../business/domain/scene-set-reverse';
 import { STYLE_PACK_IDS } from '../../business/domain/scene-style-packs';
+import { ICON_NAMES } from '../../business/domain/scene-icon-set';
+import { PALETTE_TOKENS } from '../../business/domain/scene-palette';
 
 /**
  * Prompts, kept in one file and versioned with the code.
@@ -213,6 +215,128 @@ export const MAP_GROUPS_GUIDE = [
   'what the voice is about: two or three named things at once, each',
   'pointed at as it is named. The voice names a region by its name, never',
   'by where it sits on the picture.',
+].join(' ');
+
+/**
+ * The infographic kinds as the cast list names them (infographic-editor-
+ * plan §3, stage 6): what each draws, and its fields. Code lays each out,
+ * times its motion and colours it; the writer only names what it shows.
+ * In the old writer's cast list (sceneWrite) and in the editor's guide.
+ */
+export const INFOGRAPHIC_KINDS_CAST = [
+  'Nine more kinds draw an idea as an infographic does, all by code from',
+  'what you name, never by the artist. Each is a picture of the one idea a',
+  'sentence carries; at most eight words on it.',
+  '"counter" is one number that rolls up to its value as it arrives:',
+  'counter.value is the number as it reads (45 for "45 million"),',
+  'counter.unit what it is in ("million", "%", "km", "people") or null,',
+  'counter.prefix a currency or a word before it ("$", "£", "about",',
+  '"over") or null, counter.label what it counts in at most six words, or',
+  'null, and counter.then a later value it rolls on to, shown with a show',
+  'effect on "id.then" as the voice reaches it, or null. Point at',
+  '"id.number" or "id.label".',
+  '"icons" is a unit chart: a count as that many icons, multiplying into a',
+  `grid as it arrives. icons.icon is one of ${ICON_NAMES.map((n) => `"${n}"`).join(', ')};`,
+  'icons.count the real number; icons.per how many one icon stands for, or',
+  'null for code to choose; icons.unit what is counted ("soldiers") or',
+  'null; icons.label its caption or null; icons.highlight a part of the',
+  'count picked out later, shown with "id.highlight" as the voice says it,',
+  'with icons.highlightLabel (at most four words), or both null. Point at',
+  '"id.icons".',
+  '"namecard" is who someone is while the voice tells their part:',
+  'namecard.name, namecard.role (at most eight words) and namecard.line',
+  '(at most ten words: what they stand for in the story), each or null;',
+  "their initials stand in the portrait, their colour is the show's for",
+  'them. Point at "id.name", "id.role", "id.line" or "id.portrait".',
+  '"calendar" is when, as tear-off calendars: calendar.calendars one to',
+  'three, each a label of at most four words or null, and dates one to',
+  'four in order as you would write them ("1 October 1960", "May 1953",',
+  '"1957", "Day 44"); a later date flips on with a show effect on',
+  '"id.<the date as written>"; calendar.merge is the one date several',
+  'calendars slide together into, shown with "id.merge", or null.',
+  '"seats" is a vote or an assembly: a chamber\'s seats in their groups\'',
+  'colours, filling seat by seat. seats.layout "hemicycle" (a parliament\'s',
+  'half circle) or "chamber" (two benches facing); seats.groups in order,',
+  'each name, seats (a number) and colour or null; seats.majority true to',
+  'draw the majority line; seats.label the chamber and its year. Point at',
+  '"id.<group name>" or "id.majority".',
+  '"strike" is a decision or a promise changed: strike.from the words that',
+  'stood, strike.to the words that replace them (each at most five',
+  'words), strike.label at most four words over them or null. Show',
+  '"id.replaced" on the words that change it.',
+  '"transfer" is why, as things moving from one to another: money, papers,',
+  'people. transfer.from and transfer.to the two ends (at most four words',
+  'each), transfer.token the icon that moves ("coin" for money, "paper"',
+  'for letters or petitions, "person" for people, "dot" for anything',
+  'else), transfer.label a word or two on its path or null, and',
+  'transfer.shut true when the flow stops in the scene, shown with',
+  '"id.shut" on the words that stop it. Point at "id.<from>", "id.<to>" or',
+  '"id.tokens".',
+  '"document" is an official paper or a newspaper: document.style "paper"',
+  'or "newspaper", document.title its title or the paper\'s name,',
+  "document.headline one headline in type or null (never an article's",
+  'text: its lines are drawn as grey bars), document.stamp at most three',
+  'words stamped on it ("NOT RECOMMENDED", "APPROVED"), shown with',
+  '"id.stamp" on the words, or null.',
+  '"split" is a comparison: the screen split between two sides.',
+  'split.sides exactly two, each a label of at most four words, items one',
+  'to four of at most four words each, and icon one of the icons or null;',
+  'split.change a later list for one side, shown with "id.change": side 1',
+  'or 2, label or null, items. Point at "id.<side label>" or "id.<item>".',
+  'On a counter, icons, seats, a chart, a graph or a timeline, source is',
+  'where its numbers come from ("UN World Population Prospects, 2024"),',
+  'written small under it, or null when the page itself gives them.',
+  `colour is the thing's colour when the show gives it one: one of ${PALETTE_TOKENS.map((t) => `"${t}"`).join(', ')}, never a hex; else null.`,
+  'Fields of these kinds are null on every other kind.',
+].join(' ');
+
+/**
+ * How an editor picks the picture for each line (the playbook's decision
+ * rule), with the infographic kinds and one example of each: for the
+ * editor's storyboard and any writer that plans an infographic film.
+ */
+export const INFOGRAPHIC_KINDS_GUIDE = [
+  "Choose each line's picture by what the line is about. A place: the",
+  'map. When: a calendar for a date or two, a timeline for several. How',
+  'many: a counter for one number, icons for a count a viewer can picture',
+  '(soldiers, schools, ships), a chart for three or more numbers',
+  'compared. Who: a namecard. Why, cause and effect: a flow of steps, or',
+  'a transfer when something moves from one to another. A comparison: a',
+  'split. A feeling, an atmosphere, an event with people in it: a scene',
+  'with people (or a drawing). Exact words: a quote. A decision or a',
+  'promise changed: a strike. An official paper, a report, a newspaper: a',
+  'document. A vote, an assembly, a parliament: seats.',
+  'Numbers go on the screen; what they mean goes in the voice: never say',
+  'what the picture shows ("this chart shows"), say what it means. Each',
+  'picture shows one idea, at most eight words on it, and changes as the',
+  "voice moves on: a later look (a calendar's next date, a strike, a",
+  "stamp, a counter's later number, a highlight) is shown on the words",
+  'that bring it. A thing the show gives a colour keeps it: name it as the',
+  'show names it.',
+  INFOGRAPHIC_KINDS_CAST,
+  'One example of each, its fields only:',
+  'counter: {"value": 8, "unit": "billion", "prefix": "about", "label":',
+  '"people alive today", "then": null}, source "UN World Population',
+  'Prospects, 2024".',
+  'icons (a share shown with its whole): {"icon": "child", "count": 4,',
+  '"per": 1, "unit": "children", "label": "Of every 4 children",',
+  '"highlight": 1, "highlightLabel": "1 never finishes school"}.',
+  'namecard: {"name": "Marie Curie", "role": "Physicist and chemist",',
+  '"line": "First person to win two Nobel Prizes"}.',
+  'calendar: {"calendars": [{"label": "Launch", "dates": ["16 July',
+  '1969"]}, {"label": "On the Moon", "dates": ["20 July 1969"]}],',
+  '"merge": null}.',
+  'seats: {"layout": "hemicycle", "groups": [{"name": "Party A", "seats":',
+  '174, "colour": null}, {"name": "Party B", "seats": 138, "colour":',
+  'null}], "majority": true, "label": "The assembly, 1959"}.',
+  'strike: {"from": "IF", "to": "HOW", "label": "The question"}.',
+  'transfer: {"from": "Every town", "to": "The capital", "token": "coin",',
+  '"label": "taxes", "shut": false}.',
+  'document: {"style": "paper", "title": "Report of the Commission",',
+  '"headline": "New states?", "stamp": "NOT RECOMMENDED"}.',
+  'split: {"sides": [{"label": "Before", "items": ["Paper forms", "Long',
+  'queues"], "icon": "paper"}, {"label": "After", "items": ["Online in',
+  'minutes"], "icon": "computer"}], "change": null}.',
 ].join(' ');
 
 export const PROMPTS = {
@@ -1604,6 +1728,7 @@ export const PROMPTS = {
       'bond". A real flag is always a flag, an equation an equation (or',
       "math, to work a sum), a molecule's structure a molecule, and steps",
       'with names a flow: never a drawing.',
+      INFOGRAPHIC_KINDS_CAST,
       'Fields a kind does not use are null.',
     ].join(' '),
     [

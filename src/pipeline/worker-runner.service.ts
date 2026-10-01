@@ -158,7 +158,11 @@ export class WorkerRunner implements OnModuleInit, OnModuleDestroy {
         this.lectureChapter.onDropped(data, reason),
     };
 
+    // A worker without Chrome and ffmpeg (STUDIO_EXPORT=off) leaves the films'
+    // videos to a service that has them (scripts/studio-export.ts --worker).
+    const exportsOff = this.config.get<string>('STUDIO_EXPORT') === 'off';
     for (const name of Object.values(QUEUE)) {
+      if (exportsOff && name === QUEUE.studioExport) continue;
       this.workers.push(this.startWorker(name, handlers[name], dropped[name]));
     }
 

@@ -416,6 +416,8 @@ export interface StudioEditorial {
   beats: EditorialBeats | null;
   hooks: EditorialHook[];
   hook: string | null;
+  /** The claims the hook rests on, by id: each one the research is sure of. Absent on one kept before. */
+  hookClaims?: string[];
   rows: EditorialRow[];
   /** The editor's read: its notes on the first draft. */
   notes: string[];
@@ -458,6 +460,7 @@ export function editorialOf(raw: unknown): StudioEditorial | null {
   for (const h of list(said.hooks))
     for (const id of list(record(h).claims))
       known.add(text(id, 16).toLowerCase());
+  for (const id of list(said.hookClaims)) known.add(text(id, 16).toLowerCase());
   for (const f of list(said.facts))
     known.add(text(record(f).claim, 16).toLowerCase());
   const beats = said.beats ? beatsOf(said.beats) : null;
@@ -484,6 +487,9 @@ export function editorialOf(raw: unknown): StudioEditorial | null {
     beats,
     hooks: hooks.hooks,
     hook: plainText(said.hook, 600) || null,
+    ...(Array.isArray(said.hookClaims)
+      ? { hookClaims: claimIds(said.hookClaims, known) }
+      : {}),
     rows,
     notes: list(said.notes)
       .map((n) => plainText(n, 400))

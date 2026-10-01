@@ -15,9 +15,11 @@ import {
   promiseReturns,
   scriptProblems,
   softened,
+  soundPackage,
   soundPlan,
   splitLongActs,
   splitSentence,
+  withPalette,
   withoutScreenTalk,
 } from './studio-editor-checks';
 
@@ -506,5 +508,51 @@ describe("the fact check's verdicts", () => {
       c4: 'cut',
     });
     expect(done.research.claims[1].sources).toHaveLength(2);
+  });
+});
+
+describe('the package and the palette, put right by code', () => {
+  const pack = {
+    title: 'Ten Days Gone',
+    titles: [
+      { text: 'Ten Days Gone', verdict: 'best' },
+      { text: 'The Calendar Glitch Nobody Noticed', verdict: 'good' },
+    ],
+    thumbnail: { words: 'TEN DAYS GONE', row: 3 },
+    description: 'Why leap years exist.',
+    leftOut: '',
+  };
+
+  it('keeps the title and the thumbnail saying different things', () => {
+    expect(soundPackage(pack, []).title).toBe(
+      'The Calendar Glitch Nobody Noticed',
+    );
+  });
+
+  it('always says what was left out, in the description too', () => {
+    const sound = soundPackage(pack, ['The French calendar']);
+    expect(sound.leftOut).toBe('What we left out: The French calendar.');
+    expect(sound.description).toBe(
+      'Why leap years exist.\n\nWhat we left out: The French calendar.',
+    );
+  });
+
+  it("gives a board's things their palette colour, by name", () => {
+    const cast = withPalette(
+      [
+        { id: 'north', name: 'The North' },
+        { id: 'chart', name: 'Seats won' },
+        { id: 'given', name: 'The South', colour: 'chart5' },
+      ],
+      [
+        { thing: 'the North', token: 'chart0' },
+        { thing: 'the South', token: 'chart1' },
+      ],
+    );
+    expect(cast.map((c) => (c as { colour?: string }).colour)).toEqual([
+      'chart0',
+      undefined,
+      'chart5',
+    ]);
   });
 });

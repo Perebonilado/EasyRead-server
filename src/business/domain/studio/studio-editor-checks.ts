@@ -973,3 +973,78 @@ export const rowSeconds = (
 /** The words a row puts on the screen: what its picture quotes. */
 export const screenWords = (show: string) =>
   [...show.matchAll(/["“]([^"”]+)["”]/gu)].reduce((n, m) => n + count(m[1]), 0);
+
+// ── The package ───────────────────────────────────────────────────────────
+
+/**
+ * The package put right by code, silently: the title and the thumbnail
+ * say different things (where the thumbnail's words are all the title's,
+ * the next title drafted takes its place), and what the show leaves out
+ * is always said, in its own paragraph and at the end of the description.
+ */
+export function soundPackage<
+  P extends {
+    title: string;
+    titles: { text: string; verdict: string }[];
+    thumbnail: { words: string; row: number | null };
+    description: string;
+    leftOut: string;
+  },
+>(pack: P, leftOut: readonly string[]): P {
+  const out = { ...pack };
+  const words = (said: string) =>
+    said
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+      .split(/\s+/u)
+      .filter(Boolean);
+  const same = (title: string) => {
+    const thumb = words(out.thumbnail.words);
+    const named = new Set(words(title));
+    return thumb.length > 0 && thumb.every((w) => named.has(w));
+  };
+  if (same(out.title)) {
+    const other = out.titles.find((t) => t.text !== out.title && !same(t.text));
+    if (other) out.title = other.text;
+  }
+  const missing = leftOut.length
+    ? `What we left out: ${leftOut.join('; ')}.`
+    : '';
+  if (!out.leftOut && missing) out.leftOut = missing;
+  if (out.leftOut && !/what we left out/iu.test(out.description))
+    out.description = [out.description, out.leftOut]
+      .filter(Boolean)
+      .join('\n\n')
+      .slice(0, 3000);
+  return out;
+}
+
+/**
+ * A lesson board's things in the show's colours: each whose name is one
+ * the palette colours, given its token (a theme token's name), unless the
+ * board gave one. Read by the code-drawn kinds that take a colour; the
+ * rest leave it be.
+ */
+export function withPalette<T extends { name?: string | null; id?: string }>(
+  cast: readonly T[],
+  palette: readonly { thing: string; token: string }[],
+): T[] {
+  if (!palette.length) return [...cast];
+  const key = (said: string) =>
+    said
+      .toLowerCase()
+      .replace(/^(?:the|a|an)\s+/u, '')
+      .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+      .replace(/\s+/gu, ' ')
+      .trim();
+  return cast.map((thing) => {
+    if ((thing as { colour?: unknown }).colour) return thing;
+    const name = key(thing.name ?? thing.id ?? '');
+    if (!name) return thing;
+    const found = palette.find((p) => {
+      const of = key(p.thing);
+      return of && (name === of || name.includes(of) || of.includes(name));
+    });
+    return found ? { ...thing, colour: found.token } : thing;
+  });
+}

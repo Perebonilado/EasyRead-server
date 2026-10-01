@@ -24,6 +24,8 @@ import {
   narratedSheet,
   onTheLines,
 } from './studio-editor.processor';
+import { StudioProcessor } from './studio.processor';
+import type { SceneProcessor } from './scene.processor';
 import { rowsOf } from '../../business/domain/studio/studio-editorial';
 import { storySheetOf } from '../../business/domain/studio/studio';
 import { planOf, researchOf } from '../../business/domain/studio/studio-editor';
@@ -207,6 +209,8 @@ function desk(editor: StudioEditor | null = EMPTY_EDITOR) {
       .map((m) => ({ what: m.meta!.event!.what, line: m.content }));
   return {
     processor,
+    repo,
+    llm,
     shows,
     episodes,
     scenes,
@@ -637,5 +641,74 @@ describe('what the editor’s boards are held to', () => {
     expect(joined.episodes[1].plants[0].paidIn).toBe(2);
     expect(joined.spine).toEqual(['b']);
     expect(joined.leftOut).toEqual(['old cut', 'new cut']);
+  });
+});
+
+describe('the Studio processor hands the editor its work', () => {
+  const studioProcessor = (d: Awaited<ReturnType<typeof planned>>) =>
+    new StudioProcessor(
+      d.repo as StudioRepository,
+      d.llm,
+      { record: () => Promise.resolve() },
+      { delete: () => Promise.resolve() } as never,
+      {} as SceneProcessor,
+      {
+        forUser: () =>
+          Promise.resolve({ assertStudioAvailable: () => undefined }),
+      } as never,
+      {} as never,
+      {
+        enqueueStudio: (jobs: StudioJobData[]) => {
+          d.queued.push(...jobs);
+          return Promise.resolve();
+        },
+      } as never,
+    );
+  const last = { attemptsMade: 1, isFinalAttempt: true, jobId: 'j1' };
+
+  it('boards an editor\'s script and, made with "Make it", makes the film after', async () => {
+    const d = await planned();
+    d.episodes.set('e1', { ...d.ep(), phase: 'script', busy: 'script' });
+    await studioProcessor(d).process(
+      {
+        kind: 'script',
+        make: true,
+        showId: 's1',
+        episodeId: 'e1',
+        userId: 'u1',
+      },
+      last,
+    );
+    const rows = [...d.scenes.values()];
+    expect(rows.length).toBe(d.ep().outline!.scenes.length);
+    expect(rows.every((r) => r.status === 'making')).toBe(true);
+    expect(d.ep().busy).toBe('make');
+    expect(d.queued).toEqual([
+      expect.objectContaining({
+        kind: 'prepare',
+        sceneIds: rows.map((r) => r.id),
+      }),
+    ]);
+    expect(
+      d
+        .events()
+        .map((e) => e.what)
+        .slice(-2),
+    ).toEqual(['scenes', 'make']);
+  });
+
+  it("says an editor's job given up on, and frees the episode", async () => {
+    const d = await planned();
+    d.failing.add('beats');
+    d.episodes.set('e1', { ...d.ep(), editorial: null, busy: 'edit' });
+    await studioProcessor(d).process(
+      { kind: 'edit', showId: 's1', episodeId: 'e1', userId: 'u1' },
+      last,
+    );
+    expect(d.events().at(-1)).toEqual({
+      what: 'failed',
+      line: 'The script could not be written. Try again in a moment.',
+    });
+    expect(d.ep()).toMatchObject({ busy: null });
   });
 });

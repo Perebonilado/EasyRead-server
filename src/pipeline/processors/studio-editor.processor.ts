@@ -75,8 +75,10 @@ import {
   planProblems,
   promiseReturns,
   scriptProblems,
+  soundPackage,
   soundPlan,
   splitLongActs,
+  withPalette,
   type EditorPace,
 } from '../../business/domain/studio/studio-editor-checks';
 import { editorOutline } from '../../business/domain/studio/studio-editor-cut';
@@ -771,6 +773,7 @@ export class StudioEditorProcessor {
       await keep({
         hooks: hooks.hooks,
         hook: mendHook(hooks.hook),
+        hookClaims: hooks.claims,
         stage: 'hooks',
       });
     }
@@ -925,7 +928,10 @@ export class StudioEditorProcessor {
         await this.record(episode.id, answer.usage, 'explainer_edit');
         editorial = {
           ...editorial,
-          package: packageOf(answer.value, rows.length),
+          package: soundPackage(
+            packageOf(answer.value, rows.length),
+            plan.leftOut,
+          ),
         };
       } catch (error) {
         // A film is never held up for its description.
@@ -1080,13 +1086,19 @@ export class StudioEditorProcessor {
     };
     const first = await this.llm.editorBoard({ kind: 'lesson', parts });
     await this.record(episode.id, first.usage, 'explainer_board');
-    const sheetOf = (draft: unknown) =>
-      explainerSheetOf({
+    // On its written lines, its things in the show's colours.
+    const sheetOf = (draft: unknown) => {
+      const lined = onTheLines(draft, lines);
+      return explainerSheetOf({
         kind: 'explainer',
         title: scene.title,
         transition: 'cut',
-        draft: onTheLines(draft, lines),
+        draft: {
+          ...lined,
+          cast: withPalette(lined.cast, world?.palette ?? []),
+        },
       });
+    };
     let sheet = sheetOf(first.value);
     let problems: SheetProblem[] = checkExplainer(sheet, options).problems;
     if (errorsIn(problems).length) {

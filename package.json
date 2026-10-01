@@ -53,6 +53,7 @@
     "set:bench": "ts-node --transpile-only -r tsconfig-paths/register scripts/set-bench.ts",
     "vehicle:bench": "ts-node --transpile-only -r tsconfig-paths/register scripts/vehicle-bench.ts",
     "story:bench": "ts-node --transpile-only -r tsconfig-paths/register scripts/story-bench.ts",
+    "editor:show": "ts-node --transpile-only -r tsconfig-paths/register scripts/editor-show.ts",
     "voice:calibrate": "ts-node --transpile-only -r tsconfig-paths/register scripts/voice-calibrate.ts",
     "pace:bench": "ts-node --transpile-only -r tsconfig-paths/register scripts/pace-bench.ts",
     "theme:bench": "ts-node --transpile-only -r tsconfig-paths/register scripts/theme-bench.ts"

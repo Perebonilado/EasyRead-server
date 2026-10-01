@@ -476,6 +476,66 @@ describe("the editor's desk on the worker", () => {
   });
 });
 
+describe('an episode of three to five minutes', () => {
+  it('sends a plan whose first episode is short back once, then fills it from the research', async () => {
+    // A deep research: twenty-four sure claims of about fifteen words.
+    const research = researchOf({
+      claims: Array.from({ length: 24 }, (_, k) => ({
+        id: `c${k + 1}`,
+        text: `Fact ${k + 1} of the calendar story is a sentence of about fifteen words in all, sourced.`,
+        kind: 'claim',
+        confidence: 'high',
+        sources: [`https://a.example.com/${k + 1}`],
+      })),
+    });
+    const d = desk({
+      ...EMPTY_EDITOR,
+      stage: 'research',
+      question: 'Why do we have leap years?',
+      research,
+    });
+    // The writer plans one episode of two items, twice: under a minute and a half.
+    const short = {
+      spine: ['1', '2', '3', '4', '5', '6'],
+      chain: [{ beat: 'The year is not whole', link: null }],
+      items: [1, 2].map((n) => ({
+        item: `Item ${n}`,
+        claims: [`c${n}`],
+        moves: true,
+        visual: true,
+        decision: 'keep',
+        episode: 1,
+        seconds: 30,
+      })),
+      episodes: [{ title: 'The gap', question: 'Why?', covers: [0, 1] }],
+    };
+    const told: string[][] = [];
+    (d.llm as { editorWrite: unknown }).editorWrite = (input: {
+      step: string;
+      problems?: string[];
+    }) => {
+      d.asked.push(input.step);
+      told.push(input.problems ?? []);
+      return Promise.resolve({
+        value: short,
+        usage: { model: 'fake', tokensIn: 1, tokensOut: 1, latencyMs: 1 },
+      });
+    };
+    await d.processor.run({ kind: 'plan' }, d.show(), d.ep());
+    expect(d.asked).toEqual(['plan', 'plan']);
+    expect(told[1].join('\n')).toMatch(
+      /Episode 1 runs about \d{2} seconds of material; an episode runs three to five minutes, about four/,
+    );
+    // Still short as written, so code fills it from the research's unused claims.
+    const plan = d.show().editor!.plan!;
+    expect(plan.episodes).toHaveLength(1);
+    expect(plan.episodes[0].minutes).toBeGreaterThanOrEqual(3);
+    expect(plan.episodes[0].short).toBeUndefined();
+    expect(plan.items.slice(2).map((i) => i.claims[0])).toContain('c3');
+    expect(d.queued.map((j) => j.kind)).toEqual(['world']);
+  });
+});
+
 describe('what the editor’s boards are held to', () => {
   const lines = rowsOf(
     [

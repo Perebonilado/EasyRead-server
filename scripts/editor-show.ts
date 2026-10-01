@@ -12,6 +12,7 @@
  *     [--tone calm] [--user <uuid>] [--searches <n>] [--boards]
  *   npm run editor:show -- --bench --out <dir> [--only <id>] [--searches <n>] [--lanes <n>]
  *   npm run editor:show -- --board <episodeId> --out <dir>
+ *   npm run editor:show -- --edit <episodeId> --out <dir>   (its script written again)
  *
  * With --make, the film is then made as "Make it" makes it: its script job
  * set going on the real queue (REDIS_URL), for a worker running beside it
@@ -71,6 +72,7 @@ import {
 } from '../src/business/domain/studio/studio-editor';
 import type { StudioEditorial } from '../src/business/domain/studio/studio-editorial';
 import {
+  directionIn,
   hookProblems,
   isFactual,
   promiseReturns,
@@ -177,6 +179,115 @@ interface Made {
   seconds: number;
 }
 
+/** The editor's desk in-process: each call kept for the ledger and the bill, each job it sets going kept to run next. */
+function deskFor(
+  deps: {
+    studio: StudioRepository;
+    llm: LlmGatewayPort;
+    ledger: AiCallLogRepository;
+  },
+  spent: AiCallLogInput[],
+  queued: StudioJobData[],
+  say: (line: string) => void,
+): StudioEditorProcessor {
+  return new StudioEditorProcessor({
+    studio: deps.studio,
+    llm: deps.llm,
+    calls: {
+      record: async (call) => {
+        spent.push(call);
+        await deps.ledger.record(call);
+      },
+    },
+    queue: {
+      enqueueStudio: (jobs) => {
+        queued.push(...(jobs as StudioJobData[]));
+        return Promise.resolve();
+      },
+    },
+    setting: (name) => process.env[name],
+    material: null,
+    logger: {
+      log: (line) => say(`  · ${line}`),
+      warn: (line) => say(`  ! ${line}`),
+    },
+  });
+}
+
+/** What a run spent, in dollars: each call's own cost, else its tokens priced. */
+const dollarsOf = (spent: readonly AiCallLogInput[]) =>
+  spent.reduce(
+    (n, call) =>
+      n +
+      (call.costUsd ??
+        costOf({
+          task: call.task,
+          model: call.model,
+          tokensIn: call.tokensIn,
+          tokensOut: call.tokensOut,
+          tokensCached: call.tokensCached ?? null,
+        }) ??
+        0),
+    0,
+  );
+
+/**
+ * An episode written before, written again from its beat sheet and its
+ * hook: the script, the editor's read and the one revision, code's
+ * repairs, the fact check, the cut and the package. A cheap look at what
+ * the script's steps make now, on the same show.
+ */
+async function editAgain(
+  deps: {
+    studio: StudioRepository;
+    llm: LlmGatewayPort;
+    ledger: AiCallLogRepository;
+  },
+  episodeId: string,
+  out: string,
+  say: (line: string) => void,
+): Promise<Made> {
+  const started = Date.now();
+  const spent: AiCallLogInput[] = [];
+  const editor = deskFor(deps, spent, [], say);
+  const before = await deps.studio.findEpisode(episodeId);
+  if (!before?.editorial?.beats || !before.editorial.hook)
+    throw new RefusedError(
+      `Episode ${episodeId} has no beat sheet and hook to write its script from.`,
+    );
+  await deps.studio.updateEpisode(before.id, {
+    editorial: {
+      ...before.editorial,
+      stage: 'hooks',
+      rows: [],
+      notes: [],
+      facts: null,
+      package: null,
+    },
+  });
+  const t = Date.now();
+  await editor.run(
+    { kind: 'edit' },
+    (await deps.studio.findShow(before.showId))!,
+    (await deps.studio.findEpisode(before.id))!,
+    'cli:edit-again',
+  );
+  say(`  edit done in ${Math.round((Date.now() - t) / 1000)}s`);
+  const show = (await deps.studio.findShow(before.showId))!;
+  const episode = (await deps.studio.findEpisode(before.id))!;
+  const made: Made = {
+    show,
+    episode,
+    editor: show.editor!,
+    editorial: episode.editorial!,
+    dollars: dollarsOf(spent),
+    calls: spent.filter((c) => c.tokensIn !== null).length,
+    seconds: Math.round((Date.now() - started) / 1000),
+  };
+  writeArtifacts(out, made, spent);
+  return made;
+}
+
 async function makeShow(
   deps: {
     studio: StudioRepository;
@@ -196,28 +307,7 @@ async function makeShow(
   const started = Date.now();
   const spent: AiCallLogInput[] = [];
   const queued: StudioJobData[] = [];
-  const editor = new StudioEditorProcessor({
-    studio: deps.studio,
-    llm: deps.llm,
-    calls: {
-      record: async (call) => {
-        spent.push(call);
-        await deps.ledger.record(call);
-      },
-    },
-    queue: {
-      enqueueStudio: (jobs) => {
-        queued.push(...(jobs as StudioJobData[]));
-        return Promise.resolve();
-      },
-    },
-    setting: (name) => process.env[name],
-    material: null,
-    logger: {
-      log: (line) => input.say(`  · ${line}`),
-      warn: (line) => input.say(`  ! ${line}`),
-    },
-  });
+  const editor = deskFor(deps, spent, queued, input.say);
   const brief = briefOf({
     format: 'explainer',
     idea: input.topic,
@@ -279,26 +369,12 @@ async function makeShow(
   }
   const show = (await deps.studio.findShow(created.id))!;
   const episode = (await deps.studio.findEpisode(first.id))!;
-  const dollars = spent.reduce(
-    (n, call) =>
-      n +
-      (call.costUsd ??
-        costOf({
-          task: call.task,
-          model: call.model,
-          tokensIn: call.tokensIn,
-          tokensOut: call.tokensOut,
-          tokensCached: call.tokensCached ?? null,
-        }) ??
-        0),
-    0,
-  );
   const made: Made = {
     show,
     episode,
     editor: show.editor!,
     editorial: episode.editorial!,
-    dollars,
+    dollars: dollarsOf(spent),
     calls: spent.filter((c) => c.tokensIn !== null).length,
     seconds: Math.round((Date.now() - started) / 1000),
   };
@@ -346,7 +422,7 @@ function planWords({ editor }: Made): string {
     plan ? '## The episodes' : '',
     ...(plan?.episodes.map(
       (e) =>
-        `${e.number}. **${e.title}**: ${e.question} (${e.minutes} min)${e.endsOn ? ` Ends on: ${e.endsOn}` : ''}${e.plants.length ? ` Plants: ${e.plants.map((p) => `${p.id} "${p.text}" → ep ${p.paidIn}`).join('; ')}` : ''}`,
+        `${e.number}. **${e.title}**: ${e.question} (${e.minutes} min${e.short ? ', short: the research holds no more' : ''})${e.endsOn ? ` Ends on: ${e.endsOn}` : ''}${e.plants.length ? ` Plants: ${e.plants.map((p) => `${p.id} "${p.text}" → ep ${p.paidIn}`).join('; ')}` : ''}`,
     ) ?? []),
     plan?.cast.length ? '## The cast' : '',
     ...(plan?.cast.map(
@@ -360,6 +436,7 @@ function planWords({ editor }: Made): string {
       (i) =>
         `- [${i.decision}${i.episode ? `, ep ${i.episode}` : ''}, ${[i.moves && 'moves', i.setsUp && 'sets up', i.visual && 'visual', i.surprise && 'surprise'].filter(Boolean).join('/') || 'no yeses'}] ${i.item}${i.reason ? ` — ${i.reason}` : ''}`,
     ) ?? []),
+    plan?.notes?.length ? `Notes: ${plan.notes.join(' ')}` : '',
     plan?.leftOut.length ? '## Left out' : '',
     ...(plan?.leftOut.map((l) => `- ${l}`) ?? []),
     world ? '## The world' : '',
@@ -471,6 +548,8 @@ interface Rubric {
   promiseKept: boolean;
   chain: { but: number; therefore: number; andThen: number };
   andThenRows: number;
+  /** Rows whose narration is still a stage direction (code's check): none, after the repairs. */
+  directions: number;
   factual: number;
   sourced: number;
   secondsPerPicture: { mean: number; most: number };
@@ -515,6 +594,7 @@ function rubricOf(made: Made, id = 'show'): Rubric {
       andThen: chain.filter((c) => c.link === 'and then').length,
     },
     andThenRows: rows.filter((r) => /^and then\b/iu.test(r.say)).length,
+    directions: rows.filter((r) => directionIn(r, editor.world)).length,
     factual: factual.length,
     sourced: sourced.length,
     secondsPerPicture: {
@@ -551,11 +631,11 @@ function rubricWords(rubrics: Rubric[]): string {
   return [
     '# The editor’s bench: code’s rubric',
     'Each row is a show’s first episode, written by the editor’s desk and checked by code (no film made). Seconds a picture: each row is one sentence, one new thing seen; the playbook asks for three to five. Still rows: past six seconds without a hold.',
-    '| Show | Hook rules | Promise kept | Chain but/therefore/and then | "And then" rows | Factual rows sourced | Seconds a picture (mean, most) | Still rows | Words on screen (most, rows over 8) | Episode min | Plan min | Episodes | Rows | Scenes (illustrated) | Claims | Searches | $ | Time |',
-    '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|',
+    '| Show | Hook rules | Promise kept | Chain but/therefore/and then | "And then" rows | Direction rows | Factual rows sourced | Seconds a picture (mean, most) | Still rows | Words on screen (most, rows over 8) | Episode min | Plan min | Episodes | Rows | Scenes (illustrated) | Claims | Searches | $ | Time |',
+    '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|',
     ...rubrics.map(
       (r) =>
-        `| ${r.id} | ${r.hookRules ? 'pass' : 'FAIL'} | ${r.promiseKept ? 'yes' : 'no'} | ${r.chain.but}/${r.chain.therefore}/${r.chain.andThen} | ${r.andThenRows} | ${r.sourced}/${r.factual} (${pct(r.sourced, r.factual)}) | ${r.secondsPerPicture.mean}, ${r.secondsPerPicture.most} | ${r.stillRows} | ${r.screenWords.most}, ${r.screenWords.over} | ${r.episodeMinutes} | ${r.planMinutes.join(', ')} | ${r.episodes} | ${r.rows} | ${r.scenes} (${r.illustrated}) | ${r.claims} | ${r.searched} | ${r.dollars.toFixed(2)} | ${Math.round(r.seconds / 60)}m |`,
+        `| ${r.id} | ${r.hookRules ? 'pass' : 'FAIL'} | ${r.promiseKept ? 'yes' : 'no'} | ${r.chain.but}/${r.chain.therefore}/${r.chain.andThen} | ${r.andThenRows} | ${r.directions} | ${r.sourced}/${r.factual} (${pct(r.sourced, r.factual)}) | ${r.secondsPerPicture.mean}, ${r.secondsPerPicture.most} | ${r.stillRows} | ${r.screenWords.most}, ${r.screenWords.over} | ${r.episodeMinutes} | ${r.planMinutes.join(', ')} | ${r.episodes} | ${r.rows} | ${r.scenes} (${r.illustrated}) | ${r.claims} | ${r.searched} | ${r.dollars.toFixed(2)} | ${Math.round(r.seconds / 60)}m |`,
     ),
     '',
     rubrics.length > 1
@@ -770,6 +850,15 @@ async function main() {
     const boardOnly = option('--board');
     if (boardOnly) {
       await boardEpisode(deps, boardOnly, out);
+      return;
+    }
+    const editOnly = option('--edit');
+    if (editOnly) {
+      const made = await editAgain(deps, editOnly, out, (line) =>
+        console.log(line),
+      );
+      console.log(rubricWords([rubricOf(made, 'again')]));
+      console.log(`\nWritten to ${out}`);
       return;
     }
     // A film is made for someone: its seconds are counted to the show's

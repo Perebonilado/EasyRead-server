@@ -184,7 +184,7 @@ export function describeShowMap(world: Pick<EditorWorld, 'base'>): string {
     .join(' ');
 }
 
-/** The world in words: its era, colours, base picture and map, places, people and things, with their ids. */
+/** The world in words, for a writer: its era, colours, base picture and map, places, people and things, each by its name (never an id). */
 export function describeWorld(world: EditorWorld): string {
   return [
     `Era: ${ERA_WORDS[world.era]}${world.region ? `; where: ${world.region}` : ''}`,
@@ -194,11 +194,12 @@ export function describeWorld(world: EditorWorld): string {
     world.picture ? `The base picture: ${world.picture}` : '',
     describeShowMap(world),
     world.legend ? `The legend: ${world.legend}` : '',
+    // By their names only: a writer given an id writes it into the script.
     world.places.length
-      ? `Places (by id):\n${world.places.map((p) => `- ${p.id}: ${p.name} (${p.kind}, usually ${p.time}): ${p.look}`).join('\n')}`
+      ? `Places:\n${world.places.map((p) => `- ${p.name} (${p.kind}, usually ${p.time}): ${p.look}`).join('\n')}`
       : '',
     world.people.length
-      ? `People (by id):\n${world.people.map((p) => `- ${p.id}: ${p.name}, ${p.role}${p.recurring ? '' : ' (once)'}; looks: ${p.likeness}`).join('\n')}`
+      ? `People:\n${world.people.map((p) => `- ${p.name}, ${p.role}${p.recurring ? '' : ' (once)'}; looks: ${p.likeness}`).join('\n')}`
       : '',
     world.things.length
       ? `Recurring things: ${world.things.map((t) => `${t.name} (${t.look})`).join('; ')}`

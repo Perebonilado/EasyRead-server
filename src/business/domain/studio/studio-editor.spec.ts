@@ -266,6 +266,25 @@ describe("the editor's plan and world, made sound", () => {
       text: 'the extra minutes',
       paidIn: 2,
     });
+    // Nothing short, nothing noted, unless code said so.
+    expect(plan.episodes[0].short).toBeUndefined();
+    expect(plan.notes).toBeUndefined();
+    const kept = planOf(
+      {
+        episodes: [
+          { title: 'Short', question: 'Why?', short: true },
+          { title: 'Long', question: 'How?', short: 'yes' },
+        ],
+        notes: [
+          '"Short" runs about 2 minutes: the research holds no more for it.',
+        ],
+      },
+      research,
+    );
+    expect(kept.episodes.map((e) => e.short)).toEqual([true, undefined]);
+    expect(kept.notes).toEqual([
+      '"Short" runs about 2 minutes: the research holds no more for it.',
+    ]);
   });
 
   it("keeps a world's colours to the theme's own tokens", () => {

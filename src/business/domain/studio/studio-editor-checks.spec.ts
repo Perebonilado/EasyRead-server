@@ -6,11 +6,14 @@ import {
   beatProblems,
   budgetBeats,
   episodeSeconds,
+  episodeTarget,
+  fitBeats,
   hookProblems,
   isFactual,
   mendHook,
   mendRows,
   pickedAngle,
+  planLengthProblems,
   planProblems,
   promiseReturns,
   scriptProblems,
@@ -185,8 +188,138 @@ describe('the plan, checked and put right by code', () => {
       base({ items: [strong('a', 1, 60), strong('b', 1, 40)] }),
     );
     expect(plan.episodes).toHaveLength(1);
-    // 15 s hook + 12 s close + 100 s of items: about two minutes, not stretched.
+    // 15 s hook + 12 s close + 100 s of items: about two minutes, not
+    // stretched, and said to be short: nothing more to fill it with.
     expect(plan.episodes[0].minutes).toBe(2);
+    expect(plan.episodes[0].short).toBe(true);
+    expect(plan.notes).toEqual([
+      '"One" runs about 2 minutes: the research holds no more for it.',
+    ]);
+  });
+
+  /** A research of many sure claims of about fifteen words: eight seconds each as a line or two. */
+  const deep = researchOf({
+    claims: Array.from({ length: 14 }, (_, k) => ({
+      id: `d${k + 1}`,
+      text: `Fact ${k + 1} of the calendar story is a sentence of about fifteen words in all, sourced.`,
+      kind: 'claim',
+      confidence: k % 2 ? 'medium' : 'high',
+      sources: [`https://a.example.com/d${k + 1}`],
+    })),
+  });
+
+  /** A plan whose items rest on the deep research's claims. */
+  const onDeep = (patch: Record<string, unknown>): EditorPlan =>
+    planOf(
+      {
+        spine: ['1', '2', '3', '4', '5', '6'],
+        episodes: [{ title: 'One', question: 'Why?' }],
+        ...patch,
+      },
+      deep,
+    );
+
+  it('fills a short episode from its own cut items with two yeses, then the research, never past five minutes', () => {
+    const { plan, fixed } = soundPlan(
+      onDeep({
+        items: [
+          { ...strong('a', 1, 60), claims: ['d1'] },
+          { ...strong('b', 1, 40), claims: ['d2'] },
+          {
+            item: 'Worth bringing back',
+            moves: true,
+            surprise: true,
+            decision: 'cut',
+            seconds: 30,
+          },
+          { item: 'Weak', moves: true, decision: 'cut', seconds: 30 },
+        ],
+        leftOut: ['Worth bringing back'],
+      }),
+      { wpm: 150 },
+      deep,
+    );
+    const [episode] = plan.episodes;
+    expect(episode.minutes).toBeGreaterThanOrEqual(3);
+    expect(episode.minutes).toBeLessThanOrEqual(5);
+    expect(episode.short).toBeUndefined();
+    expect(plan.notes).toBeUndefined();
+    // Its own cut item with two yeses first, as a line or two; the weak one stays out.
+    expect(plan.items[2]).toMatchObject({ decision: 'compress', episode: 1 });
+    expect(plan.items[3]).toMatchObject({ decision: 'cut', episode: null });
+    expect(plan.leftOut).toEqual(['Weak']);
+    // Then the research's claims no item uses, the surest first, in story order after.
+    const added = plan.items.slice(4);
+    expect(added.length).toBeGreaterThan(0);
+    expect(added[0]).toMatchObject({
+      claims: ['d3'],
+      decision: 'compress',
+      episode: 1,
+      moves: true,
+      visual: true,
+    });
+    expect(added.every((i) => !['d1', 'd2'].includes(i.claims[0]))).toBe(true);
+    expect(episode.covers).toEqual([...episode.covers].sort((a, b) => a - b));
+    expect(fixed.join('; ')).toMatch(
+      /"Worth bringing back" brought back for episode 1; \d+ of the research's claims added to episode 1/,
+    );
+  });
+
+  it("pulls the next episode's first items into a short one, in story order", () => {
+    const { plan } = soundPlan(
+      base({
+        items: [
+          strong('a', 1, 60),
+          strong('b', 1, 40),
+          strong('c', 2, 90),
+          strong('d', 2, 90),
+          strong('e', 2, 90),
+        ],
+        episodes: [
+          { title: 'One', question: 'Why?' },
+          { title: 'Two', question: 'How?' },
+        ],
+      }),
+    );
+    expect(plan.episodes.map((e) => e.covers)).toEqual([
+      [0, 1, 2],
+      [3, 4],
+    ]);
+    for (const e of plan.episodes) {
+      expect(e.minutes).toBeGreaterThanOrEqual(3);
+      expect(e.short).toBeUndefined();
+    }
+  });
+
+  it('sends a short first episode back once, while the research holds more', () => {
+    const short = onDeep({
+      items: [
+        { ...strong('a', 1, 60), claims: ['d1'] },
+        { ...strong('b', 1, 40), claims: ['d2'] },
+      ],
+    });
+    const [problem] = planLengthProblems(short, { wpm: 150 }, deep);
+    expect(problem).toMatch(
+      /^Episode 1 runs about 127 seconds of material; an episode runs three to five minutes, about four\. Keep more of the research that serves its question, as items of its own \(about 113 seconds more\)/,
+    );
+    expect(problem).toContain('Claims no kept item uses yet: d3, d4,');
+    // Not when the research truly holds no more, nor when it is long enough.
+    expect(planLengthProblems(short, { wpm: 150 }, research)).toEqual([]);
+    expect(
+      planLengthProblems(
+        base({ items: [strong('a', 1, 90), strong('b', 1, 90)] }),
+        { wpm: 150 },
+        deep,
+      ),
+    ).toEqual([]);
+  });
+
+  it('writes an episode to its material: three to five minutes, under three only when it is short', () => {
+    const plan = base({ items: [strong('a', 1, 60), strong('b', 1, 40)] });
+    expect(episodeTarget(plan, 1, 150)).toEqual({ seconds: 180, short: false });
+    const short = soundPlan(plan).plan;
+    expect(episodeTarget(short, 1, 150)).toEqual({ seconds: 127, short: true });
+    expect(episodeTarget(plan, 2, 150)).toBeNull();
   });
 
   it('moves an item to the next episode when one runs past five minutes', () => {
@@ -246,6 +379,32 @@ describe('the plan, checked and put right by code', () => {
 });
 
 describe('the beat sheet', () => {
+  const acts = (...seconds: number[]) =>
+    beatsOf({
+      acts: seconds.map((n, k) => ({ title: `Act ${k + 1}`, seconds: n })),
+    });
+
+  it("is laid out to its episode's length: scaled up when short of it, down past five minutes", () => {
+    const target = { seconds: 180, short: false };
+    expect(fitBeats(acts(40, 40), target).acts.map((a) => a.seconds)).toEqual([
+      90, 90,
+    ]);
+    expect(fitBeats(acts(200, 200), target).acts.map((a) => a.seconds)).toEqual(
+      [150, 150],
+    );
+    // Within its length, its seconds are its own.
+    expect(fitBeats(acts(100, 140), target).acts.map((a) => a.seconds)).toEqual(
+      [100, 140],
+    );
+    // A short episode keeps to its material.
+    expect(
+      fitBeats(acts(100, 100), { seconds: 120, short: true }).acts.map(
+        (a) => a.seconds,
+      ),
+    ).toEqual([60, 60]);
+    expect(fitBeats(acts(40, 40), null).seconds).toBe(80);
+  });
+
   it('budgets words at the pace, fewer in a grave act', () => {
     const beats = budgetBeats(
       beatsOf({
@@ -564,6 +723,10 @@ describe('the script held to its length and its scenes', () => {
     );
     const problems = scriptProblems(rows, { research, pace, beats });
     expect(problems[0]).toMatch(/^The script runs about 7 words/);
+    // How much it still needs, in words and in rows of its pace's length.
+    expect(problems[0]).toContain(
+      'It needs about 293 more words: about 21 more rows of about 14 words.',
+    );
     expect(problems.join('\n')).toMatch(/Act 1 runs only 4 words of its 150/);
   });
 

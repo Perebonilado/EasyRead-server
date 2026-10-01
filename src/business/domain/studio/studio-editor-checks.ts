@@ -201,6 +201,7 @@ interface Draft {
 export function soundPlan(
   given: EditorPlan,
   pace: Pick<EditorPace, 'wpm'> = PLAIN_PACE,
+  research: Pick<EditorResearch, 'claims'> | null = null,
 ): { plan: EditorPlan; fixed: string[] } {
   const fixed: string[] = [];
   const plan: EditorPlan = JSON.parse(JSON.stringify(given)) as EditorPlan;
@@ -265,6 +266,9 @@ export function soundPlan(
     pace.wpm,
     fixed,
   );
+  // Never under three minutes while the story has more to give: its own
+  // cut items with two yeses brought back, then the research's unused claims.
+  const { short, restored } = filled(live, plan, pace.wpm, research, fixed);
   const renumber = new Map<number, number>();
   live.forEach((d, k) => d.was.forEach((n) => renumber.set(n, k + 1)));
   const last = Math.max(1, live.length);
@@ -272,7 +276,7 @@ export function soundPlan(
     const number = k + 1;
     for (const item of d.items) plan.items[item].episode = number;
     const seconds = episodeSeconds(plan, d.items, number, pace.wpm);
-    return {
+    const episode: EditorPlanEpisode = {
       ...d.episode,
       number,
       covers: d.items,
@@ -286,7 +290,21 @@ export function soundPlan(
         return { ...plant, paidIn };
       }),
     };
+    if (short.has(k)) episode.short = true;
+    else delete episode.short;
+    return episode;
   });
+  // An episode the research cannot fill is said to be short, by its title.
+  const notes = plan.episodes
+    .filter((e) => e.short)
+    .map(
+      (e) =>
+        `"${e.title}" runs about ${e.minutes} minutes: the research holds no more for it.`,
+    );
+  if (notes.length) plan.notes = notes;
+  else delete plan.notes;
+  // What is brought back is no longer left out.
+  plan.leftOut = plan.leftOut.filter((l) => !restored.has(l.toLowerCase()));
   // Whatever was cut from the whole show is what the description leaves out.
   for (const item of plan.items)
     if (
@@ -302,8 +320,8 @@ export function soundPlan(
  * Episodes rebalanced to three to five minutes at their edges: one too
  * long gives its last item to the next (a new episode after the last);
  * one too short takes the next one's first item, or the next one whole
- * when the two fit in five minutes. Never padded: a single short episode
- * stays as it is.
+ * when the two fit in five minutes. One still short is filled after
+ * (filled), from the story's own material, never padded.
  */
 function rebalanced(
   drafts: Draft[],
@@ -407,7 +425,202 @@ function rebalanced(
   return drafts;
 }
 
+/** What a claim takes on screen as an item made of it: a line or two. */
+const claimItemSeconds = (claim: Pick<EditorClaim, 'text'>) =>
+  Math.max(
+    5,
+    Math.min(
+      COMPRESSED_SECONDS,
+      Math.round((count(claim.text) * 60) / ITEM_PACE_WPM) + 2,
+    ),
+  );
+
+/** A claim the research stands behind: sourced, and not found wanting. */
+const usable = (claim: EditorClaim) =>
+  claim.sources.length > 0 &&
+  claim.confidence !== 'low' &&
+  claim.status !== 'cut';
+
+/**
+ * Episodes still short of three minutes filled from the story, silently:
+ * first the items its writer cut in that episode's stretch of the story
+ * that have two yeses (brought back as a line or two, the strongest
+ * first), then the claims of the research no item uses, the surest first
+ * (each a line or two), never past five minutes. One the research cannot
+ * fill stays short (`short`, by position), its material its length.
+ */
+function filled(
+  drafts: Draft[],
+  plan: EditorPlan,
+  wpm: number,
+  research: Pick<EditorResearch, 'claims'> | null,
+  fixed: string[],
+): { short: Set<number>; restored: Set<string> } {
+  const [least, most] = EPISODE_SECONDS;
+  const secs = (d: Draft, at: number) =>
+    episodeSeconds(plan, d.items, at + 1, wpm);
+  const short = new Set<number>();
+  const restored = new Set<string>();
+  const used = new Set(plan.items.flatMap((i) => i.claims));
+  drafts.forEach((d, at) => {
+    if (secs(d, at) >= least) return;
+    // Its stretch of the story: after the episode before's last item, up to the next one's first.
+    const before = drafts[at - 1]?.items ?? [];
+    const after = drafts[at + 1]?.items ?? [];
+    const from = before.length ? Math.max(...before) + 1 : 0;
+    const to = after.length ? Math.min(...after) : plan.items.length;
+    const back = plan.items
+      .map((item, k) => ({ item, k }))
+      .filter(
+        ({ item, k }) =>
+          k >= from && k < to && item.decision === 'cut' && yeses(item) >= 2,
+      )
+      .sort((a, b) => yeses(b.item) - yeses(a.item) || a.k - b.k);
+    for (const { item, k } of back) {
+      if (secs(d, at) >= least) break;
+      item.decision = 'compress';
+      d.items.push(k);
+      if (secs(d, at) > most) {
+        d.items.pop();
+        item.decision = 'cut';
+        continue;
+      }
+      restored.add(item.item.toLowerCase());
+      fixed.push(`"${item.item}" brought back for episode ${at + 1}`);
+    }
+    const left = (research?.claims ?? [])
+      .filter((c) => usable(c) && !used.has(c.id))
+      .sort(
+        (a, b) =>
+          Number(b.confidence === 'high') - Number(a.confidence === 'high'),
+      );
+    let added = 0;
+    for (const claim of left) {
+      if (secs(d, at) >= least || plan.items.length >= PLAN_LIMITS.items) break;
+      plan.items.push({
+        item: claim.text.slice(0, 300),
+        claims: [claim.id],
+        moves: true,
+        setsUp: false,
+        visual: true,
+        surprise: false,
+        decision: 'compress',
+        episode: null,
+        seconds: claimItemSeconds(claim),
+        reason: 'from the research, for a full episode',
+      });
+      d.items.push(plan.items.length - 1);
+      if (secs(d, at) > most) {
+        d.items.pop();
+        plan.items.pop();
+        break;
+      }
+      used.add(claim.id);
+      added += 1;
+    }
+    if (added)
+      fixed.push(
+        `${added} of the research's claims added to episode ${at + 1}`,
+      );
+    d.items.sort((a, b) => a - b);
+    if (secs(d, at) < least) short.add(at);
+  });
+  return { short, restored };
+}
+
+/** The length the playbook aims an episode at: about four minutes. */
+export const EPISODE_AIM_SECONDS = 240;
+
+/**
+ * What the plan's writer is told, once, when its first episode runs under
+ * three minutes after code's own pulling and bringing back, while the
+ * research holds more: keep more of what serves its question, and give
+ * the rest of the strong material to later episodes.
+ */
+export function planLengthProblems(
+  plan: EditorPlan,
+  pace: Pick<EditorPace, 'wpm'>,
+  research: Pick<EditorResearch, 'claims'> | null,
+): string[] {
+  const [least] = EPISODE_SECONDS;
+  const sound = soundPlan(plan, pace).plan;
+  const first = sound.episodes[0];
+  if (!first || !research) return [];
+  const seconds = Math.round(episodeSeconds(sound, first.covers, 1, pace.wpm));
+  if (seconds >= least) return [];
+  const used = new Set(
+    sound.items.filter((i) => i.decision !== 'cut').flatMap((i) => i.claims),
+  );
+  const left = research.claims.filter((c) => usable(c) && !used.has(c.id));
+  const more = left.reduce(
+    (n, c) =>
+      n + (claimItemSeconds(c) * ITEM_PACE_WPM) / Math.max(60, pace.wpm),
+    0,
+  );
+  // The research truly holds no more: a short episode is its length.
+  if (seconds + more < least) return [];
+  return [
+    `Episode 1 runs about ${seconds} seconds of material; an episode runs three to five minutes, about four. Keep more of the research that serves its question, as items of its own (about ${Math.max(15, EPISODE_AIM_SECONDS - seconds)} seconds more), and give the rest of the strong material to later episodes, each with its own question. Claims no kept item uses yet: ${left
+      .slice(0, 30)
+      .map((c) => c.id)
+      .join(', ')}.`,
+  ];
+}
+
+/**
+ * The seconds an episode's beat sheet and script are written to: its
+ * material's at the audience's pace, three to five minutes, under three
+ * only when the plan says the research holds no more for it (`short`).
+ */
+export function episodeTarget(
+  plan: EditorPlan,
+  number: number,
+  wpm: number,
+): { seconds: number; short: boolean } | null {
+  const episode = plan.episodes.find((e) => e.number === number);
+  if (!episode) return null;
+  const [least, most] = EPISODE_SECONDS;
+  const seconds = episodeSeconds(plan, episode.covers, number, wpm);
+  const short = episode.short === true;
+  return {
+    seconds: Math.round(
+      Math.min(most, short ? seconds : Math.max(least, seconds)),
+    ),
+    short,
+  };
+}
+
 // ── The beat sheet ────────────────────────────────────────────────────────
+
+/**
+ * A beat sheet laid out to its episode's planned length, by code: acts
+ * that add up to much less than it scaled up to it together (each act
+ * keeping its share), and acts past five minutes (past its material, for
+ * a short episode) scaled down; within those, its seconds are its own.
+ */
+export function fitBeats(
+  beats: EditorialBeats,
+  target: { seconds: number; short: boolean } | null,
+): EditorialBeats {
+  if (!target || !beats.acts.length) return beats;
+  const total = beats.acts.reduce((n, a) => n + a.seconds, 0);
+  if (!total) return beats;
+  const most = target.short ? target.seconds * 1.15 : EPISODE_SECONDS[1];
+  const to =
+    total < target.seconds * 0.9
+      ? target.seconds
+      : total > most
+        ? target.short
+          ? target.seconds
+          : EPISODE_SECONDS[1]
+        : null;
+  if (to === null) return beats;
+  const acts = beats.acts.map((a) => ({
+    ...a,
+    seconds: Math.max(10, Math.round((a.seconds * to) / total)),
+  }));
+  return { ...beats, acts, seconds: acts.reduce((n, a) => n + a.seconds, 0) };
+}
 
 /** A grave act is told slower: its words at this share of the pace. */
 export const GRAVE_PACE = 0.85;
@@ -760,11 +973,17 @@ export function splitSentence(say: string): [string, string] | null {
 export const longestRow = (pace: Pick<EditorPace, 'sentence'>) =>
   Math.min(MOST_SENTENCE_WORDS, Math.max(12, pace.sentence[1] + 4));
 
+/** The words a script's row runs, for its length in rows: one sentence each. */
+export const rowWords = (pace: Pick<EditorPace, 'sentence'>) =>
+  Math.max(8, Math.min(14, pace.sentence[1] - 2));
+
 /** Context the script is checked in: the show's research and the audience's pace. */
 export interface ScriptContext {
   research: Pick<EditorResearch, 'claims'> | null;
   pace: EditorPace;
   beats?: EditorialBeats | null;
+  /** The world's people and places, by the names a script says them by. */
+  world?: WorldNames | null;
 }
 
 const claimsOf = (
@@ -790,6 +1009,291 @@ const unsourcedQuote = (
 const unsureNumber = (claim: EditorClaim) =>
   claim.kind === 'number' &&
   (distinctSources(claim.sources) < 2 || claim.confidence === 'low');
+
+// ── Narration, never a direction ──────────────────────────────────────────
+
+/** A world's people and places as a script names them, each with the id code knows it by. */
+export interface WorldNames {
+  places: readonly { id: string; name: string }[];
+  people: readonly { id: string; name: string }[];
+}
+
+/** A run of words joined by hyphens, as a world's ids are: "a-calendar-user". */
+const ID_LIKE = /\b[a-z0-9]+(?:-[a-z0-9]+)+\b/giu;
+
+/** A world's ids a sentence could never say (those with a hyphen), each with its name. */
+function idNames(world: WorldNames | null | undefined): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const one of [...(world?.people ?? []), ...(world?.places ?? [])])
+    if (one.id.includes('-') && one.name)
+      out.set(one.id.toLowerCase(), one.name);
+  return out;
+}
+
+/** The world's ids a sentence uses, as they stand in it. */
+function idsIn(say: string, world: WorldNames | null | undefined): string[] {
+  const names = idNames(world);
+  if (!names.size) return [];
+  return [...say.matchAll(ID_LIKE)]
+    .map((m) => m[0])
+    .filter((id) => names.has(id.toLowerCase()));
+}
+
+/**
+ * Words with each world id said as its name: "a-calendar-user" is "a
+ * calendar user" mid-sentence, "A calendar user" opening one.
+ */
+export function namedText(
+  words: string,
+  world: WorldNames | null | undefined,
+): string {
+  const names = idNames(world);
+  if (!names.size) return words;
+  return words.replace(ID_LIKE, (found: string, at: number, whole: string) => {
+    const name = names.get(found.toLowerCase());
+    if (!name) return found;
+    const before = whole.slice(0, at);
+    const opens = !before.trim() || /[.!?:]\s*$/u.test(before);
+    return !opens && /^(?:A|An|The) \p{Ll}/u.test(name)
+      ? name[0].toLowerCase() + name.slice(1)
+      : name;
+  });
+}
+
+/** A script's rows with every world id in what is said and seen given as its name. */
+export function withNames(
+  rows: readonly EditorialRow[],
+  world: WorldNames | null | undefined,
+): EditorialRow[] {
+  if (!idNames(world).size) return [...rows];
+  return rows.map((row) => {
+    const say = namedText(row.say, world);
+    const show = namedText(row.show, world);
+    return say === row.say && show === row.show ? row : { ...row, say, show };
+  });
+}
+
+/** Light and time set down as a screenplay's heading sets them: "Dawn,", "Soft afternoon light,". */
+const SLUG =
+  /^(?:(?:soft|bright|hard|harsh|warm|cold|grey|gray|golden|pale|dim|early|late|morning|afternoon|evening|midday|winter|summer|autumn|spring)\s+)*(?:dawn|dusk|daylight|sunlight|lamplight|candlelight|light|night|nighttime|night-time|midday|noon|midnight|morning|afternoon|evening|sunrise|sunset|interior|exterior|int\.?|ext\.?)$/iu;
+
+/** Little words, and those that only place things, which say nothing of a row's meaning. */
+const PLACING = new Set(
+  'under above below beside behind through across around while same each every other some only also still even once onto upon near'.split(
+    ' ',
+  ),
+);
+
+/** A word as a script and its picture both say it: "unrolled" and "unroll" one word. */
+const stemOf = (word: string) => {
+  let w = word;
+  if (w.length > 4 && w.endsWith('s') && !w.endsWith('ss')) w = w.slice(0, -1);
+  if (w.length > 5 && w.endsWith('ing')) w = w.slice(0, -3);
+  else if (w.length > 4 && w.endsWith('ed')) w = w.slice(0, -2);
+  if (w.length > 4 && w.endsWith('e')) w = w.slice(0, -1);
+  return w;
+};
+
+/** The words that carry meaning, as stems: no little words, no numbers. */
+const meaningWords = (words: string) =>
+  new Set(
+    words
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+      .split(/\s+/u)
+      .filter(
+        (w) =>
+          w.length > 2 && !/\d/u.test(w) && !LITTLE.has(w) && !PLACING.has(w),
+      )
+      .map(stemOf),
+  );
+
+/** What a row's picture asks for, without the words it puts on screen ("…"). */
+const unquoted = (show: string) => show.replace(/["“][^"”]*["”]/gu, ' ');
+
+/** The opening a row sets down as a label: a place's name or its picture's first words, or the light. */
+function labelIn(
+  row: Pick<EditorialRow, 'say' | 'show'>,
+  world: WorldNames | null | undefined,
+): string | null {
+  const say = row.say.trim();
+  const comma = say.indexOf(',');
+  if (comma <= 0) return null;
+  const first = say.slice(0, comma).trim();
+  const bare = (words: string) =>
+    words
+      .replace(/^(?:the|a|an)\s+/iu, '')
+      .trim()
+      .toLowerCase();
+  const label = bare(first);
+  if (!label) return null;
+  const places = (world?.places ?? []).map((p) => bare(p.name));
+  const pictured = bare(unquoted(row.show).split(',')[0] ?? '');
+  return places.includes(label) || label === pictured || SLUG.test(first)
+    ? first
+    : null;
+}
+
+/**
+ * Why a row's words are a stage direction, not what a narrator says; null
+ * when they are narration. A direction names someone or somewhere by the
+ * world's id ("a-calendar-user"); sets a place or the light down as a
+ * label before its sentence ("Modern home office, …"); or, on a scene of
+ * people in a place, reads out its own picture: most of its words the
+ * ones its show asks to be drawn, at least two of them more than the
+ * names of the world's people and places. A diagram's line that says what
+ * its picture shows is the read's to weigh (never narrate the graphic),
+ * not a direction: a chart of common and leap years beside "1900 was a
+ * common year" is narration.
+ */
+export function directionIn(
+  row: Pick<EditorialRow, 'say' | 'show'> & {
+    visual?: EditorialRow['visual'];
+  },
+  world: WorldNames | null | undefined,
+): string | null {
+  const ids = idsIn(row.say, world);
+  if (ids.length)
+    return `it names ${ids.map((id) => `"${id}"`).join(' and ')} by an id: say the name, as the world says it`;
+  const label = labelIn(row, world);
+  if (label)
+    return `it opens on "${label}," set down as a label, as a direction does`;
+  if (row.visual && row.visual !== 'scene') return null;
+  const said = meaningWords(row.say);
+  if (said.size < 3) return null;
+  const shown = meaningWords(unquoted(row.show));
+  const names = meaningWords(
+    [...(world?.people ?? []), ...(world?.places ?? [])]
+      .map((one) => one.name)
+      .join(' '),
+  );
+  const shared = [...said].filter((w) => shown.has(w));
+  const plain = shared.filter((w) => !names.has(w));
+  return shared.length * 2 >= said.size && plain.length >= 2
+    ? `it reads out its own picture (${plain.join(', ')})`
+    : null;
+}
+
+/** How much two rows' words are one: shared over all of them, and over the shorter's. */
+const overlapOf = (a: ReadonlySet<string>, b: ReadonlySet<string>) => {
+  const shared = [...a].filter((w) => b.has(w)).length;
+  return {
+    shared,
+    share: shared / Math.max(1, a.size + b.size - shared),
+    within: shared / Math.max(1, Math.min(a.size, b.size)),
+  };
+};
+
+/**
+ * How alike two rows are before one says the other again: for the one
+ * revision, most of their words the same, or nearly all of the shorter's;
+ * for code to drop after it, nearly word for word.
+ */
+const REPEATS = {
+  note: { share: 0.5, within: 0.8, shared: 4 },
+  drop: { share: 0.8, within: 0.9, shared: 5 },
+} as const;
+
+/**
+ * The earlier row a row says again, as a writer padding to a length does;
+ * null when it says something new. A payoff, a recap and the last three
+ * rows may echo what came before.
+ */
+export function repeatOf(
+  rows: readonly Pick<EditorialRow, 'say' | 'payoff' | 'delivery'>[],
+  k: number,
+  level: keyof typeof REPEATS = 'note',
+): number | null {
+  const row = rows[k];
+  if (!row || row.payoff || row.delivery === 'recap' || k >= rows.length - 3)
+    return null;
+  const words = meaningWords(row.say);
+  if (words.size < 4) return null;
+  const most = REPEATS[level];
+  for (let j = 0; j < k; j += 1) {
+    const { shared, share, within } = overlapOf(
+      words,
+      meaningWords(rows[j].say),
+    );
+    if (shared >= 4 && share >= most.share) return j;
+    if (shared >= most.shared && within >= most.within) return j;
+  }
+  return null;
+}
+
+/**
+ * A script's rows that say again what an earlier row said nearly word
+ * for word, dropped by code after the one revision, silently. What it did,
+ * for the log.
+ */
+export function withoutRepeats(given: readonly EditorialRow[]): {
+  rows: EditorialRow[];
+  fixed: string[];
+} {
+  const out: EditorialRow[] = [];
+  const fixed: string[] = [];
+  given.forEach((row, k) => {
+    const j = repeatOf([...out, ...given.slice(k)], out.length, 'drop');
+    if (j === null) {
+      out.push(row);
+      return;
+    }
+    fixed.push(
+      `row ${k + 1}: said again (row ${j + 1}), dropped ("${row.say.slice(0, 90)}")`,
+    );
+  });
+  return { rows: out, fixed };
+}
+
+/** A claim's words as a sentence the narrator says. */
+const sentenceOf = (words: string) => {
+  const said = words.trim().replace(/\s+/gu, ' ');
+  if (!said) return '';
+  return cap(/[.!?]["”]?$/u.test(said) ? said : `${said}.`);
+};
+
+/**
+ * A script's stage directions put right by code after the one revision,
+ * silently: every world id said as its name; a row still a direction
+ * said instead as the claim it rests on (one no other row says yet),
+ * its picture kept; else dropped. A direction is never voiced.
+ */
+export function withoutDirections(
+  given: readonly EditorialRow[],
+  ctx: ScriptContext,
+): { rows: EditorialRow[]; fixed: string[] } {
+  const world = ctx.world ?? null;
+  const rows = withNames(given, world);
+  const fixed: string[] = [];
+  const directions = new Set(
+    rows.flatMap((row, k) => (directionIn(row, world) ? [k] : [])),
+  );
+  if (!directions.size) return { rows, fixed };
+  // What the narration says already: the claims of the rows that stay.
+  const said = new Set(
+    rows.flatMap((row, k) => (directions.has(k) ? [] : row.claims)),
+  );
+  const most = longestRow(ctx.pace) + 8;
+  const out = rows.flatMap((row, k): EditorialRow[] => {
+    if (!directions.has(k)) return [row];
+    // For the log: what it said, and why it was a direction.
+    const was = `"${row.say.slice(0, 90)}", ${directionIn(row, world)}`;
+    const claim = claimsOf(row, ctx.research).find(
+      (c) => !said.has(c.id) && count(c.text) <= most,
+    );
+    const say = claim ? sentenceOf(claim.text) : '';
+    if (claim && say && !directionIn({ ...row, say }, world)) {
+      said.add(claim.id);
+      fixed.push(
+        `row ${k + 1}: a stage direction said as what it means (${was})`,
+      );
+      return [{ ...row, say, claims: [claim.id] }];
+    }
+    fixed.push(`row ${k + 1}: a stage direction dropped (${was})`);
+    return [];
+  });
+  return { rows: out, fixed };
+}
 
 /**
  * What the script's writer and the editor's read are told code found,
@@ -854,6 +1358,16 @@ export function scriptProblems(
       out.push(
         `Row ${n} shows nothing: write what is seen while it is said, or cut the line.`,
       );
+    const direction = directionIn(row, ctx.world);
+    if (direction)
+      out.push(
+        `Row ${n} is a stage direction, not narration ("${row.say}"): ${direction}. Say is only what the narrator speaks aloud: what the moment means and why it matters. The place, the light and what people do belong in show.`,
+      );
+    const again = repeatOf(rows, k);
+    if (again !== null)
+      out.push(
+        `Row ${n} says again what row ${again + 1} said ("${row.say}"): cut it, or say something new from this episode's material; never pad to a length.`,
+      );
   });
   // Each act's words against its budget, and the whole episode's: its
   // length is its material's, never cut short of what the plan gave it.
@@ -872,10 +1386,12 @@ export function scriptProblems(
   }
   const budget = ctx.beats?.words ?? 0;
   const total = rows.reduce((n, r) => n + count(r.say), 0);
-  if (budget && total < budget * SHORT_SHARE)
+  if (budget && total < budget * SHORT_SHARE) {
+    const more = budget - total;
     out.unshift(
-      `The script runs about ${total} words (${Math.round((total * 60) / Math.max(60, ctx.pace.wpm))} seconds); the beat sheet gives this episode about ${budget} (${Math.round(ctx.beats?.seconds ?? 0)} seconds): write every act out in full. Cut only what is weak, and put this episode's own material from the plan in its place; never make the episode shorter than its material.`,
+      `The script runs about ${total} words (${Math.round((total * 60) / Math.max(60, ctx.pace.wpm))} seconds); the beat sheet gives this episode about ${budget} (${Math.round(ctx.beats?.seconds ?? 0)} seconds). It needs about ${more} more words: about ${Math.ceil(more / rowWords(ctx.pace))} more rows of about ${rowWords(ctx.pace)} words. Write every act out in full. Cut only what is weak, and put this episode's own material from the plan in its place; never make the episode shorter than its material.`,
     );
+  }
   return out;
 }
 
@@ -897,6 +1413,14 @@ export function mendRows(
   for (const [k, original] of given.entries()) {
     const row = { ...original };
     const n = k + 1;
+    const named = {
+      say: namedText(row.say, ctx.world),
+      show: namedText(row.show, ctx.world),
+    };
+    if (named.say !== row.say || named.show !== row.show) {
+      Object.assign(row, named);
+      fixed.push(`row ${n}: an id said as its name`);
+    }
     if (/^and then,?\s+/iu.test(row.say)) {
       row.say = cap(row.say.replace(/^and then,?\s+/iu, ''));
       fixed.push(`row ${n}: "and then" taken out`);

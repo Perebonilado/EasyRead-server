@@ -167,7 +167,9 @@ export interface StudioEventRecord {
     | 'research'
     | 'plan'
     | 'world'
-    | 'editorial';
+    | 'editorial'
+    /** A film made into a video file: "Your video is ready". */
+    | 'export';
   /** The step it belongs to: a phase, or the story's own step (the Story card), which no episode's phase is. */
   step: EpisodePhase | 'story';
   sceneId?: string;

@@ -1191,7 +1191,13 @@ export type SceneThingDto =
       callouts?: Record<string, string>;
       /** Of those, the parts whose label waits until the voice points at the part. */
       calloutsLater?: string[];
-      /** Drawn by code, not by the artist: working, a graph, the text's own words, a timeline, a chart, a map, flags, a flow or a molecule. */
+      /**
+       * Drawn by code, not by the artist: working, a graph, the text's own
+       * words, a timeline, a chart, a map, flags, a flow or a molecule; or
+       * one of the infographic kinds: a counter, a unit chart of icons, a
+       * name card, calendars, a chamber's seats, words struck out, things
+       * moving between two boxes, a document, a split screen.
+       */
       source?:
         | 'math'
         | 'plot'
@@ -1201,7 +1207,16 @@ export type SceneThingDto =
         | 'map'
         | 'flag'
         | 'flow'
-        | 'molecule';
+        | 'molecule'
+        | 'counter'
+        | 'icons'
+        | 'namecard'
+        | 'calendar'
+        | 'seats'
+        | 'strike'
+        | 'transfer'
+        | 'document'
+        | 'split';
       /** A story's place: the scene behind the stage, never in a slot. */
       backdrop?: true;
       /**

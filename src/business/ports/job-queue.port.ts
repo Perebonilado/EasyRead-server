@@ -162,6 +162,11 @@ export interface ExportJob extends PipelineJob {
   exportId: string;
 }
 
+/** A Studio film made into a video file (studio-export): everything else is on its row. */
+export interface StudioExportJob {
+  exportId: string;
+}
+
 /**
  * Enqueuing is a port so handlers stay free of BullMQ, and so tests can assert
  * "this was enqueued" without Redis.
@@ -211,6 +216,8 @@ export interface JobQueuePort {
   enqueueStudio(jobs: StudioJob[]): Promise<void>;
   /** Fetches an imported document's pages, then starts the normal pipeline. */
   enqueueImport(job: PipelineJob): Promise<void>;
+  /** A Studio film made into a video file, one at a time on the worker. */
+  enqueueStudioExport(job: StudioExportJob): Promise<void>;
   /** Raises priority for pages N..N+3 so the page being read lands first. */
   prioritise(input: {
     documentId: string;

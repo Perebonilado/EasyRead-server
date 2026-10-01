@@ -33,6 +33,7 @@
     "ask:eval": "ts-node --transpile-only -r tsconfig-paths/register scripts/ask-eval.ts",
     "check:storage": "ts-node --transpile-only scripts/check-storage.ts",
     "scene:page": "ts-node --transpile-only -r tsconfig-paths/register scripts/scene-page.ts",
+    "studio:export": "ts-node --transpile-only -r tsconfig-paths/register scripts/studio-export.ts",
     "scene:voices": "ts-node --transpile-only -r tsconfig-paths/register scripts/scene-voices.ts",
     "scene:recompose": "ts-node --transpile-only -r tsconfig-paths/register scripts/scene-recompose.ts",
     "scene:try": "ts-node --transpile-only -r tsconfig-paths/register scripts/scene-try.ts",
@@ -56,7 +57,8 @@
     "editor:show": "ts-node --transpile-only -r tsconfig-paths/register scripts/editor-show.ts",
     "voice:calibrate": "ts-node --transpile-only -r tsconfig-paths/register scripts/voice-calibrate.ts",
     "pace:bench": "ts-node --transpile-only -r tsconfig-paths/register scripts/pace-bench.ts",
-    "theme:bench": "ts-node --transpile-only -r tsconfig-paths/register scripts/theme-bench.ts"
+    "theme:bench": "ts-node --transpile-only -r tsconfig-paths/register scripts/theme-bench.ts",
+    "kinds:fixtures": "ts-node --transpile-only -r tsconfig-paths/register scripts/kinds-fixtures.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.38",
@@ -108,6 +110,7 @@
     "pino": "^10.3.1",
     "pino-http": "^11.0.0",
     "pino-pretty": "^13.1.3",
+    "puppeteer-core": "^24.43.1",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
     "sequelize": "^6.37.8",

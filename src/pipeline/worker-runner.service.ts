@@ -26,6 +26,7 @@ import { LectureBoardProcessor } from './processors/lecture-board.processor';
 import { LectureFollowProcessor } from './processors/lecture-follow.processor';
 import { SceneProcessor } from './processors/scene.processor';
 import { StudioProcessor } from './processors/studio.processor';
+import { StudioExportProcessor } from './processors/studio-export.processor';
 import { SimplifyPageProcessor } from './processors/simplify.processor';
 import { SummarizeProcessor } from './processors/summarize.processor';
 import { TopicsProcessor } from './processors/topics.processor';
@@ -46,6 +47,7 @@ import {
   LectureFollowJobData,
   VisualSceneJobData,
   type StudioJobData,
+  type StudioExportJobData,
 } from './queues';
 
 type Handler = (data: never, context: JobContext) => Promise<void>;
@@ -103,6 +105,7 @@ export class WorkerRunner implements OnModuleInit, OnModuleDestroy {
     private readonly learn: LearnProcessor,
     private readonly importer: ImportProcessor,
     private readonly studio: StudioProcessor,
+    private readonly studioExport: StudioExportProcessor,
   ) {}
 
   onModuleInit(): void {
@@ -145,6 +148,8 @@ export class WorkerRunner implements OnModuleInit, OnModuleDestroy {
         this.visualScene.process(data, ctx),
       [QUEUE.studio]: (data: StudioJobData, ctx) =>
         this.studio.process(data, ctx),
+      [QUEUE.studioExport]: (data: StudioExportJobData, ctx) =>
+        this.studioExport.process(data, ctx),
     };
     // A chapter job the queue gives up on leaves pages pending for ever
     // unless someone says so; the other queues' rows go stale on their own.
@@ -153,7 +158,11 @@ export class WorkerRunner implements OnModuleInit, OnModuleDestroy {
         this.lectureChapter.onDropped(data, reason),
     };
 
+    // A worker without Chrome and ffmpeg (STUDIO_EXPORT=off) leaves the films'
+    // videos to a service that has them (scripts/studio-export.ts --worker).
+    const exportsOff = this.config.get<string>('STUDIO_EXPORT') === 'off';
     for (const name of Object.values(QUEUE)) {
+      if (exportsOff && name === QUEUE.studioExport) continue;
       this.workers.push(this.startWorker(name, handlers[name], dropped[name]));
     }
 

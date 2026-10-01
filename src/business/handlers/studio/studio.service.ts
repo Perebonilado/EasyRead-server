@@ -137,6 +137,7 @@ import { EntitlementsService } from '../documents/entitlements.service';
 import { StudioCastService, optionPreview } from './studio-cast.service';
 import { explainerPlay } from './studio-engage';
 import { StudioDocumentsService } from './studio-documents.service';
+import { StudioExportService } from './studio-export.service';
 import { EVENT_LINES, historyOf, logEvent } from './studio-log';
 import {
   episodeShape,
@@ -233,6 +234,8 @@ export class StudioService {
     private readonly voices: SceneVoiceService,
     /** The show's document, its pages chosen in words (studio-documents). */
     @Optional() private readonly documents?: StudioDocumentsService,
+    /** Its films made into video files (studio-export), listed with each episode. */
+    @Optional() private readonly videos?: StudioExportService,
   ) {}
 
   // ── Whose it is ─────────────────────────────────────────────────────────
@@ -412,7 +415,7 @@ export class StudioService {
     const made = episodeDto(episode, scenes, show.bible, show.brief, twin);
     // An episode the editor wrote: its script, fact check and package, its
     // chapters on the film's clock.
-    const dto = episode.editorial
+    const written = episode.editorial
       ? {
           ...made,
           editorial: editorialDto(
@@ -427,6 +430,9 @@ export class StudioService {
           ),
         }
       : made;
+    // Its videos, the latest first: absent when it has none.
+    const videos = (await this.videos?.listFor(episode)) ?? [];
+    const dto = videos.length ? { ...written, exports: videos } : written;
     if (!episode.twinOf) return dto;
     // A twin's script is its lead's: nothing to make here but what the
     // lead has made, and each scene stale as its lead's has changed.
@@ -2714,6 +2720,24 @@ export class StudioService {
 
   async playShared(token: string): Promise<StudioPlayDto> {
     const { show, episode } = await this.shared(token);
+    const scenes = await this.studio.listScenes(episode.id);
+    const { watermarked } = await this.entitlements.studioBalance(show.userId);
+    const lead = episode.twinOf
+      ? await this.studio.findEpisode(episode.twinOf)
+      : null;
+    return this.playOf(show, episode, scenes, watermarked, lead);
+  }
+
+  /**
+   * The film as its player plays it, for the render page that makes it a
+   * video file (studio-export): whoever holds a render key for it, which
+   * the caller has checked. The free plan's films carry the Studio's name
+   * there too.
+   */
+  async playForRender(episodeId: string): Promise<StudioPlayDto> {
+    const episode = await this.studio.findEpisode(episodeId);
+    const show = episode ? await this.studio.findShow(episode.showId) : null;
+    if (!episode || !show) throw new NotFoundError('Film');
     const scenes = await this.studio.listScenes(episode.id);
     const { watermarked } = await this.entitlements.studioBalance(show.userId);
     const lead = episode.twinOf

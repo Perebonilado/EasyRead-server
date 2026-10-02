@@ -38,6 +38,7 @@ import type { RegistryEntry } from '../shots/types';
 import { clipWords, roleWords } from './credit';
 import { samePicture, titleKey } from './desk';
 import { nameWords, stems, textWords } from './match';
+import { EVENT_VERBS } from './rank';
 import type { PictureQuery, PictureRecord } from './types';
 
 /** How many people, places, events and things one pass asks about (the research keeps 12 people). */
@@ -166,6 +167,14 @@ const CUT_BEFORE =
  */
 export function eventName(text: string): string {
   const words = line(text, 200).split(' ').filter(Boolean);
+  // What did it, when that is two words or more: "Resumed constitutional
+  // conference" of "… sets out the path to independence".
+  const verb = words.findIndex((w) =>
+    EVENT_VERBS.has(w.toLowerCase().replace(/[^\p{L}]/gu, '')),
+  );
+  const article = /^(?:the|a|an)$/iu.test(words[0] ?? '') ? 1 : 0;
+  if (verb - article >= 2 && verb <= 6)
+    return clip(words.slice(0, verb).join(' '), 6);
   const out: string[] = [];
   for (const word of words) {
     if (out.length >= 3 && CUT_BEFORE.test(word.replace(/[,.;:]+$/u, '')))

@@ -326,7 +326,7 @@ describe("an episode's desk pass", () => {
         ['Baird demonstrates television', [1926]],
         ['Farnsworth transmits the first all-electronic television', [1927]],
         ['Zworykin announces the iconoscope camera tube', [1933]],
-        ['The BBC Television Service opens', [1936]],
+        ['The BBC Television Service', [1936]],
         ["The BBC drops Baird's mechanical system", [1937]],
         ['RCA introduces television', [1939]],
       ]);
@@ -418,9 +418,18 @@ describe("an episode's desk pass", () => {
         eventName(
           'Constitutional talks expose a split over the timing of self-government',
         ),
-      ).toBe('Constitutional talks expose a split');
+      ).toBe('Constitutional talks');
+      expect(
+        eventName(
+          'Resumed constitutional conference sets out the path to independence',
+        ),
+      ).toBe('Resumed constitutional conference');
+      // "The BBC" alone would say nothing: its words then run to the turn.
+      expect(eventName("The BBC drops Baird's mechanical system")).toBe(
+        "The BBC drops Baird's mechanical system",
+      );
       expect(eventName('Lyttleton Constitution establishes federalism')).toBe(
-        'Lyttleton Constitution establishes federalism',
+        'Lyttleton Constitution',
       );
     });
 
@@ -496,14 +505,14 @@ describe("an episode's desk pass", () => {
           chip: 'London, 1926 · Wikimedia Commons · Public domain',
         }),
       ],
-      'The BBC Television Service opens': [
+      'The BBC Television Service': [
         pictureOf('bbc-1936', {
           kind: 'event',
-          subject: 'The BBC Television Service opens',
+          subject: 'The BBC Television Service',
           year: 1936,
           title:
             "World's first high definition television transmission from Alexandra Palace, November 1936",
-          chip: 'The BBC Television Service opens, 1936 · Wikimedia Commons · Public domain',
+          chip: 'The BBC Television Service, 1936 · Wikimedia Commons · Public domain',
         }),
       ],
       iconoscope: [
@@ -544,7 +553,7 @@ describe("an episode's desk pass", () => {
         ],
         ['photo:London 1926', { kind: 'place', name: 'place:London' }],
         [
-          'photo:The BBC Television Service opens 1936',
+          'photo:The BBC Television Service 1936',
           {
             kind: 'event',
             name: 'The BBC Television Service opens at Alexandra Palace',
@@ -599,14 +608,14 @@ describe("an episode's desk pass", () => {
       ]);
       // The line rests on the BBC's opening (c7); the photo of it is offered.
       expect(offered([TELEVISION.rows[6]])).toEqual([
-        'photo:The BBC Television Service opens 1936',
+        'photo:The BBC Television Service 1936',
       ]);
       // Said with its year and its words, though resting on no claim of it.
       expect(
         offered([
           { say: 'In 1936 the BBC television service opened.', claims: [] },
         ]),
-      ).toEqual(['photo:The BBC Television Service opens 1936']);
+      ).toEqual(['photo:The BBC Television Service 1936']);
       expect(offered([TELEVISION.rows[4]])).toEqual(['photo:iconoscope 1936']);
       // A line about none of them is offered none.
       expect(

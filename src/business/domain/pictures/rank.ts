@@ -440,8 +440,10 @@ export function eventPhotoOf(
     return { ok: false, reason: 'the research gives the event no year' };
   if (year === undefined)
     return { ok: false, reason: 'it has no date to match the event’s year' };
-  const off = Math.min(...years.map((y) => Math.abs(y - year)));
-  if (off > EVENT_YEARS)
+  // Its year, or the next for one that ran over; never the year before:
+  // a photo taken before an event is of something else (the 1957
+  // conference's opening is no photo of the conference resumed in 1958).
+  if (!years.some((y) => year >= y && year <= y + EVENT_YEARS))
     return { ok: false, reason: `taken in ${year}, not in the event’s year` };
   const said = `${file.title} ${file.description} ${file.categories.join(' ')}`;
   if (COMMEMORATION.test(`${file.title} ${file.description}`))

@@ -408,6 +408,22 @@ describe('whether a picture can be one more photo of a person, of an event or of
     expect(why('Nigerian independence parade', 1965)).toMatch(
       /not in the event’s year/u,
     );
+    // The year before an event is never of it: the 1957 conference's
+    // opening for the conference resumed in 1958.
+    expect(
+      eventPhotoOf(
+        file('The 1957 Nigerian Constitutional Conference'),
+        {
+          name: 'Resumed constitutional conference',
+          years: [1958],
+          place: ['Nigeria'],
+          words: [
+            'Resumed constitutional conference sets out the path to independence',
+          ],
+        },
+        1957,
+      ),
+    ).toEqual({ ok: false, reason: 'taken in 1957, not in the event’s year' });
     expect(why('Nigerian independence parade', undefined)).toMatch(/no date/u);
     expect(
       why('A street in Lagos', 1960, { categories: ['1960 in Nigeria'] }),

@@ -1551,7 +1551,7 @@ export async function mapFrameOf(
 }
 
 /** A frame's projection, made again from its numbers. */
-function projectionOf(g: D3Geo, frame: MapFrame): GeoProjection {
+export function projectionOf(g: D3Geo, frame: MapFrame): GeoProjection {
   const { name, rotate, parallels, scale, translate } = frame.projection;
   const projection =
     name === 'naturalEarth1'

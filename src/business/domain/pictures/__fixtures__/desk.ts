@@ -335,7 +335,37 @@ export const FAKE_PIXELS: PicturePixelsPort = {
     const data = new Uint8Array(4 * 4 * 4).fill(128);
     return Promise.resolve({ data, width: 4, height: 4 });
   },
+  png: () => Promise.resolve(Buffer.from('png:small')),
 };
+
+/**
+ * A model that sees, answering by the file's name: the tractor print
+ * shows six people photographed off a museum wall; anything else is one
+ * person's photograph, their face high on the right. Its calls counted.
+ */
+export class FakeFocus {
+  calls: string[] = [];
+  readonly ask = (input: { png: Buffer; about: string }) => {
+    this.calls.push(input.about);
+    const print = /tractor|museum wall/iu.test(input.about);
+    return Promise.resolve({
+      value: print
+        ? {
+            faces: ['B2', 'C2', 'D2'],
+            subject: ['A2', 'F5'],
+            people: 6,
+            kind: 'photograph-of-a-print',
+          }
+        : {
+            faces: ['E2'],
+            subject: ['D2', 'F6'],
+            people: 1,
+            kind: 'photograph',
+          },
+      usage: { model: 'fake:see', tokensIn: 900, tokensOut: 40, latencyMs: 1 },
+    });
+  };
+}
 
 /** A depth model that answers with a small grey PNG, its calls counted. */
 export class FakeDepth implements DepthPort {

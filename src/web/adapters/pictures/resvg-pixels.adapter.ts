@@ -32,9 +32,43 @@ export function pixelsAt(
   };
 }
 
+/** A picture drawn at an exact size, as a PNG. */
+export function pngAt(
+  bytes: Buffer,
+  mime: string,
+  width: number,
+  height: number,
+): Buffer {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><image x="0" y="0" width="${width}" height="${height}" preserveAspectRatio="none" href="data:${mime};base64,${bytes.toString('base64')}"/></svg>`;
+  return new Resvg(svg, {
+    fitTo: { mode: 'original' },
+    background: 'rgba(255,255,255,1)',
+  })
+    .render()
+    .asPng();
+}
+
 export class ResvgPixelsAdapter implements PicturePixelsPort {
   measure(bytes: Buffer) {
     return measureImage(bytes);
+  }
+
+  png(bytes: Buffer, short: number): Promise<Buffer | null> {
+    const size = measureImage(bytes);
+    if (!size) return Promise.resolve(null);
+    const scale = Math.min(1, short / Math.min(size.width, size.height));
+    try {
+      return Promise.resolve(
+        pngAt(
+          bytes,
+          size.mime,
+          Math.max(1, Math.round(size.width * scale)),
+          Math.max(1, Math.round(size.height * scale)),
+        ),
+      );
+    } catch {
+      return Promise.resolve(null);
+    }
   }
 
   pixels(bytes: Buffer, short: number): Promise<PicturePixels | null> {

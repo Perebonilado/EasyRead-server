@@ -26,6 +26,7 @@ import type {
   PicturePixelsPort,
   PictureSourcesPort,
 } from '../../ports/pictures.port';
+import type { LlmUsage } from '../../ports/llm.port';
 import type { StoragePort } from '../../ports/storage.port';
 import type {
   PictureCacheRepository,
@@ -41,6 +42,13 @@ import {
   yearOf,
 } from './credit';
 import { contentBox, isMono } from './depth';
+import {
+  focalFromFocus,
+  focusOf,
+  photoDoubt,
+  portraitDoubt,
+  type Focus,
+} from './focus';
 import { licenceOf } from './licence';
 import { matchPerson, matchPlace, nameWords } from './match';
 import {
@@ -69,6 +77,17 @@ export interface DeskDeps {
   pixels: PicturePixelsPort;
   /** Depth Anything V2 Small; absent or null, a picture is one plane. */
   depth?: DepthPort | null;
+  /**
+   * A model that sees (picture_focus): where a picture's faces and subject
+   * are, how many people show, and what the picture is. Absent or null,
+   * a subject is the middle third a little high, and no picture is doubted.
+   */
+  focus?:
+    | ((input: {
+        png: Buffer;
+        about: string;
+      }) => Promise<{ value: Record<string, unknown>; usage: LlmUsage }>)
+    | null;
   now?: () => Date;
   log?: (message: string) => void;
 }
@@ -81,7 +100,7 @@ const LOOKUP_DAYS = 30;
  * again (a portrait that is a statue's photograph, once let through, is
  * not handed out for a month after the rule against it).
  */
-export const DESK_RULES = 5;
+export const DESK_RULES = 6;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** The width the desk asks a source for: a full frame's with room for a 12% push; a portrait's print; a page. */
@@ -95,6 +114,9 @@ const FETCH_WIDTH: Readonly<Record<PictureUse, number>> = {
 const FROM_DEPICTS = 12;
 const FROM_CATEGORY = 30;
 const FROM_SEARCH = 15;
+
+/** How many of a question's best pictures are tried before none is taken. */
+const TRIES = 3;
 
 /** The least score a picture is used at (house): under it, no picture is better. */
 export const PICK_LEAST = 0.4;
@@ -479,7 +501,13 @@ export class PictureDesk {
    */
   async take(
     candidate: PictureCandidate,
-    opts: { depth?: boolean; person?: WikiPerson; role?: string } = {},
+    opts: {
+      depth?: boolean;
+      person?: WikiPerson;
+      role?: string;
+      /** Each model call the look at it made, for the ledger. */
+      onUsage?: (usage: LlmUsage) => void;
+    } = {},
   ): Promise<PictureRecord | null> {
     const { file } = candidate;
     const had = await this.deps.cache.bySource(file.source, file.sourceId);
@@ -503,7 +531,9 @@ export class PictureDesk {
           : null;
       const size = bytes ? this.deps.pixels.measure(bytes) : null;
       const seen =
-        bytes && size ? await this.seen(candidate, bytes, size) : null;
+        bytes && size
+          ? await this.seen(candidate, bytes, size, opts.onUsage)
+          : null;
       const fresh =
         !seen && had.chip === candidate.chip && had.credit === candidate.credit
           ? had
@@ -520,6 +550,11 @@ export class PictureDesk {
                   }
                 : {}),
             });
+      const doubt = this.doubtOf(candidate, fresh.meta);
+      if (doubt) {
+        this.log(`pictures: ${file.sourceId} will not do: ${doubt}`);
+        return null;
+      }
       const kept = await this.withDepth(fresh, opts.depth ?? true);
       return this.recordOf(kept, candidate, opts);
     }
@@ -545,7 +580,7 @@ export class PictureDesk {
       });
       storageKey = stored.ref;
     }
-    const seen = await this.seen(candidate, got.bytes, size);
+    const seen = await this.seen(candidate, got.bytes, size, opts.onUsage);
     const row = await this.deps.cache.save({
       ...this.blank(file.source, file.sourceId),
       ...(had ? { id: had.id } : {}),
@@ -579,6 +614,12 @@ export class PictureDesk {
       },
       refusedReason: null,
     });
+    // Kept either way (another use may take it), but not for this one when what was seen says no.
+    const doubt = this.doubtOf(candidate, row.meta);
+    if (doubt) {
+      this.log(`pictures: ${file.sourceId} will not do: ${doubt}`);
+      return null;
+    }
     const kept = await this.withDepth(row, opts.depth ?? true, got.bytes);
     return this.recordOf(kept, candidate, opts);
   }
@@ -592,13 +633,40 @@ export class PictureDesk {
     candidate: PictureCandidate,
     bytes: Buffer,
     size: { width: number; height: number },
+    onUsage?: (usage: LlmUsage) => void,
   ): Promise<{ focal: PixelBox; meta: Record<string, unknown> }> {
     const small = await this.safely(
       () => this.deps.pixels.pixels(bytes, 256),
       null,
     );
-    const [fx, fy, fw, fh] = candidate.focal.box;
     const crop = small ? cropOf(contentBox(small), size) : undefined;
+    // Where its subject is, as a model that sees names it (once a copy).
+    let focus: Focus | null = null;
+    if (this.deps.focus && this.deps.pixels.png) {
+      const png = await this.safely(
+        () => this.deps.pixels.png!(bytes, 512),
+        null,
+      );
+      const answer = png
+        ? await this.safely(
+            () =>
+              this.deps.focus!({
+                png,
+                about: `${candidate.subject}${candidate.year ? `, ${candidate.year}` : ''}: ${candidate.file.title}`,
+              }),
+            null,
+          )
+        : null;
+      if (answer) {
+        onUsage?.(answer.usage);
+        focus = focusOf(answer.value);
+      }
+    }
+    const looked = focus ? focalFromFocus(focus) : null;
+    const [fx, fy, fw, fh] =
+      candidate.focal.from === 'depicts' || !looked
+        ? candidate.focal.box
+        : looked;
     return {
       focal: [
         Math.round(fx * size.width),
@@ -608,11 +676,29 @@ export class PictureDesk {
       ],
       meta: {
         rules: DESK_RULES,
-        focalFrom: candidate.focal.from,
+        focalFrom:
+          candidate.focal.from === 'depicts'
+            ? 'depicts'
+            : looked
+              ? 'looked'
+              : 'centre',
         ...(small ? { mono: isMono(small) } : {}),
         ...(crop ? { crop } : {}),
+        ...(focus ? { focus } : {}),
       },
     };
+  }
+
+  /** Why a kept copy cannot serve this use, by what was seen of it; null when it can. */
+  private doubtOf(
+    candidate: PictureCandidate,
+    meta: Record<string, unknown> | null,
+  ): string | null {
+    const focus = (meta?.focus ?? null) as Focus | null;
+    if (!focus) return null;
+    return candidate.kind === 'person'
+      ? portraitDoubt(focus)
+      : photoDoubt(focus);
   }
 
   /** Its depth map beside it, made once (by the bytes' sha1, so a twin's is reused). */
@@ -707,7 +793,7 @@ export class PictureDesk {
    */
   async lookup(
     query: PictureQuery,
-    opts: { depth?: boolean } = {},
+    opts: { depth?: boolean; onUsage?: (usage: LlmUsage) => void } = {},
   ): Promise<PictureRecord | null> {
     const key = lookupKey(query);
     const asked = await this.safely(
@@ -747,20 +833,26 @@ export class PictureDesk {
       found: [] as PictureCandidate[],
       reason: 'the sources could not be reached',
     });
+    // The best that will do: each in turn, from the best down, while it scores enough.
     const best = this.pick(result.found);
-    const record = best
-      ? await this.safely(
-          () =>
-            this.take(best, {
-              depth: opts.depth ?? true,
-              ...('person' in result && result.person
-                ? { person: result.person }
-                : {}),
-              ...(query.role !== undefined ? { role: query.role } : {}),
-            }),
-          null,
-        )
-      : null;
+    let record: PictureRecord | null = null;
+    for (const candidate of best
+      ? result.found.filter((c) => c.score >= PICK_LEAST).slice(0, TRIES)
+      : []) {
+      record = await this.safely(
+        () =>
+          this.take(candidate, {
+            depth: opts.depth ?? true,
+            ...('person' in result && result.person
+              ? { person: result.person }
+              : {}),
+            ...(query.role !== undefined ? { role: query.role } : {}),
+            ...(opts.onUsage ? { onUsage: opts.onUsage } : {}),
+          }),
+        null,
+      );
+      if (record) break;
+    }
     const reason = record
       ? null
       : (result.reason ??

@@ -16,6 +16,7 @@ import type {
   EditorResearch,
   EditorWorld,
 } from '../studio/studio-editor';
+import type { LlmUsage } from '../../ports/llm.port';
 import type { RegistryEntry } from '../shots/types';
 import { clipWords, roleWords } from './credit';
 import { nameWords, textWords } from './match';
@@ -244,7 +245,7 @@ export interface EpisodePictures {
 export interface DeskLike {
   lookup(
     query: PictureQuery,
-    opts?: { depth?: boolean },
+    opts?: { depth?: boolean; onUsage?: (usage: LlmUsage) => void },
   ): Promise<PictureRecord | null>;
 }
 
@@ -252,13 +253,21 @@ export interface DeskLike {
 export async function deskPass(
   desk: DeskLike,
   input: PassInput,
-  opts: { depth?: boolean; log?: (message: string) => void } = {},
+  opts: {
+    depth?: boolean;
+    log?: (message: string) => void;
+    /** Each model call the desk makes (its look at a picture), for the ledger. */
+    onUsage?: (usage: LlmUsage) => void;
+  } = {},
 ): Promise<EpisodePictures> {
   const entries: EpisodePictures['entries'] = [];
   const names = new Set<string>();
   for (const question of passQuestions(input)) {
     const record = await desk
-      .lookup(question.query, { depth: opts.depth === true })
+      .lookup(question.query, {
+        depth: opts.depth ?? true,
+        ...(opts.onUsage ? { onUsage: opts.onUsage } : {}),
+      })
       .catch(() => null);
     if (!record) continue;
     const entry = entryOf(question, record);

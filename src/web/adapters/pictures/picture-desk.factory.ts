@@ -6,24 +6,34 @@
  *   PICTURE_DEPTH      'on' (the default) makes a depth map of each picture
  *                      for the stage's planes; 'off', one plane;
  *   DEPTH_MODEL_PATH   where Depth Anything V2 Small is (downloaded there
- *                      once and checked when it is missing).
+ *                      once and checked when it is missing);
+ *   PICTURE_FOCUS      'on' (the default) asks a model that sees where a
+ *                      picture's faces and subject are (picture_focus,
+ *                      AI_MODEL_PICTURE_FOCUS), once a picture; 'off', the
+ *                      middle third a little high.
  */
 import { PictureDesk } from '../../../business/domain/pictures/desk';
 import type { PictureCacheRepository } from '../../../business/repositories/picture-cache.repository';
+import type { LlmGatewayPort } from '../../../business/ports/llm.port';
 import type { StoragePort } from '../../../business/ports/storage.port';
 import { OnnxDepthAdapter } from './onnx-depth.adapter';
 import { PictureSourcesAdapter } from './picture-sources.adapter';
 import { userAgentOf } from './polite-http';
 import { ResvgPixelsAdapter } from './resvg-pixels.adapter';
 
-/** Whether depth maps are made: on unless switched off. */
-export const depthSwitchOn = (value: string | undefined | null) =>
+/** Whether a switch that is on by default is on: anything but off. */
+const switchOn = (value: string | undefined | null) =>
   !/^(?:off|false|0|no)$/iu.test((value ?? '').trim());
+
+/** Whether depth maps are made: on unless switched off. */
+export const depthSwitchOn = switchOn;
 
 export function pictureDeskOf(input: {
   setting: (name: string) => string | undefined;
   cache: PictureCacheRepository;
   storage: Pick<StoragePort, 'put' | 'size' | 'get'>;
+  /** A model that sees, for where a picture's subject is (picture_focus); none, the middle third. */
+  llm?: Pick<LlmGatewayPort, 'pictureFocus'> | null;
   log?: (message: string) => void;
 }): PictureDesk {
   const contact = input.setting('PICTURES_CONTACT');
@@ -43,12 +53,17 @@ export function pictureDeskOf(input: {
         ...(input.log ? { log: input.log } : {}),
       })
     : null;
+  const llm = input.llm;
   return new PictureDesk({
     sources,
     cache: input.cache,
     storage: input.storage,
     pixels: new ResvgPixelsAdapter(),
     depth,
+    focus:
+      llm && switchOn(input.setting('PICTURE_FOCUS'))
+        ? (ask) => llm.pictureFocus(ask)
+        : null,
     ...(input.log ? { log: input.log } : {}),
   });
 }

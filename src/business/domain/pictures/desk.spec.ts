@@ -1,7 +1,10 @@
 import {
+  commonsFile,
   FAKE_PIXELS,
   FakeDepth,
+  FakeFocus,
   FakeSources,
+  FILES,
   MemoryCache,
   MemoryStorage,
 } from './__fixtures__/desk';
@@ -15,6 +18,7 @@ function deskWith(
     sources?: FakeSources;
     depth?: FakeDepth | null;
     now?: () => Date;
+    focus?: FakeFocus;
   } = {},
 ) {
   const sources = over.sources ?? new FakeSources();
@@ -28,6 +32,7 @@ function deskWith(
     storage,
     pixels: FAKE_PIXELS,
     depth,
+    ...(over.focus ? { focus: over.focus.ask } : {}),
     now: over.now ?? (() => NOW),
     log: (m) => logs.push(m),
   });
@@ -241,5 +246,40 @@ describe('the picture desk', () => {
     const record = await second.desk.lookup(BELLO_Q, { depth: true });
     expect(record?.depthKey).toBeNull();
     expect(second.logs.join('\n')).toMatch(/no depth/u);
+  });
+
+  it('frames a picture on the faces a model that sees names, and records its call', async () => {
+    const focus = new FakeFocus();
+    const { desk } = deskWith({ focus });
+    const usage: string[] = [];
+    const record = await desk.lookup(BELLO_Q, {
+      onUsage: (u) => usage.push(u.model),
+    });
+    // E2 grown for head and shoulders, in the copy's 1280 × 1601 pixels.
+    expect(record?.focal).toEqual([747, 133, 427, 667]);
+    expect(focus.calls).toHaveLength(1);
+    expect(usage).toEqual(['fake:see']);
+  });
+
+  it('passes over a portrait the model sees is a photograph of a print with six people in it, for the next', async () => {
+    const tractor = commonsFile({
+      sourceId: 'File:Ahmadu Bello on a tractor 1962.jpg',
+      description: 'Sir Ahmadu Bello on a tractor',
+      date: '1962',
+      categories: ['Ahmadu Bello', 'PD US Government'],
+      depicts: [{ qid: 'Q401032' }],
+      institutional: true,
+      quality: 'featured',
+    });
+    const sources = new FakeSources(undefined, undefined, [tractor, ...FILES]);
+    const focus = new FakeFocus();
+    const { desk, logs } = deskWith({ sources, focus });
+    const record = await desk.lookup(BELLO_Q);
+    expect(record?.sourceId).toBe(
+      'File:Ahmadu Bello Premier of the Northern Region of Nigeria 1960 Oak Ridge (24578438519).jpg',
+    );
+    expect(logs.join('\n')).toMatch(
+      /on a tractor 1962\.jpg will not do: it is a photograph of a print/u,
+    );
   });
 });

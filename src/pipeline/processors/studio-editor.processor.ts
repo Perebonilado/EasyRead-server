@@ -1290,6 +1290,7 @@ export class StudioEditorProcessor {
     )
       return null;
     progressNow({ says: 'Finding archive pictures' });
+    const calls: LlmUsage[] = [];
     try {
       const pictures = await deskPass(
         desk,
@@ -1301,8 +1302,12 @@ export class StudioEditorProcessor {
         {
           log: (message) =>
             this.deps.logger.log(`studio ${episode.id}: ${message}`),
+          // The desk's look at each picture it takes is a model call: in the ledger.
+          onUsage: (usage) => calls.push(usage),
         },
       );
+      for (const usage of calls)
+        await this.record(episode.id, usage, 'picture_focus');
       this.deps.logger.log(
         `studio ${episode.id}: the picture desk cleared ${pictures.entries.length} picture${pictures.entries.length === 1 ? '' : 's'}`,
       );

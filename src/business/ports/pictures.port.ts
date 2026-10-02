@@ -68,6 +68,8 @@ export interface PicturePixelsPort {
   ): { width: number; height: number; mime: string } | null;
   /** Its pixels with the shorter side at `short` (never larger than it is), or null when it cannot be read. */
   pixels(bytes: Buffer, short: number): Promise<PicturePixels | null>;
+  /** The same as a PNG, for a model that sees; absent where it cannot be made. */
+  png?(bytes: Buffer, short: number): Promise<Buffer | null>;
 }
 
 /** A picture's depth (Depth Anything V2 Small): an 8-bit grey PNG, white near, at the model's own size. */

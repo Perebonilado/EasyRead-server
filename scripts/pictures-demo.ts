@@ -43,7 +43,8 @@ import {
   pictureAssetOf,
   pictureSetOf,
 } from '../src/business/domain/shots/shot-pictures';
-import { STORAGE } from '../src/business/ports/tokens';
+import { LLM_GATEWAY, STORAGE } from '../src/business/ports/tokens';
+import type { LlmGatewayPort } from '../src/business/ports/llm.port';
 import type { StoragePort } from '../src/business/ports/storage.port';
 import { PICTURE_CACHE_REPOSITORY } from '../src/business/repositories/tokens';
 import type { PictureCacheRepository } from '../src/business/repositories/picture-cache.repository';
@@ -99,6 +100,7 @@ async function main(): Promise<void> {
       setting: (name) => process.env[name],
       cache: app.get<PictureCacheRepository>(PICTURE_CACHE_REPOSITORY),
       storage: app.get<StoragePort>(STORAGE),
+      llm: app.get<LlmGatewayPort>(LLM_GATEWAY),
       log: (message) => console.log(`  ${message}`),
     });
     const made: {

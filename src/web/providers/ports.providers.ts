@@ -30,6 +30,7 @@ import {
 import { PICTURE_CACHE_REPOSITORY } from '../../business/repositories/tokens';
 import type { PictureCacheRepository } from '../../business/repositories/picture-cache.repository';
 import type { StoragePort } from '../../business/ports/storage.port';
+import type { LlmGatewayPort } from '../../business/ports/llm.port';
 import { pictureDeskOf } from '../adapters/pictures/picture-desk.factory';
 import { BullmqQueueAdapter } from '../adapters/bullmq-queue.adapter';
 import { DriveConverterAdapter } from '../adapters/drive-converter.adapter';
@@ -203,16 +204,18 @@ export const portProviders: Provider[] = [
     // The picture desk (explainer-animation-plan §6.3): archive photos and
     // portraits, their licences cleared, kept in our storage by sha1.
     provide: PICTURE_DESK,
-    inject: [ConfigService, PICTURE_CACHE_REPOSITORY, STORAGE],
+    inject: [ConfigService, PICTURE_CACHE_REPOSITORY, STORAGE, LLM_GATEWAY],
     useFactory: (
       config: ConfigService,
       cache: PictureCacheRepository,
       storage: StoragePort,
+      llm: LlmGatewayPort,
     ) =>
       pictureDeskOf({
         setting: (name) => config.get<string>(name) ?? process.env[name],
         cache,
         storage,
+        llm,
         log: (message) => logger.log(message),
       }),
   },

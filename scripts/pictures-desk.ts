@@ -27,7 +27,8 @@ import {
   passQuestions,
 } from '../src/business/domain/pictures/episode';
 import type { PictureQuery } from '../src/business/domain/pictures/types';
-import { STORAGE } from '../src/business/ports/tokens';
+import { LLM_GATEWAY, STORAGE } from '../src/business/ports/tokens';
+import type { LlmGatewayPort } from '../src/business/ports/llm.port';
 import type { StoragePort } from '../src/business/ports/storage.port';
 import {
   PICTURE_CACHE_REPOSITORY,
@@ -81,6 +82,7 @@ async function main(): Promise<void> {
       setting: (name) => process.env[name],
       cache: app.get<PictureCacheRepository>(PICTURE_CACHE_REPOSITORY),
       storage: app.get<StoragePort>(STORAGE),
+      llm: app.get<LlmGatewayPort>(LLM_GATEWAY),
       log: (message) => console.log(`  ${message}`),
     });
     const person = option('--person');

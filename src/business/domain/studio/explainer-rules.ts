@@ -8,7 +8,7 @@
  */
 
 /** Bumped when a rule changes what a film may contain, so stored checks can tell which rules they ran. */
-export const RULES_VERSION = 1;
+export const RULES_VERSION = 2;
 
 /** Pace, in ms (research §3.2). An information event puts a new fact on screen; a sub-step is part of one. */
 export const PACE = {

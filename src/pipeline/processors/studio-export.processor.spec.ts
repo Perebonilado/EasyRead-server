@@ -239,6 +239,7 @@ function worker(
       };
       return Promise.resolve(film);
     },
+    stills: () => Promise.reject(new Error('the export takes no stills')),
   };
 
   const config = {

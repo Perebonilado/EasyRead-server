@@ -63,7 +63,11 @@ export const TEXT = {
  * at least half the height (research §3.8); in a wide one, at least this
  * share of the height or of the area. The jet engine at 0.7% fails both.
  */
-export const FOCAL = { tallMinHeight: 0.5, wideMinHeight: 0.35, wideMinArea: 0.12 } as const;
+export const FOCAL = {
+  tallMinHeight: 0.5,
+  wideMinHeight: 0.35,
+  wideMinArea: 0.12,
+} as const;
 
 /** Contrast floors against what sits behind (WCAG 2.2: 1.4.3 and 1.4.11). */
 export const CONTRAST = { text: 4.5, marks: 3 } as const;
@@ -79,11 +83,63 @@ export const SAFETY = { flashesPerSecond: 3, flicker: 0.1 } as const;
  */
 export const SAFE = {
   wide: { x0: 96 / 1920, x1: 1824 / 1920, y0: 54 / 1080, y1: 1026 / 1080 },
-  tall: { x0: 48 / 1080, x1: 887 / 1080, y0: 288 / 1920, y1: 1247 / 1920, captionY0: 1040 / 1920 },
+  tall: {
+    x0: 48 / 1080,
+    x1: 887 / 1080,
+    y0: 288 / 1920,
+    y1: 1247 / 1920,
+    captionY0: 1040 / 1920,
+  },
 } as const;
 
 /** The life layer's cap (research §3.6): small, slow, never across a label. */
 export const LIFE = { maxLuminanceChange: 0.15, maxHz: 1 } as const;
+
+/**
+ * The frame checks' own values (shots/frame-checks.ts; house, to be tuned
+ * on the bench): how much boxes may overlap, what is blank or tiny, the
+ * band of pixels a text is read against, and how fast each axis's score
+ * falls, as a share of 10 per share of the scene that fails.
+ */
+export const FRAME_CHECKS = {
+  /** Words on words: overlapping more than this share of the smaller box. */
+  overlapShare: 0.1,
+  /** A label over this share of its own subject hides it. */
+  coverShare: 0.25,
+  /** A subject under this share of the frame's area is a strip, not a picture (the jet engine was 0.7%). */
+  tinyArea: 0.02,
+  /** The band just outside a text's box that its background is read from, in frame pixels. */
+  ringPx: [2, 8] as const,
+  /** How far off the frame's median a pixel's luma is to count as ink, 0 to 1. */
+  inkLuma: 0.06,
+  /** A frame with less ink than this share of it is blank. */
+  blankInk: 0.005,
+  /** Neighbouring stills this close that jump in brightness by SAFETY.flicker and back are a flash. */
+  flashWithinMs: 1000,
+  /** Text fainter than this is coming or going: its size, contrast and place are judged once it is up. */
+  judgedOpacity: 0.6,
+  /** How far past its first and last word the voice's span reaches, for a frame that must show something. */
+  voicedPadMs: 500,
+  /** What each failure takes off its axis, per share of the scene it covers (a word card a third of the time is 0). */
+  weights: {
+    textSmall: 1,
+    captionSmall: 0.25,
+    contrast: 1,
+    overlap: 1,
+    safe: 0.5,
+    focal: 1,
+    noPicture: 1,
+    blank: 2,
+    flash: 0.5,
+    gapShort: 1,
+    gapLong: 1.5,
+    dwell: 1,
+    firstLate: 0.3,
+    card: 3,
+    person: 2,
+    tiny: 1.5,
+  },
+} as const;
 
 /** What an explainer never shows. The plan check, the frame check and the critic all name these. */
 export const BANNED = [
@@ -128,7 +184,7 @@ export const RULES_PROMPT = [
   'Something new every 2 to 4 seconds; the first change within 1.5 seconds; never 6 seconds without a change unless it is a declared hold.',
   'One attention cue at a time, and at most two moving things.',
   'At most 8 words on the stage, 3 per label; numbers and labels stay long enough to read.',
-  'Truth: a named place only as the map or a verified photo of it; a named person only as a verified portrait or a trace of them (a signature, a document); groups as silhouettes in their side\'s colour; every number, place, person and photo from the research log.',
+  "Truth: a named place only as the map or a verified photo of it; a named person only as a verified portrait or a trace of them (a signature, a document); groups as silhouettes in their side's colour; every number, place, person and photo from the research log.",
   'Never: a word card standing in for a picture, a centred title on a gradient, everything fading in, sparkles or glows, frame borders, a stock figure for a real group, an invented place, the audience on screen.',
   'The camera moves with intent: establish, push in on what is named, pull back to show the whole, travel along what connects. Zoom only on what the voice names.',
 ].join('\n');

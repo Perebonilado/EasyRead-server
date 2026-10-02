@@ -16,13 +16,15 @@ import { once } from 'node:events';
 import { join } from 'node:path';
 import { Logger } from '@nestjs/common';
 import type { Browser, CDPSession, Page } from 'puppeteer-core';
+import type { FrameReport } from '../../business/domain/shots/frame-checks';
+import type { FilmTimeline } from '../../business/domain/shots/frame-moments';
 import {
   concatList,
   encodeArgs,
   type Chapter,
 } from '../../business/domain/studio/studio-export';
 import type { VideoTools } from './ffmpeg';
-import { writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 
 /** One voice as the page lays it on the video's clock. */
 export interface PageVoice {
@@ -66,8 +68,40 @@ export interface CapturedFilm {
   };
 }
 
+/** Stills of a film at chosen moments, for the frame checks (explainer-animation-plan §9.1). */
+export interface StillsInput {
+  /** The render page, its key and options in the query. */
+  url: string;
+  width: number;
+  height: number;
+  /**
+   * The moments, on the video's clock, in ms; or how to choose them from
+   * the film's timeline (`__render.timeline`), asked once it is loaded.
+   */
+  times: number[] | ((timeline: FilmTimeline) => number[]);
+  /** Where the PNGs are written, one a moment. */
+  outDir: string;
+  /** Also what is on the frame at each moment (`__render.inspect`). */
+  inspect?: boolean;
+  /** Each still's file name; `still-<ms>.png` when absent. */
+  name?: (ms: number, index: number) => string;
+  /** How many browsers share the moments; the capture's own count when absent. */
+  pages?: number;
+  /** Told as stills are taken: how many of how many. */
+  onStill?: (done: number, total: number) => void;
+}
+
+/** One still: its moment, its PNG, and what was on the frame (null when not asked). */
+export interface CapturedStill {
+  ms: number;
+  file: string;
+  inspect: FrameReport | null;
+}
+
 export interface FilmCapturePort {
   capture(input: CaptureInput): Promise<CapturedFilm>;
+  /** Stills at moments of the film, in the order of their moments, each a PNG; what was on the frame too, when asked. */
+  stills(input: StillsInput): Promise<CapturedStill[]>;
 }
 
 /** The render page's handle, as the browser holds it. */
@@ -80,6 +114,8 @@ interface RenderHandle {
   audioBytes(kind: 'music' | 'effects'): Promise<number>;
   audioSlice(kind: 'music' | 'effects', from: number, to: number): string;
   chapters: Chapter[];
+  inspect?(ms: number): Promise<FrameReport>;
+  timeline?: FilmTimeline;
 }
 type RenderWindow = Window & { __render?: RenderHandle };
 
@@ -118,6 +154,21 @@ export function segmentsOf(
     out.push({
       from: Math.round((frames * k) / count),
       to: Math.round((frames * (k + 1)) / count),
+    });
+  return out.filter((one) => one.to > one.from);
+}
+
+/** `count` things cut into at most `parts` runs, in order, about as long as each other; none for none. */
+export function runsOf(
+  count: number,
+  parts: number,
+): { from: number; to: number }[] {
+  const n = Math.max(1, Math.min(Math.max(1, parts), count));
+  const out: { from: number; to: number }[] = [];
+  for (let k = 0; k < n; k += 1)
+    out.push({
+      from: Math.round((count * k) / n),
+      to: Math.round((count * (k + 1)) / n),
     });
   return out.filter((one) => one.to > one.from);
 }
@@ -312,8 +363,145 @@ export class PuppeteerFilmCapture implements FilmCapturePort {
     }
   }
 
+  /**
+   * Stills at chosen moments (the frame checks' "times" mode): the same
+   * page, the same seek and the same screenshot as a frame of the film,
+   * as a PNG a moment, with what was on the frame when asked. The moments
+   * are shared among the browsers in runs, in order, so each one seeks
+   * forward; a browser that fails is launched again from the moment it
+   * had reached, as a film's is.
+   */
+  async stills(input: StillsInput): Promise<CapturedStill[]> {
+    await mkdir(input.outDir, { recursive: true });
+    let relaunches = 0;
+    let first: Drawer | null = await this.open(input);
+    try {
+      const told = await first.page.evaluate(() => {
+        const handle = (window as RenderWindow).__render!;
+        return {
+          durationMs: handle.durationMs,
+          timeline: handle.timeline ?? null,
+          inspects: typeof handle.inspect === 'function',
+        };
+      });
+      if (input.inspect && !told.inspects)
+        throw new Error(
+          'The render page cannot say what is on its frame: its web must be one with lib/scene/inspect.ts',
+        );
+      const timeline: FilmTimeline = told.timeline ?? {
+        titleMs: 0,
+        filmMs: told.durationMs,
+        endMs: 0,
+        durationMs: told.durationMs,
+        clips: [],
+      };
+      const asked =
+        typeof input.times === 'function' ? input.times(timeline) : input.times;
+      const moments = [
+        ...new Set(
+          asked.map((ms) =>
+            Math.min(told.durationMs, Math.max(0, Math.round(ms))),
+          ),
+        ),
+      ].sort((a, b) => a - b);
+      const name =
+        input.name ??
+        ((ms: number) => `still-${String(ms).padStart(7, '0')}.png`);
+      // A browser for every dozen stills or so, up to the pages asked for.
+      const runs = runsOf(
+        moments.length,
+        Math.min(
+          input.pages ?? this.options.pages,
+          Math.ceil(moments.length / 12),
+        ),
+      );
+      const out: CapturedStill[] = new Array<CapturedStill>(moments.length);
+      let done = 0;
+      const drawers: (Drawer | null)[] = runs.map((_, k) =>
+        k === 0 ? first : null,
+      );
+      if (runs.length) first = null;
+      // One run failing fails them all: the others stop where they are.
+      let failed: Error | null = null;
+      try {
+        await Promise.all(
+          runs.map(async (run, k) => {
+            try {
+              let drawer = drawers[k] ?? (await this.open(input));
+              drawers[k] = drawer;
+              let i = run.from;
+              while (i < run.to) {
+                if (failed) throw failed;
+                const ms = moments[i];
+                try {
+                  let inspect: FrameReport | null = null;
+                  if (input.inspect)
+                    inspect = await withTimeout(
+                      drawer.page.evaluate(
+                        (at) => (window as RenderWindow).__render!.inspect!(at),
+                        ms,
+                      ),
+                      FRAME_MS,
+                      'A still',
+                    );
+                  else
+                    await withTimeout(
+                      drawer.page.evaluate(
+                        (at) => (window as RenderWindow).__render!.seek(at),
+                        ms,
+                      ),
+                      FRAME_MS,
+                      'A still',
+                    );
+                  const shot = await withTimeout(
+                    drawer.cdp.send('Page.captureScreenshot', {
+                      format: 'png',
+                      optimizeForSpeed: true,
+                    }),
+                    FRAME_MS,
+                    'A still',
+                  );
+                  const file = join(input.outDir, name(ms, i));
+                  await writeFile(file, Buffer.from(shot.data, 'base64'));
+                  out[i] = { ms, file, inspect };
+                  i += 1;
+                  done += 1;
+                  input.onStill?.(done, moments.length);
+                } catch (error) {
+                  relaunches += 1;
+                  if (failed || relaunches > MOST_RELAUNCHES) throw error;
+                  this.logger.warn(
+                    `the browser failed at the still at ${ms} ms (${(error as Error).message}): launching it again, from that still`,
+                  );
+                  await drawer.browser.close().catch(() => undefined);
+                  drawer = await this.open(input);
+                  drawers[k] = drawer;
+                }
+              }
+            } catch (error) {
+              failed ??=
+                error instanceof Error ? error : new Error(String(error));
+              throw error;
+            }
+          }),
+        );
+      } finally {
+        await Promise.all(
+          drawers.flatMap((one) =>
+            one ? [one.browser.close().catch(() => undefined)] : [],
+          ),
+        );
+      }
+      return out;
+    } finally {
+      await first?.browser.close().catch(() => undefined);
+    }
+  }
+
   /** A browser at the frame's size, the film loaded and ready to draw. */
-  private async open(input: CaptureInput): Promise<Drawer> {
+  private async open(
+    input: Pick<CaptureInput, 'url' | 'width' | 'height'>,
+  ): Promise<Drawer> {
     const { launch } = await import('puppeteer-core');
     const browser = await launch({
       executablePath: this.options.chrome,

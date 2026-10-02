@@ -262,21 +262,39 @@ describe('the plan built', () => {
     });
   });
 
-  it('opens on the show’s map when the first shot cannot be drawn, and on paper when nothing can', () => {
-    const plan: ShotPlan = {
-      shots: [
-        {
-          ...PLAN.shots[1],
-          set: { kind: 'chart', chart: { kind: 'nonsense', spec: {} } },
-        },
-      ],
+  it('stands in for a shot that cannot be drawn with the nearest set that can, the map only for a shot about where, paper when nothing can', () => {
+    // The counter's shot with a chart no kind draws: about no place.
+    const broken: ShotPlan['shots'][number] = {
+      ...PLAN.shots[1],
+      set: { kind: 'chart', chart: { kind: 'nonsense', spec: {} } },
     };
-    const opened = buildShots(plan, registry, ctx);
+    // The next picture begun early, never the show's map (Richard, 2026-10-02).
+    const early = buildShots({ shots: [broken, PLAN.shots[1]] }, registry, ctx);
+    expect(early.shots[0].set.kind).toBe('chart');
+    expect(early.notes.join(' ')).toContain(
+      'the nearest set that could be drawn',
+    );
+    // After a map, a shot about no place is not given the map carried on.
+    const after = buildShots(
+      { shots: [PLAN.shots[0], broken, PLAN.shots[1]] },
+      registry,
+      ctx,
+    );
+    expect(after.shots[1].set.kind).toBe('chart');
+    // A shot about where (a region it names) opens on the show's map.
+    const where = { ...broken, focal: 'region:North Region' };
+    const opened = buildShots({ shots: [where] }, registry, ctx);
     expect(opened.shots[0].set.kind).toBe('map');
     expect(opened.shots[0].camera[0].move).toBe('establish');
-    const bare = buildShots(plan, registry, { ...ctx, map: null });
+    // Nothing that can be drawn, and no map: paper.
+    const alone = buildShots({ shots: [broken] }, registry, ctx);
+    expect(alone.shots[0].set).toEqual({ kind: 'plain' });
+    expect(alone.notes.join(' ')).toContain('no picture could be drawn');
+    const bare = buildShots({ shots: [where] }, registry, {
+      ...ctx,
+      map: null,
+    });
     expect(bare.shots[0].set).toEqual({ kind: 'plain' });
-    expect(bare.notes.join(' ')).toContain('no picture could be drawn');
   });
 
   it('stands the kit’s pieces on the set: a crowd on its place on the map, as a marker, counting no one', () => {

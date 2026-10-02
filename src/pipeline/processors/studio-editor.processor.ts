@@ -1279,7 +1279,15 @@ export class StudioEditorProcessor {
             this.deps.logger.warn(
               `studio ${episode.id} s${at + 1}: boarded plainly: ${(error as Error).message}`,
             );
-            await this.plainBoard(show, episode, bible, rows[at], at, shots);
+            await this.plainBoard(
+              show,
+              episode,
+              bible,
+              rows[at],
+              at,
+              shots,
+              pictures,
+            );
           }
           progressNow({ scene: at, done: true });
         }
@@ -1374,6 +1382,8 @@ export class StudioEditorProcessor {
     k: number,
     /** Lesson scenes are boarded as shots (EXPLAINER_SHOTS). */
     shots = false,
+    /** The episode's pictures (pictureDesk): a line's stand-in is its photo first. */
+    pictures: EpisodePictures | null = null,
   ): Promise<void> {
     const scene = episode.outline!.scenes[k];
     const lines = this.rowsOf(episode, scene);
@@ -1383,6 +1393,10 @@ export class StudioEditorProcessor {
         rows: lines,
         research: show.editor?.research ?? null,
         world: show.editor?.world ?? null,
+        look:
+          showLookStyle(show.brief, show.editor?.world, show.bible) ??
+          'editorial',
+        pictures: picturesFor(lines, pictures),
       });
       const sheet = shotsSheet(
         scene,

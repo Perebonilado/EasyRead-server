@@ -6,6 +6,7 @@ import {
   travelMs,
   type BuildContext,
 } from './shot-build';
+import { chartAsset } from './shot-charts';
 import { registryOf } from './shot-registry';
 import { CAMERA_AMOUNT } from './shot-time';
 import type { ShotPlan } from './types';
@@ -65,7 +66,9 @@ jest.mock('./shot-charts', () => {
     }),
   };
   return {
-    chartAsset: (kind: string): ShotSvgAssetDto | null => kinds[kind] ?? null,
+    chartAsset: jest.fn(
+      (kind: string): ShotSvgAssetDto | null => kinds[kind] ?? null,
+    ),
   };
 });
 
@@ -493,9 +496,9 @@ describe('the board’s names, as the build resolves them', () => {
   const named = buildShots(plan, entries, ctx);
   const [timeline, map, strike, quote] = named.shots;
 
-  it('takes "set" as the set’s own subject', () => {
-    expect(timeline.focal).toEqual({ kind: 'asset', asset: 'chart-1' });
-    expect(strike.focal).toEqual({ kind: 'asset', asset: 'chart-2' });
+  it('takes "set" as the set’s own subject: the box its drawing frames, never the whole asset edge to edge', () => {
+    expect(timeline.focal).toEqual({ kind: 'box', box: [200, 200, 1200, 500] });
+    expect(strike.focal).toEqual({ kind: 'box', box: [200, 200, 1200, 500] });
   });
 
   it('finds a part by the words it shows, and a date as its event; a label on a chart brings its part on, never a second name', () => {
@@ -664,6 +667,51 @@ describe('a set’s later state and its own names, brought on by the changes the
       ['stamp', 'stamp', undefined],
       ['enter', 'stamp', 'scale'],
     ]);
+  });
+
+  it('names a region as the run fills it when the plan names it only in a later shot', () => {
+    const named = buildShots(
+      {
+        shots: [
+          {
+            ...plan.shots[0],
+            info: [
+              {
+                recipe: 'fill',
+                target: 'region:North Region',
+                on: 'colonial Nigeria',
+              },
+            ],
+            join: 'continue',
+          },
+          {
+            ...plan.shots[0],
+            on: 'Then the fight changed',
+            info: [
+              {
+                recipe: 'label',
+                target: 'region:North Region',
+                on: 'independence',
+              },
+            ],
+          },
+        ],
+      },
+      entries,
+      { ...ctx, map: labelled },
+    );
+    const [filling, naming] = named.shots;
+    expect(
+      filling.info.map((i) => [
+        i.recipe,
+        (i.target as { part?: string }).part,
+        i.on,
+      ]),
+    ).toEqual([
+      ['fill', 'group-north-region', 'colonial Nigeria'],
+      ['enter', 'label-north-region', 'colonial Nigeria'],
+    ]);
+    expect(naming.info).toEqual([]);
   });
 
   it('brings on a later part nothing brings on with the shot’s last change', () => {
@@ -936,5 +984,52 @@ describe('the camera and the fills, as the stage plays them', () => {
       ['mark', 'regional legislatures'],
     ]);
     expect(made.shots[1].info[0].until).toBe('but three');
+  });
+});
+
+describe('what a chart writes', () => {
+  it('writes a source given as a claim’s id as where the claim comes from, or writes none', () => {
+    const entries = registryOf([
+      ...REGISTRY,
+      {
+        name: 'claim:c9',
+        kind: 'claim',
+        about: 'the regions kept their revenues',
+        claim: 'c9',
+        source: 'Nigeria: a country study',
+      },
+    ]);
+    const counter = (on: string, source: string) => ({
+      on,
+      set: {
+        kind: 'chart' as const,
+        chart: { kind: 'counter', spec: { value: 4, source } },
+      },
+      actors: [],
+      info: [],
+      life: [],
+      camera: [],
+      join: 'cut' as const,
+    });
+    const asked = chartAsset as jest.Mock;
+    asked.mockClear();
+    buildShots(
+      {
+        shots: [
+          counter('After the 1945 strikes', 'c9'),
+          counter('Then the fight changed', 'claim:c99'),
+        ],
+      },
+      entries,
+      ctx,
+    );
+    const specs = asked.mock.calls.map(
+      (call: unknown[]) => call[1] as Record<string, unknown>,
+    );
+    expect(specs[0]).toMatchObject({
+      value: 4,
+      source: 'Nigeria: a country study',
+    });
+    expect(specs[1]).not.toHaveProperty('source');
   });
 });

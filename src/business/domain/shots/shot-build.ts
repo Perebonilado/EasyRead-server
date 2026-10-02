@@ -228,6 +228,9 @@ const STAYS: ReadonlySet<ShotInfoRecipe> = new Set<ShotInfoRecipe>([
   'enter',
 ]);
 
+/** A camera taking in this share of its set's subject or more takes in the subject whole. */
+const SUBJECT_MOST = 0.5;
+
 /** A strike's new words come in this long after the line through the old ones has landed. */
 const NEW_WORDS_LAG_MS = 400;
 
@@ -288,34 +291,58 @@ export function travelMs(from: ShotBox, to: ShotBox, width: number): number {
   return Math.round(Math.max(400, Math.min(1200, 300 + 600 * across)));
 }
 
+/** A research claim named by its id ("c7", "claim:c7"): never words a viewer reads. */
+const CLAIM_ID = /^(?:claim:)?(c\d+)$/i;
+
 /**
- * A chart's spec as it is drawn: a timeline's event named only by its own
- * date ({when: "1951", name: "1951"}) is drawn by its date alone, never
- * the year twice.
+ * A chart's spec as it is drawn: a source given as a claim's id is the
+ * title of where that claim comes from, or no source line at all; and
+ * nothing is written twice: a timeline's event named only by its own date
+ * ({when: "1951", name: "1951"}) is drawn by its date alone, and a
+ * calendar named only by its one date ({label: "1957", dates: ["1957"]})
+ * is its sheet alone.
  */
 function drawnSpec(
   kind: string,
-  spec: Record<string, unknown>,
+  given: Record<string, unknown>,
+  sourceOf: (claim: string) => string | undefined,
 ): Record<string, unknown> {
-  if (kind !== 'timeline' || !Array.isArray(spec.events)) return spec;
+  const id =
+    typeof given.source === 'string'
+      ? CLAIM_ID.exec(given.source.trim())?.[1]
+      : undefined;
+  const spec = { ...given };
+  if (id) {
+    const source = sourceOf(id.toLowerCase());
+    if (source) spec.source = source;
+    else delete spec.source;
+  }
   const key = (raw: unknown) =>
     typeof raw === 'string' || typeof raw === 'number'
       ? String(raw)
           .toLowerCase()
           .replace(/[^\p{L}\p{N}]/gu, '')
       : '';
-  return {
-    ...spec,
-    events: (spec.events as unknown[]).map((raw) => {
-      const e = (raw && typeof raw === 'object' ? raw : {}) as Record<
-        string,
-        unknown
-      >;
-      return key(e.name) && key(e.name) === key(e.when)
-        ? { ...e, name: '' }
-        : e;
-    }),
-  };
+  const each = (list: unknown, fix: (one: Record<string, unknown>) => object) =>
+    (list as unknown[]).map((raw) =>
+      fix(
+        (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>,
+      ),
+    );
+  if (kind === 'timeline' && Array.isArray(spec.events))
+    spec.events = each(spec.events, (e) =>
+      key(e.name) && key(e.name) === key(e.when) ? { ...e, name: '' } : e,
+    );
+  if (kind === 'calendar' && Array.isArray(spec.calendars))
+    spec.calendars = each(spec.calendars, (c) =>
+      Array.isArray(c.dates) &&
+      c.dates.length === 1 &&
+      key(c.label) &&
+      key(c.label) === key(c.dates[0])
+        ? { ...c, label: null }
+        : c,
+    );
+  return spec;
 }
 
 /** A shot moved onto another copy of its set: every reference to the one asset made to the other. */
@@ -493,7 +520,11 @@ export function buildShots(
           return { set: { kind: 'chart', asset: kept.id }, asset: kept };
         const dto = chartAsset(
           planned.chart.kind,
-          drawnSpec(planned.chart.kind, planned.chart.spec ?? {}),
+          drawnSpec(
+            planned.chart.kind,
+            planned.chart.spec ?? {},
+            (claim) => registry.resolve(`claim:${claim}`)?.source,
+          ),
           look,
           ctx.shape,
         );
@@ -969,9 +1000,19 @@ export function buildShots(
     /**
      * What the camera is aimed at, with room round it: a point or a small
      * box (a place) widened to a share of its set, kept inside the set.
+     * The set as a whole is its own subject, the box its drawing says the
+     * camera frames (on the stage the whole asset is framed edge to edge,
+     * past the set's sides onto paper).
      */
     function inContext(target: ShotTargetDto): ShotTargetDto {
       if (!svg) return target;
+      if (
+        target.kind === 'asset' &&
+        target.asset === assetId &&
+        !target.part &&
+        svg.focal
+      )
+        return { kind: 'box', box: svg.focal };
       const box =
         target.kind === 'box'
           ? target.box
@@ -1098,9 +1139,16 @@ export function buildShots(
         const whole = out
           .flatMap((o) => o.boxes)
           .reduce((a, b) => around(a, b), view);
+        // Most of the set's subject: the subject whole, never a slice of it
+        // with its last part at the frame's edge.
+        const subject = svg.focal ?? svg.box;
+        const most =
+          whole[2] * whole[3] >= subject[2] * subject[3] * SUBJECT_MOST;
         const target = inContext({
           kind: 'box',
-          box: whole.map((n) => Math.round(n * 10) / 10) as ShotBox,
+          box: (most ? around(subject, whole) : whole).map(
+            (n) => Math.round(n * 10) / 10,
+          ) as ShotBox,
         });
         const wholeBox = boxOf(target) ?? whole;
         const on = out[0].x.on;
@@ -1197,6 +1245,45 @@ export function buildShots(
         });
         if (info.length !== shot.info.length) built[j].shot = { ...shot, info };
       }
+      // A region's own name comes on with it: one the run fills before the
+      // plan names it is named as it fills, never left off a region the
+      // voice has already named.
+      const fillOf = new Map<string, { j: number; on: string }>();
+      for (let j = k; j < end; j += 1)
+        for (const x of built[j].shot.info)
+          if (
+            x.recipe === 'fill' &&
+            x.target?.kind === 'asset' &&
+            x.target.part &&
+            !fillOf.has(x.target.part)
+          )
+            fillOf.set(x.target.part, { j, on: x.on });
+      for (let j = k; j < end; j += 1)
+        for (const x of built[j].shot.info) {
+          const part =
+            x.recipe === 'enter' && x.target?.kind === 'asset'
+              ? x.target.part
+              : undefined;
+          const fill = part?.startsWith('label-')
+            ? fillOf.get(`group-${part.slice('label-'.length)}`)
+            : undefined;
+          if (!fill || fill.j >= j) continue;
+          built[j].shot = {
+            ...built[j].shot,
+            info: built[j].shot.info.filter((y) => y !== x),
+          };
+          const into = built[fill.j].shot;
+          built[fill.j].shot = {
+            ...into,
+            info: [
+              ...into.info,
+              { ...x, id: `${into.id}-n${into.info.length + 1}`, on: fill.on },
+            ],
+          };
+          notes.push(
+            `shot ${j + 1}: ${part} brought on with its region's fill in shot ${fill.j + 1}`,
+          );
+        }
       if (first.length) {
         const parts = [...new Set(first)].sort();
         const copy = `${id}~${seedOf(parts.join('+')).toString(36)}`;

@@ -150,9 +150,10 @@ describe('a scene of shots from the board to the stage', () => {
     const [, counter, quote] = scene.shots!.shots;
     const count = counter.info.find((i) => i.recipe === 'count')!;
     expect(count).toMatchObject({ value: 1393, target: { part: 'number' } });
+    const drawn = scene.shots!.assets[(quote.set as { asset: string }).asset];
     expect(quote.focal).toEqual({
-      kind: 'asset',
-      asset: (quote.set as { asset: string }).asset,
+      kind: 'box',
+      box: drawn.kind === 'svg' ? drawn.focal : null,
     });
   });
 
@@ -290,6 +291,42 @@ describe('the board’s charts on the charts as drawn', () => {
     );
     const svg = (once.assets['chart-1'] as { svg: string }).svg;
     expect(svg.match(/>1945</g)).toHaveLength(1);
+  });
+
+  it('draws a calendar named by its one date with that date once', () => {
+    const once = buildShots(
+      {
+        shots: [
+          {
+            ...plan.shots[1],
+            set: {
+              kind: 'chart',
+              chart: {
+                kind: 'calendar',
+                spec: {
+                  calendars: [
+                    { label: '1957', dates: ['1957'] },
+                    { label: '1958', dates: ['1958'] },
+                  ],
+                },
+              },
+            },
+            info: [],
+          },
+        ],
+      },
+      registry,
+      {
+        shape: 'wide',
+        palette: [],
+        held: null,
+        theme: 'paper',
+        map: null,
+        seed: 'charts',
+      },
+    );
+    const svg = (once.assets['chart-1'] as { svg: string }).svg;
+    expect(svg.match(/>1957</g)).toHaveLength(1);
   });
 
   it('draws a timeline, a calendar and a quotation from the shapes the board writes', () => {

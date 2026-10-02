@@ -15,6 +15,7 @@
  * unknown values fall back to known ones, lists are capped, text is
  * trimmed. What cannot be made sound is left for the check to name.
  */
+import type { RegistryEntry, ShotPlan } from '../shots/types';
 import { createHash } from 'node:crypto';
 import {
   personaOf,
@@ -1441,6 +1442,20 @@ export interface ExplainerSheet {
   title: string;
   transition: Transition;
   draft: SceneScriptDraft;
+  /**
+   * 'shots' when the shots engine makes it (explainer-animation-tech.md):
+   * its picture is the plan in `shots`, and `draft` holds only its beats
+   * (one per script row, word for word) with no things or steps. Absent,
+   * today's storyboard in `draft`. Decided once, at the board, so a remake,
+   * a twin or a recompose makes it the same way.
+   */
+  engine?: 'shots';
+  /** The board's plan of shots: every name from a closed list or from `registry`. */
+  shots?: ShotPlan;
+  /** What the plan may name, resolved when it was boarded: places, people, numbers, regions, pictures. */
+  registry?: RegistryEntry[];
+  /** Each beat's research claims (by the draft's beat index): the link from what is said to what is shown. */
+  rowClaims?: string[][];
 }
 
 export type SceneSheet = StorySheet | ExplainerSheet;
@@ -1658,6 +1673,12 @@ export function explainerSheetOf(raw: unknown): ExplainerSheet {
     said.draft && typeof said.draft === 'object'
       ? (said.draft as SceneScriptDraft)
       : null;
+  const shots =
+    said.shots &&
+    typeof said.shots === 'object' &&
+    Array.isArray((said.shots as Record<string, unknown>).shots)
+      ? (said.shots as ShotPlan)
+      : null;
   return {
     kind: 'explainer',
     title: text(said.title, 80) || text(draft?.title, 80) || 'A scene',
@@ -1671,6 +1692,24 @@ export function explainerSheetOf(raw: unknown): ExplainerSheet {
       cast: [],
       steps: [],
     },
+    // The shots engine's fields are kept only together: a plan without its
+    // switch, or the switch without a plan, is read as today's storyboard.
+    ...(said.engine === 'shots' && shots
+      ? {
+          engine: 'shots' as const,
+          shots,
+          registry: Array.isArray(said.registry)
+            ? (said.registry as RegistryEntry[])
+            : [],
+          rowClaims: Array.isArray(said.rowClaims)
+            ? (said.rowClaims as unknown[]).map((claims) =>
+                Array.isArray(claims)
+                  ? claims.filter((id): id is string => typeof id === 'string')
+                  : [],
+              )
+            : [],
+        }
+      : {}),
   };
 }
 

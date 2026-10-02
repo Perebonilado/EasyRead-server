@@ -140,16 +140,17 @@ export function capsule(a: Pt, ra: number, b: Pt, rb: number): Shape {
   if (d <= Math.abs(ra - rb) + 1e-6)
     return circle(ra >= rb ? a : b, Math.max(ra, rb));
   // The touching lines leave each circle at θ ± α; the far end is rounded
-  // through θ (2α of it shows), the near end through θ + π (the rest).
+  // through θ (2α of it shows), the near end through θ + π (the rest);
+  // drawn clockwise on screen, as every shape of the kit is.
   const theta = Math.atan2(b[1] - a[1], b[0] - a[0]);
   const alpha = Math.acos(Math.max(-1, Math.min(1, (ra - rb) / d)));
   const a1 = add(a, scale(dir(theta + alpha), ra));
-  const b1 = add(b, scale(dir(theta + alpha), rb));
   const a2 = add(a, scale(dir(theta - alpha), ra));
-  const endB = arcCubics(b, rb, theta + alpha, theta - alpha);
-  const endA = arcCubics(a, ra, theta - alpha, theta + alpha - 2 * Math.PI);
+  const b2 = add(b, scale(dir(theta - alpha), rb));
+  const endB = arcCubics(b, rb, theta - alpha, theta + alpha);
+  const endA = arcCubics(a, ra, theta + alpha, theta - alpha + 2 * Math.PI);
   const cubic = (s: Pt[]) => `C${pt(s[1])} ${pt(s[2])} ${pt(s[3])}`;
-  const path = `M${pt(a1)}L${pt(b1)}${endB.map(cubic).join('')}L${pt(a2)}${endA.map(cubic).join('')}Z`;
+  const path = `M${pt(a2)}L${pt(b2)}${endB.map(cubic).join('')}L${pt(a1)}${endA.map(cubic).join('')}Z`;
   return {
     d: path,
     box: unionBox([circle(a, ra).box, circle(b, rb).box]),
@@ -157,10 +158,26 @@ export function capsule(a: Pt, ra: number, b: Pt, rb: number): Shape {
 }
 
 /**
+ * Points in clockwise order on screen (y down), as every shape of the
+ * kit is drawn: shapes joined into one path then fill their overlaps
+ * instead of cutting holes in each other.
+ */
+export function clockwise(points: readonly Pt[]): Pt[] {
+  let sum = 0;
+  for (let i = 0; i < points.length; i += 1) {
+    const [x1, y1] = points[i];
+    const [x2, y2] = points[(i + 1) % points.length];
+    sum += x1 * y2 - x2 * y1;
+  }
+  return sum < 0 ? [...points].reverse() : [...points];
+}
+
+/**
  * A smooth closed shape through points (Catmull–Rom turned into cubics):
  * a torso, a coat, a hull. `tension` 0 is a polygon, 1 the full curve.
  */
-export function blob(points: readonly Pt[], tension = 1): Shape {
+export function blob(given: readonly Pt[], tension = 1): Shape {
+  const points = clockwise(given);
   const n = points.length;
   if (n < 3) return { d: '', box: boxOf(points) };
   const all: Pt[] = [];
@@ -183,7 +200,8 @@ export function blob(points: readonly Pt[], tension = 1): Shape {
  * sharp): a placard, a carriage, a container. Corners are quadratic-like
  * cubics, so the shape stays a path of absolute commands.
  */
-export function rounded(points: readonly Pt[], r: number): Shape {
+export function rounded(given: readonly Pt[], r: number): Shape {
+  const points = clockwise(given);
   const n = points.length;
   if (n < 3) return { d: '', box: boxOf(points) };
   if (r <= 0)

@@ -12,30 +12,48 @@ import {
 } from './studio-host';
 
 /**
- * A show's host (studio-explainer-plan, Ask 9, idea 4): on for children,
- * off for grown-ups, drawn by the kits, picked by the maker from three
- * looks on the choosing card, kept across episodes, and one of the show's
- * characters so a clip may cast them.
+ * A show's host (studio-explainer-plan, Ask 9, idea 4): drawn by the kits,
+ * picked by the maker from three looks on the choosing card, kept across
+ * episodes, and one of the show's characters so a clip may cast them.
+ * Off now for every show (explainer-animation-plan §10): the audience is
+ * never on screen, so no explainer has a host or a mascot.
  */
 describe('hostOn', () => {
   const brief = (said: Record<string, unknown>) =>
     briefOf({ format: 'explainer', idea: 'Day and night', ...said });
 
-  it("is on for children and off for grown-ups by the audience's recipe", () => {
-    expect(hostOn(brief({ who: { band: 'primary-upper' } }))).toBe(true);
-    expect(hostOn(brief({ audience: 'young children' }))).toBe(true);
+  it("puts no host or mascot in front of an explainer's audience, whoever it is for", () => {
+    expect(hostOn(brief({ who: { band: 'primary-upper' } }))).toBe(false);
+    expect(hostOn(brief({ audience: 'young children' }))).toBe(false);
     expect(hostOn(brief({ who: { band: 'university' } }))).toBe(false);
     expect(hostOn(brief({ audience: 'adults' }))).toBe(false);
   });
 
-  it("follows the maker's word either way, and is never a story's", () => {
-    expect(hostOn(brief({ audience: 'adults', host: true }))).toBe(true);
+  it("is off whatever the maker's word, and never a story's", () => {
+    expect(hostOn(brief({ audience: 'adults', host: true }))).toBe(false);
+    expect(hostOn(brief({ audience: 'children', host: true }))).toBe(false);
     expect(hostOn(brief({ audience: 'children', host: false }))).toBe(false);
     expect(
       hostOn(
         briefOf({ format: 'story', idea: 'A kite', audience: 'children' }),
       ),
     ).toBe(false);
+  });
+
+  it('takes the host out of the bible a show had, never putting one in', () => {
+    const before = bibleOf({
+      characters: [
+        { name: 'Juno', id: HOST_ID, host: true, voice: 'woman' },
+        { name: 'Ada', id: 'ada', voice: 'woman' },
+      ],
+      subject: 'x',
+    });
+    const children = brief({ audience: 'young children' });
+    const kept = withHost(before, before, hostOn(children), 'show-1');
+    expect(kept.bible.characters.map((c) => c.id)).toEqual(['ada']);
+    expect(kept.fresh).toBe(false);
+    const none = withHost(EMPTY_BIBLE, null, hostOn(children), 'show-2');
+    expect(none.bible.characters).toEqual([]);
   });
 
   it("keeps the maker's word on the brief", () => {

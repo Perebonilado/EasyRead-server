@@ -69,6 +69,7 @@ import {
 import { Ffmpeg, type VideoTools } from '../export/ffmpeg';
 import {
   PuppeteerFilmCapture,
+  exportGl,
   chromePath,
   type FilmCapturePort,
 } from '../export/film-capture';
@@ -120,6 +121,7 @@ export class StudioExportProcessor {
           4,
           Math.max(1, Number(config.get<string>('EXPORT_PAGES')) || 1),
         ),
+        gl: exportGl(config.get<string>('EXPORT_GL')),
       });
   }
 

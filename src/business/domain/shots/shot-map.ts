@@ -1,27 +1,32 @@
 /**
- * The show's one map as a shot's set (explainer-animation-tech.md §4.1),
- * behind one function, mapSetAsset(), so the MapLibre work package (WP8)
- * swaps only this: today it is the map scene-map.ts draws for the show's
- * frame, made a still asset whose regions, seams and places are named
- * parts the recipes and the camera can point at; WP8 makes it a geo asset
- * the player draws, its places staying points on the earth.
+ * The show's one map as a shot's set (explainer-animation-tech.md §4.1,
+ * §6.1), behind one function, mapSetAsset(). The map is geography the
+ * player draws itself on MapLibre (work package 8): a geo asset of the
+ * show's regions, seams and land round them (shot-geo), its places points
+ * on the earth, so the camera can tilt over it, fly across it and light
+ * it up a region at a time.
  *
- * The drawing is today's map with what the shots engine does itself taken
- * out: its CSS animations (the recipes move the parts), its rounded card
- * corners (the map fills the frame), its region names (a label recipe
- * names a region when the voice does) and its "Today's borders" corner
- * note (which becomes the shot's source chip). Its ids are made its own,
- * so two assets on the stage at once never share one.
+ * Today's drawing (scene-map's SVG, its regions, seams and places named
+ * parts) is kept as `drawnMapSet()`, a still asset for anything that
+ * cannot draw a geo map: its CSS animations out (the recipes move the
+ * parts), its rounded card corners out (the map fills the frame), its
+ * region names out (a label recipe names a region when the voice does)
+ * and its "Today's borders" corner note out (it becomes the shot's source
+ * chip). Its ids are made its own, so two assets on the stage at once
+ * never share one.
  */
 import { parseDocument } from 'htmlparser2';
 import render from 'dom-serializer';
 import type { Element } from 'domhandler';
 import type {
   FilmShape,
+  ShotBox,
   ShotCreditDto,
+  ShotGeoAssetDto,
   ShotLookDto,
   ShotPartDto,
   ShotSvgAssetDto,
+  ShotTargetDto,
 } from '../../../contracts';
 import { isolate } from '../scene-callouts';
 import { elements, removeNode, walk } from '../scene-dom';
@@ -38,6 +43,7 @@ import {
 import { nameKey } from '../scene-palette';
 import { renderSvg } from '../scene-raster';
 import { THEMES, themedCode, type ThemeId } from '../scene-themes';
+import { mapGeo, mercator, mercatorBox, type GeoBounds } from './shot-geo';
 
 /** The map's id among a scene's assets. */
 export const MAP_ASSET = 'map';
@@ -45,15 +51,22 @@ export const MAP_ASSET = 'map';
 /** The show's map, ready to be a shot's set. */
 export interface ShotMapSet {
   id: string;
-  asset: ShotSvgAssetDto;
-  /** Each region, seam and place it draws, by the name the show gives it, to its part. */
+  /** The geography the player draws (a geo map), or today's drawing (a drawn map). */
+  asset: ShotSvgAssetDto | ShotGeoAssetDto;
+  /** Each region, seam and place it draws, by the name the show gives it, to its part (or feature). */
   parts: Record<string, string>;
   /**
    * A point on the drawn map in the asset's units, or null off it: how a
-   * place is pointed at on a drawn map. Absent on a geo map (WP8), where a
+   * place is pointed at on a drawn map. Absent on a geo map, where a
    * place stays a point on the earth.
    */
   project?: (lng: number, lat: number) => [number, number] | null;
+  /** A geo map's frame, in Web Mercator pixels at zoom 8 (shot-geo's WORLD_PX): the units its distances are measured in. */
+  box?: ShotBox;
+  /** On a geo map, what a target covers in those units: a point, a feature's bounds, the whole frame. */
+  boxOf?: (target: ShotTargetDto) => ShotBox | null;
+  /** On a geo map, each feature's bounds on the earth (west, south, east, north), by id. */
+  geoBoxes?: Record<string, GeoBounds>;
   /** What the map says of itself: drawn with today's borders for a past year. */
   chip?: ShotCreditDto;
   /** A drawn map cannot tilt or show terrain; a geo map can. */
@@ -159,38 +172,62 @@ function union(boxes: readonly [number, number, number, number][]) {
 const made = new Map<string, Promise<ShotMapSet | null>>();
 const MADE_KEPT = 16;
 
-/**
- * The show's one map (the editor's world.base) as a shot's set, drawn for
- * the film's shape in the look's colours: its named regions, its seams,
- * each a part with its box in the drawing's units. Null for a show with no
- * map code can draw. Each show map, shape and theme is drawn and measured
- * once while the process runs.
- */
-export function mapSetAsset(
-  base: unknown,
-  look: ShotLookDto,
-  shape: FilmShape,
-  theme: ThemeId = 'paper',
+/** One making per key while the process runs, the oldest let go. */
+function keptMaking(
+  key: string,
+  make: () => Promise<ShotMapSet | null>,
 ): Promise<ShotMapSet | null> {
-  const key = JSON.stringify([base, shape, theme, look.palette.sides]);
   const kept = made.get(key);
   if (kept) return kept;
-  const making = drawMapSet(base, look, shape, theme).catch(() => null);
+  const making = make().catch(() => null);
   const oldest = made.keys().next();
   if (made.size >= MADE_KEPT && !oldest.done) made.delete(oldest.value);
   made.set(key, making);
   return making;
 }
 
-async function drawMapSet(
+/**
+ * The show's one map (the editor's world.base) as a shot's set: a geo
+ * map the player draws, its named regions and seams features it can
+ * light up, its land round it, its places points on the earth. Null for a
+ * show with no map code can draw. The same for every shape and theme (the
+ * player colours it from the look), made once per show map while the
+ * process runs. `drawn` asks for today's drawing instead (drawnMapSet).
+ */
+export function mapSetAsset(
   base: unknown,
   look: ShotLookDto,
   shape: FilmShape,
-  theme: ThemeId,
+  theme: ThemeId = 'paper',
+  engine: 'geo' | 'drawn' = 'geo',
 ): Promise<ShotMapSet | null> {
+  if (engine === 'drawn') return drawnMapSet(base, look, shape, theme);
+  return keptMaking(JSON.stringify(['geo', base]), () => geoMapSet(base));
+}
+
+/**
+ * Today's drawing of the show's map, for the shape and the look's
+ * colours, as a still asset whose regions and seams are measured parts.
+ * Each show map, shape and theme is drawn and measured once while the
+ * process runs.
+ */
+export function drawnMapSet(
+  base: unknown,
+  look: ShotLookDto,
+  shape: FilmShape,
+  theme: ThemeId = 'paper',
+): Promise<ShotMapSet | null> {
+  return keptMaking(
+    JSON.stringify([base, shape, theme, look.palette.sides]),
+    () => drawMapSet(base, look, shape, theme),
+  );
+}
+
+/** The show's map read as scene-map reads a show's base: its regions, its seams, its year. */
+function baseSpec(base: unknown) {
   const sound = readMapBase(base);
   if (!sound) return null;
-  const { spec } = readMap({
+  return readMap({
     region: sound.region,
     highlight: null,
     places: null,
@@ -200,7 +237,67 @@ async function drawMapSet(
     year: sound.year ?? null,
     bordersDiffer: sound.bordersDiffer ?? null,
     base: sound,
-  });
+  }).spec;
+}
+
+/** A target's centre on the earth, on a geo map: a point's own, a feature's middle. */
+const centreOf = ([w, s, e, n]: GeoBounds): [number, number] => [
+  (w + e) / 2,
+  (s + n) / 2,
+];
+
+async function geoMapSet(base: unknown): Promise<ShotMapSet | null> {
+  const spec = baseSpec(base);
+  if (!spec) return null;
+  const geo = await mapGeo(spec);
+  const box = mercatorBox(geo.asset.bounds);
+  const boxOf = (target: ShotTargetDto): ShotBox | null => {
+    switch (target.kind) {
+      case 'geo': {
+        const [x, y] = mercator(target.lng, target.lat);
+        return [x, y, 0, 0];
+      }
+      case 'feature':
+        return target.asset === MAP_ASSET && geo.boxes[target.id]
+          ? mercatorBox(geo.boxes[target.id])
+          : null;
+      case 'asset':
+        return target.asset === MAP_ASSET && !target.part ? box : null;
+      case 'box':
+        return target.box;
+      default:
+        return null;
+    }
+  };
+  return {
+    id: MAP_ASSET,
+    asset: geo.asset,
+    parts: geo.parts,
+    box,
+    boxOf,
+    geoBoxes: geo.boxes,
+    // Natural Earth's borders are today's; a map of a year whose borders differed says so on its chip.
+    ...(spec.period ? { chip: BORDERS_CHIP } : {}),
+    flat: false,
+  };
+}
+
+/** A geo feature's middle on the earth, by id; null for one the map has not. */
+export function featureCentre(
+  map: ShotMapSet,
+  id: string,
+): [number, number] | null {
+  const bounds = map.geoBoxes?.[id];
+  return bounds ? centreOf(bounds) : null;
+}
+
+async function drawMapSet(
+  base: unknown,
+  look: ShotLookDto,
+  shape: FilmShape,
+  theme: ThemeId,
+): Promise<ShotMapSet | null> {
+  const spec = baseSpec(base);
   if (!spec) return null;
   const drawn = await renderMap(spec, shape);
   const coloured =

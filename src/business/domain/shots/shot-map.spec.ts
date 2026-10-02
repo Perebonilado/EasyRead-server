@@ -1,5 +1,12 @@
 import { shotLook } from './shot-build';
-import { MAP_ASSET, mapSetAsset, stillMap } from './shot-map';
+import {
+  MAP_ASSET,
+  drawnMapSet,
+  featureCentre,
+  mapSetAsset,
+  stillMap,
+} from './shot-map';
+import { mercator } from './shot-geo';
 
 describe('today’s map made a still asset', () => {
   const drawn =
@@ -79,10 +86,53 @@ describe('the show’s map as a shot’s set', () => {
     theme: 'paper',
   });
 
-  it('draws the regions and seam as measured parts, points places on it, and says whose borders they are', async () => {
+  it('is geography the player draws: its regions and seam features, its frame in Web Mercator, tiltable', async () => {
     const set = (await mapSetAsset(base, look, 'wide'))!;
     expect(set.id).toBe(MAP_ASSET);
+    expect(set.flat).toBe(false);
+    expect(set.project).toBeUndefined();
+    if (set.asset.kind !== 'geo') throw new Error('a geo map');
+    const ids = (
+      set.asset.features.features as { properties: { id: string } }[]
+    ).map((one) => one.properties.id);
+    expect(ids).toEqual(
+      expect.arrayContaining([
+        'group-north-region',
+        'group-west-region',
+        'seam-the-line',
+      ]),
+    );
+    expect(set.parts['West Region']).toBe('group-west-region');
+    // Kano is inside the North's box; its point is a point on the earth.
+    const north = set.boxOf!({
+      kind: 'feature',
+      asset: MAP_ASSET,
+      id: 'group-north-region',
+    })!;
+    const [kx, ky] = mercator(8.52, 12.0);
+    expect(kx).toBeGreaterThan(north[0]);
+    expect(kx).toBeLessThan(north[0] + north[2]);
+    expect(ky).toBeGreaterThan(north[1]);
+    expect(ky).toBeLessThan(north[1] + north[3]);
+    expect(set.boxOf!({ kind: 'geo', lng: 8.52, lat: 12 })).toEqual([
+      kx,
+      ky,
+      0,
+      0,
+    ]);
+    expect(set.boxOf!({ kind: 'asset', asset: MAP_ASSET })).toEqual(set.box);
+    const middle = featureCentre(set, 'group-north-region')!;
+    expect(middle[1]).toBeGreaterThan(8);
+    expect(set.chip?.text).toContain('Natural Earth');
+    // Made once, for every shape and theme.
+    expect(await mapSetAsset(base, look, 'tall', 'nightsky')).toBe(set);
+  }, 30_000);
+
+  it('keeps today’s drawing for whatever cannot draw geography: regions and seam as measured parts, places pointed at on it', async () => {
+    const set = (await drawnMapSet(base, look, 'wide'))!;
+    expect(set.id).toBe(MAP_ASSET);
     expect(set.flat).toBe(true);
+    if (set.asset.kind !== 'svg') throw new Error('a drawn map');
     expect(Object.keys(set.asset.parts).sort()).toEqual([
       'group-north-region',
       'group-west-region',
@@ -104,7 +154,8 @@ describe('the show’s map as a shot’s set', () => {
     expect(set.chip?.text).toContain('Natural Earth');
     expect(set.asset.svg).not.toContain('animation');
     // Drawn once and kept.
-    expect(await mapSetAsset(base, look, 'wide')).toBe(set);
+    expect(await drawnMapSet(base, look, 'wide')).toBe(set);
+    expect(await mapSetAsset(base, look, 'wide', 'paper', 'drawn')).toBe(set);
   }, 30_000);
 
   it('is nothing for a show with no map code can draw', async () => {

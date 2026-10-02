@@ -1,12 +1,15 @@
 import type { ShotSvgAssetDto } from '../../../contracts';
 import { MAP, PALETTE, PLAN, REGISTRY } from './__fixtures__/regional-turn';
 import {
+  MAP_TILT,
   buildShots,
   registryFrom,
   shotLook,
   travelMs,
   type BuildContext,
+  type BuiltShots,
 } from './shot-build';
+import { mapSetAsset, type ShotMapSet } from './shot-map';
 import { CAMERA_AMOUNT } from './shot-time';
 import type { ShotPlan } from './types';
 
@@ -296,5 +299,130 @@ describe('the plan built', () => {
       buildShots(PLAN, registry, { ...ctx, seed: 'other' }).shots[0].life[0]
         .seed,
     ).not.toBe(built.shots[0].life[0].seed);
+  });
+});
+
+describe('the plan built on the player’s own map (geography it draws)', () => {
+  /** The show's map as the editor wrote it: Nigeria's three regions and the seam between two. */
+  const BASE = {
+    kind: 'map',
+    region: 'Nigeria',
+    year: 1960,
+    bordersDiffer: true,
+    groups: [
+      {
+        name: 'North Region',
+        colour: 'chart0',
+        members: [
+          'Kano',
+          'Kaduna',
+          'Sokoto',
+          'Borno',
+          'Niger',
+          'Kwara',
+          'Benue',
+          'Plateau',
+          'Bauchi',
+          'Adamawa',
+        ],
+      },
+      {
+        name: 'West Region',
+        colour: 'chart1',
+        members: ['Lagos', 'Ogun', 'Oyo', 'Osun', 'Ondo'],
+      },
+      {
+        name: 'East Region',
+        colour: 'chart2',
+        members: ['Enugu', 'Anambra', 'Imo', 'Abia', 'Rivers'],
+      },
+    ],
+    seams: [
+      { name: 'federal balance', between: ['North Region', 'East Region'] },
+    ],
+  };
+  let geo: BuiltShots;
+  let geoMap: ShotMapSet | null;
+  beforeAll(async () => {
+    geoMap = await mapSetAsset(BASE, shotLook(ctx), 'wide');
+    geo = buildShots(PLAN, registry, { ...ctx, map: geoMap });
+  }, 60_000);
+
+  it('tilts the map the plan asks to tilt, steep enough to read as ground', () => {
+    expect(geo.assets.map.kind).toBe('geo');
+    expect(geo.shots[0].set).toEqual({
+      kind: 'map',
+      asset: 'map',
+      style: 'atlas',
+      tilt: MAP_TILT,
+      bearing: 0,
+      terrain: false,
+    });
+    expect(MAP_TILT).toBeGreaterThanOrEqual(45);
+    expect(MAP_TILT).toBeLessThanOrEqual(55);
+    // A map the plan leaves flat stays flat.
+    expect(geo.shots[2].set).toMatchObject({ kind: 'map', tilt: 0 });
+  });
+
+  it('points at a region or a seam as a feature, and at a place as a point on the earth', () => {
+    const [pin, fill] = geo.shots[0].info;
+    expect(fill.target).toEqual({
+      kind: 'feature',
+      asset: 'map',
+      id: 'group-north-region',
+    });
+    expect(pin.target).toEqual({ kind: 'geo', lng: 3.38, lat: 6.52 });
+    expect(geo.shots[0].focal).toEqual({
+      kind: 'feature',
+      asset: 'map',
+      id: 'group-north-region',
+    });
+    const seam = geo.shots[2].info.find((i) => i.recipe === 'seam');
+    expect(seam?.target).toEqual({
+      kind: 'feature',
+      asset: 'map',
+      id: 'seam-federal-balance',
+    });
+    expect(geo.shots[2].camera[0].target).toEqual({
+      kind: 'feature',
+      asset: 'map',
+      id: 'seam-federal-balance',
+    });
+    // Still nothing for a place with no point, and no words in its place.
+    expect(geo.shots[0].info.map((i) => i.recipe)).toEqual(['pin', 'fill']);
+  });
+
+  it('times a travel by how far it goes on the earth', () => {
+    const travel = geo.shots[4].camera.find((c) => c.move === 'travel')!;
+    expect(travel.target).toEqual({ kind: 'geo', lng: 3.38, lat: 6.52 });
+    expect(travel.durMs).toBeGreaterThanOrEqual(400);
+    expect(travel.durMs).toBeLessThanOrEqual(1200);
+  });
+
+  it('leaves off a place past the land the map has', () => {
+    const far = registryFrom([
+      ...REGISTRY,
+      {
+        name: 'place:Paris',
+        kind: 'place',
+        about: 'far away',
+        geo: { lng: 2.35, lat: 48.85 },
+      },
+    ]);
+    const plan: ShotPlan = {
+      shots: [
+        {
+          ...PLAN.shots[0],
+          info: [
+            { recipe: 'pin', target: 'place:Paris', on: 'colonial Nigeria' },
+            { recipe: 'pin', target: 'place:Kano', on: 'power' },
+          ],
+        },
+      ],
+    };
+    const pins = buildShots(plan, far, { ...ctx, map: geoMap }).shots[0].info;
+    expect(pins.map((i) => i.target)).toEqual([
+      { kind: 'geo', lng: 8.52, lat: 12 },
+    ]);
   });
 });

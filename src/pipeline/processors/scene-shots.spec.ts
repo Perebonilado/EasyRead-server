@@ -225,14 +225,15 @@ describe('a scene of shots on the stage a Studio scene is made on', () => {
     expect(scene.voicePace).toBe(1);
     expect(scene.ideas).toEqual([{ beat: 0, label: 'Regions' }]);
     expect(scene.shots!.assets.map).toBeDefined();
-    expect(scene.shots!.assets.map.kind).toBe('svg');
+    // The show's map is geography the player draws.
+    expect(scene.shots!.assets.map.kind).toBe('geo');
     expect(scene.shots!.shots[0].set.kind).toBe('map');
-    // The regions the plan fills are the drawn map's own parts.
+    // The regions the plan fills are the map's own features.
     const fill = scene.shots!.shots[0].info.find((i) => i.recipe === 'fill');
     expect(fill?.target).toEqual({
-      kind: 'asset',
+      kind: 'feature',
       asset: 'map',
-      part: 'group-north-region',
+      id: 'group-north-region',
     });
     // Its card's still was made, and its parts kept for a twin made later.
     expect(kept.get(made.thumbKey)?.subarray(1, 4).toString()).toBe('PNG');
@@ -241,16 +242,13 @@ describe('a scene of shots on the stage a Studio scene is made on', () => {
     ) as SceneParts;
     expect(parts.script.beats.map((b) => b.say)).toEqual(LINES);
     expect(parts.drawings).toEqual([]);
-    // Its twin: the same voice, its map drawn again for the tall frame.
+    // Its twin: the same voice, framed for the tall frame on the same map
+    // (geography is the same in every shape; the player frames it).
     const twin = stored(kept, made.twin!.sceneKey);
     expect(twin.engine).toBe('shots');
     expect(twin.shape).toBe('tall');
     expect(twin.stagings.wide).toEqual({ w: 900, h: 1600, places: [] });
-    expect(
-      twin.shots!.assets.map.kind === 'svg' && twin.shots!.assets.map.svg,
-    ).not.toBe(
-      scene.shots!.assets.map.kind === 'svg' && scene.shots!.assets.map.svg,
-    );
+    expect(twin.shots!.assets.map).toEqual(scene.shots!.assets.map);
     expect(twin.beats).toEqual(scene.beats);
   }, 60_000);
 

@@ -10,6 +10,7 @@ import {
   REGISTRY,
 } from './__fixtures__/regional-turn';
 import { checkTimed } from './shot-check-timed';
+import { SHOT_SOUNDS } from './shot-sound';
 import {
   composeShotScene,
   shotsInputOf,
@@ -157,7 +158,10 @@ describe('a scene of shots composed', () => {
   });
 
   it('gives its motion its sounds, and leaves its pace mended', () => {
-    expect(scene.shots!.sounds.some((s) => s.sound === 'tick')).toBe(true);
+    // A pin pops as it lands; every sound is one the player's library makes.
+    expect(scene.shots!.sounds.some((s) => s.sound === 'pop')).toBe(true);
+    for (const cue of scene.shots!.sounds)
+      expect(SHOT_SOUNDS).toContain(cue.sound);
     expect(problems.map((p) => p.code)).not.toContain('first-change');
     expect(
       checkTimed(scene.shots!.shots, DURATION_MS, { first: true }),

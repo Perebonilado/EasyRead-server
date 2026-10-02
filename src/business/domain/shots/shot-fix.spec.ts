@@ -31,7 +31,11 @@ const shot = (
   ...s,
 });
 
-/** The Wall's plan as the board left it: the map, the border's length, Reagan's words, East Germany holding on. */
+/**
+ * The Wall's plan as the board left it: the map, the border's length,
+ * Reagan's words, East Germany holding on, and the year the Wall opened
+ * (the map only while its lines name its places).
+ */
 const plan = (): ShotPlan =>
   mendPlan(
     {
@@ -121,15 +125,29 @@ const plan = (): ShotPlan =>
               text: 'East Germany',
               on: 'held on',
             },
-            { recipe: 'mark', target: 'place:Berlin', on: 'the Wall opened' },
           ],
           focal: 'region:East Germany',
+        }),
+        shot({
+          on: 'Two years later',
+          set: {
+            kind: 'chart',
+            chart: {
+              kind: 'calendar',
+              spec: {
+                calendars: [{ label: 'Wall opens', dates: ['1989'] }],
+                merge: null,
+              },
+            },
+          },
+          camera: [{ move: 'establish', on: 'Two years later' }],
+          focal: WHOLE_SET,
         }),
       ],
     },
     narration,
     registry,
-    { map: true },
+    { map: true, lines: WALL_ROWS },
   );
 
 const fix = (
@@ -253,6 +271,7 @@ describe("the critic's fixes made into plan edits (applyFixes)", () => {
       'map',
       'chart',
       'map',
+      'chart',
     ]);
     expect(
       out.plan.shots[0].info.some((i) => i.target === 'seam:inner border'),
@@ -333,17 +352,19 @@ describe("the critic's fixes made into plan edits (applyFixes)", () => {
       board: () => Promise.resolve<ShotPlan>({ shots: [splitChart] }),
     });
     expect(full.applied[0].outcome).toBe('boarded');
-    expect(full.plan.shots).toHaveLength(5);
+    expect(full.plan.shots).toHaveLength(6);
     // A new shot that shows nothing of its own (the same map again) is
     // mended away: the camera moves at the words instead.
     const idle = await run([fix('split', 1, { to: 'cut in two' })], {
       board: () =>
         Promise.resolve<ShotPlan>({
-          shots: [shot({ on: 'cut in two', set: { kind: 'map', tilt: 'flat' } })],
+          shots: [
+            shot({ on: 'cut in two', set: { kind: 'map', tilt: 'flat' } }),
+          ],
         }),
     });
     expect(idle.applied[0].outcome).toBe('fell-back');
-    expect(idle.plan.shots).toHaveLength(4);
+    expect(idle.plan.shots).toHaveLength(5);
     expect(idle.plan.shots[0].camera).toContainEqual(
       expect.objectContaining({ on: 'cut in two' }),
     );
@@ -380,7 +401,7 @@ describe("the critic's fixes made into plan edits (applyFixes)", () => {
     const undone = await run([fix('merge', 1)]);
     expect(undone.applied[0].outcome).toBe('no-effect');
     expect(undone.applied[0].what).toMatch(/would break the rules/);
-    expect(undone.plan.shots).toHaveLength(4);
+    expect(undone.plan.shots).toHaveLength(5);
   });
 
   it('move-event: an item onto other words in its shot, or onto its nearest words when they are in another set', async () => {

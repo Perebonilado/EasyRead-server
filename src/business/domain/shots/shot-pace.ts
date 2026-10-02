@@ -191,6 +191,157 @@ export function spareShots(
   );
 }
 
+/** An actor with only its moves before a word (`early`), or from it on. */
+function movesOf(
+  actor: PlanActor,
+  before: (on: string) => boolean,
+  early: boolean,
+): PlanActor {
+  const { moves: all, ...rest } = actor;
+  const kept = (all ?? []).filter((m) => before(m.on) === early);
+  return kept.length ? { ...rest, moves: kept } : rest;
+}
+
+/** Whether an actor has left before a word. */
+const goneBy = (actor: PlanActor, before: (on: string) => boolean) =>
+  (actor.moves ?? []).some(
+    (m) => ['exit', 'leave'].includes(m.move) && before(m.on),
+  );
+
+/** Whether an actor is on before a word: there from the start, or come on by then. */
+const thereBy = (actor: PlanActor, before: (on: string) => boolean) => {
+  const enter = (actor.moves ?? []).find((m) => m.move === 'enter');
+  return !enter || before(enter.on);
+};
+
+/** A shot moved onto other words: its own, and each of its changes that were on its words. */
+export function onWords(shot: PlanShot, on: string): PlanShot {
+  const was = shot.on;
+  return {
+    ...shot,
+    on,
+    info: shot.info.map((i) => (i.on === was ? { ...i, on } : i)),
+    camera: shot.camera.map((c) => (c.on === was ? { ...c, on } : c)),
+  };
+}
+
+/**
+ * Another picture put over shot `k`'s words from `from` to `to` (in place,
+ * in `shots`): the shot keeps what it brings on before `from`, where it
+ * has words of its own before it (else the picture starts on the shot's
+ * own words); the picture holds from there; and the shot goes on after
+ * `to` as its continuation, with what it brings on from there, where it
+ * has room. What the shot brought on between goes, or, with `keep`, comes
+ * on as its continuation begins. False, and nothing changed, when the
+ * shot has no words or the picture would have no room.
+ */
+export function replaceSpan(
+  shots: PlanShot[],
+  k: number,
+  from: number,
+  to: number,
+  picture: PlanShot,
+  n: Narration,
+  keep = false,
+): boolean {
+  const starts = shotStarts({ shots }, n);
+  const start = starts[k];
+  if (start === undefined || start < 0) return false;
+  const end = starts.slice(k + 1).find((s) => s > start) ?? n.keys.length;
+  const a = from - start < PLAN_PACE.nextWords ? start : from;
+  const b = Math.min(to, end);
+  if (b - a < PLAN_PACE.roomWords) return false;
+  const shot = shots[k];
+  const lands = (on: string) => landingOf(n, on, start);
+  const beforeA = (on: string) => lands(on) < a;
+  const beforeB = (on: string) => lands(on) < b;
+  const between = (on: string) => !beforeA(on) && beforeB(on);
+  const pieces: PlanShot[] = [];
+  if (a > start)
+    pieces.push({
+      ...shot,
+      info: shot.info.filter((i) => beforeA(i.on)),
+      camera: shot.camera.filter((c) => beforeA(c.on)),
+      actors: shot.actors
+        .filter((x) => thereBy(x, beforeA))
+        .map((x) => movesOf(x, beforeA, true)),
+      join: 'cut',
+    });
+  const tail = end - b >= PLAN_PACE.roomWords;
+  const spot = uniquePhrase(n, a, 3);
+  pieces.push({
+    ...onWords(
+      picture,
+      a === start ? shot.on : phraseText(n, spot.at, spot.length),
+    ),
+    join: tail ? 'cut' : shot.join,
+  });
+  if (tail) {
+    const at = uniquePhrase(n, b, 3);
+    const on = phraseText(n, at.at, at.length);
+    const kept = (on: string) => !beforeB(on) || (keep && between(on));
+    const moved = <T extends { on: string }>(x: T): T =>
+      between(x.on) ? { ...x, on } : x;
+    const info = shot.info.filter((i) => kept(i.on)).map(moved);
+    // A map going on is framed on what it now brings on first.
+    const subject =
+      shot.set.kind === 'map'
+        ? info.find((i) => i.target && !i.target.startsWith('part:'))?.target
+        : undefined;
+    pieces.push({
+      ...shot,
+      on,
+      info,
+      camera: shot.camera.filter((c) => !beforeB(c.on)),
+      actors: shot.actors
+        .filter((x) => !goneBy(x, beforeB))
+        .map((x) => movesOf(x, beforeB, false)),
+      join: shot.join,
+      ...(subject ? { focal: subject } : {}),
+    });
+  }
+  shots.splice(k, 1, ...pieces);
+  return true;
+}
+
+/**
+ * A picture cut into the plan where the voice names what it shows, at key
+ * `at` (in place, in `shots`), within the pace's limits: it holds at
+ * least a few words (PLAN_PACE.roomWords), until the next change of the
+ * shot it cuts into, which then goes on; it starts on that shot's own
+ * words when the name is said as the shot begins. False, and nothing
+ * changed, when the shot under it has a change too soon after the name
+ * for a picture to be read between.
+ */
+export function cutIn(
+  shots: PlanShot[],
+  at: number,
+  picture: PlanShot,
+  n: Narration,
+): boolean {
+  const starts = shotStarts({ shots }, n);
+  let k = -1;
+  starts.forEach((s, i) => {
+    if (s >= 0 && s <= at && (k < 0 || s >= starts[k])) k = i;
+  });
+  if (k < 0) return false;
+  const start = starts[k];
+  const end = starts.slice(k + 1).find((s) => s > start) ?? n.keys.length;
+  const from = at - start < PLAN_PACE.nextWords ? start : at;
+  const shot = shots[k];
+  const changes = [
+    ...shot.info.map((i) => i.on),
+    ...shot.camera.map((c) => c.on),
+    ...shot.actors.flatMap((x) => (x.moves ?? []).map((m) => m.on)),
+  ]
+    .map((on) => landingOf(n, on, start))
+    .filter((x) => x > from && x < end);
+  // A change of its own too soon after the name: no room for a picture.
+  if (changes.some((x) => x < from + PLAN_PACE.roomWords)) return false;
+  const to = changes.length ? Math.min(...changes) : end;
+  return replaceSpan(shots, k, from, to, picture, n, true);
+}
+
 /**
  * A shot with no room for another change goes on from where the change
  * lands as its continuation (in place, in `shots`): the same set, framed
@@ -218,22 +369,6 @@ export function splitShot(
   if (later.length + (change ? 1 : 0) > most) return false;
   if (!change && !later.length) return false;
   const spot = uniquePhrase(n, at, 3);
-  /** An actor with only its moves before the change (early), or from it on. */
-  const keep = (a: PlanActor, early: boolean): PlanActor => {
-    const { moves: all, ...rest } = a;
-    const kept = (all ?? []).filter((m) => before(m.on) === early);
-    return kept.length ? { ...rest, moves: kept } : rest;
-  };
-  const gone = (a: PlanActor) =>
-    (a.moves ?? []).some(
-      (m) => ['exit', 'leave'].includes(m.move) && before(m.on),
-    );
-  const comes = (a: PlanActor) =>
-    (a.moves ?? []).find((m) => m.move === 'enter');
-  const there = (a: PlanActor) => {
-    const enter = comes(a);
-    return !enter || before(enter.on);
-  };
   shots.splice(
     k,
     1,
@@ -241,13 +376,17 @@ export function splitShot(
       ...shot,
       info: shot.info.filter((i) => before(i.on)),
       camera: shot.camera.filter((c) => before(c.on)),
-      actors: shot.actors.filter(there).map((a) => keep(a, true)),
+      actors: shot.actors
+        .filter((a) => thereBy(a, before))
+        .map((a) => movesOf(a, before, true)),
       join: 'continue',
     },
     {
       on: change ? change.on : phraseText(n, spot.at, spot.length),
       set: shot.set,
-      actors: shot.actors.filter((a) => !gone(a)).map((a) => keep(a, false)),
+      actors: shot.actors
+        .filter((a) => !goneBy(a, before))
+        .map((a) => movesOf(a, before, false)),
       info: change ? [change, ...later] : later,
       life: [...shot.life],
       camera: shot.camera.filter((c) => !before(c.on)),

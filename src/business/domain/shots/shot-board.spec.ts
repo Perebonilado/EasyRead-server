@@ -8,7 +8,7 @@ import {
   withPace,
   withSafeShots,
 } from './shot-board';
-import { checkPlan, WHOLE_SET } from './shot-check';
+import { checkPlan, mapsOffPlace, WHOLE_SET } from './shot-check';
 import {
   lineSpans,
   narrationOf,
@@ -169,15 +169,22 @@ describe("a lesson scene's shots boarded", () => {
     expect(everyLineShown(made.plan)).toBe(true);
   });
 
-  it('boards by code alone when the board cannot be had: safe shots, never a card', () => {
+  it('boards by code alone when the board cannot be had: safe shots, never a card, never the map as a stand-in', () => {
     const { plan, registry } = safePlan(input);
     expect(checkPlan(plan, narration, registry, { map: true })).toEqual([]);
     expect(everyLineShown(plan)).toBe(true);
+    // Berlin and its year: the year's calendar before the map.
     expect(plan.shots[0]).toMatchObject({
       on: 'In 1961, Berlin',
-      set: { kind: 'map' },
-      focal: 'place:Berlin',
+      set: { kind: 'chart', chart: { kind: 'calendar' } },
     });
+    // The map only where a line names a place it shows: East Germany.
+    expect(
+      plan.shots.filter((s) => s.set.kind === 'map').map((s) => s.focal),
+    ).toEqual(['region:East Germany']);
+    expect(
+      mapsOffPlace(plan, narrationOf(narration), registry, WALL_ROWS),
+    ).toEqual([]);
     expect(JSON.stringify(plan)).not.toMatch(/"kind":"(?:words|plain)"/u);
   });
 

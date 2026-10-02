@@ -2387,6 +2387,13 @@ export interface ShotPartDto {
   value?: number;
   /** A colour role from the look: 'ink', 'muted', 'accent', 'held', or a side's name. */
   role?: string;
+  /**
+   * A part of the picture's later state (the words that replace struck
+   * ones, a stamp, the date several dates come to): drawn in the asset as
+   * the picture ends, but hidden until a recipe brings it on. Absent, the
+   * part is there from the shot's start.
+   */
+  later?: boolean;
 }
 
 /** A kit piece's states (each a pose per part) and the moves it can make. */

@@ -49,6 +49,7 @@ import { toAsset } from '../kit/rig';
 import { kitStyle, type KitLook } from '../kit/style';
 import { chartAsset } from './shot-charts';
 import { WHOLE_SET } from './shot-check';
+import { pictureAssetOf, pictureSetOf } from './shot-pictures';
 import type { ShotMapSet } from './shot-map';
 import { chartPartIds, partSlug } from './shot-parts';
 import { splitTarget } from './shot-registry';
@@ -202,13 +203,15 @@ function kitSet(
   return null;
 }
 
-/** A photo, portrait or document the picture desk cleared (WP11). None yet: such a shot is a safe one. */
-function pictureAsset(entry: RegistryEntry | null): {
-  asset: ShotAssetDto;
-  credit: ShotCreditDto;
-} | null {
-  void entry;
-  return null;
+/**
+ * A photo, portrait or document the picture desk cleared (WP11): its image
+ * asset with its credit (shot-pictures). A name with no cleared picture is
+ * a safe shot.
+ */
+function pictureAsset(
+  entry: RegistryEntry | null,
+): ReturnType<typeof pictureAssetOf> {
+  return pictureAssetOf(entry);
 }
 
 // ── Building ──────────────────────────────────────────────────────────────
@@ -646,20 +649,16 @@ export function buildShots(
         }
         const id = pictures.get(name) ?? `picture-${pictures.size + 1}`;
         pictures.set(name, id);
-        const set: ShotSetDto =
-          planned.kind === 'photo'
-            ? {
-                kind: 'photo',
-                asset: id,
-                treatment: planned.treatment ?? 'duotone',
-              }
-            : planned.kind === 'portrait'
-              ? {
-                  kind: 'portrait',
-                  asset: id,
-                  name: name.replace(/^[a-z]+:/i, ''),
-                }
-              : { kind: 'document', asset: id };
+        const set: ShotSetDto = pictureSetOf({
+          kind: planned.kind,
+          asset: id,
+          name,
+          picture: picture.picture,
+          shape: ctx.shape,
+          ...(planned.kind === 'photo' && planned.treatment
+            ? { treatment: planned.treatment }
+            : {}),
+        });
         return { set, asset: { id, dto: picture.asset }, chip: picture.credit };
       }
       case 'set': {

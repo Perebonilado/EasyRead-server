@@ -149,8 +149,39 @@ export interface RegistryEntry {
   geo?: { lng: number; lat: number };
   /** A feature of the scene's geo asset: a region, a seam, a route, a pin. */
   feature?: { asset: string; id: string };
-  /** A picture the picture desk cleared (photos, portraits, documents). */
-  picture?: { asset: string; credit: string };
+  /**
+   * A picture the picture desk cleared (photos, portraits, documents):
+   * its id at the desk and its chip's words; then (WP11) what the build
+   * makes its image asset of, kept on the stored registry so the make
+   * needs nothing but the sheet.
+   */
+  picture?: {
+    asset: string;
+    credit: string;
+    /** Our copy, relative to the API's origin ("api/v1/studio/pictures/<id>"), its size and its subject's box in its pixels. */
+    url?: string;
+    width?: number;
+    height?: number;
+    focal?: [number, number, number, number];
+    /** Its depth map (white near), when one was made. */
+    depthUrl?: string;
+    licence?: string;
+    /** The chip's middle: who made or holds it. */
+    source?: string;
+    /** The file's page at its source. */
+    sourceUrl?: string;
+    /** The full credit for the description. */
+    fullCredit?: string;
+    kind?: 'photo' | 'portrait' | 'document';
+    year?: number;
+    /** No colour of its own: it may take the show's ink and paper. */
+    mono?: boolean;
+    /** Its own content inside its scan's border, in its pixels. */
+    crop?: [number, number, number, number];
+    /** A portrait's person: their years and who they were (three words at most). */
+    dates?: string;
+    role?: string;
+  };
   value?: number;
   unit?: string;
   /** Wikidata's id for a person, place or thing, when known. */

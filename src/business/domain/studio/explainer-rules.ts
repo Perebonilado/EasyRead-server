@@ -8,7 +8,7 @@
  */
 
 /** Bumped when a rule changes what a film may contain, so stored checks can tell which rules they ran. */
-export const RULES_VERSION = 1;
+export const RULES_VERSION = 2;
 
 /** Pace, in ms (research §3.2). An information event puts a new fact on screen; a sub-step is part of one. */
 export const PACE = {
@@ -81,12 +81,9 @@ export const SAFETY = { flashesPerSecond: 3, flicker: 0.1 } as const;
  * Safe areas as fractions of the frame (research §3.8): graphics-safe for
  * wide (EBU R95); for tall, the box clear of YouTube's and the platforms'
  * overlays, with the caption band at its foot. Only text, labels, the chip
- * and captions must sit inside; the picture runs full-bleed.
- *
- * The foot of every captioned film is the captions' (house, 2026-10-02):
- * from `captionY0` down, a frame's own words (labels, values, names) stay
- * out, so a caption never sits on them; pictures may run under it. In a
- * wide frame that is its lowest 18%.
+ * and captions must sit inside; the picture runs full-bleed. In a captioned
+ * film the foot of the frame is the captions': a wide frame's foot 18% of
+ * its height (house), a tall frame's band from captionY0.
  */
 export const SAFE = {
   wide: {

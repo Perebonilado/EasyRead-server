@@ -5,9 +5,15 @@
  * timed by hand as shots:
  *
  *  1. a tilted terrain map of the country, Lagos pinned;
- *  2. the three regions filling one after another, each in its side's colour;
+ *  2. the three regions filling one after another, each in its side's colour,
+ *     a crowd coming on at Kano as the North fills and cheering;
  *  3. a spotlight on the regions, Lagos dimming with the rest;
- *  4. the camera pulling back to show them among their neighbours.
+ *  4. a group marching from Kano to Lagos as the camera pulls back to show
+ *     the regions among their neighbours.
+ *
+ * The kit's pieces are made and stood on the earth by the build itself
+ * (buildShots, kit/place), as a show's would be; only their moves are timed
+ * here by hand.
  *
  * Written as <name>.json and <name>-tall.json into each --out folder, for
  * the client's /dev/shots (public/dev-scenes/shots) and its tests
@@ -20,15 +26,29 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createConnection } from 'mysql2/promise';
 import type {
+  FilmShape,
   SceneDto,
+  ShotActorDto,
+  ShotAssetDto,
   ShotDto,
   ShotInfoDto,
   ShotTargetDto,
 } from '../src/contracts';
 import { placeNamed } from '../src/business/domain/scene-map-places';
 import { STAGES } from '../src/business/domain/scene-shape';
-import { shotLook, MAP_TILT } from '../src/business/domain/shots/shot-build';
-import { MAP_ASSET, mapSetAsset } from '../src/business/domain/shots/shot-map';
+import {
+  buildShots,
+  shotLook,
+  MAP_TILT,
+  type BuildContext,
+} from '../src/business/domain/shots/shot-build';
+import {
+  MAP_ASSET,
+  mapSetAsset,
+  type ShotMapSet,
+} from '../src/business/domain/shots/shot-map';
+import { registryOf } from '../src/business/domain/shots/shot-registry';
+import type { UntimedActor } from '../src/business/domain/shots/shot-time';
 import { showTheme } from '../src/business/domain/studio/studio-look';
 import type { PaletteToken } from '../src/business/domain/scene-palette';
 
@@ -74,6 +94,96 @@ function beatsOf(): SceneDto['beats'] {
 
 /** The moment a word of a line is said. */
 const wordAt = (line: number, word: number) => LINES[line][1] + word * WORD_MS;
+
+const KANO = { lng: 8.52, lat: 12 };
+
+/**
+ * The kit's pieces for the two shots, made and stood on the map's earth by
+ * the build (as a show's are): a crowd on Kano, and a group of the North
+ * marching from Kano to Lagos. Their moves are timed by hand, each at the
+ * moment given, as long as the build made it (a walk as long as its way).
+ */
+function piecesOf(
+  map: ShotMapSet,
+  shape: FilmShape,
+  ctx: Omit<BuildContext, 'shape' | 'map' | 'seed'>,
+  lagos: { lng: number; lat: number },
+): { shots: ShotActorDto[][]; assets: Record<string, ShotAssetDto> } {
+  const registry = registryOf([
+    { name: 'place:Kano', kind: 'place', about: 'the North', geo: KANO },
+    { name: 'place:Lagos', kind: 'place', about: 'the capital', geo: lagos },
+  ]);
+  const shot = (actor: {
+    id: string;
+    kit: string;
+    params?: Record<string, string | number>;
+    moves: { move: string; on: string; to?: string }[];
+  }) => ({
+    on: actor.id,
+    set: { kind: 'map' as const, tilt: 'tilted' as const },
+    actors: [{ ...actor, place: 'place:Kano', side: 'North Region' }],
+    info: [],
+    life: [],
+    camera: [],
+    join: 'continue' as const,
+  });
+  const built = buildShots(
+    {
+      shots: [
+        shot({
+          id: 'crowd',
+          kit: 'people.crowd',
+          moves: [
+            { move: 'enter', on: 'three regional bases' },
+            { move: 'cheer', on: 'not one neutral' },
+          ],
+        }),
+        shot({
+          id: 'marchers',
+          kit: 'people.group',
+          params: { pose: 'marching', count: 5 },
+          moves: [{ move: 'march', on: 'had to fit', to: 'place:Lagos' }],
+        }),
+      ],
+    },
+    registry,
+    { ...ctx, shape, map, seed: `kano:${shape}` },
+  );
+  for (const note of built.notes) console.log(`  ${shape}: ${note}`);
+  const timed = (
+    actor: UntimedActor,
+    at: [number, number][],
+  ): ShotActorDto => ({
+    ...actor,
+    moves: actor.moves.map((move, k) => ({
+      move: move.move,
+      atMs: at[k][0],
+      durMs: move.durMs ?? at[k][1],
+      ...(move.to ? { to: move.to } : {}),
+      ...(move.state ? { state: move.state } : {}),
+    })),
+  });
+  const [crowd] = built.shots[0].actors;
+  const [marchers] = built.shots[1].actors;
+  if (!crowd || !marchers) throw new Error('a piece was left out');
+  const assets: Record<string, ShotAssetDto> = {};
+  for (const one of [crowd, marchers])
+    assets[one.asset] = built.assets[one.asset];
+  return {
+    shots: [
+      // On as the North fills; cheering on "neutral".
+      [
+        timed(crowd, [
+          [1500, 2000],
+          [wordAt(0, 9), 1800],
+        ]),
+      ],
+      // Setting out on "had to fit", reaching Lagos as the camera pulls back.
+      [timed(marchers, [[wordAt(1, 1), 5000]])],
+    ],
+    assets,
+  };
+}
 
 async function main(): Promise<void> {
   const episodeId = flags('--episode')[0];
@@ -199,6 +309,20 @@ async function main(): Promise<void> {
   ];
   for (const shape of ['wide', 'tall'] as const) {
     const stage = STAGES[shape];
+    const pieces = piecesOf(
+      map,
+      shape,
+      {
+        palette: world.palette ?? [],
+        held: world.held?.token ?? null,
+        theme,
+      },
+      { lng: lagos.lon, lat: lagos.lat },
+    );
+    const withPieces = shots.map((one, k) => ({
+      ...one,
+      actors: pieces.shots[k] ?? [],
+    }));
     const scene: SceneDto = {
       version: 4,
       generator: 'shots-map-sample',
@@ -220,8 +344,8 @@ async function main(): Promise<void> {
       shots: {
         version: 1,
         look,
-        assets: { [MAP_ASSET]: map.asset },
-        shots,
+        assets: { [MAP_ASSET]: map.asset, ...pieces.assets },
+        shots: withPieces,
         sounds: [],
       },
     };

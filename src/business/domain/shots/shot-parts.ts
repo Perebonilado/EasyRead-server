@@ -148,6 +148,12 @@ export const isClaimId = (text: string): boolean =>
 const sameDate = (name: string, when: string) =>
   keysOf(name).join(' ') === keysOf(when).join(' ');
 
+/** A date by itself ("1957", "early 1960", "12 December 1959"): words that name no thing. */
+const DATE_TEXT =
+  /^(?:(?:early|mid|late)\s+)?(?:\d{1,2}\s+)?(?:(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+)?(?:1\d{3}|20\d{2})s?$/iu;
+export const dateOnly = (text: string): boolean =>
+  DATE_TEXT.test(text.replace(/[,.]/gu, '').replace(/\s+/gu, ' ').trim());
+
 /** A number as a model writes it: 45, "45", "1,500"; null for none. */
 function looseNumber(raw: unknown): number | string | null {
   if (typeof raw === 'number') return Number.isFinite(raw) ? raw : null;

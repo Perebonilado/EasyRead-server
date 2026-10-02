@@ -634,9 +634,10 @@ describe("the board's plan mended (mendPlan)", () => {
     );
     expect(codes(plan)).toContain('0:label-names');
     const mended = mend(plan).shots[0];
+    // A year by itself names no place: the label names Berlin.
     expect(mended.info.slice(2).map((i) => i.text)).toEqual([
       'East Germany',
-      '1961',
+      'Berlin',
     ]);
     expect(codes(mend(plan))).toEqual([]);
   });
@@ -1077,6 +1078,45 @@ describe('the plan across its lines', () => {
       'region:West Region on Southern leaders wanted',
       'region:East Region on Southern leaders wanted',
     ]);
+  });
+
+  it('never labels a thing with a date by itself', () => {
+    const plan = good();
+    plan.shots[3].info[1] = {
+      recipe: 'label',
+      target: 'region:East Germany',
+      text: '1961',
+      on: 'held on',
+    };
+    expect(check(plan)).toContain('3:label-names');
+    // Renamed by what it labels.
+    expect(mend(plan).shots[3].info[1]).toMatchObject({
+      recipe: 'label',
+      target: 'region:East Germany',
+      text: 'East Germany',
+    });
+    // On a calendar's own date, a label of the date is dropped.
+    const calendar = good();
+    calendar.shots[2] = {
+      ...calendar.shots[2],
+      set: {
+        kind: 'chart',
+        chart: {
+          kind: 'calendar',
+          spec: {
+            calendars: [{ label: 'Reagan speaks', dates: ['1987'] }],
+            merge: null,
+          },
+        },
+      },
+      info: [
+        { recipe: 'label', target: 'part:1987', text: '1987', on: 'In 1987' },
+      ],
+      camera: [{ move: 'establish', on: 'In 1987' }],
+      focal: WHOLE_SET,
+    };
+    expect(check(calendar)).toContain('2:label-names');
+    expect(mend(calendar).shots[2].info).toEqual([]);
   });
 
   it('fills a region where the shot already shows it, when it has no room', () => {

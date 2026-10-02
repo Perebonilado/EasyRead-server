@@ -62,6 +62,7 @@ import {
   chartTexts,
   chartWords,
   clip,
+  dateOnly,
   fewerWords,
   isClaimId,
   line,
@@ -929,6 +930,8 @@ function labelNames(
   if (!target || target.kind === 'set' || target.kind === 'actor') return true;
   const words = keysOf(text);
   if (!words.length) return false;
+  // A date by itself names nothing: the calendar or the timeline shows it.
+  if (dateOnly(text)) return false;
   if (words.every((w) => /^\d+$/u.test(w)))
     return numbersIn(text).every((n) => given.has(n));
   const own = new Set(
@@ -1699,7 +1702,7 @@ function mendShot(
       (!item.text || !labelNames(item.text, target, given))
     ) {
       const name = clip(nameOf(target), TEXT.labelWordsMax);
-      if (name && !roleOnly(name)) item.text = name;
+      if (name && !roleOnly(name) && !dateOnly(name)) item.text = name;
       else delete item.text;
     }
     if (item.recipe === 'label' && !item.text) return [];

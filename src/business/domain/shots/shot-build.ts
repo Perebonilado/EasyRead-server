@@ -192,6 +192,13 @@ const MAP_TILT = 35;
 /** A place pinned on a drawn map is this share of the map's shorter side across. */
 const PLACE_BOX_SHARE = 0.03;
 
+/**
+ * The least the camera shows round what it is aimed at, as a share of
+ * its set's shorter side: a place is a point, and framed alone it would
+ * fill the frame with a dot. A third of the map round it says where it is.
+ */
+const CAMERA_CONTEXT_SHARE = 0.3;
+
 /** The life layer's amount when the plan only names the effect: under the rules' cap either way. */
 const LIFE_AMOUNT = 0.5;
 const LIFE_MOST = 3;
@@ -364,6 +371,8 @@ export function buildShots(
   const firstDrawn = own.find((one): one is BuiltSet => one !== null) ?? null;
 
   const built: { shot: UntimedShot; asset: ShotAssetDto | null }[] = [];
+  /** Where the camera was last aimed, for a travel's distance on a set carried on. */
+  let lastView: { asset: string | null; box: ShotBox } | null = null;
   plan.shots.forEach((planned, i) => {
     const id = `s${i + 1}`;
     let set = own[i];
@@ -616,17 +625,56 @@ export function buildShots(
       });
     });
 
-    // The camera: each move on what it names, or the shot's subject when
-    // what it names is not on this set; a travel as long as its distance.
-    const focal = planned.focal ? targetOf(planned.focal) : null;
-    const camera: UntimedCamera[] = safeMove ? [safeMove] : [];
-    let from: ShotBox | null = focal ? boxOf(focal) : (svg?.focal ?? null);
-    for (const one of planned.camera ?? ([] as PlanCamera[])) {
+    /**
+     * What the camera is aimed at, with room round it: a point or a small
+     * box (a place) widened to a share of its set, kept inside the set.
+     */
+    function inContext(target: ShotTargetDto): ShotTargetDto {
+      if (target.kind !== 'box' || !svg) return target;
+      const [bx, by, bw, bh] = svg.box;
+      const least = Math.min(bw, bh) * CAMERA_CONTEXT_SHARE;
+      const [, , w, h] = target.box;
+      if (w >= least && h >= least) return target;
+      const W = Math.max(w, least);
+      const H = Math.max(h, least);
+      const [cx, cy] = centre(target.box);
+      const x0 = Math.max(bx, Math.min(bx + bw - W, cx - W / 2));
+      const y0 = Math.max(by, Math.min(by + bh - H, cy - H / 2));
+      const r = (n: number) => Math.round(n * 10) / 10;
+      return { kind: 'box', box: [r(x0), r(y0), r(W), r(H)] };
+    }
+
+    // The camera: each move on what it names, with room round it, or the
+    // shot's subject when what it names is not on this set; a travel as
+    // long as its distance from where the camera was.
+    const named = planned.focal ? targetOf(planned.focal) : null;
+    const moves = (planned.camera ?? ([] as PlanCamera[])).map((one) => {
       const target = one.target ? targetOf(one.target) : null;
       if (one.target && !target)
         notes.push(
           `shot ${i + 1}: ${one.move} on "${one.target}" frames the subject instead`,
         );
+      return { one, target: target ? inContext(target) : null };
+    });
+    // A shot that travels to its subject opens where the camera was, not
+    // already there: its subject is where the travel ends.
+    const opensOnTravel =
+      named &&
+      moves[0]?.one.move === 'travel' &&
+      JSON.stringify(moves[0].target) === JSON.stringify(inContext(named));
+    const focal = named && !opensOnTravel ? inContext(named) : null;
+    const carried =
+      lastView && assetId !== null && lastView.asset === assetId
+        ? lastView.box
+        : null;
+    let from: ShotBox | null =
+      (focal ? boxOf(focal) : null) ??
+      carried ??
+      svg?.focal ??
+      svg?.box ??
+      null;
+    const camera: UntimedCamera[] = safeMove ? [safeMove] : [];
+    for (const { one, target } of moves) {
       const amount =
         one.move === 'push' ||
         one.move === 'pull' ||
@@ -645,6 +693,7 @@ export function buildShots(
       });
       if (to) from = to;
     }
+    if (from) lastView = { asset: assetId, box: from };
 
     const life: ShotLifeDto[] = [...new Set(planned.life ?? [])]
       .slice(0, LIFE_MOST)

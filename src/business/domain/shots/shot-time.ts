@@ -165,6 +165,14 @@ export const CUT_LEAD_MS = 100;
 /** The shortest a shot may be: anything shorter is a flash, not a picture. */
 export const MIN_SHOT_MS = PACE.minGapMs;
 
+/**
+ * Recipes that are a process, not a change: a flow's wave along the causal
+ * path and a machine starting run as the words that name them are said, so
+ * they start on their word rather than settle before it.
+ */
+export const STARTS_ON_WORD: ReadonlySet<ShotInfoRecipe> =
+  new Set<ShotInfoRecipe>(['flow', 'run']);
+
 // ── The words ─────────────────────────────────────────────────────────────
 
 /**
@@ -383,12 +391,23 @@ export function timeShots(
         durMs: Math.round(dur),
       };
     };
+    /** A process started on its word and run on, inside the shot. */
+    const started = (word: number, durMs: number) => {
+      const atMs = clamp(word - SETTLE_LEAD_MS, startMs, endMs);
+      return {
+        atMs: Math.round(atMs),
+        durMs: Math.round(Math.max(0, Math.min(durMs, endMs - atMs))),
+      };
+    };
 
     const info = one.shot.info
       .map((item) => {
         const { on, until, durMs: own, ...rest } = item;
         const word = wordMs(on);
-        const timed = settled(word, own ?? RECIPE_MS[item.recipe]);
+        const length = own ?? RECIPE_MS[item.recipe];
+        const timed = STARTS_ON_WORD.has(item.recipe)
+          ? started(word, length)
+          : settled(word, length);
         let untilMs: number | undefined;
         if (until) {
           const from = indexOf(on, span.fromWord) ?? span.fromWord;
@@ -529,7 +548,10 @@ export function retimeShots(
       startMs,
       endMs,
       info: shot.info.map((item) => {
-        const atMs = settles(item.atMs, item.durMs);
+        // A process keeps its start on its word; a change its settling.
+        const atMs = STARTS_ON_WORD.has(item.recipe)
+          ? inside(map(item.atMs + SETTLE_LEAD_MS) - SETTLE_LEAD_MS, item.durMs)
+          : settles(item.atMs, item.durMs);
         return {
           ...item,
           atMs,

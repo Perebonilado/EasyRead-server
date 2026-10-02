@@ -188,6 +188,55 @@ describe('the plan built', () => {
     });
   });
 
+  it('aims the camera at a place with room round it, while its pin points at the place itself', () => {
+    const last = built.shots[4];
+    const pin = last.info.find((i) => i.recipe === 'pin')!.target as {
+      box: number[];
+    };
+    const travel = last.camera[0].target as { kind: string; box: number[] };
+    expect(pin.box[2]).toBeLessThan(30);
+    expect(travel.kind).toBe('box');
+    expect(travel.box[2]).toBeCloseTo(700 * 0.3, 0);
+    // Kept inside the map, round Lagos.
+    expect(travel.box[0]).toBeGreaterThanOrEqual(0);
+    expect(travel.box[0] + travel.box[2]).toBeLessThanOrEqual(900);
+    expect(travel.box[1] + travel.box[3]).toBeLessThanOrEqual(700);
+  });
+
+  it('opens a shot that travels to its subject where the camera was, the travel measured from there', () => {
+    const plan: ShotPlan = {
+      shots: [
+        {
+          on: 'After the 1945 strikes',
+          set: { kind: 'map' },
+          actors: [],
+          info: [],
+          life: [],
+          camera: [
+            { move: 'push', target: 'place:Kano', on: 'colonial Nigeria' },
+          ],
+          join: 'continue',
+        },
+        {
+          on: 'Then the fight changed',
+          set: { kind: 'map' },
+          actors: [],
+          info: [],
+          life: [],
+          camera: [
+            { move: 'travel', target: 'place:Lagos', on: 'independence' },
+          ],
+          focal: 'place:Lagos',
+          join: 'cut',
+        },
+      ],
+    };
+    const [, travelling] = buildShots(plan, registry, ctx).shots;
+    expect(travelling.focal).toBeUndefined();
+    // From Kano, in the north, down to Lagos: longer than a step on the spot.
+    expect(travelling.camera[0].durMs).toBeGreaterThan(400);
+  });
+
   it('times a travel by how far it goes', () => {
     const travel = built.shots[4].camera[0];
     expect(travel.move).toBe('travel');

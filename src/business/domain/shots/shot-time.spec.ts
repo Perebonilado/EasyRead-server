@@ -157,6 +157,38 @@ describe('the shots on the voice', () => {
     expect(first.atMs).toBe(timed[1].startMs);
   });
 
+  it('starts a flow on its word and lets it run, where a change settles before its word', () => {
+    const flowing = timeShots(
+      [
+        shot('s1', 'After the 1945 strikes', {
+          info: [
+            {
+              id: 'flow',
+              recipe: 'flow',
+              target: region('group-west-region'),
+              to: region('group-north-region'),
+              on: 'shifting power',
+            },
+          ],
+        }),
+      ],
+      BEATS,
+      DURATION_MS,
+    );
+    const flow = flowing[0].info[0];
+    expect(flow.atMs).toBe(wordAt(0, 7) - SETTLE_LEAD_MS);
+    expect(flow.durMs).toBe(RECIPE_MS.flow);
+    // Moved with a slower voice, it still starts on its word.
+    const slower = retimeShots(
+      flowing,
+      (ms) => Math.round(ms * 1.2),
+      DURATION_MS * 1.2,
+    );
+    expect(slower[0].info[0].atMs).toBe(
+      Math.round((flow.atMs + SETTLE_LEAD_MS) * 1.2) - SETTLE_LEAD_MS,
+    );
+  });
+
   it('ends a piece of information on its until words, after it has landed', () => {
     const fill = timed[0].info.find((i) => i.id === 'fill')!;
     // "Then the fight" opens the next shot: the fill lets go as it comes, inside its own shot.

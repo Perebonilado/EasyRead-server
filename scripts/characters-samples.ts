@@ -123,7 +123,15 @@ const SAMPLES: Sample[] = [
             },
             { recipe: 'pin', target: 'place:Rome', on: 'the city itself' },
           ],
-          camera: [{ move: 'establish', on: "Rome's legions marched south" }],
+          camera: [
+            { move: 'establish', on: "Rome's legions marched south" },
+            {
+              move: 'push',
+              target: 'region:Roman Italy',
+              amount: 'large',
+              on: 'mile after mile',
+            },
+          ],
           life: ['cloud-shadows'],
           join: 'cut',
           focal: 'set',
@@ -198,7 +206,15 @@ const SAMPLES: Sample[] = [
               colour: 'Arabia',
             },
           ],
-          camera: [{ move: 'establish', on: 'Out of Arabia rode' }],
+          camera: [
+            { move: 'establish', on: 'Out of Arabia rode' },
+            {
+              move: 'push',
+              target: 'region:Arabia',
+              amount: 'medium',
+              on: 'of a new empire',
+            },
+          ],
           life: [],
           join: 'cut',
           focal: 'region:Arabia',

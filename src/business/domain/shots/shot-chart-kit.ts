@@ -506,9 +506,10 @@ export function wrap(
 
 /**
  * Words set as large as fit a width on at most `most` lines, between the
- * largest and the least size; at the least, any word too long is cut
- * short and the lines past the last are folded into it with an ellipsis.
- * Never smaller than the least: the floor a viewer must be able to read.
+ * largest and the least size; at the least, a word too long for a line is
+ * broken with a hyphen, and the words past the last line are let go at a
+ * whole word, with an ellipsis. Never smaller than the least: the floor a
+ * viewer must be able to read.
  */
 export function fit(
   text: string,
@@ -569,13 +570,29 @@ export function fit(
   }
   if (current) lines.push(current);
   if (lines.length > most) {
-    let last = lines.slice(most - 1).join(' ');
-    while (
-      last.length > 1 &&
-      wordsWidth(`${last}…`, size, weight, face) > width
-    )
-      last = last.slice(0, -1);
-    lines.splice(most - 1, lines.length, `${last.trimEnd()}…`);
+    // The words past the last line are let go at a whole word, an ellipsis
+    // after it; where not even the last line's first word leaves room for
+    // one, the line before ends them instead.
+    const ended = (line: string) => {
+      const words = line.split(' ');
+      for (let n = words.length; n >= 1; n -= 1) {
+        const kept = `${words
+          .slice(0, n)
+          .join(' ')
+          .replace(/[\s,;:.\-–—]+$/, '')}…`;
+        if (wordsWidth(kept, size, weight, face) <= width) return kept;
+      }
+      return null;
+    };
+    const last = ended(lines.slice(most - 1).join(' '));
+    if (last) lines.splice(most - 1, lines.length, last);
+    else {
+      const before = most > 1 ? ended(lines[most - 2]) : null;
+      lines.splice(most - 1, lines.length);
+      if (before) lines[most - 2] = before;
+      // One line, one word that fills it: the word, whole.
+      else if (!lines.length) lines.push(pieces[0]?.word ?? '');
+    }
   }
   return { size: r1(size), lines };
 }

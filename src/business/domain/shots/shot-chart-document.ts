@@ -34,6 +34,7 @@ import {
   textSvg,
   union,
   wordsWidth,
+  wholeWords,
   wordsWithin,
 } from './shot-chart-kit';
 
@@ -50,7 +51,8 @@ export function documentAsset(
       headline: 60,
       stamp: 24,
     }),
-    extra.name,
+    // A title taken from its name, kept whole as the reader's 48.
+    wholeWords(extra.name, 48),
     extra,
   );
   if (!spec) return null;

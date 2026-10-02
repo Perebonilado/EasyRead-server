@@ -515,6 +515,12 @@ describe('the kit', () => {
       label: 'The fears of minorities and…',
       groups: [{ name: 'The fears of…' }],
     });
+    // Words past the fitter's last line are let go at a whole word.
+    const set = fit(long, 300, 50, 50, 2);
+    expect(set.lines).toHaveLength(2);
+    expect(set.lines[1].endsWith('…')).toBe(true);
+    for (const word of set.lines.join(' ').replace('…', '').split(' '))
+      expect(long.split(' ')).toContain(word);
   });
 
   it("keeps a reader's own cut out of the middle of a word", () => {
@@ -536,6 +542,24 @@ describe('the kit', () => {
     expect(words.endsWith('…')).toBe(true);
     for (const word of words.replace('…', '').split(' '))
       expect(label.split(' ')).toContain(word);
+    // A document's title taken from its name, longer than the reader keeps.
+    const name = 'Report of the Commission appointed to enquire into the fears';
+    const paper = chartAsset(
+      'document',
+      { name, document: { headline: 'Not recommended' } },
+      LIGHT_LOOK,
+      'wide',
+    )!;
+    const title = [
+      ...paper.svg.matchAll(/data-part="title"[^>]*>(.*?)<\/text>/g),
+    ]
+      .map((m) => m[1].replace(/<[^>]+>/g, ' '))
+      .join(' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    expect(title.endsWith('…')).toBe(true);
+    for (const word of title.replace('…', '').split(' '))
+      expect(name.split(' ')).toContain(word);
   });
 
   it('colours several things apart, what is left over muted', () => {

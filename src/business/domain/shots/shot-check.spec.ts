@@ -553,28 +553,53 @@ describe("the board's plan mended (mendPlan)", () => {
       {
         recipe: 'label',
         target: 'place:Berlin',
-        text: 'A divided city',
+        text: 'Berlin divided city',
         on: 'Berlin',
       },
       {
         recipe: 'label',
         target: 'region:East Germany',
-        text: 'Soviet zone east',
+        text: 'East Germany zone',
         on: 'cut in two',
       },
       {
         recipe: 'label',
         target: 'region:West Germany',
-        text: 'Allied zones west',
+        text: 'West Germany zone',
         on: 'overnight',
       },
     ];
     const mended = mend(plan).shots[0];
     expect(stageWords(mended)).toBeLessThanOrEqual(8);
     expect(mended.info.map((i) => i.text)).toEqual([
-      'A divided city',
-      'Soviet zone east',
+      'Berlin divided city',
+      'East Germany zone',
     ]);
+  });
+
+  it('makes a label name what it is on, never repeat the voice', () => {
+    const plan = good();
+    plan.shots[0].info.push(
+      {
+        recipe: 'label',
+        target: 'region:East Germany',
+        text: 'cut overnight',
+        on: 'cut in two',
+      },
+      {
+        recipe: 'label',
+        target: 'place:Berlin',
+        text: '1961',
+        on: 'overnight',
+      },
+    );
+    expect(codes(plan)).toContain('0:label-names');
+    const mended = mend(plan).shots[0];
+    expect(mended.info.slice(2).map((i) => i.text)).toEqual([
+      'East Germany',
+      '1961',
+    ]);
+    expect(codes(mend(plan))).toEqual([]);
   });
 
   it('sets a missing subject from what the set shows', () => {

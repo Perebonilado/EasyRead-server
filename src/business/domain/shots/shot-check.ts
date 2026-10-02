@@ -651,6 +651,39 @@ export function colourName(
   return side?.kind === 'side' ? splitTarget(side.name).rest : null;
 }
 
+/** A target's own name, as a label writes it: "North Region", "Lagos", "1951". */
+function nameOf(target: Target): string {
+  return target.kind === 'entry' || target.kind === 'part'
+    ? splitTarget(target.name).rest
+    : '';
+}
+
+/**
+ * Whether a label names what it is on: a word of its target's name (the
+ * generic ones aside), or numbers the scene gives (a year on a place). A
+ * label never repeats what the voice says.
+ */
+function labelNames(
+  text: string,
+  target: Target | null,
+  given: ReadonlySet<number>,
+): boolean {
+  if (!target || target.kind === 'set' || target.kind === 'actor') return true;
+  const words = keysOf(text);
+  if (!words.length) return false;
+  if (words.every((w) => /^\d+$/u.test(w)))
+    return numbersIn(text).every((n) => given.has(n));
+  const own = new Set(
+    [
+      nameOf(target),
+      ...(target.kind === 'entry' ? (target.entry.aliases ?? []) : []),
+    ]
+      .flatMap((n) => keysOf(n))
+      .filter((k) => !['the', 'of', 'region', 'state', 'and'].includes(k)),
+  );
+  return words.some((w) => own.has(w));
+}
+
 // ── What a shot puts on the stage ─────────────────────────────────────────
 
 /** The words a shot puts on the stage: its labels' and its chart's. */
@@ -974,6 +1007,16 @@ export function checkPlan(
         );
       if (info.recipe === 'label' && !info.text)
         say(k, 'wrong-target', `${S}: a label needs its words (one to three).`);
+      if (
+        info.recipe === 'label' &&
+        info.text &&
+        !labelNames(info.text, targetIn(shot, info.target, registry), given)
+      )
+        say(
+          k,
+          'label-names',
+          `${S}: the label "${info.text}" does not name what it is on (${info.target}); a label names it, never repeats the voice.`,
+        );
       for (const words of [info.text, info.replace])
         if (words && wordsIn(words) > TEXT.labelWordsMax)
           say(
@@ -1311,19 +1354,30 @@ function mendShot(
     const recipe = recipeOf(raw.recipe);
     if (!recipe) return [];
     let item: PlanInfo = { ...raw, recipe };
-    const target = targetIn(out, item.target, registry);
-    const to = targetIn(out, item.to, registry);
+    const named = targetIn(out, item.target, registry);
+    const towards = targetIn(out, item.to, registry);
+    // The whole set is a shot's subject, never what a recipe acts on.
+    const target = named?.kind === 'set' ? null : named;
+    const to = towards?.kind === 'set' ? null : towards;
     item = {
       ...item,
       ...(target ? { target: target.name } : {}),
       ...(to ? { to: to.name } : {}),
     };
+    if (named?.kind === 'set') delete item.target;
     if (item.to && !to) delete item.to;
     if (item.target && !target) return [];
-    // A label's words: its own, else the name of what it labels.
-    if (item.recipe === 'label' && !item.text && target?.kind === 'entry')
-      item.text = clip(splitTarget(target.name).rest, TEXT.labelWordsMax);
+    // A label's words name what it is on: its own words when they do, else
+    // the name of what it labels.
     if (item.text) item.text = clip(item.text, TEXT.labelWordsMax);
+    if (
+      item.recipe === 'label' &&
+      target &&
+      (!item.text || !labelNames(item.text, target, given))
+    ) {
+      const name = clip(nameOf(target), TEXT.labelWordsMax);
+      if (name) item.text = name;
+    }
     if (item.replace) item.replace = clip(item.replace, TEXT.labelWordsMax);
     if (item.text && (!item.target || AUDIENCE.test(item.text))) return [];
     if (item.replace && AUDIENCE.test(item.replace)) delete item.replace;
@@ -1366,7 +1420,9 @@ function mendShot(
       {
         ...rest,
         move,
-        ...(target && shownBy(out, target) ? { target: target.name } : {}),
+        ...(target && target.kind !== 'set' && shownBy(out, target)
+          ? { target: target.name }
+          : {}),
         ...(amount ? { amount } : {}),
       },
     ];

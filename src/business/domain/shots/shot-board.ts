@@ -75,6 +75,8 @@ export interface BoardShotsResult {
   registry: TargetRegistry;
   /** What was wrong with the board's answer before code mended it: for the log, never the maker. */
   problems: ShotProblem[];
+  /** What was wrong with its first answer, when it was sent back: for the log. */
+  firstProblems: ShotProblem[];
   /** Each model call, for the ledger. */
   usage: LlmUsage[];
   /** Whether the board was sent back once. */
@@ -254,6 +256,7 @@ export async function boardShots(
   usage.push(first.usage);
   let plan = planOf(first.value, narration, options);
   let problems = checkPlan(plan, narration, registry, options);
+  const firstProblems = problems;
   let sentBack = false;
   // Sent back once, for what only the board can put right; the rest is mended.
   if (problems.some((p) => SERIOUS.has(p.code))) {
@@ -277,6 +280,7 @@ export async function boardShots(
     plan: mendPlan(covered, narration, registry, options),
     registry,
     problems,
+    firstProblems,
     usage,
     sentBack,
   };

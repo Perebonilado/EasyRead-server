@@ -305,7 +305,35 @@ Full detail with line numbers is in this build's maps (`…/scratchpad/anim/maps
 - **Photos.** `sanitize.ts` forbids `<image>`, so ShotStage draws photos itself (HTML `<img>`/canvas planes), never inside a sanitised SVG.
 - **Names.** `lib/scene/shots.ts` already exists (shot framing for stories). The new engine lives in `lib/shots/`.
 
-## 10. To-do: the 3D engine
+## 11. Decisions made during the build
+
+### 2026-10-02 (Richard)
+After sending two references of his own, a cartoon world-history film and a UI/UX redesign walkthrough:
+1. **Both looks, chosen per show.**
+   - **Editorial:** portraits for named people, silhouettes for groups.
+   - **Illustrated:** cute era-dressed characters for groups, and named characters with a label, on the same maps and sets.
+   - Archive portraits and paintings appear in both looks.
+   - The app picks the look from the topic and the maker can switch. It is stored with the show's visual system, and `ShotLookDto` gains `style?: 'editorial' | 'illustrated'` (an addition only).
+2. **The UI kit for tech and how-to explainers:**
+   - device frames;
+   - screens built from UI parts by code;
+   - a cursor that moves, clicks and drags;
+   - numbered callouts;
+   - state swaps behind a short blur;
+   - before and after;
+   - chapter breaks.
+   - A generic UI only, never a fake screen of a real product.
+
+Richard then left the remaining calls to the lead overnight ("Make the decisions").
+
+### New work packages
+
+| WP | Agent | Repos | Builds | Needs |
+|---|---|---|---|---|
+| 17 | `characters` | both | The illustrated look: era-dressed characters built on the figure kit (`scene-figure.ts`, with eras, wardrobe and likeness ported from `ig-illustrated`), restyled flat and clean with a consistent big-head proportion. Groups get varied characters in their side's colour; a named person gets a labelled character (plus their archive portrait when one clears). They stand on maps (geo) and in sets. Also a `say` recipe (a speech bubble of up to 6 words, used sparingly), "eyes" on map regions (personified countries, illustrated look only), and the look switch (the board's kit choice, the stored look). | 9 (rig, registry) |
+| 18 | `ui` | both | Device frames (phone, tablet, laptop, browser, app window); screens from UI parts by code (bars, cards, lists, buttons, inputs, toggles, sliders, small charts, image slots); component states; a cursor actor (move, click with a press ripple, drag, scroll, type); recipes `callout` (numbered dots on leaders) and `swap` (a state change behind a short blur); a `frost` chapter break; before and after. | 7, 9 (rig) |
+
+## 12. To-do: the 3D engine
 
 This is the product plan's §11:
 - a three.js stage in the set layer (orbit, section sweep, exploded views, flows, labels on 3D anchors);

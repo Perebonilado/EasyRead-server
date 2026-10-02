@@ -530,3 +530,12 @@ Each phase can be tested on its own, on your account. Shipping to production is 
    - *Recommendation:* public domain, CC0 and CC BY only at first; CC BY-SA after a legal read.
 9. **Scope.**
    - *Recommendation:* explainers move fully to the new shot stage; stories stay on today's stage.
+
+### Richard's answers (2026-10-02)
+- **Build everything, in parallel;** decisions 1–9 taken as recommended.
+- **The downloads are approved** (the depth model, Lottie effects, calibration frames).
+- **People: both looks, per show.**
+  - Editorial: portraits for named people and silhouettes for groups.
+  - Illustrated: characters dressed for their era for groups, and labelled characters for named people, after his cartoon world-history reference.
+  - Archive art in both.
+- **Added: a UI kit for tech and how-to explainers,** after his UI/UX reference: device frames, screens built from parts, a cursor, numbered callouts, and state swaps.

@@ -36,3 +36,5 @@ export const WEB_IMPORT = Symbol('WebImportPort');
 export const ALIGNER = Symbol('AlignerPort');
 /** Audio decoded to samples and encoded back, for the voice's pace step. */
 export const AUDIO_CODEC = Symbol('AudioCodecPort');
+/** The picture desk (domain/pictures/desk): archive photos and portraits, cleared and kept. */
+export const PICTURE_DESK = Symbol('PictureDesk');

@@ -98,6 +98,15 @@ import {
   shotsSwitchOn,
 } from '../../business/domain/studio/studio-editor-cut';
 import { boardShots, safePlan } from '../../business/domain/shots/shot-board';
+import { pictureCredits } from '../../business/domain/shots/shot-pictures';
+import { registryOf } from '../../business/domain/shots/shot-registry';
+import {
+  deskPass,
+  picturesFor,
+  withPictureCredits,
+  type DeskLike,
+  type EpisodePictures,
+} from '../../business/domain/pictures/episode';
 import type {
   RegistryEntry,
   ShotPlan,
@@ -235,6 +244,12 @@ export interface EditorDeps {
   /** A setting, by its name: the config's, else the environment's. */
   setting: (name: string) => string | undefined;
   material?: StudioMaterialService | null;
+  /**
+   * The picture desk (WP11): archive photos and portraits for a shots
+   * episode's scenes, asked once an episode before they are boarded.
+   * Absent or null, no pictures: people are shown by their traces.
+   */
+  pictures?: DeskLike | null;
   logger: { log(message: string): void; warn(message: string): void };
 }
 
@@ -1212,6 +1227,10 @@ export class StudioEditorProcessor {
     // Lesson scenes boarded as shots (EXPLAINER_SHOTS): decided here, once,
     // and kept on each sheet, so the make follows the sheet, not the switch.
     const shots = shotsSwitchOn(this.deps.setting('EXPLAINER_SHOTS'));
+    // The picture desk's one pass for the episode (WP11), before any scene
+    // is boarded, so every scene is offered what cleared.
+    const pictures = shots ? await this.pictureDesk(show, episode) : null;
+    const credits: string[] = [];
     let k = 0;
     const lanes = Array.from(
       { length: Math.min(BOARDERS, rows.length) },
@@ -1223,9 +1242,20 @@ export class StudioEditorProcessor {
           try {
             if (isIllustrated(scene))
               await this.illustratedBoard(show, episode, bible, rows[at], at);
-            else if (shots)
-              await this.shotsBoard(show, episode, bible, rows[at], at);
-            else await this.lessonBoard(show, episode, bible, rows[at], at);
+            else if (shots) {
+              const sheet = await this.shotsBoard(
+                show,
+                episode,
+                bible,
+                rows[at],
+                at,
+                pictures,
+              );
+              if (sheet.shots && sheet.registry)
+                credits.push(
+                  ...pictureCredits(sheet.shots, registryOf(sheet.registry)),
+                );
+            } else await this.lessonBoard(show, episode, bible, rows[at], at);
           } catch (error) {
             // A board that cannot be had is a plain one, never a hole in
             // the film: its lines said over what they name.
@@ -1239,7 +1269,75 @@ export class StudioEditorProcessor {
       },
     );
     await Promise.all(lanes);
+    if (shots) await this.creditPictures(episode, credits);
     return rows.length;
+  }
+
+  /**
+   * The picture desk's pass for an episode (WP11): its people's portraits
+   * and its places' photos, cleared and kept; null when there is no desk,
+   * it is switched off (PICTURE_DESK=off), or it cannot be reached, which
+   * never holds a film up.
+   */
+  async pictureDesk(
+    show: StudioShowRecord,
+    episode: StudioEpisodeRecord,
+  ): Promise<EpisodePictures | null> {
+    const desk = this.deps.pictures;
+    if (
+      !desk ||
+      /^(?:off|false|0|no)$/iu.test(this.deps.setting('PICTURE_DESK') ?? '')
+    )
+      return null;
+    progressNow({ says: 'Finding archive pictures' });
+    const calls: LlmUsage[] = [];
+    try {
+      const pictures = await deskPass(
+        desk,
+        {
+          rows: episode.editorial?.rows ?? [],
+          research: show.editor?.research ?? null,
+          world: show.editor?.world ?? null,
+        },
+        {
+          log: (message) =>
+            this.deps.logger.log(`studio ${episode.id}: ${message}`),
+          // The desk's look at each picture it takes is a model call: in the ledger.
+          onUsage: (usage) => calls.push(usage),
+        },
+      );
+      for (const usage of calls)
+        await this.record(episode.id, usage, 'picture_focus');
+      this.deps.logger.log(
+        `studio ${episode.id}: the picture desk cleared ${pictures.entries.length} picture${pictures.entries.length === 1 ? '' : 's'}`,
+      );
+      return pictures;
+    } catch (error) {
+      this.deps.logger.warn(
+        `studio ${episode.id}: no pictures: ${(error as Error).message}`,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * The episode's description with the full credit of every picture its
+   * film shows at its foot (research §3.4: TASL credits in the
+   * description), replacing any list an earlier board left.
+   */
+  private async creditPictures(
+    episode: StudioEpisodeRecord,
+    credits: readonly string[],
+  ): Promise<void> {
+    const now = (await this.studio.findEpisode(episode.id)) ?? episode;
+    const editorial = now.editorial;
+    const pack = editorial?.package;
+    if (!editorial || !pack) return;
+    const description = withPictureCredits(pack.description, credits);
+    if (description === pack.description) return;
+    await this.studio.updateEpisode(episode.id, {
+      editorial: { ...editorial, package: { ...pack, description } },
+    });
   }
 
   /**
@@ -1403,6 +1501,8 @@ export class StudioEditorProcessor {
     bible: StudioBible,
     row: StudioSceneRecord,
     k: number,
+    /** The episode's pictures (pictureDesk), of which the scene is offered what is about it. */
+    pictures: EpisodePictures | null = null,
   ): Promise<ExplainerSheet> {
     const outline = episode.outline!;
     const scene = outline.scenes[k];
@@ -1412,6 +1512,7 @@ export class StudioEditorProcessor {
         rows: lines,
         research: show.editor?.research ?? null,
         world: show.editor?.world ?? null,
+        pictures: picturesFor(lines, pictures),
         scene: {
           index: k,
           of: outline.scenes.length,

@@ -2567,6 +2567,26 @@ export interface ShotSoundDto {
   sound: string;
   /** 0 to 1, where 1 is the library's level. */
   gain: number;
+  /**
+   * How long it sounds, for one that lasts as its motion does: a pencil
+   * along its stroke, a whoosh over its move, a swell under its flow, a
+   * count's ticks over its count. Absent, the effect's own length.
+   */
+  durMs?: number;
+  /**
+   * What makes it: an info item's id (a count's ticks follow its count),
+   * or `<shot id>:camera:<n>`, `<shot id>:join`, `<shot id>:set`,
+   * `<info id>:reveal`.
+   */
+  of?: string;
+  /**
+   * How far either way (ms) the player may move it onto the music's beat;
+   * absent or 0, it stays on its motion. The picture never moves, so a
+   * landing's is small and a soft sound's wider.
+   */
+  snapMs?: number;
+  /** A big reveal's: rather on a bar's first beat, within `snapMs`. */
+  downbeat?: boolean;
 }
 
 export interface VisualSceneDto {

@@ -195,7 +195,7 @@ describe('the drawn set of the moment a line tells', () => {
           params: { pose: 'protest', era: '1945-1975' },
         },
       ],
-      life: ['smoke'],
+      life: [],
       focal: 'set',
     });
     // An illustrated show's people are its characters.

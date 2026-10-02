@@ -371,16 +371,16 @@ const THINGS: readonly {
 
 /**
  * A kind of place, by the words that tell a moment there: `event` when
- * they tell a real event (its set carries the "Illustration" tag), the
- * life the place really has, and how its people stand (none indoors,
- * where the hall's own rows are the people).
+ * they tell a real event (its set carries the "Illustration" tag), and how
+ * its people stand (none indoors, where the hall's own rows are the
+ * people). Its life comes with the set (its chimneys smoke, its water
+ * shimmers, its flag stirs).
  */
 const PLACES: readonly {
   words: RegExp;
   place: NonNullable<PlanSetScene['place']>;
   land?: PlanSetScene['land'];
   event?: boolean;
-  life: PlanShot['life'];
   /** The crowd's pose, as silhouettes and as characters; none, no crowd. */
   pose?: { silhouettes: string; characters: string };
 }[] = [
@@ -389,14 +389,12 @@ const PLACES: readonly {
       /^(?:legislatures?|parliaments?|assembl(?:y|ies)|congress|senate|chambers?|councils?|delegates?|delegations?|seats|debates?|conferences?|talks|negotiations?|negotiators?|summits?)$/u,
     place: 'assembly-hall',
     event: true,
-    life: [],
   },
   {
     words:
       /^(?:ceremon(?:y|ies)|celebrations?|celebrated|parades?|inaugurations?|inaugurated|anthems?|flags?|jubilee)$/u,
     place: 'ceremony-ground',
     event: true,
-    life: ['flags'],
     pose: { silhouettes: 'cheering', characters: 'cheering' },
   },
   {
@@ -404,33 +402,28 @@ const PLACES: readonly {
       /^(?:strikes?|strikers?|factor(?:y|ies)|mills?|industry|industries|industrial|miners?|mines|unions?|workshops?)$/u,
     place: 'industry',
     event: true,
-    life: ['smoke'],
     pose: { silhouettes: 'protest', characters: 'marching' },
   },
   {
     words: /^(?:ports?|harbou?rs?|docks?|dockers|ships?|cargo|sailors?)$/u,
     place: 'port',
     land: 'coast',
-    life: ['shimmer'],
     pose: { silhouettes: 'standing', characters: 'standing' },
   },
   {
     words: /^(?:markets?|marketplaces?|bazaars?|traders?|merchants?)$/u,
     place: 'market',
-    life: ['clouds'],
     pose: { silhouettes: 'standing', characters: 'standing' },
   },
   {
     words:
       /^(?:farms?|farmers?|farming|crops?|harvests?|cattle|plantations?)$/u,
     place: 'farm',
-    life: ['wind'],
     pose: { silhouettes: 'standing', characters: 'standing' },
   },
   {
     words: /^(?:oil|oilfields?|petroleum|refiner(?:y|ies)|crude)$/u,
     place: 'oilfield',
-    life: ['smoke'],
   },
   {
     words:
@@ -438,14 +431,12 @@ const PLACES: readonly {
     place: 'city',
     land: 'city',
     event: true,
-    life: ['clouds'],
     pose: { silhouettes: 'protest', characters: 'marching' },
   },
   {
     words: /^(?:city|cities|streets?|urban|downtown)$/u,
     place: 'city',
     land: 'city',
-    life: ['clouds'],
     pose: { silhouettes: 'standing', characters: 'standing' },
   },
 ];
@@ -558,7 +549,7 @@ export function momentShot(
       },
       actors: crowd ? [crowd] : [],
       info: [],
-      life: [...place.life],
+      life: [],
       camera: [{ move: 'establish', on }],
       join: 'cut',
       focal: 'set',

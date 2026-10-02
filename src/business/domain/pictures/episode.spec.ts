@@ -1,5 +1,6 @@
 import type { EditorResearch, EditorWorld } from '../studio/studio-editor';
-import { buildRegistry, promptList } from '../shots/shot-registry';
+import { boardList } from '../shots/shot-board';
+import { buildRegistry } from '../shots/shot-registry';
 import { TELEVISION } from './__fixtures__/television';
 import {
   countsOf,
@@ -641,12 +642,14 @@ describe("an episode's desk pass", () => {
         kind: 'person',
         name: 'person:Philo Farnsworth',
       });
-      const list = promptList(registry);
+      // The board's list (shot-board's boardList) says what each photo
+      // shows, from `shows`, and shows a person with photos by them.
+      const list = boardList(registry);
       expect(list).toContain(
-        '- person:Philo Farnsworth: American inventor of electronic television · no portrait · photos of them: photo:Philo Farnsworth 1929',
+        '- person:Philo Farnsworth: American inventor of electronic television · photos of them: photo:Philo Farnsworth 1929 · no portrait: show them by their photos',
       );
       expect(list).toContain(
-        '- photo:Philo Farnsworth 1929 (shows person:Philo Farnsworth): a photo of Philo Farnsworth, 1929 (Wikimedia Commons): “Philo Farnsworth with his image dissector”',
+        '- photo:Philo Farnsworth 1929: shows person:Philo Farnsworth · a photo of Philo Farnsworth, 1929 (Wikimedia Commons): “Philo Farnsworth with his image dissector”',
       );
       expect(list).not.toContain('no trace: never on screen');
     });

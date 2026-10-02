@@ -198,7 +198,7 @@ describe("the picture desk's adapters", () => {
       0xe0,
       0x00,
       0x10,
-      ...new Array(14).fill(0),
+      ...Array<number>(14).fill(0),
       0xff,
       0xc0,
       0x00,

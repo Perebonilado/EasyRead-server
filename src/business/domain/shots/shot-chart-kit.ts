@@ -413,6 +413,26 @@ export function figuresWidth(text: string, size: number, share = 0.6): number {
   return w;
 }
 
+/**
+ * Words as they may be broken: at spaces, and after a hyphen inside a word
+ * ("Self-" "government"), which joins the next piece with no space.
+ */
+function piecesOf(text: string): { word: string; glued: boolean }[] {
+  const out: { word: string; glued: boolean }[] = [];
+  for (const word of text.trim().split(/\s+/).filter(Boolean)) {
+    const parts = word.split(/(?<=[\p{L}\p{N}]-)(?=[\p{L}\p{N}])/u);
+    parts.forEach((part, i) => out.push({ word: part, glued: i > 0 }));
+  }
+  return out;
+}
+
+/**
+ * How much wider than a line a single word may be before it is cut: the
+ * measure is a little wider than most faces set the words, so a word
+ * measured this much over still sets inside the line.
+ */
+const LONG_WORD = 1.12;
+
 /** Words broken into lines no wider than a width, or null when a word alone is wider or more lines are needed. */
 export function wrap(
   text: string,
@@ -422,12 +442,11 @@ export function wrap(
   weight: 600 | 700 = 700,
   face: Face = 'text',
 ): string[] | null {
-  const words = text.trim().split(/\s+/).filter(Boolean);
   const out: string[] = [];
   let current = '';
-  for (const word of words) {
-    if (wordsWidth(word, size, weight, face) > width) return null;
-    const next = current ? `${current} ${word}` : word;
+  for (const { word, glued } of piecesOf(text)) {
+    if (wordsWidth(word, size, weight, face) > width * LONG_WORD) return null;
+    const next = current ? `${current}${glued ? '' : ' '}${word}` : word;
     if (current && wordsWidth(next, size, weight, face) > width) {
       out.push(current);
       current = word;
@@ -458,17 +477,19 @@ export function fit(
     if (lines) return { size: r1(size), lines };
   }
   const size = least;
-  const words = said.split(' ').map((word) => {
-    if (wordsWidth(word, size, weight, face) <= width) return word;
-    let cut = word;
-    while (cut.length > 1 && wordsWidth(`${cut}…`, size, weight, face) > width)
-      cut = cut.slice(0, -1);
-    return `${cut}…`;
-  });
   const lines: string[] = [];
   let current = '';
-  for (const word of words) {
-    const next = current ? `${current} ${word}` : word;
+  for (const piece of piecesOf(said)) {
+    let word = piece.word;
+    if (wordsWidth(word, size, weight, face) > width * LONG_WORD) {
+      while (
+        word.length > 1 &&
+        wordsWidth(`${word}…`, size, weight, face) > width
+      )
+        word = word.slice(0, -1);
+      word = `${word}…`;
+    }
+    const next = current ? `${current}${piece.glued ? '' : ' '}${word}` : word;
     if (current && wordsWidth(next, size, weight, face) > width) {
       lines.push(current);
       current = word;
@@ -631,6 +652,7 @@ export class PartBook {
         ? { value: part.value }
         : {}),
       ...(part.role ? { role: part.role } : {}),
+      ...(part.later ? { later: true } : {}),
     };
     return id;
   }
@@ -724,7 +746,8 @@ export function sourceLine(raw: string | null | undefined): string | null {
 
 /**
  * A source line: small, in the muted ink, at the chip's size, set from a
- * point, cut short to its width. A part, "source".
+ * point; on two lines where one is too short, and cut short past them.
+ * A part, "source".
  */
 export function sourceSvg(
   book: PartBook,
@@ -737,17 +760,22 @@ export function sourceSvg(
   anchor: 'start' | 'middle' | 'end' = 'start',
 ): { svg: string; box: ShotBox } {
   const size = frame.size.chip;
-  let line = text;
-  while (line.length > 8 && wordsWidth(line, size, 600) > width)
-    line = `${line.slice(0, -2).trimEnd()}…`.replace(/……$/, '…');
-  const box = linesBox([line], x, y, size, anchor, 1.15, 600);
+  const { lines } = fit(text, width, size, size, 2, 600);
+  const box = linesBox(lines, x, y, size, anchor, 1.2, 600);
   book.add('source', { box, role: 'muted' });
   return {
     svg: textSvg(
-      [line],
+      lines,
       x,
       y,
-      { size, fill: paint.muted, family: paint.text, weight: 600, anchor },
+      {
+        size,
+        fill: paint.muted,
+        family: paint.text,
+        weight: 600,
+        anchor,
+        leading: 1.2,
+      },
       'source',
     ),
     box,

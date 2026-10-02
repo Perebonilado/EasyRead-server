@@ -18,10 +18,12 @@ import type {
   ShotLookDto,
   ShotSvgAssetDto,
 } from '../../../contracts';
+import { barsAsset } from './shot-chart-bars';
 import { counterAsset } from './shot-chart-counter';
+import { timelineAsset } from './shot-chart-timeline';
 
 /** The kinds drawn here, as the board names them. */
-export const CHART_KINDS = ['counter'] as const;
+export const CHART_KINDS = ['counter', 'chart', 'timeline'] as const;
 export type ChartKind = (typeof CHART_KINDS)[number];
 
 type Draw = (
@@ -32,6 +34,8 @@ type Draw = (
 
 const DRAW: Record<ChartKind, Draw> = {
   counter: counterAsset,
+  chart: barsAsset,
+  timeline: timelineAsset,
 };
 
 /** Whether a kind is one drawn here. */

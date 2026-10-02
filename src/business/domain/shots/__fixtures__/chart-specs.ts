@@ -83,4 +83,79 @@ export const CHART_SPECS: Record<
       source: 'Annual report, 2019',
     },
   },
+  chart: {
+    regions: {
+      chart: {
+        kind: 'bar',
+        unit: 'million',
+        bars: [
+          { label: 'Northern Region', value: 16.8 },
+          { label: 'Eastern Region', value: 7.2 },
+          { label: 'Western Region', value: 6.1 },
+        ],
+      },
+      source: 'Census of Nigeria, 1952',
+    },
+    turnout: {
+      chart: {
+        kind: 'bar',
+        unit: '%',
+        bars: [
+          { label: 'Kenya', value: 65 },
+          { label: 'Ghana', value: 79 },
+          { label: 'Senegal', value: 61 },
+          { label: 'South Africa', value: 58 },
+          { label: 'Brazil', value: 79 },
+          { label: 'India', value: 66 },
+          { label: 'Indonesia', value: 81 },
+        ],
+      },
+      source: 'International IDEA',
+    },
+    prices: {
+      chart: {
+        kind: 'line',
+        unit: '%',
+        bars: [
+          { label: '2016', value: 15.7 },
+          { label: '2017', value: 16.5 },
+          { label: '2018', value: 12.1 },
+          { label: '2019', value: 11.4 },
+          { label: '2020', value: 13.2 },
+          { label: '2021', value: 17 },
+          { label: '2022', value: 18.8 },
+          { label: '2023', value: 24.7 },
+        ],
+      },
+      source: 'National statistics office',
+    },
+  },
+  timeline: {
+    road: {
+      timeline: [
+        { when: '1914', name: 'North and South joined' },
+        { when: '1946', name: 'Richards constitution' },
+        { when: '1951', name: 'Regions elect assemblies' },
+        { when: '1954', name: 'A federation' },
+        { when: '1957', name: 'Self-government begins' },
+        { when: '1960', name: 'Independence' },
+      ],
+      source: 'Coleman, Nigeria: Background to Nationalism',
+    },
+    curie: {
+      timeline: [
+        { when: '1891', name: 'Moves to Paris' },
+        { when: '1898', name: 'Finds polonium' },
+        { when: '1903', name: 'Nobel Prize, physics' },
+        { when: '1911', name: 'Nobel Prize, chemistry' },
+      ],
+    },
+    stages: {
+      timeline: [
+        { when: 'Stage 1', name: 'Seed' },
+        { when: 'Stage 2', name: 'Sprout' },
+        { when: 'Stage 3', name: 'Flowers' },
+      ],
+    },
+  },
 };

@@ -121,6 +121,7 @@ import {
   isInfographicThing,
   partNames,
   quotedSpans,
+  withoutThings,
   type CharacterThing,
   type SceneCameraAsk,
   type SceneScript,
@@ -373,9 +374,11 @@ function reverseDto(
 
 /**
  * The thing as the client gets it: its drawing, or a card with its name
- * when the drawing failed. On a story's page nothing is labelled: no
- * names, no captions, no labels on a drawing's parts. Who someone is, the
- * story says; the only words on its stage are the ones its people speak.
+ * when the drawing failed. A Studio explainer's never comes here without
+ * its drawing: it is left out before (explainerFloor), never a card. On a
+ * story's page nothing is labelled: no names, no captions, no labels on a
+ * drawing's parts. Who someone is, the story says; the only words on its
+ * stage are the ones its people speak.
  */
 export function thingDto(
   thing: SceneThing,
@@ -1486,22 +1489,83 @@ function unlabelled(
 }
 
 /**
+ * Whether a scene is a Studio explainer's lesson: a film's, and no
+ * story's, by its profile and by its cast (no character or place of a
+ * story on it). Its floor holds (explainerFloor); a book's page and every
+ * story are composed as they always were.
+ */
+export function isExplainerScene(
+  input: Pick<ComposeInput, 'script' | 'profile'>,
+): boolean {
+  return (
+    input.profile?.film === true &&
+    input.profile.story !== true &&
+    !input.script.cast.some(
+      (thing) => thing.kind === 'character' || thing.kind === 'place',
+    )
+  );
+}
+
+/**
+ * A Studio explainer's scene held to the floor (explainer-animation-plan
+ * §10). A thing that could not be drawn is left out, never shown as a
+ * card of its name (thingDto's): its steps go with it and the stage keeps
+ * what it had (withoutThings). And the scene opens on its first picture
+ * as the voice starts, never on an empty stage while its first sentence
+ * is said, unless a build carries the board on from the scene before.
+ */
+export function explainerFloor(
+  script: SceneScript,
+  drawings: ReadonlyMap<string, GatedDrawing | null>,
+): SceneScript {
+  const undrawn = new Set(
+    script.cast.flatMap((thing) =>
+      thing.kind !== 'stat' && thing.kind !== 'words' && !drawings.get(thing.id)
+        ? [thing.id]
+        : [],
+    ),
+  );
+  const kept = withoutThings(script, undrawn);
+  if (kept.board?.carried.length) return kept;
+  const first = kept.steps.findIndex((step) => step.stage);
+  const opening = kept.steps[first];
+  if (!opening || opening.after !== undefined || opening.at.beat === 0)
+    return kept;
+  const words = (kept.beats[0]?.say ?? '').split(/\s+/).filter(Boolean);
+  return {
+    ...kept,
+    steps: kept.steps.map((step, k) =>
+      k === first
+        ? {
+            ...step,
+            at: { beat: 0, phrase: words.slice(0, 3).join(' ') },
+            word: 0,
+          }
+        : step,
+    ),
+  };
+}
+
+/**
  * The scene the player plays. Steps are timed on their phrases and kept
  * apart; effects follow their step; a stretch longer than the quiet limit
  * gets a pulse on the thing in focus; every step is placed twice. Its
  * words set at its shape's sizes (scene-lesson-shape), a tall lesson's
- * steps of more than a phone's screen holds paged by code.
+ * steps of more than a phone's screen holds paged by code. A Studio
+ * explainer's held to the floor first (explainerFloor).
  */
 export function composeScene(
   input: ComposeInput,
 ): ReturnType<typeof composeShaped> {
   const shape = input.shape ?? 'wide';
+  const script = isExplainerScene(input)
+    ? explainerFloor(input.script, input.drawings)
+    : input.script;
   return withTextOf(shape, () =>
-    composeShaped(
-      shape === 'tall'
-        ? { ...input, script: pagedForTall(input.script) }
-        : input,
-    ),
+    composeShaped({
+      ...input,
+      script: shape === 'tall' ? pagedForTall(script) : script,
+    }),
   );
 }
 

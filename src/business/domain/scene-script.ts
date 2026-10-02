@@ -1341,6 +1341,121 @@ export function fitLayout(asked: SceneLayout, count: number): SceneLayout {
   return asked === 'stack' && count <= 4 ? 'stack' : 'row';
 }
 
+/**
+ * A script with some of its things left out (explainer-animation-plan
+ * §10): an explainer's thing that cannot be shown truthfully is gone from
+ * its cast and its storyboard, never set as a card of its name. A stage
+ * that showed only them is no change, so the stage keeps what it had; one
+ * that showed others too keeps those, laid out for as many, and their
+ * arrows, comings and goings, cells and effects go with them. A step left
+ * with nothing to do is gone. And a scene never opens on nothing: when
+ * the first thing it showed is left out, its next picture comes on in its
+ * place.
+ */
+export function withoutThings<
+  T extends Pick<SceneScript, 'cast' | 'steps'> &
+    Partial<Pick<SceneScript, 'backdrop' | 'opening' | 'board'>>,
+>(script: T, ids: ReadonlySet<string>): T {
+  if (!script.cast.some((thing) => ids.has(thing.id))) return script;
+  const kept = (id: string) => !ids.has(id);
+  const keptIn = <V>(record: Record<string, V>) =>
+    Object.fromEntries(Object.entries(record).filter(([id]) => kept(id)));
+  const stageOf = (stage: SceneStage): SceneStage | null => {
+    const show = stage.show.filter(kept);
+    const backdrop =
+      stage.backdrop !== undefined && kept(stage.backdrop)
+        ? stage.backdrop
+        : undefined;
+    if (!show.length && backdrop === undefined) return null;
+    const out: SceneStage = {
+      ...stage,
+      layout: fitLayout(stage.layout, show.length),
+      show,
+      arrows: stage.arrows.filter((a) => kept(a.from) && kept(a.to)),
+    };
+    if (backdrop === undefined) delete out.backdrop;
+    for (const key of ['cutIn', 'arrive', 'leave'] as const) {
+      const left = stage[key]?.filter(kept);
+      if (left?.length) out[key] = left;
+      else delete out[key];
+    }
+    if (stage.at) out.at = keptIn(stage.at);
+    if (stage.depth) out.depth = keptIn(stage.depth);
+    if (stage.going)
+      out.going = Object.fromEntries(
+        Object.entries(keptIn(stage.going)).map(([id, how]) => {
+          if (how.toward === undefined || kept(how.toward)) return [id, how];
+          const rest = { ...how };
+          delete rest.toward;
+          return [id, rest];
+        }),
+      );
+    if (stage.board) {
+      const frame = Array.isArray(stage.board.frame)
+        ? stage.board.frame.filter(kept)
+        : stage.board.frame;
+      out.board = {
+        ...stage.board,
+        cells: keptIn(stage.board.cells),
+        faded: stage.board.faded.filter(kept),
+        frame: Array.isArray(frame) && !frame.length ? 'whole' : frame,
+      };
+    }
+    return out;
+  };
+  const steps = script.steps.map((step): SceneStep => ({
+    ...step,
+    stage: step.stage ? stageOf(step.stage) : null,
+    effects: step.effects
+      .filter((effect) => kept(effect.target))
+      .map((effect) =>
+        effect.part !== null && !kept(effect.part)
+          ? { ...effect, part: null }
+          : effect,
+      ),
+    ...(step.interact
+      ? { interact: step.interact.filter((one) => kept(one.who)) }
+      : {}),
+  }));
+  // What the scene opened on was left out: its next picture opens it.
+  const first = script.steps.findIndex((step) => step.stage);
+  if (first >= 0 && !steps[first].stage) {
+    const next = steps.findIndex((step, k) => k > first && step.stage);
+    if (next > first) {
+      steps[first] = { ...steps[first], stage: steps[next].stage };
+      steps[next] = { ...steps[next], stage: null };
+    }
+  }
+  return {
+    ...script,
+    cast: script.cast.filter((thing) => kept(thing.id)),
+    steps: steps.filter(
+      (step) =>
+        step.stage || step.effects.length || (step.interact?.length ?? 0) > 0,
+    ),
+    ...(script.backdrop && !kept(script.backdrop) ? { backdrop: null } : {}),
+    ...(script.opening
+      ? {
+          opening: {
+            show: script.opening.show.filter(kept),
+            backdrop:
+              script.opening.backdrop && kept(script.opening.backdrop)
+                ? script.opening.backdrop
+                : null,
+          },
+        }
+      : {}),
+    ...(script.board
+      ? {
+          board: {
+            ...script.board,
+            carried: script.board.carried.filter(kept),
+          },
+        }
+      : {}),
+  };
+}
+
 // ── The mend ──────────────────────────────────────────────────────────────
 
 const slug = (text: string) => groupId(text).slice(0, 32);
@@ -1585,6 +1700,14 @@ export interface MendOptions {
   held?: PaletteToken | null;
   /** The formats the document may use; a kind of another is set in type. */
   formats?: readonly SceneFormat[];
+  /**
+   * A Studio explainer's storyboard (explainer-animation-plan §10): what
+   * cannot be shown truthfully is left out, never set in type as a card
+   * of its name, and no one is drawn (no person, no stand-in for the
+   * viewer, no stock figure for a group), so the stage keeps what it had.
+   * Absent, a book's page, mended as it always was.
+   */
+  explainer?: boolean;
   /** The story's characters, when the book is a story: who a character may be. */
   characters?: readonly {
     id: string;
@@ -1674,12 +1797,27 @@ export function mendCast(
     idFor.set(raw.id.toLowerCase(), id);
     idFor.set(slug(raw.id), id);
     const name = clean(raw.name) || clean(raw.id);
+    // An explainer's thing that cannot be shown truthfully, or that is
+    // someone, is left out (explainer-animation-plan §10): no one refers
+    // to it any more, so its steps drop it and the stage keeps what it
+    // had. A book's page sets it in type, as it always did.
+    const explainer = options.explainer === true;
+    const forget = () => {
+      used.delete(id);
+      for (const key of [raw.id, raw.id.toLowerCase(), slug(raw.id)])
+        if (idFor.get(key) === id) idFor.delete(key);
+    };
+    const leaveOut = (why: string) => {
+      forget();
+      mended.push(`${id}: ${why}; left out`);
+    };
     if (raw.kind === 'stat') {
       const value = clean(raw.value);
       if (value) {
         cast.push({ id, kind: 'stat', value, caption: name });
         return;
       }
+      if (explainer) return leaveOut('a number with no value');
       mended.push(`${id}: a number with no value is set as words`);
       cast.push({ id, kind: 'words', text: name, style: 'keyword' });
       return;
@@ -1716,7 +1854,9 @@ export function mendCast(
           `${id}: "${name}" is a map of a real place; drawn by code, of ${asMap.region.name || 'its places'}`,
         );
         cast.push({ id, kind: 'map', name, map: asMap });
-      } else {
+      } else if (explainer)
+        leaveOut(`"${name}" is a map of a real place code cannot read`);
+      else {
         mended.push(
           `${id}: "${name}" is a map of a real place code cannot read; set in type`,
         );
@@ -1763,6 +1903,7 @@ export function mendCast(
       problems.push(
         `The equation "${raw.id}" has no lines: give equation as one to four lines of LaTeX.`,
       );
+      if (explainer) return leaveOut('an equation with no lines');
       mended.push(`${id}: an equation with no lines; set in type`);
       cast.push({ id, kind: 'words', text: name, style: 'keyword' });
       return;
@@ -1776,9 +1917,12 @@ export function mendCast(
         options.material,
         options.stage === 'early',
         textFloorOf(options.stage),
+        explainer,
       );
       mended.push(...made.mended);
       problems.push(...made.problems);
+      // One it could not make is left out (an explainer's), said so above.
+      if (!made.thing) return forget();
       // In the show's colours, where it has them.
       cast.push(palette ? applyPalette(made.thing, palette) : made.thing);
       return;
@@ -1823,6 +1967,10 @@ export function mendCast(
     if (raw.kind === 'character') {
       if (known) mended.push(`${id}: the story's character ${known.id}`);
       const who = storyEntry(options.characters ?? [], raw.ref, name);
+      if (!who && explainer)
+        return leaveOut(
+          `"${raw.ref ?? name}" is not one of the story's characters`,
+        );
       if (!who) {
         mended.push(
           `${id}: "${raw.ref ?? name}" is not one of the story's characters; set in type`,
@@ -1852,6 +2000,11 @@ export function mendCast(
       });
       return;
     }
+    // An explainer draws no one: not the viewer, not a stock figure for a
+    // group, not a likeness of someone real (a portrait comes with the
+    // shots engine). The voice names them; the picture holds.
+    if (raw.kind === 'person' && explainer)
+      return leaveOut(`"${name}" is a person, and an explainer draws no one`);
     if (raw.kind === 'person') {
       if (!raw.figure)
         mended.push(`${id}: a person with no figure, drawn plainly`);
@@ -1894,6 +2047,8 @@ export function mendCast(
       !(raw.states ?? []).length
         ? someoneIn(name)
         : null;
+    if (someone && explainer)
+      return leaveOut(`"${name}" is someone, and an explainer draws no one`);
     if (someone) {
       mended.push(`${id}: "${name}" is someone; drawn as a person`);
       cast.push({
@@ -1917,6 +2072,10 @@ export function mendCast(
     // outline of a person…") is them, drawn by the kit: what else the
     // brief asks for is left to the voice.
     const about = raw.kind === 'drawing' && !someone ? personIn(asked) : null;
+    if (about && explainer)
+      return leaveOut(
+        'its brief is about someone, and an explainer draws no one',
+      );
     if (about) {
       mended.push(`${id}: its brief is about someone; drawn as a person`);
       cast.push({
@@ -1940,14 +2099,18 @@ export function mendCast(
         `${id}: its brief mentions people; the artist leaves them out`,
       );
     // And the writer, told which drawing asks for someone, shows them as
-    // people when it writes the page again.
+    // people when it writes the page again; an explainer's, that no one is
+    // drawn at all.
     const wanted = asked ? peopleAskedFor(asked) : null;
     if (wanted)
       problems.push(
-        `The drawing "${raw.id}" asks the artist for people ("${wanted}"), and the artist draws no one: show each person as a person (a pose for how they are placed, "in bed" for someone in bed; signs for what they go through, shown at the words; count for a few), with a face that fits, and let drawings show only things.`,
+        explainer
+          ? `The drawing "${raw.id}" asks the artist for people ("${wanted}"): an explainer draws no one. Show the thing itself, or what is real about them: where it happened on the map, a document, a number, their exact words as a quote.`
+          : `The drawing "${raw.id}" asks the artist for people ("${wanted}"), and the artist draws no one: show each person as a person (a pose for how they are placed, "in bed" for someone in bed; signs for what they go through, shown at the words; count for a few), with a face that fits, and let drawings show only things.`,
       );
     if (!brief) {
       problems.push(`The drawing "${raw.id}" has no brief: say what to draw.`);
+      if (explainer) return leaveOut('a drawing with no brief');
       cast.push({ id, kind: 'words', text: name, style: 'keyword' });
       return;
     }
@@ -2383,7 +2546,8 @@ export function mendScript(
     }
     const drawings = cast.filter((thing) => thing.kind === 'drawing');
     if (drawings.length > MAX_DRAWINGS) {
-      // The ones on stage longest keep their drawings; the rest are set in type.
+      // The ones on stage longest keep their drawings; the rest are set in
+      // type, or an explainer's left out, the stage keeping what it had.
       const firstSeen = (id: string) => {
         const at = steps.findIndex((step) => step.stage?.show.includes(id));
         return at < 0 ? Number.POSITIVE_INFINITY : at;
@@ -2394,19 +2558,29 @@ export function mendScript(
           .slice(0, MAX_DRAWINGS)
           .map((thing) => thing.id),
       );
-      cast.forEach((thing, index) => {
-        if (thing.kind === 'drawing' && !keep.has(thing.id)) {
-          cast[index] = {
-            id: thing.id,
-            kind: 'words',
-            text: thing.name,
-            style: 'keyword',
-          };
-          mended.push(
-            `${thing.id}: more than ${MAX_DRAWINGS} drawings; set in type`,
-          );
-        }
-      });
+      if (options.explainer) {
+        const extra = new Set(
+          drawings.filter((t) => !keep.has(t.id)).map((t) => t.id),
+        );
+        const left = withoutThings({ cast, steps }, extra);
+        cast.splice(0, cast.length, ...left.cast);
+        steps.splice(0, steps.length, ...left.steps);
+        for (const id of extra)
+          mended.push(`${id}: more than ${MAX_DRAWINGS} drawings; left out`);
+      } else
+        cast.forEach((thing, index) => {
+          if (thing.kind === 'drawing' && !keep.has(thing.id)) {
+            cast[index] = {
+              id: thing.id,
+              kind: 'words',
+              text: thing.name,
+              style: 'keyword',
+            };
+            mended.push(
+              `${thing.id}: more than ${MAX_DRAWINGS} drawings; set in type`,
+            );
+          }
+        });
     }
   }
 
@@ -2877,7 +3051,8 @@ export function storyEntry<
 /**
  * A thing code draws, made sound: working whose sums hold, a graph whose
  * function has values, a quotation that is the page's own words. One the
- * document's formats do not include is set in type instead.
+ * document's formats do not include is set in type instead; an
+ * explainer's (`leaveOut`) is no thing at all, never a card of its name.
  */
 function codeThing(
   id: string,
@@ -2889,18 +3064,25 @@ function codeThing(
   young = false,
   /** The smallest text its audience reads, in stage units: what flags, flows and molecules are drawn at. */
   textFloor?: number,
-): { thing: SceneThing; problems: string[]; mended: string[] } {
+  /** An explainer's: one that cannot be made is left out (explainer-animation-plan §10). */
+  leaveOut = false,
+): { thing: SceneThing | null; problems: string[]; mended: string[] } {
   const problems: string[] = [];
   const mended: string[] = [];
   const words = (why: string) => ({
-    thing: {
-      id,
-      kind: 'words' as const,
-      text: name || raw.id,
-      style: 'keyword' as const,
-    },
+    thing: leaveOut
+      ? null
+      : {
+          id,
+          kind: 'words' as const,
+          text: name || raw.id,
+          style: 'keyword' as const,
+        },
     problems,
-    mended: [...mended, `${id}: ${why}; set in type`],
+    mended: [
+      ...mended,
+      `${id}: ${why}; ${leaveOut ? 'left out' : 'set in type'}`,
+    ],
   });
   if (raw.kind === 'math') {
     // Working on any page that works a calculation: a law page's interest,
@@ -3566,10 +3748,15 @@ export function stageWordsFor(
  */
 export const WORDS_ALONE = 12;
 
-/** Each stretch where the stage shows only word cards for more than `limit` spoken words, said for the writer. */
+/**
+ * Each stretch where the stage shows only word cards for more than `limit`
+ * spoken words, said for the writer: an explainer's told what may show
+ * the idea without drawing anyone (explainer-animation-plan §10).
+ */
 export function wordsAloneStretches(
   script: SceneScript,
   limit = WORDS_ALONE,
+  explainer = false,
 ): string[] {
   const cards = new Map(
     script.cast.flatMap((thing) =>
@@ -3594,7 +3781,7 @@ export function wordsAloneStretches(
     if (until - stage.at <= limit) return;
     const words = stage.show.map((id) => `"${cards.get(id)}"`).join(', ');
     out.push(
-      `${until - stage.at} spoken words pass with only words on the stage (${words}), from word ${stage.at} (about ${Math.round((until - stage.at) / 2.5)} seconds): show the idea as a picture that builds up as the voice goes (a drawing, a person, a chart), with its words as its label. A word card alone is only for following a list the voice reads out, each arriving as it is named.`,
+      `${until - stage.at} spoken words pass with only words on the stage (${words}), from word ${stage.at} (about ${Math.round((until - stage.at) / 2.5)} seconds): show the idea as a picture that builds up as the voice goes (${explainer ? 'a drawing of the thing, a map, a chart, a counter, a document' : 'a drawing, a person, a chart'}), with its words as its label${explainer ? ', or leave the picture before it on the stage' : ''}. A word card alone is only for following a list the voice reads out, each arriving as it is named.`,
     );
   });
   return out;

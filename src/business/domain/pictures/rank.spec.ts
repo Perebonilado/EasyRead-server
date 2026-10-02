@@ -569,3 +569,59 @@ describe('an event is of its own people, bodies and things, not of its verbs', (
     ).toEqual({ ok: true });
   });
 });
+
+describe('an event is where it happened', () => {
+  const fair = {
+    name: 'RCA introduces television',
+    years: [1939],
+    place: ['New York'],
+    words: [
+      "RCA introduces television at the New York World's Fair",
+      'New York',
+    ],
+    names: ['RCA', "New York World's Fair"],
+  };
+
+  it('refuses a photo its words place in another city far off', () => {
+    expect(
+      eventPhotoOf(
+        {
+          title:
+            'FCC Chairman faces lens of television camera. Washington, D.C., Chairman Frank R. McNinch',
+          description: 'RCA television demonstration, 1939',
+          categories: [],
+        },
+        fair,
+        1939,
+      ),
+    ).toEqual({
+      ok: false,
+      reason: 'its words place it in Washington, D.C., not New York',
+    });
+  });
+
+  it('takes one placed there, or placed nowhere', () => {
+    expect(
+      eventPhotoOf(
+        {
+          title: "RCA television at the 1939 New York World's Fair",
+          description: '',
+          categories: [],
+        },
+        fair,
+        1939,
+      ).ok,
+    ).toBe(true);
+    expect(
+      eventPhotoOf(
+        {
+          title: "RCA television pavilion, World's Fair",
+          description: '',
+          categories: [],
+        },
+        fair,
+        1939,
+      ).ok,
+    ).toBe(true);
+  });
+});

@@ -9,7 +9,8 @@
  *           + 0.10·tier + 0.05·sourceRank   (+ 0.10 for a person's own
  *           Wikidata picture, house: the one their editors chose)
  */
-import { nameWords, stems, textWords } from './match';
+import { placeNamed, placesIn } from '../scene-map-places';
+import { kmBetween, nameWords, stems, textWords } from './match';
 import type {
   PictureKind,
   PictureQuery,
@@ -406,6 +407,33 @@ function keysIn(text: string): Set<string> {
   return keys;
 }
 
+/** How far from where an event happened a photo's own city may be and still be there. */
+const SAME_CITY_KM = 150;
+
+/** A city the map knows, by name or by a part of a name ("London" of "Frith Street, London"). */
+function cityOf(names: readonly string[]) {
+  for (const name of names) {
+    const parts = name.split(',').map((p) => p.trim());
+    for (const tried of [name, ...parts.reverse()]) {
+      const place = placeNamed(tried);
+      if (place && (place.kind === 'city' || place.kind === 'capital'))
+        return place;
+    }
+  }
+  return null;
+}
+
+/** The cities a file's words name, as the map knows them. */
+function citiesIn(text: string) {
+  return placesIn(text)
+    .filter((p) => p.kind === 'place')
+    .map((p) => placeNamed(p.name))
+    .filter(
+      (p): p is NonNullable<typeof p> =>
+        p !== null && (p.kind === 'city' || p.kind === 'capital'),
+    );
+}
+
 /** A commemoration of an event (a plaque, a memorial) is no photo of the event itself. */
 const COMMEMORATION =
   /\b(?:plaque|memorial|monument|commemorat\w*|statue|museum|exhibit(?:ion)?|replica|anniversary|re-?enactment|stamp|banknote|coin|postage)\b/iu;
@@ -450,6 +478,32 @@ export function eventPhotoOf(
     return { ok: false, reason: 'it commemorates the event; it is not of it' };
   const made = contemptOf(file);
   if (made) return { ok: false, reason: made };
+  // Where it happened, when the map knows the city: a photo its words
+  // place only in a city far from it is of something else (the FCC's
+  // chairman before a camera in Washington, for RCA at New York's fair).
+  const city = cityOf([query.place ?? []].flat());
+  if (city) {
+    const named = citiesIn(`${file.title} ${file.description}`);
+    const there = named.some(
+      (p) =>
+        kmBetween(
+          { lng: city.lon, lat: city.lat },
+          { lng: p.lon, lat: p.lat },
+        ) <= SAME_CITY_KM,
+    );
+    const elsewhere = named.find(
+      (p) =>
+        kmBetween(
+          { lng: city.lon, lat: city.lat },
+          { lng: p.lon, lat: p.lat },
+        ) > SAME_CITY_KM,
+    );
+    if (elsewhere && !there)
+      return {
+        ok: false,
+        reason: `its words place it in ${elsewhere.name}, not ${city.name}`,
+      };
+  }
   const seen = keysIn(said);
   const placed = [...keysIn([query.place ?? []].flat().join(' '))];
   // Its own words, but the verbs that tell it: "demonstrates" is in a

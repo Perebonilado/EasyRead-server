@@ -150,7 +150,10 @@ const RAW = {
           kit: 'character.person',
           place: 'place:Kano',
           name: 'Ahmadu Bello',
-          moves: [{ move: 'enter', on: 'Ahmadu Bello watched' }],
+          moves: [
+            { move: 'enter', on: 'Ahmadu Bello watched' },
+            { move: 'surprised', on: 'from the north' },
+          ],
         },
         {
           id: 'nobody',
@@ -261,6 +264,22 @@ describe('the build in an illustrated show', () => {
     const svg = built.assets[bello.asset];
     // A white turban: the likeness's.
     expect(svg.kind === 'svg' && svg.svg).toContain('data-part="hat"');
+  });
+
+  it('turns a character’s face at a word, in a blink, to a state of its rig', () => {
+    const bello = built.shots
+      .flatMap((one) => one.actors)
+      .find((a) => a.id === 'bello')!;
+    const face = bello.moves.find((m) => m.move === 'surprised');
+    expect(face).toMatchObject({ state: 'surprised', durMs: 160 });
+    const svg = built.assets[bello.asset];
+    expect(svg.kind === 'svg' && svg.rig?.states.surprised).toBeTruthy();
+  });
+
+  it('lets a group standing together shift and cheer, each on its own', () => {
+    const men = built.shots[0].actors.find((a) => a.id === 'men')!;
+    const asset = built.assets[men.asset];
+    expect(asset.kind === 'svg' && asset.rig?.idle).toEqual(['f1', 'f2', 'f3']);
   });
 
   it('times a bubble to leave once it is read', () => {

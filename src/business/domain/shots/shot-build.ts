@@ -223,6 +223,9 @@ export interface BuiltShots {
   notes: string[];
 }
 
+/** How long a character's face takes to change at a word: a blink. */
+const FACE_MS = 160;
+
 /** A map's tilt when the plan asks for one and the map can tilt (a geo map): the brief's 45–55°, steep enough to read as ground. */
 export const MAP_TILT = 50;
 
@@ -846,9 +849,22 @@ export function buildShots(
               toBox[1] + toBox[3] - placed.at.y,
             )
           : 0;
-        const durMs = moveMs(name, distance, setBox[2], placed.scale);
+        // A face changes in a blink; the rest as long as their way.
+        const durMs =
+          moveMs(name, distance, setBox[2], placed.scale) ??
+          (made.asset.rig?.states[name] && name !== 'sit' && name !== 'stand'
+            ? FACE_MS
+            : undefined);
+        // A sit starts from standing; a move named for one of the piece's
+        // states (a character's face at a word) ends in that state.
         const state =
-          name === 'sit' ? 'seated' : name === 'stand' ? 'standing' : undefined;
+          name === 'sit'
+            ? 'seated'
+            : name === 'stand'
+              ? 'standing'
+              : made.asset.rig?.states[name]
+                ? name
+                : undefined;
         moves.push({
           move: name,
           on: move.on,

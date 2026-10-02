@@ -1205,8 +1205,24 @@ export const CHARACTER_MOVES = [
   'wave',
   'cheer',
   'hold-up',
+  // A face turned at a word: the rig's state of that name.
+  ...FACE_MOVES(),
 ];
-const GROUP_MOVES = ['enter', 'exit', 'walk', 'leave', 'turn', 'wave', 'cheer'];
+const GROUP_MOVES = [
+  'enter',
+  'exit',
+  'walk',
+  'leave',
+  'turn',
+  'wave',
+  'cheer',
+  ...FACE_MOVES(),
+];
+
+/** The faces a character may turn to at a word, as moves (each the rig's state of its name). */
+function FACE_MOVES(): string[] {
+  return ['neutral', 'happy', 'surprised', 'angry', 'worried'];
+}
 
 /** One character, as a piece. */
 function personPiece(
@@ -1326,6 +1342,10 @@ function groupPiece(
       figures: figures.sort((a, b) =>
         a.prefix.localeCompare(b.prefix, 'en', { numeric: true }),
       ),
+      // Standing together, each shifts a little on its own and bounces when they cheer.
+      ...(side
+        ? {}
+        : { idle: [...Array(count).keys()].map((k) => `f${k + 1}`) }),
     },
     box,
     [],

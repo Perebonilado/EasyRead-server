@@ -1,7 +1,9 @@
 import type { SceneDto, ShotDto } from '../../../contracts';
 import {
+  CLOSE_OUT_MS,
   GRID_MS,
   clipAt,
+  inFade,
   momentsOf,
   videoMsOf,
   type FilmTimeline,
@@ -169,6 +171,26 @@ describe('the moments a film’s stills are taken at', () => {
           m.videoMs < TIMELINE.titleMs + TIMELINE.filmMs,
       ),
     ).toBe(true);
+  });
+
+  it('takes nothing while the film goes down to black at its end or through a dip', () => {
+    const end = TIMELINE.titleMs + TIMELINE.filmMs;
+    expect(inFade(TIMELINE, end - 600)).toBe(true);
+    expect(inFade(TIMELINE, end - CLOSE_OUT_MS - 10)).toBe(false);
+    expect(
+      momentsOf(TIMELINE, SCENES).every((m) => !inFade(TIMELINE, m.videoMs)),
+    ).toBe(true);
+    // The first scene ends at 12.9 s: down over its last 0.7 s, black, up over the next's first 0.8 s.
+    const dipped: FilmTimeline = {
+      ...TIMELINE,
+      clips: [
+        TIMELINE.clips[0],
+        { ...TIMELINE.clips[1], join: 'dip', startsAtMs: 13_250 },
+      ],
+    };
+    expect(
+      [12_000, 12_500, 13_100, 13_900, 14_200].map((ms) => inFade(dipped, ms)),
+    ).toEqual([false, true, true, true, false]);
   });
 
   it('is the same however often it is asked', () => {

@@ -772,11 +772,13 @@ export function buildRegistry(input: RegistryInput): TargetRegistry {
       });
   }
 
-  // Pictures the desk cleared: a portrait on its person, a photo or a document as its own.
+  // Pictures the desk cleared: a portrait on its person, a photo or a
+  // document as its own. A portrait never brings its person in: only a
+  // person these lines are about is on screen.
   for (const picture of input.pictures ?? []) {
     const had = entries.find((e) => e.name === picture.name);
     if (had && picture.picture) had.picture = picture.picture;
-    else if (!had) add({ ...picture });
+    else if (!had && picture.kind !== 'person') add({ ...picture });
   }
   return registryOf(entries);
 

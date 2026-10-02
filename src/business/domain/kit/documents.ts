@@ -520,7 +520,7 @@ export function drawDocument(
         [box(-4, y0 + 7, 4, -1.1, 0.4), shadeOf(wood, 0.15)],
       ]);
       d.part('face', 'document', [[box(-3.8, -1.1, 3.8, 0, 0.2), face]]);
-      d.anchor('stamp', 'document', [0, 0]);
+      d.anchor('stamp', 'document', [0, -1]);
       break;
     }
   }
@@ -566,39 +566,20 @@ export function drawDocument(
   });
 }
 
-const ABOUT: Record<DocumentKind, string> = {
-  letter:
-    'A letter: its lines (bars, no words), a signature the draw recipe can write, a stamp spot.',
-  charter:
-    'A charter or treaty on parchment: clauses, three signatures, a wax seal on its ribbon.',
-  newspaper:
-    'A newspaper page: masthead, headline, a photo block and columns (no words of its own).',
-  ballot:
-    'A ballot paper: options with boxes, and the voter’s cross in the first (a later part).',
-  note: 'A banknote-like note: never a real currency, no portrait, no figure.',
-  booklet:
-    'A booklet or passport-like book, closed: a cover in a colour, a plain emblem circle.',
-  stamp:
-    'A rubber stamp (handle, mount, inked face): approving, rejecting, official.',
+export const DOCUMENT_KIT: Readonly<Record<string, KitEntry>> = {
+  document: {
+    family: 'documents',
+    looks: ['editorial', 'illustrated'],
+    about:
+      'A document as a prop, its lines bars, never words of its own: kind letter (a signature part to draw), charter (a treaty: clauses, signatures, a seal), newspaper (masthead, headline, columns), ballot (its cross the state marked), note (like a banknote, never a currency), booklet, stamp (a rubber stamp). Each has a stamp spot (part stamp).',
+    params: { kind: { values: DOCUMENT_KINDS, default: 'letter', about: 'which document' } },
+    moves: ['enter', 'exit'],
+    make: (params: KitParams, style: KitStyle, seed: number) =>
+      drawDocument(
+        (DOCUMENT_KINDS as readonly unknown[]).includes(params.kind) ? (params.kind as DocumentKind) : 'letter',
+        typeof params.colour === 'string' ? { colour: params.colour } : {},
+        style,
+        seed,
+      ),
+  },
 };
-
-export const DOCUMENT_KIT: Readonly<Record<string, KitEntry>> =
-  Object.fromEntries(
-    DOCUMENT_KINDS.map((kind): [string, KitEntry] => [
-      `document.${kind}`,
-      {
-        family: 'documents',
-        looks: ['editorial', 'illustrated'],
-        about: ABOUT[kind],
-        params: {},
-        moves: ['enter', 'exit'],
-        make: (params: KitParams, style: KitStyle, seed: number) =>
-          drawDocument(
-            kind,
-            typeof params.colour === 'string' ? { colour: params.colour } : {},
-            style,
-            seed,
-          ),
-      },
-    ]),
-  );

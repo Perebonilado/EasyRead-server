@@ -549,56 +549,26 @@ function arcPts(c: Pt, r: number, a0: number, a1: number, n: number): Pt[] {
   });
 }
 
-const ABOUT: Record<ObjectKind, string> = {
-  phone: 'A smartphone; its screen lights (states on, off).',
-  computer: 'A laptop computer, open; its screen lights (states on, off).',
-  book: 'A closed book, its cover in a colour.',
-  coins:
-    'A stack of coins (count 1–20, its value the count): money, savings, a price.',
-  sack: 'A sack of grain, tied: food, harvest, aid.',
-  barrel: 'An oil barrel (a 200-litre drum): oil, fuel, a price per barrel.',
-  crate: 'A wooden crate: goods, trade, shipping.',
-  battery: 'A battery cell, its charge showing (count 0–10 tenths full).',
-  lamp: 'A table lamp that lights (states on, off): electricity, an idea, home.',
-  key: 'A key: access, a solution.',
-  lock: 'A padlock (states closed, open): security, a restriction lifted.',
-  chain: 'A chain of links, each a part: a supply chain, a link in a sequence.',
+export const OBJECT_KIT: Readonly<Record<string, KitEntry>> = {
+  object: {
+    family: 'objects',
+    looks: ['editorial', 'illustrated'],
+    about:
+      'An everyday thing, big and simple: kind phone and computer (screens light: states on, off), book, coins (a stack of count coins), sack (of grain), barrel (an oil drum), crate, battery (count tenths charged), lamp (states on, off), key, lock (states closed, open), chain (its links are parts).',
+    params: {
+      kind: { values: OBJECT_KINDS, default: 'coins', about: 'which thing' },
+      count: { range: [0, 20], default: 8, about: 'coins in the stack, or a battery\u2019s tenths of charge' },
+    },
+    moves: ['enter', 'exit'],
+    make: (params: KitParams, style: KitStyle, seed: number) =>
+      drawObject(
+        (OBJECT_KINDS as readonly unknown[]).includes(params.kind) ? (params.kind as ObjectKind) : 'coins',
+        {
+          ...(typeof params.colour === 'string' ? { colour: params.colour } : {}),
+          ...(typeof params.count === 'number' ? { count: params.count } : {}),
+        },
+        style,
+        seed,
+      ),
+  },
 };
-
-const COUNTS: Partial<
-  Record<
-    ObjectKind,
-    { range: readonly [number, number]; default: number; about: string }
-  >
-> = {
-  coins: { range: [1, 20], default: 8, about: 'how many coins in the stack' },
-  battery: { range: [0, 10], default: 7, about: 'how full, in tenths' },
-};
-
-export const OBJECT_KIT: Readonly<Record<string, KitEntry>> =
-  Object.fromEntries(
-    OBJECT_KINDS.map((kind): [string, KitEntry] => [
-      `object.${kind}`,
-      {
-        family: 'objects',
-        looks: ['editorial', 'illustrated'],
-        about: ABOUT[kind],
-        params: COUNTS[kind] ? { count: COUNTS[kind] } : {},
-        moves: ['enter', 'exit'],
-        make: (params: KitParams, style: KitStyle, seed: number) =>
-          drawObject(
-            kind,
-            {
-              ...(typeof params.colour === 'string'
-                ? { colour: params.colour }
-                : {}),
-              ...(typeof params.count === 'number'
-                ? { count: params.count }
-                : {}),
-            },
-            style,
-            seed,
-          ),
-      },
-    ]),
-  );

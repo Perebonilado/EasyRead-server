@@ -89,15 +89,21 @@ list.forEach(([raw, seed, state], i) => {
       if (look.lit !== undefined) {
         const lit = look.lit;
         const groupRe = new RegExp(`(<g data-part="${part}"[^>]*>)(.*?)(</g>)`);
-        svg = svg.replace(groupRe, (_m, open: string, inner: string, close: string) => {
-          let n = 0;
-          const lighted = inner.replace(/<path d="([^"]+)"(?: opacity="0")?\/>/g, (_p, d: string) => {
-            const on = lightRank(part, n) < lit;
-            n += 1;
-            return `<path d="${d}"${on ? '' : ' opacity="0"'}/>`;
-          });
-          return `${open}${lighted}${close}`;
-        });
+        svg = svg.replace(
+          groupRe,
+          (_m, open: string, inner: string, close: string) => {
+            let n = 0;
+            const lighted = inner.replace(
+              /<path d="([^"]+)"(?: opacity="0")?\/>/g,
+              (_p, d: string) => {
+                const on = lightRank(part, n) < lit;
+                n += 1;
+                return `<path d="${d}"${on ? '' : ' opacity="0"'}/>`;
+              },
+            );
+            return `${open}${lighted}${close}`;
+          },
+        );
       }
     }
   }

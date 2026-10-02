@@ -109,6 +109,7 @@ export const SET_PLACES = [
   'oilfield',
   'assembly-hall',
   'ceremony-ground',
+  'display',
 ] as const;
 export type SetPlace = (typeof SET_PLACES)[number];
 /** The states a set can be in, and change between while a shot is on. */
@@ -153,8 +154,8 @@ export interface DrawnSet {
   asset: ShotSvgAssetDto;
   /** The ground line actors stand on, in its units. */
   ground: number;
-  /** Its units a metre at that ground line. */
-  unitsPerMetre: number;
+  /** Its units a metre at that ground line; absent on a display, where what stands is sized to be big. */
+  unitsPerMetre?: number;
   /** The low sky's colour as it opens: what far people standing in it fade into (kitStyle's air). */
   air: string;
   notes: string[];
@@ -867,6 +868,7 @@ export function drawSet(
   ) as Record<SetTime, Light>;
   const canvas = new SetCanvas(W, H, style, times, lights, s.time);
   if (place === 'assembly-hall') return assemblyHall(canvas, s, shape);
+  if (place === 'display') return display(canvas, shape);
 
   const notes: string[] = [
     `${s.land}, ${s.time}, ${s.weather}, ${s.town}, ${place}, ${s.era}`,
@@ -1168,7 +1170,9 @@ export function drawSet(
       { depth: 0.45 },
     );
     canvas.windows('lights-far', far.windows, 0.45);
-    far.smoke.forEach((p, i) =>
+    far.smoke
+      .filter(([x, y]) => x >= 0 && x <= W && y >= 0 && y <= H)
+      .forEach((p, i) =>
       canvas.raw(
         `smoke-far${i ? `-${i + 1}` : ''}`,
         '',
@@ -1938,7 +1942,7 @@ function framing(
   for (let i = 0; i < 3; i += 1) {
     const x = side(W * rng.between(0.02, 0.2));
     const r = rng.between(40, 90) * u;
-    shapes.push(dome(x, bottom - H * 0.02, r * 1.4, r));
+    shapes.push(dome(x, H + H * 0.01, r * 1.4, r));
   }
   return { shapes, colour: s.land === 'desert' ? '#a98a64' : '#6f7268', lamps };
 }
@@ -2372,6 +2376,30 @@ function assemblyHall(
     air: wall,
     notes: [`assembly hall, ${s.time}`, `${rows} rows`],
   };
+}
+
+/**
+ * A display: a clean studio backdrop for a machine or a thing shown on
+ * its own, as a museum or a catalogue shows it, its wall a soft gradient
+ * of the show's paper, a floor and the light pooled where the subject
+ * stands. It has no scale of its own: what stands on it is sized big.
+ */
+function display(canvas: SetCanvas, shape: FilmShape): DrawnSet {
+  const { W, H, style } = canvas;
+  const wallTop = mixOk(style.paper, '#ffffff', luminance(style.paper) < 0.35 ? 0.04 : 0.35);
+  const wallFoot = mixOk(style.paper, style.muted, 0.12);
+  const floor = mixOk(style.paper, style.muted, 0.2);
+  const groundY = H * 0.84;
+  canvas.defs.push(
+    `<linearGradient id="wall" x1="0" y1="0" x2="0" y2="${n1(groundY)}" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="${wallTop}"/><stop offset="1" stop-color="${wallFoot}"/></linearGradient>`,
+    `<radialGradient id="pool" cx="${n1(W / 2)}" cy="${n1(groundY)}" r="${n1(W * 0.42)}" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#ffffff" stop-opacity="0.28"/><stop offset="1" stop-color="#ffffff" stop-opacity="0"/></radialGradient>`,
+  );
+  canvas.raw('wall', `<rect x="${-W * 0.06}" y="${-H * 0.06}" width="${W * 1.12}" height="${n1(groundY + H * 0.06)}" fill="url(#wall)"/>`, [0, 0, W, groundY], { depth: 0.3 });
+  canvas.flat('floor', [box(-W * 0.06, groundY, W * 1.06, H * 1.06)], floor, { depth: 1 });
+  canvas.raw('pool', `<ellipse cx="${n1(W / 2)}" cy="${n1(groundY)}" rx="${n1(W * 0.42)}" ry="${n1(H * 0.1)}" fill="url(#pool)"/>`, [W * 0.08, groundY - H * 0.1, W * 0.84, H * 0.2], { depth: 1 });
+  canvas.raw('ground-line', '', [0, groundY, W, H - groundY]);
+  const focal = fitFocal([W * 0.1, H * 0.12, W * 0.8, groundY - H * 0.08], W, H, shape);
+  return { asset: canvas.asset(focal), ground: groundY, air: wallFoot, notes: ['display backdrop'] };
 }
 
 // ── Reading settings ──────────────────────────────────────────────────────

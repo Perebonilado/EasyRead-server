@@ -70,6 +70,8 @@ export interface UntimedShot {
   join: ShotJoin;
   chip?: ShotCreditDto;
   illustration?: boolean;
+  /** A drawn set's changes of light (kit/sets), on their words: each runs its own length from its word. */
+  changes?: { state: string; on: string; durMs: number }[];
 }
 
 // ── How long things take ──────────────────────────────────────────────────
@@ -521,11 +523,24 @@ export function timeShots(
         .sort((a, b) => a.atMs - b.atMs),
     }));
 
+    // A drawn set's change of light starts on its word and runs its own
+    // length (a sunset is slow, and carries on into the shots after).
+    const set =
+      one.shot.set.kind === 'set' && one.shot.changes?.length
+        ? {
+            ...one.shot.set,
+            changes: one.shot.changes.map((change) => ({
+              state: change.state,
+              atMs: Math.round(clamp(wordMs(change.on) - SETTLE_LEAD_MS, startMs, endMs)),
+              durMs: Math.round(change.durMs),
+            })),
+          }
+        : one.shot.set;
     const shot: ShotDto = {
       id: one.shot.id,
       startMs,
       endMs,
-      set: one.shot.set,
+      set,
       actors,
       info,
       life: one.shot.life,
@@ -573,6 +588,17 @@ export function retimeShots(
       ...shot,
       startMs,
       endMs,
+      // A drawn set's changes keep their start on their word.
+      set:
+        shot.set.kind === 'set' && shot.set.changes
+          ? {
+              ...shot.set,
+              changes: shot.set.changes.map((change) => ({
+                ...change,
+                atMs: inside(map(change.atMs + SETTLE_LEAD_MS) - SETTLE_LEAD_MS, 0),
+              })),
+            }
+          : shot.set,
       info: shot.info.map((item) => {
         // A process keeps its start on its word; a change its settling.
         const atMs = STARTS_ON_WORD.has(item.recipe)

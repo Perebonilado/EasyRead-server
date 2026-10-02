@@ -148,6 +148,10 @@ export function ratiosOf(layout: MachineLayout): Map<string, number> {
   return out;
 }
 
+/** The machines the kit has ready, by kind. */
+export const MACHINE_KINDS = ['gears', 'pulleys', 'pump', 'steam-engine', 'printing-press', 'loom', 'conveyor', 'wind-turbine', 'water-wheel'] as const;
+export type MachineKind = (typeof MACHINE_KINDS)[number];
+
 /** The presets: each about as big as a real one stands. */
 export const MACHINE_LAYOUTS: Record<
   | 'gears'
@@ -1696,19 +1700,6 @@ function shareAlong(points: readonly Pt[], x: number): number {
 
 // ── The registry's entries ────────────────────────────────────────────────
 
-const preset = (
-  name: keyof typeof MACHINE_LAYOUTS,
-  about: string,
-): KitEntry => ({
-  family: 'machines',
-  looks: ['editorial', 'illustrated'],
-  about,
-  params: {},
-  moves: ['enter', 'exit'],
-  make: (_params: KitParams, style: KitStyle) =>
-    drawMachine(`machine.${name}`, MACHINE_LAYOUTS[name], style),
-});
-
 const intIn = (
   raw: string | number | undefined,
   lo: number,
@@ -1726,23 +1717,11 @@ export const MACHINE_KIT: Readonly<Record<string, KitEntry>> = {
     family: 'machines',
     looks: ['editorial', 'illustrated'],
     about:
-      'A jet engine (turbofan) cut open: parts fan, compressor (lp-compressor, hp-compressor), combustor (fuel-nozzle, igniter), turbine (hp-turbine, lp-turbine), nozzle, lp-shaft, hp-shaft, casing, nacelle; paths core-flow and bypass-flow for flow (text "compress" squeezes and warms the core flow); run turns its spools. Make it the shot’s subject.',
+      'A jet engine (turbofan) cut open: parts fan, compressor (lp-compressor, hp-compressor), combustor (fuel-nozzle, igniter), turbine (hp-turbine, lp-turbine), nozzle, lp-shaft, hp-shaft, casing, nacelle; paths core-flow and bypass-flow (and core-flow-2, bypass-flow-2 below) for flow (text "compress" squeezes and warms the core flow); run turns its spools. Make it the shot\u2019s subject.',
     params: {
-      bypass: {
-        values: ['high', 'low'],
-        default: 'high',
-        about: 'a big fan (an airliner’s) or a small one (a fighter’s)',
-      },
-      lp: {
-        range: [2, 5],
-        default: 3,
-        about: 'low-pressure compressor stages',
-      },
-      hp: {
-        range: [4, 12],
-        default: 9,
-        about: 'high-pressure compressor stages',
-      },
+      bypass: { values: ['high', 'low'], default: 'high', about: 'a big fan (an airliner\u2019s) or a small one (a fighter\u2019s)' },
+      lp: { range: [2, 5], default: 3, about: 'low-pressure compressor stages' },
+      hp: { range: [4, 12], default: 9, about: 'high-pressure compressor stages' },
       hpt: { range: [1, 2], default: 2, about: 'high-pressure turbine stages' },
       lpt: { range: [3, 7], default: 5, about: 'low-pressure turbine stages' },
     },
@@ -1760,48 +1739,18 @@ export const MACHINE_KIT: Readonly<Record<string, KitEntry>> = {
       );
     },
   },
-  'machine.gears': preset(
-    'gears',
-    'Three meshed gears of different sizes on a plate: a ratio, a mechanism, how one turn becomes another (run turns them).',
-  ),
-  'machine.pulleys': preset(
-    'pulleys',
-    'Two pulleys of different sizes on a belt: transmission, speed changed by size (run turns them).',
-  ),
-  'machine.pump': preset(
-    'pump',
-    'A beam pump worked by a crank: pumping water or oil (run works it).',
-  ),
-  'machine.steam-engine': preset(
-    'steam-engine',
-    'A steam engine: boiler, cylinder, piston and flywheel (run works it; smoke rises from its chimney).',
-  ),
-  'machine.printing-press': preset(
-    'printing-press',
-    'A rotary printing press: paper from its roll between the cylinders (run turns it).',
-  ),
-  'machine.loom': preset(
-    'loom',
-    'A power loom: heddles, shuttle and beater (run works it).',
-  ),
-  'machine.conveyor': preset(
-    'conveyor',
-    'A conveyor belt on two drums: production, a line (run moves it).',
-  ),
-  'machine.wind-turbine': {
+  machine: {
     family: 'machines',
     looks: ['editorial', 'illustrated'],
-    about: 'A wind turbine on its tower: wind power (run turns its rotor).',
-    params: {},
+    about:
+      'A machine whose parts move from one shaft (run starts it): kind gears (three meshed, a ratio), pulleys (two on a belt), pump (a beam pump), steam-engine, printing-press, loom, conveyor, wind-turbine, water-wheel.',
+    params: { kind: { values: MACHINE_KINDS, default: 'gears', about: 'which machine' } },
     moves: ['enter', 'exit'],
-    make: (_params: KitParams, style: KitStyle) => windTurbine(style),
-  },
-  'machine.water-wheel': {
-    family: 'machines',
-    looks: ['editorial', 'illustrated'],
-    about: 'A water wheel in its race: water power, a mill (run turns it).',
-    params: {},
-    moves: ['enter', 'exit'],
-    make: (_params: KitParams, style: KitStyle) => waterWheel(style),
+    make(params: KitParams, style: KitStyle): KitPiece {
+      const kind = (MACHINE_KINDS as readonly unknown[]).includes(params.kind) ? (params.kind as MachineKind) : 'gears';
+      if (kind === 'wind-turbine') return windTurbine(style);
+      if (kind === 'water-wheel') return waterWheel(style);
+      return drawMachine(`machine.${kind}`, MACHINE_LAYOUTS[kind], style);
+    },
   },
 };

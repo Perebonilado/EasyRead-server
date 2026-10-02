@@ -69,6 +69,12 @@ export function hashText(text: string): number {
     h ^= text.charCodeAt(i);
     h = Math.imul(h, 0x01000193);
   }
+  // Mixed once more (murmur3's finish), so near words ("lights:1", "lights:2") land far apart.
+  h ^= h >>> 16;
+  h = Math.imul(h, 0x85ebca6b);
+  h ^= h >>> 13;
+  h = Math.imul(h, 0xc2b2ae35);
+  h ^= h >>> 16;
   return h >>> 0;
 }
 
@@ -337,10 +343,12 @@ export const escapeText = (text: string): string =>
 
 /** A box held inside another (for a part reported inside a set). */
 export function clipBox(b: ShotBox, frame: ShotBox): ShotBox {
-  const x0 = Math.max(b[0], frame[0]);
-  const y0 = Math.max(b[1], frame[1]);
-  const x1 = Math.min(b[0] + b[2], frame[0] + frame[2]);
-  const y1 = Math.min(b[1] + b[3], frame[1] + frame[3]);
+  // Each edge held inside the frame, so a box wholly outside it comes to its edge with no size.
+  const hold = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
+  const x0 = hold(b[0], frame[0], frame[0] + frame[2]);
+  const y0 = hold(b[1], frame[1], frame[1] + frame[3]);
+  const x1 = hold(b[0] + b[2], frame[0], frame[0] + frame[2]);
+  const y1 = hold(b[1] + b[3], frame[1], frame[1] + frame[3]);
   return [
     Math.round(x0 * 10) / 10,
     Math.round(y0 * 10) / 10,

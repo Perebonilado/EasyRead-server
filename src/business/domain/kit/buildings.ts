@@ -1498,85 +1498,45 @@ export function drawBuilding(
   });
 }
 
-// ── The registry's entries ────────────────────────────────────────────────
+// ── The registry's entry ──────────────────────────────────────────────────
 
-const ABOUT: Record<BuildingKind, string> = {
-  house: 'A house of one to three storeys: homes, a street, a family’s place.',
-  flats: 'A block of flats: housing, a city’s growth, workers’ homes.',
-  tower: 'An office tower: business, finance, a modern city centre.',
-  factory:
-    'A factory with chimneys (smoke rises from them): industry, jobs, pollution.',
-  warehouse: 'A warehouse with wide doors: goods, storage, trade.',
-  hall: 'An assembly or parliament building, a flag over it: a legislature, a government (never a named one).',
-  court: 'A court with columns and steps: the law, a trial, a ruling.',
-  school: 'A school with its yard railing: education, children’s lives.',
-  hospital: 'A hospital block with an entrance canopy: health, care.',
-  market:
-    'A row of market stalls with goods and canopies: trade, prices, daily life.',
-  cranes:
-    'Port cranes (container cranes after 1945, dockside cranes before): shipping, trade, a port.',
-  farm: 'A farm: a barn with a silo (or a hay rick, or a water tank where dry): farming, food.',
-};
+/** What each kind is, for the board: one line of the kit's guide, its kinds named in it. */
+const KINDS_ABOUT =
+  'A building of its era and climate (never a named one): kind house (homes), flats (housing), tower (business), factory (industry; smoke rises from its stacks), warehouse (goods), hall (a legislature in general, a flag over it), court (the law), school, hospital, market (stalls: trade, prices), cranes (a port\u2019s), farm (barn and silo).';
 
-const PARAMS = {
-  era: {
-    values: ERA_IDS,
-    default: 'today',
-    about: 'when it is: sets how it is built',
-  },
-  climate: {
-    values: CLIMATES,
-    default: 'temperate',
-    about:
-      'the place’s climate, never a country: arid has flat roofs, cold steep ones, tropical wide eaves',
-  },
-  size: { values: SIZES, default: 'medium', about: 'how big' },
-  material: {
-    values: MATERIALS,
-    default: 'auto',
-    about: 'what it is built of; auto follows era and climate',
-  },
-} as const;
+const oneOf = <T extends string>(list: readonly T[], raw: unknown, fallback: T): T =>
+  (list as readonly unknown[]).includes(raw) ? (raw as T) : fallback;
 
-function entry(kind: BuildingKind): KitEntry {
-  return {
+export const BUILDING_KIT: Readonly<Record<string, KitEntry>> = {
+  building: {
     family: 'buildings',
     looks: ['editorial', 'illustrated'],
-    about: ABOUT[kind],
-    params: PARAMS,
+    about: KINDS_ABOUT,
+    params: {
+      kind: { values: BUILDING_KINDS, default: 'house', about: 'which building' },
+      era: { values: ERA_IDS, default: 'today', about: 'when it is: sets how it is built' },
+      climate: {
+        values: CLIMATES,
+        default: 'temperate',
+        about: 'never a country: arid has flat roofs, cold steep ones, tropical wide eaves',
+      },
+      size: { values: SIZES, default: 'medium', about: 'how big' },
+      material: { values: MATERIALS, default: 'auto', about: 'auto follows era and climate' },
+    },
     moves: ['enter', 'exit'],
     make(params: KitParams, style: KitStyle, seed: number): KitPiece {
       return drawBuilding(
-        kind,
+        oneOf(BUILDING_KINDS, params.kind, 'house'),
         {
-          era: (ERA_IDS as readonly string[]).includes(String(params.era))
-            ? (params.era as EraId)
-            : 'today',
-          climate: (CLIMATES as readonly string[]).includes(
-            String(params.climate),
-          )
-            ? (params.climate as Climate)
-            : 'temperate',
-          size: (SIZES as readonly string[]).includes(String(params.size))
-            ? (params.size as Size)
-            : 'medium',
-          material: (MATERIALS as readonly string[]).includes(
-            String(params.material),
-          )
-            ? (params.material as Material)
-            : 'auto',
-          ...(typeof params.colour === 'string'
-            ? { colour: params.colour }
-            : {}),
+          era: oneOf(ERA_IDS, params.era, 'today'),
+          climate: oneOf(CLIMATES, params.climate, 'temperate'),
+          size: oneOf(SIZES, params.size, 'medium'),
+          material: oneOf(MATERIALS, params.material, 'auto'),
+          ...(typeof params.colour === 'string' ? { colour: params.colour } : {}),
         },
         style,
         seed,
       );
     },
-  };
-}
-
-export const BUILDING_KIT: Readonly<Record<string, KitEntry>> =
-  Object.fromEntries(
-    BUILDING_KINDS.map((kind) => [`building.${kind}`, entry(kind)]),
-  );
+  },
+};

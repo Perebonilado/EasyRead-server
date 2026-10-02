@@ -46,18 +46,55 @@ import type {
   ShotSvgAssetDto,
 } from '../../../contracts';
 import { ERA_IDS, type EraId } from './eras';
-import { type BuildingKind, type Climate, type Size, buildingParts } from './buildings';
-import { band, box, clipBox, dome, hashText, poly, seeded, type Seeded, vivid } from './paint';
+import {
+  type BuildingKind,
+  type Climate,
+  type Size,
+  buildingParts,
+} from './buildings';
+import {
+  band,
+  box,
+  clipBox,
+  dome,
+  hashText,
+  poly,
+  seeded,
+  type Seeded,
+  vivid,
+} from './paint';
 import { type Pt, type Shape, circle, ellipse, n1, unionBox } from './shape';
-import { type KitLook, type KitStyle, kitStyle, luminance, mixOk } from './style';
+import {
+  type KitLook,
+  type KitStyle,
+  kitStyle,
+  luminance,
+  mixOk,
+} from './style';
 
 // ── Settings ──────────────────────────────────────────────────────────────
 
-export const SET_LANDS = ['plain', 'hills', 'mountains', 'coast', 'desert', 'forest', 'city', 'sea'] as const;
+export const SET_LANDS = [
+  'plain',
+  'hills',
+  'mountains',
+  'coast',
+  'desert',
+  'forest',
+  'city',
+  'sea',
+] as const;
 export type SetLand = (typeof SET_LANDS)[number];
 export const SET_TIMES = ['day', 'dusk', 'night', 'dawn'] as const;
 export type SetTime = (typeof SET_TIMES)[number];
-export const SET_WEATHERS = ['clear', 'cloud', 'rain', 'snow', 'storm', 'haze'] as const;
+export const SET_WEATHERS = [
+  'clear',
+  'cloud',
+  'rain',
+  'snow',
+  'storm',
+  'haze',
+] as const;
 export type SetWeather = (typeof SET_WEATHERS)[number];
 export const SET_TOWNS = ['none', 'village', 'town', 'city'] as const;
 export type SetTown = (typeof SET_TOWNS)[number];
@@ -75,7 +112,13 @@ export const SET_PLACES = [
 ] as const;
 export type SetPlace = (typeof SET_PLACES)[number];
 /** The states a set can be in, and change between while a shot is on. */
-export const SET_STATES = ['day', 'dusk', 'night', 'dawn', 'lights-on'] as const;
+export const SET_STATES = [
+  'day',
+  'dusk',
+  'night',
+  'dawn',
+  'lights-on',
+] as const;
 export type SetState = (typeof SET_STATES)[number];
 
 export interface SetSettings {
@@ -99,10 +142,11 @@ export const CHANGE_MS: Readonly<Record<SetState, number>> = {
 };
 
 /** A set's box per shape: a little wider than the film's frame, for the camera's travels. */
-export const SET_FRAME: Readonly<Record<FilmShape, { w: number; h: number }>> = {
-  wide: { w: 2000, h: 1000 },
-  tall: { w: 1000, h: 1700 },
-};
+export const SET_FRAME: Readonly<Record<FilmShape, { w: number; h: number }>> =
+  {
+    wide: { w: 2000, h: 1000 },
+    tall: { w: 1000, h: 1700 },
+  };
 
 /** A set made: the asset the stage plays, where actors stand on it and at what scale, the air far things fade into, and notes for the log. */
 export interface DrawnSet {
@@ -121,7 +165,8 @@ export interface DrawnSet {
  * 1: the same on the client (lib/shots/scenery's lightRank), so a still
  * drawn here and the player light the same windows.
  */
-export const lightRank = (part: string, n: number): number => hashText(`${part}:${n}`) / 4294967296;
+export const lightRank = (part: string, n: number): number =>
+  hashText(`${part}:${n}`) / 4294967296;
 
 // ── Light ─────────────────────────────────────────────────────────────────
 
@@ -224,14 +269,77 @@ const TIME_LIGHT: Readonly<Record<SetTime, Light>> = {
 
 /** What weather does to a time's light: the sky pulled toward its own colour by `k`, the sun hidden as much, the land dimmer. */
 const WEATHER_SKY: Readonly<
-  Record<SetWeather, { k: number; colour: Record<SetTime, string>; sun: number; dim: number }>
+  Record<
+    SetWeather,
+    { k: number; colour: Record<SetTime, string>; sun: number; dim: number }
+  >
 > = {
-  clear: { k: 0, colour: { day: '#ffffff', dusk: '#ffffff', night: '#ffffff', dawn: '#ffffff' }, sun: 1, dim: 0 },
-  cloud: { k: 0.42, colour: { day: '#a3adb7', dusk: '#6f6178', night: '#18203a', dawn: '#a497a8' }, sun: 0.55, dim: 0.1 },
-  rain: { k: 0.74, colour: { day: '#7c8794', dusk: '#4b4859', night: '#10182b', dawn: '#77778a' }, sun: 0, dim: 0.42 },
-  storm: { k: 0.86, colour: { day: '#4c5564', dusk: '#353148', night: '#0b111f', dawn: '#4f4d62' }, sun: 0, dim: 0.55 },
-  snow: { k: 0.55, colour: { day: '#cdd5dc', dusk: '#a49cb4', night: '#26314a', dawn: '#d3c9d1' }, sun: 0.3, dim: 0.04 },
-  haze: { k: 0.5, colour: { day: '#e4d2b2', dusk: '#e09d6e', night: '#2b2d42', dawn: '#ecd3b2' }, sun: 0.6, dim: 0.06 },
+  clear: {
+    k: 0,
+    colour: {
+      day: '#ffffff',
+      dusk: '#ffffff',
+      night: '#ffffff',
+      dawn: '#ffffff',
+    },
+    sun: 1,
+    dim: 0,
+  },
+  cloud: {
+    k: 0.42,
+    colour: {
+      day: '#a3adb7',
+      dusk: '#6f6178',
+      night: '#18203a',
+      dawn: '#a497a8',
+    },
+    sun: 0.55,
+    dim: 0.1,
+  },
+  rain: {
+    k: 0.74,
+    colour: {
+      day: '#7c8794',
+      dusk: '#4b4859',
+      night: '#10182b',
+      dawn: '#77778a',
+    },
+    sun: 0,
+    dim: 0.42,
+  },
+  storm: {
+    k: 0.86,
+    colour: {
+      day: '#4c5564',
+      dusk: '#353148',
+      night: '#0b111f',
+      dawn: '#4f4d62',
+    },
+    sun: 0,
+    dim: 0.55,
+  },
+  snow: {
+    k: 0.55,
+    colour: {
+      day: '#cdd5dc',
+      dusk: '#a49cb4',
+      night: '#26314a',
+      dawn: '#d3c9d1',
+    },
+    sun: 0.3,
+    dim: 0.04,
+  },
+  haze: {
+    k: 0.5,
+    colour: {
+      day: '#e4d2b2',
+      dusk: '#e09d6e',
+      night: '#2b2d42',
+      dawn: '#ecd3b2',
+    },
+    sun: 0.6,
+    dim: 0.06,
+  },
 };
 
 /** A natural colour in the show's look: the editorial look pulls it a little toward the paper; the illustrated one makes it brighter. */
@@ -252,11 +360,22 @@ function lightOf(time: SetTime, weather: SetWeather, style: KitStyle): Light {
     sky: base.sky.map((c) => look(mixOk(c, grey, w.k))) as Light['sky'],
     sunOpacity: base.sunOpacity * w.sun,
     glowOpacity: base.glowOpacity * (0.3 + 0.7 * w.sun),
-    moonOpacity: base.moonOpacity * (weather === 'clear' || weather === 'haze' ? 1 : 0.35),
-    stars: base.stars * (weather === 'clear' ? 1 : weather === 'haze' ? 0.4 : 0.1),
-    cloud: look(mixOk(base.cloud, grey, weather === 'rain' || weather === 'storm' ? 0.75 : w.k * 0.5)),
+    moonOpacity:
+      base.moonOpacity * (weather === 'clear' || weather === 'haze' ? 1 : 0.35),
+    stars:
+      base.stars * (weather === 'clear' ? 1 : weather === 'haze' ? 0.4 : 0.1),
+    cloud: look(
+      mixOk(
+        base.cloud,
+        grey,
+        weather === 'rain' || weather === 'storm' ? 0.75 : w.k * 0.5,
+      ),
+    ),
     // Weather darkens the land toward its own grey, not toward the day's white.
-    tone: w.dim > 0 ? mixOk(base.tone, grey, Math.min(1, w.k + (time === 'day' ? 0.3 : 0))) : base.tone,
+    tone:
+      w.dim > 0
+        ? mixOk(base.tone, grey, Math.min(1, w.k + (time === 'day' ? 0.3 : 0)))
+        : base.tone,
     dim: Math.min(0.9, base.dim + w.dim),
     water: look(mixOk(base.water, grey, w.k * 0.6)),
     glint: base.glint * (0.3 + 0.7 * w.sun),
@@ -265,24 +384,44 @@ function lightOf(time: SetTime, weather: SetWeather, style: KitStyle): Light {
 }
 
 /** A colour as a time of day's light tones it. */
-const toned = (colour: string, light: Light): string => mixOk(colour, light.tone, light.dim);
+const toned = (colour: string, light: Light): string =>
+  mixOk(colour, light.tone, light.dim);
 
 // ── The land ──────────────────────────────────────────────────────────────
 
 /** Each land's colours by day: its far range, its middle, its near land and its ground. */
-const LAND_COLOUR: Readonly<Record<SetLand, { far: string; mid: string; near: string; ground: string }>> = {
+const LAND_COLOUR: Readonly<
+  Record<SetLand, { far: string; mid: string; near: string; ground: string }>
+> = {
   plain: { far: '#9fb08c', mid: '#8aa271', near: '#94ab69', ground: '#9db26c' },
   hills: { far: '#90a782', mid: '#76976a', near: '#86a35f', ground: '#93ad63' },
-  mountains: { far: '#8f9db4', mid: '#7f907f', near: '#86996a', ground: '#96a96a' },
+  mountains: {
+    far: '#8f9db4',
+    mid: '#7f907f',
+    near: '#86996a',
+    ground: '#96a96a',
+  },
   coast: { far: '#9aab90', mid: '#8ba077', near: '#a5a99a', ground: '#cdb98a' },
-  desert: { far: '#cfae84', mid: '#ddbb8a', near: '#e3c491', ground: '#e6cc9b' },
-  forest: { far: '#6c9273', mid: '#4d7b58', near: '#3f6c47', ground: '#5a8247' },
+  desert: {
+    far: '#cfae84',
+    mid: '#ddbb8a',
+    near: '#e3c491',
+    ground: '#e6cc9b',
+  },
+  forest: {
+    far: '#6c9273',
+    mid: '#4d7b58',
+    near: '#3f6c47',
+    ground: '#5a8247',
+  },
   city: { far: '#a3a9b3', mid: '#959ca6', near: '#8d939b', ground: '#8c9097' },
   sea: { far: '#9aab90', mid: '#8ba077', near: '#a5a99a', ground: '#cdb98a' },
 };
 
 /** The climate a set's buildings are built for, from its land and weather when the board names none. */
-export function climateOf(settings: Pick<SetSettings, 'land' | 'weather' | 'climate'>): Climate {
+export function climateOf(
+  settings: Pick<SetSettings, 'land' | 'weather' | 'climate'>,
+): Climate {
   if (settings.climate) return settings.climate;
   if (settings.land === 'desert') return 'arid';
   if (settings.weather === 'snow') return 'cold';
@@ -298,11 +437,22 @@ function waves(rng: Seeded, count: number): (u: number) => number {
   }));
   const total = parts.reduce((s, one) => s + one.a, 0);
   return (u) =>
-    0.5 + parts.reduce((s, one) => s + one.a * Math.sin(u * one.f * Math.PI * 2 + one.p), 0) / (2 * total);
+    0.5 +
+    parts.reduce(
+      (s, one) => s + one.a * Math.sin(u * one.f * Math.PI * 2 + one.p),
+      0,
+    ) /
+      (2 * total);
 }
 
 /** A layer's silhouette: its top edge from x0 to x1 (`top(x)`), down to `bottom`. */
-function silhouette(x0: number, x1: number, bottom: number, top: (x: number) => number, steps: number): Shape {
+function silhouette(
+  x0: number,
+  x1: number,
+  bottom: number,
+  top: (x: number) => number,
+  steps: number,
+): Shape {
   const points: Pt[] = [];
   for (let i = 0; i <= steps; i += 1) {
     const x = x0 + ((x1 - x0) * i) / steps;
@@ -313,7 +463,14 @@ function silhouette(x0: number, x1: number, bottom: number, top: (x: number) => 
 }
 
 /** A range of peaks: a jagged ridge (straight slopes between peaks and saddles), and the snow on its peaks. */
-function peaks(x0: number, x1: number, bottom: number, base: number, height: number, rng: Seeded): { ridge: Shape; caps: Shape[] } {
+function peaks(
+  x0: number,
+  x1: number,
+  bottom: number,
+  base: number,
+  height: number,
+  rng: Seeded,
+): { ridge: Shape; caps: Shape[] } {
   const points: Pt[] = [[x0, base - height * 0.3]];
   const caps: Shape[] = [];
   let x = x0;
@@ -326,8 +483,11 @@ function peaks(x0: number, x1: number, bottom: number, base: number, height: num
     points.push(top, [x + step, saddle]);
     // Snow on each peak: down a quarter of its slopes, its lower edge ragged.
     const k = 0.28;
-    const rightFoot: Pt = [top[0] + (step * 0.5) * k, peak + (saddle - peak) * k];
-    const leftFoot: Pt = [top[0] - (top[0] - left[0]) * k, peak + (left[1] - peak) * k];
+    const rightFoot: Pt = [top[0] + step * 0.5 * k, peak + (saddle - peak) * k];
+    const leftFoot: Pt = [
+      top[0] - (top[0] - left[0]) * k,
+      peak + (left[1] - peak) * k,
+    ];
     caps.push(
       poly([
         top,
@@ -344,14 +504,26 @@ function peaks(x0: number, x1: number, bottom: number, base: number, height: num
 }
 
 /** Flat-topped hills of a dry land, far off: trapezoids along the horizon. */
-function mesas(x0: number, x1: number, bottom: number, base: number, height: number, rng: Seeded): Shape {
+function mesas(
+  x0: number,
+  x1: number,
+  bottom: number,
+  base: number,
+  height: number,
+  rng: Seeded,
+): Shape {
   const points: Pt[] = [[x0, base]];
   let x = x0 + (x1 - x0) * rng.between(0.02, 0.1);
   while (x < x1) {
     const w = (x1 - x0) * rng.between(0.08, 0.2);
     const h = height * rng.between(0.4, 1);
     const slope = w * rng.between(0.08, 0.16);
-    points.push([x, base], [x + slope, base - h], [x + w - slope, base - h], [Math.min(x1, x + w), base]);
+    points.push(
+      [x, base],
+      [x + slope, base - h],
+      [x + w - slope, base - h],
+      [Math.min(x1, x + w), base],
+    );
     x += w + (x1 - x0) * rng.between(0.05, 0.22);
   }
   points.push([x1, base], [x1, bottom], [x0, bottom]);
@@ -359,7 +531,15 @@ function mesas(x0: number, x1: number, bottom: number, base: number, height: num
 }
 
 /** Tree crowns along a line: rounded tops (or pointed ones where it is cold), each a circle on a base band. */
-function treeLine(x0: number, x1: number, bottom: number, base: number, size: number, rng: Seeded, pointed: boolean): Shape[] {
+function treeLine(
+  x0: number,
+  x1: number,
+  bottom: number,
+  base: number,
+  size: number,
+  rng: Seeded,
+  pointed: boolean,
+): Shape[] {
   const shapes: Shape[] = [box(x0, base - size * 0.35, x1, bottom)];
   let x = x0;
   while (x < x1) {
@@ -414,7 +594,8 @@ class SetCanvas {
   readonly layers: Layer[] = [];
   readonly defs: string[] = [];
   readonly states: Record<string, Record<string, Look>> = {};
-  readonly drift: Record<string, { dx?: number; dy?: number; wrap?: number }> = {};
+  readonly drift: Record<string, { dx?: number; dy?: number; wrap?: number }> =
+    {};
 
   constructor(
     readonly W: number,
@@ -431,7 +612,12 @@ class SetCanvas {
   }
 
   /** A layer of shapes in one colour (the colour on its group, so a state can change it). */
-  flat(id: string, shapes: readonly Shape[], fill: string, options: Omit<Layer, 'id' | 'markup' | 'box'> = {}): Layer {
+  flat(
+    id: string,
+    shapes: readonly Shape[],
+    fill: string,
+    options: Omit<Layer, 'id' | 'markup' | 'box'> = {},
+  ): Layer {
     const real = shapes.filter((s) => s.d);
     const layer: Layer = {
       id,
@@ -445,26 +631,50 @@ class SetCanvas {
   }
 
   /** A flat layer whose colour each state works out from its light (a land layer, a mast). */
-  lit(id: string, shapes: readonly Shape[], colourIn: (light: Light) => string, options: Omit<Layer, 'id' | 'markup' | 'box'> = {}): Layer {
+  lit(
+    id: string,
+    shapes: readonly Shape[],
+    colourIn: (light: Light) => string,
+    options: Omit<Layer, 'id' | 'markup' | 'box'> = {},
+  ): Layer {
     const layer = this.flat(id, shapes, colourIn(this.open), options);
-    for (const state of SET_STATES) this.look(state, id, { fill: colourIn(this.lights[this.times[state].time]) });
+    for (const state of SET_STATES)
+      this.look(state, id, {
+        fill: colourIn(this.lights[this.times[state].time]),
+      });
     return layer;
   }
 
   /** A layer of markup drawn elsewhere (a building's own colours), with its box. */
-  raw(id: string, markup: string, box: ShotBox, options: Omit<Layer, 'id' | 'markup' | 'box'> = {}): Layer {
+  raw(
+    id: string,
+    markup: string,
+    box: ShotBox,
+    options: Omit<Layer, 'id' | 'markup' | 'box'> = {},
+  ): Layer {
     const layer: Layer = { id, markup, box, ...options };
     this.layers.push(layer);
     return layer;
   }
 
   /** A veil over what is drawn in its own colours: it darkens it as the light goes. */
-  veil(id: string, shapes: readonly Shape[], depth: number, strength = 1): void {
+  veil(
+    id: string,
+    shapes: readonly Shape[],
+    depth: number,
+    strength = 1,
+  ): void {
     const open = this.open;
-    this.flat(id, shapes, open.veil, { depth, attrs: { opacity: Math.round(open.veilOpacity * strength * 100) / 100 } });
+    this.flat(id, shapes, open.veil, {
+      depth,
+      attrs: { opacity: Math.round(open.veilOpacity * strength * 100) / 100 },
+    });
     for (const state of SET_STATES) {
       const light = this.lights[this.times[state].time];
-      this.look(state, id, { fill: light.veil, opacity: Math.round(light.veilOpacity * strength * 100) / 100 });
+      this.look(state, id, {
+        fill: light.veil,
+        opacity: Math.round(light.veilOpacity * strength * 100) / 100,
+      });
     }
   }
 
@@ -473,20 +683,36 @@ class SetCanvas {
    * rank as each state lights them, never fewer than `least` of them;
    * `lamps` are all on as soon as the light goes (street lamps, floodlights).
    */
-  windows(id: string, shapes: readonly Shape[], depth: number, colour = '#ffd88a', least = 0, lamps = false): void {
+  windows(
+    id: string,
+    shapes: readonly Shape[],
+    depth: number,
+    colour = '#ffd88a',
+    least = 0,
+    lamps = false,
+  ): void {
     if (!shapes.length) return;
     const levelOf = (state: SetState) => {
-      const level = Math.max(least, this.times[state].lit ?? this.lights[this.times[state].time].lit);
+      const level = Math.max(
+        least,
+        this.times[state].lit ?? this.lights[this.times[state].time].lit,
+      );
       return lamps ? (level >= 0.1 ? 1 : 0) : level;
     };
     const open = levelOf(this.opening);
     this.raw(
       id,
-      shapes.map((s, n) => `<path d="${s.d}"${lightRank(id, n) < open ? '' : ' opacity="0"'}/>`).join(''),
+      shapes
+        .map(
+          (s, n) =>
+            `<path d="${s.d}"${lightRank(id, n) < open ? '' : ' opacity="0"'}/>`,
+        )
+        .join(''),
       unionBox(shapes.map((s) => s.box)),
       { depth, attrs: { fill: colour } },
     );
-    for (const state of SET_STATES) this.look(state, id, { lit: Math.round(levelOf(state) * 100) / 100 });
+    for (const state of SET_STATES)
+      this.look(state, id, { lit: Math.round(levelOf(state) * 100) / 100 });
   }
 
   /** A part's look in a state. */
@@ -502,18 +728,24 @@ class SetCanvas {
     const markup = this.layers
       .map((layer) => {
         const attrs = Object.entries(layer.attrs ?? {})
-          .map(([k, v]) => ` ${k}="${typeof v === 'number' ? Math.round(v * 1000) / 1000 : v}"`)
+          .map(
+            ([k, v]) =>
+              ` ${k}="${typeof v === 'number' ? Math.round(v * 1000) / 1000 : v}"`,
+          )
           .join('');
         const inside = clipBox(layer.box, frame);
         const part: ShotPartDto = { box: inside };
         if (layer.pivot) {
           const [bx, by, bw, bh] = inside;
           part.pivot = [
-            Math.round(((layer.pivot[0] - bx) / Math.max(1e-6, bw)) * 1000) / 1000,
-            Math.round(((layer.pivot[1] - by) / Math.max(1e-6, bh)) * 1000) / 1000,
+            Math.round(((layer.pivot[0] - bx) / Math.max(1e-6, bw)) * 1000) /
+              1000,
+            Math.round(((layer.pivot[1] - by) / Math.max(1e-6, bh)) * 1000) /
+              1000,
           ];
         }
-        if (layer.depth !== undefined && layer.depth !== 1) part.depth = layer.depth;
+        if (layer.depth !== undefined && layer.depth !== 1)
+          part.depth = layer.depth;
         if (layer.value !== undefined) part.value = layer.value;
         parts[layer.id] = part;
         return `<g data-part="${layer.id}"${attrs}>${layer.markup}</g>`;
@@ -530,7 +762,9 @@ class SetCanvas {
 }
 
 /** The states a set describes, each with the time of day it shows and its lights (lights-on keeps the opening's time). */
-function stateTimes(opening: SetTime): Record<SetState, { time: SetTime; lit?: number }> {
+function stateTimes(
+  opening: SetTime,
+): Record<SetState, { time: SetTime; lit?: number }> {
   return {
     day: { time: 'day' },
     dusk: { time: 'dusk' },
@@ -541,11 +775,19 @@ function stateTimes(opening: SetTime): Record<SetState, { time: SetTime; lit?: n
 }
 
 /** The sun's arc: its middle and radius, so the sun stands high by day and touches the horizon at dusk and dawn, inside the frame. */
-function sunArc(W: number, H: number, horizon: number): { c: Pt; r: number; angle: Record<SetTime, number> } {
+function sunArc(
+  W: number,
+  H: number,
+  horizon: number,
+): { c: Pt; r: number; angle: Record<SetTime, number> } {
   const dusk = 70;
   const r = (0.28 * W) / Math.sin((dusk * Math.PI) / 180);
   const k = r * Math.cos((dusk * Math.PI) / 180) - 0.035 * H;
-  return { c: [W / 2, horizon + k], r, angle: { day: 34, dusk, night: 118, dawn: -dusk } };
+  return {
+    c: [W / 2, horizon + k],
+    r,
+    angle: { day: 34, dusk, night: 118, dawn: -dusk },
+  };
 }
 
 const onArc = (c: Pt, r: number, deg: number): Pt => [
@@ -556,13 +798,17 @@ const onArc = (c: Pt, r: number, deg: number): Pt => [
 /** A path's numbers moved by dx, dy (the kit's paths are absolute M, L, C and Z only). */
 function shift(d: string, dx: number, dy: number): string {
   let k = 0;
-  return d.replace(/-?\d+(?:\.\d+)?/g, (m) => n1(Number(m) + (k++ % 2 === 0 ? dx : dy)));
+  return d.replace(/-?\d+(?:\.\d+)?/g, (m) =>
+    n1(Number(m) + (k++ % 2 === 0 ? dx : dy)),
+  );
 }
 
 /** A path's numbers scaled by k and moved by x, y (absolute commands only, as the kit draws). */
 function scalePath(d: string, k: number, x: number, y: number): string {
   let i = 0;
-  return d.replace(/-?\d+(?:\.\d+)?/g, (m) => n1(Number(m) * k + (i++ % 2 === 0 ? x : y)));
+  return d.replace(/-?\d+(?:\.\d+)?/g, (m) =>
+    n1(Number(m) * k + (i++ % 2 === 0 ? x : y)),
+  );
 }
 
 /**
@@ -570,7 +816,12 @@ function scalePath(d: string, k: number, x: number, y: number): string {
  * in the largest view inside the set (the camera's rule: lib/shots/
  * camera's frameFor), so the opening never shows past the set's edges.
  */
-function fitFocal(focal: ShotBox, W: number, H: number, shape: FilmShape): ShotBox {
+function fitFocal(
+  focal: ShotBox,
+  W: number,
+  H: number,
+  shape: FilmShape,
+): ShotBox {
   const aspect = shape === 'wide' ? 16 / 9 : 9 / 16;
   const fit = Math.min(H, W / aspect);
   const most = { w: fit * aspect * 0.9, h: fit * 0.9 };
@@ -578,7 +829,12 @@ function fitFocal(focal: ShotBox, W: number, H: number, shape: FilmShape): ShotB
   const h = Math.min(focal[3], most.h);
   const cx = focal[0] + focal[2] / 2;
   const y = focal[1] + focal[3] - h;
-  return [Math.round(cx - w / 2), Math.round(Math.max(0, y)), Math.round(w), Math.round(h)];
+  return [
+    Math.round(cx - w / 2),
+    Math.round(Math.max(0, y)),
+    Math.round(w),
+    Math.round(h),
+  ];
 }
 
 /**
@@ -595,15 +851,26 @@ export function drawSet(
   const { w: W, h: H } = SET_FRAME[shape];
   const style = kitStyle(look, { look: options.kitLook ?? 'editorial', shape });
   const rng = seeded(options.seed ^ 0x5e75e7);
-  const place: SetPlace = settings.place === 'open' && settings.land === 'city' ? 'city' : settings.place;
+  const place: SetPlace =
+    settings.place === 'open' && settings.land === 'city'
+      ? 'city'
+      : settings.place;
   // A port needs its coast.
-  const s: SetSettings = { ...settings, place, land: place === 'port' ? 'coast' : settings.land };
+  const s: SetSettings = {
+    ...settings,
+    place,
+    land: place === 'port' ? 'coast' : settings.land,
+  };
   const times = stateTimes(s.time);
-  const lights = Object.fromEntries(SET_TIMES.map((t) => [t, lightOf(t, s.weather, style)])) as Record<SetTime, Light>;
+  const lights = Object.fromEntries(
+    SET_TIMES.map((t) => [t, lightOf(t, s.weather, style)]),
+  ) as Record<SetTime, Light>;
   const canvas = new SetCanvas(W, H, style, times, lights, s.time);
   if (place === 'assembly-hall') return assemblyHall(canvas, s, shape);
 
-  const notes: string[] = [`${s.land}, ${s.time}, ${s.weather}, ${s.town}, ${place}, ${s.era}`];
+  const notes: string[] = [
+    `${s.land}, ${s.time}, ${s.weather}, ${s.town}, ${place}, ${s.era}`,
+  ];
   const watery = s.land === 'coast' || s.land === 'sea';
   // The frame's bands: the horizon; the line the place's buildings stand on (by the coast, the far shore); the line actors stand on.
   const horizon = H * (s.land === 'mountains' ? 0.56 : watery ? 0.5 : 0.54);
@@ -622,12 +889,23 @@ export function drawSet(
   const stops = [0, 0.42, 0.8, 1];
   canvas.defs.push(
     `<linearGradient id="sky" x1="0" y1="0" x2="0" y2="${n1(horizon)}" gradientUnits="userSpaceOnUse">${stops
-      .map((o, i) => `<stop offset="${o}" stop-color="${open.sky[i]}" data-part="sky-${i + 1}"/>`)
+      .map(
+        (o, i) =>
+          `<stop offset="${o}" stop-color="${open.sky[i]}" data-part="sky-${i + 1}"/>`,
+      )
       .join('')}</linearGradient>`,
   );
-  canvas.raw('sky', `<rect x="${-over}" y="${-over}" width="${W + 2 * over}" height="${H + 2 * over}" fill="url(#sky)"/>`, [0, 0, W, H], { depth: 0 });
+  canvas.raw(
+    'sky',
+    `<rect x="${-over}" y="${-over}" width="${W + 2 * over}" height="${H + 2 * over}" fill="url(#sky)"/>`,
+    [0, 0, W, H],
+    { depth: 0 },
+  );
   for (let i = 0; i < 4; i += 1)
-    for (const state of SET_STATES) canvas.look(state, `sky-${i + 1}`, { fill: lights[times[state].time].sky[i] });
+    for (const state of SET_STATES)
+      canvas.look(state, `sky-${i + 1}`, {
+        fill: lights[times[state].time].sky[i],
+      });
 
   // ── Stars, the moon, the sun and its glow on their arc.
   const stars: Shape[] = [];
@@ -635,15 +913,30 @@ export function drawSet(
   for (let i = 0; i < 70; i += 1) {
     const [x, y] = [rng.between(0, W), rng.between(0, horizon * 0.72)];
     const r = rng.between(1.4, 3.6);
-    stars.push(poly([[x, y - r], [x + r, y], [x, y + r], [x - r, y]]));
+    stars.push(
+      poly([
+        [x, y - r],
+        [x + r, y],
+        [x, y + r],
+        [x - r, y],
+      ]),
+    );
   }
-  canvas.flat('stars', stars, '#fdf6e3', { depth: 0, attrs: { opacity: open.stars } });
+  canvas.flat('stars', stars, '#fdf6e3', {
+    depth: 0,
+    attrs: { opacity: open.stars },
+  });
   const moonAt: Pt = [W * (tall ? 0.26 : 0.2), horizon * 0.28];
   const moonR = Math.min(W, H) * 0.034;
   canvas.raw(
     'moon',
     `<circle cx="${n1(moonAt[0])}" cy="${n1(moonAt[1])}" r="${n1(moonR * 2.8)}" fill="#dfe7ff" opacity="0.1"/><circle cx="${n1(moonAt[0])}" cy="${n1(moonAt[1])}" r="${n1(moonR)}" fill="#f4f1e6"/><circle cx="${n1(moonAt[0] - moonR * 0.3)}" cy="${n1(moonAt[1] - moonR * 0.2)}" r="${n1(moonR * 0.22)}" fill="#ddd8c8"/><circle cx="${n1(moonAt[0] + moonR * 0.35)}" cy="${n1(moonAt[1] + moonR * 0.3)}" r="${n1(moonR * 0.15)}" fill="#ddd8c8"/>`,
-    [moonAt[0] - moonR * 2.8, moonAt[1] - moonR * 2.8, moonR * 5.6, moonR * 5.6],
+    [
+      moonAt[0] - moonR * 2.8,
+      moonAt[1] - moonR * 2.8,
+      moonR * 5.6,
+      moonR * 5.6,
+    ],
     { depth: 0.02, attrs: { opacity: open.moonOpacity } },
   );
   const arc = sunArc(W, H, horizon);
@@ -657,94 +950,289 @@ export function drawSet(
     'sun',
     `<circle cx="${n1(sunAt[0])}" cy="${n1(sunAt[1])}" r="${n1(glowR)}" fill="url(#glow)" opacity="${Math.round(open.glowOpacity * 100) / 100}" data-part="glow"/><circle cx="${n1(sunAt[0])}" cy="${n1(sunAt[1])}" r="${n1(sunR)}" fill="${open.sun}" data-part="sun-disc"/>`,
     // Its box reaches to the arc's middle, so its pivot is inside it.
-    unionBox([[sunAt[0] - sunR, sunAt[1] - sunR, 2 * sunR, 2 * sunR], [arc.c[0] - 1, arc.c[1] - 1, 2, 2]]),
+    unionBox([
+      [sunAt[0] - sunR, sunAt[1] - sunR, 2 * sunR, 2 * sunR],
+      [arc.c[0] - 1, arc.c[1] - 1, 2, 2],
+    ]),
     { depth: 0.04, pivot: arc.c, attrs: { opacity: open.sunOpacity } },
   );
   for (const state of SET_STATES) {
     const light = lights[times[state].time];
     canvas.look(state, 'stars', { opacity: light.stars });
     canvas.look(state, 'moon', { opacity: light.moonOpacity });
-    canvas.look(state, 'sun', { rotate: arc.angle[times[state].time] - arc.angle[s.time], opacity: light.sunOpacity });
+    canvas.look(state, 'sun', {
+      rotate: arc.angle[times[state].time] - arc.angle[s.time],
+      opacity: light.sunOpacity,
+    });
     canvas.look(state, 'glow', { opacity: light.glowOpacity });
-    for (let i = 1; i <= 3; i += 1) canvas.look(state, `glow-${i}`, { fill: light.glow });
+    for (let i = 1; i <= 3; i += 1)
+      canvas.look(state, `glow-${i}`, { fill: light.glow });
     canvas.look(state, 'sun-disc', { fill: light.sun });
   }
 
   // ── Clouds, drifting (each with a copy a wrap behind it, so it comes in on one side as it leaves the other).
-  const cloudCount = { clear: 3, cloud: 6, rain: 7, storm: 8, snow: 6, haze: 2 }[s.weather];
+  const cloudCount = {
+    clear: 3,
+    cloud: 6,
+    rain: 7,
+    storm: 8,
+    snow: 6,
+    haze: 2,
+  }[s.weather];
   const heavy = s.weather === 'rain' || s.weather === 'storm';
   for (let i = 0; i < cloudCount; i += 1) {
-    const cw = W * rng.between(0.14, 0.28) * (heavy ? 1.5 : 1) * (tall ? 1.4 : 1);
+    const cw =
+      W * rng.between(0.14, 0.28) * (heavy ? 1.5 : 1) * (tall ? 1.4 : 1);
     const cx = rng.between(0, W);
     const cy = rng.between(horizon * 0.14, horizon * (heavy ? 0.5 : 0.7));
     const shapes = cloudShapes(cx, cy, cw, rng);
     const wrap = W + cw * 2.4;
-    const both = [...shapes, ...shapes.map((p) => ({ d: shift(p.d, -wrap, 0), box: [p.box[0] - wrap, p.box[1], p.box[2], p.box[3]] as ShotBox }))];
+    const both = [
+      ...shapes,
+      ...shapes.map((p) => ({
+        d: shift(p.d, -wrap, 0),
+        box: [p.box[0] - wrap, p.box[1], p.box[2], p.box[3]] as ShotBox,
+      })),
+    ];
     const id = `cloud-${i + 1}`;
-    canvas.flat(id, both, open.cloud, { depth: Math.round(rng.between(0.06, 0.16) * 100) / 100, attrs: { opacity: s.weather === 'haze' ? 0.55 : 0.94 } });
-    canvas.drift[id] = { dx: Math.round(rng.between(4, 11) * (W / 2000) * 10) / 10, wrap: Math.round(wrap) };
-    for (const state of SET_STATES) canvas.look(state, id, { fill: lights[times[state].time].cloud });
+    canvas.flat(id, both, open.cloud, {
+      depth: Math.round(rng.between(0.06, 0.16) * 100) / 100,
+      attrs: { opacity: s.weather === 'haze' ? 0.55 : 0.94 },
+    });
+    canvas.drift[id] = {
+      dx: Math.round(rng.between(4, 11) * (W / 2000) * 10) / 10,
+      wrap: Math.round(wrap),
+    };
+    for (const state of SET_STATES)
+      canvas.look(state, id, { fill: lights[times[state].time].cloud });
   }
 
   // ── The land, far to near, each layer's colour toned by the light and hazed by its distance.
   const colours = LAND_COLOUR[s.land];
   const snowy = s.weather === 'snow';
   const landColour = (base: string, depth: number) => (light: Light) => {
-    const hazed = mixOk(toned(base, light), light.haze, (1 - depth) * (0.6 + (s.weather === 'haze' ? 0.2 : 0)));
-    return toLook(style, snowy ? mixOk(hazed, mixOk('#f1f4f7', light.tone, light.dim), 0.62 * depth) : hazed);
+    const hazed = mixOk(
+      toned(base, light),
+      light.haze,
+      (1 - depth) * (0.6 + (s.weather === 'haze' ? 0.2 : 0)),
+    );
+    return toLook(
+      style,
+      snowy
+        ? mixOk(hazed, mixOk('#f1f4f7', light.tone, light.dim), 0.62 * depth)
+        : hazed,
+    );
   };
   if (s.land === 'mountains') {
     const range = peaks(x0, x1, bottom, horizon, H * 0.34, rng);
-    canvas.lit('land-far', [range.ridge], landColour(colours.far, 0.22), { depth: 0.22 });
-    canvas.lit('snowcaps', range.caps, (light) => toLook(style, mixOk(mixOk('#f4f6f8', light.tone, light.dim * 0.85), light.haze, 0.3)), { depth: 0.22 });
+    canvas.lit('land-far', [range.ridge], landColour(colours.far, 0.22), {
+      depth: 0.22,
+    });
+    canvas.lit(
+      'snowcaps',
+      range.caps,
+      (light) =>
+        toLook(
+          style,
+          mixOk(
+            mixOk('#f4f6f8', light.tone, light.dim * 0.85),
+            light.haze,
+            0.3,
+          ),
+        ),
+      { depth: 0.22 },
+    );
     const roll = waves(rng, 3);
-    canvas.lit('land-mid', [silhouette(x0, x1, bottom, (x) => horizon + H * 0.04 - H * 0.1 * roll(x / W), 40)], landColour(colours.mid, 0.45), { depth: 0.45 });
+    canvas.lit(
+      'land-mid',
+      [
+        silhouette(
+          x0,
+          x1,
+          bottom,
+          (x) => horizon + H * 0.04 - H * 0.1 * roll(x / W),
+          40,
+        ),
+      ],
+      landColour(colours.mid, 0.45),
+      { depth: 0.45 },
+    );
   } else if (s.land === 'desert') {
-    canvas.lit('land-far', [mesas(x0, x1, bottom, horizon, H * 0.13, rng)], landColour(colours.far, 0.25), { depth: 0.25 });
+    canvas.lit(
+      'land-far',
+      [mesas(x0, x1, bottom, horizon, H * 0.13, rng)],
+      landColour(colours.far, 0.25),
+      { depth: 0.25 },
+    );
     const dune = waves(rng, 3);
-    canvas.lit('land-mid', [silhouette(x0, x1, bottom, (x) => horizon + H * 0.05 - H * 0.07 * dune(x / W), 60)], landColour(colours.mid, 0.5), { depth: 0.5 });
+    canvas.lit(
+      'land-mid',
+      [
+        silhouette(
+          x0,
+          x1,
+          bottom,
+          (x) => horizon + H * 0.05 - H * 0.07 * dune(x / W),
+          60,
+        ),
+      ],
+      landColour(colours.mid, 0.5),
+      { depth: 0.5 },
+    );
   } else if (s.land === 'forest') {
     const pointed = snowy || climateOf(s) === 'cold';
-    canvas.lit('land-far', treeLine(x0, x1, bottom, horizon, H * 0.09, rng, pointed), landColour(colours.far, 0.28), { depth: 0.28 });
-    canvas.lit('land-mid', treeLine(x0, x1, bottom, horizon + H * 0.09, H * 0.15, rng, pointed), landColour(colours.mid, 0.55), { depth: 0.55 });
+    canvas.lit(
+      'land-far',
+      treeLine(x0, x1, bottom, horizon, H * 0.09, rng, pointed),
+      landColour(colours.far, 0.28),
+      { depth: 0.28 },
+    );
+    canvas.lit(
+      'land-mid',
+      treeLine(x0, x1, bottom, horizon + H * 0.09, H * 0.15, rng, pointed),
+      landColour(colours.mid, 0.55),
+      { depth: 0.55 },
+    );
   } else if (s.land !== 'sea') {
     const roll = waves(rng, 3);
-    const height = s.land === 'hills' ? 0.12 : s.land === 'city' ? 0.02 : s.land === 'coast' ? 0.07 : 0.05;
-    canvas.lit('land-far', [silhouette(x0, x1, bottom, (x) => horizon - H * height * roll(x / W), 60)], landColour(colours.far, 0.25), { depth: 0.25 });
+    const height =
+      s.land === 'hills'
+        ? 0.12
+        : s.land === 'city'
+          ? 0.02
+          : s.land === 'coast'
+            ? 0.07
+            : 0.05;
+    canvas.lit(
+      'land-far',
+      [
+        silhouette(
+          x0,
+          x1,
+          bottom,
+          (x) => horizon - H * height * roll(x / W),
+          60,
+        ),
+      ],
+      landColour(colours.far, 0.25),
+      { depth: 0.25 },
+    );
     if (s.land === 'hills') {
       const roll2 = waves(rng, 2);
-      canvas.lit('land-mid', [silhouette(x0, x1, bottom, (x) => horizon + H * 0.08 - H * 0.12 * roll2(x / W), 50)], landColour(colours.mid, 0.5), { depth: 0.5 });
+      canvas.lit(
+        'land-mid',
+        [
+          silhouette(
+            x0,
+            x1,
+            bottom,
+            (x) => horizon + H * 0.08 - H * 0.12 * roll2(x / W),
+            50,
+          ),
+        ],
+        landColour(colours.mid, 0.5),
+        { depth: 0.5 },
+      );
     }
   }
 
   // ── The far townscape along the horizon (or the far shore): blocks by density and era, its windows lighting.
   const climate = climateOf(s);
-  const town: SetTown = s.town === 'none' && (place === 'industry' || place === 'city' || place === 'port') ? 'town' : s.town;
+  const town: SetTown =
+    s.town === 'none' &&
+    (place === 'industry' || place === 'city' || place === 'port')
+      ? 'town'
+      : s.town;
   if (town !== 'none') {
-    const far = farTownscape(rng, W, H, s.land === 'coast' ? farShore - H * 0.02 : horizon, town, s.era, place);
-    canvas.lit('town-far', far.blocks, (light) => toLook(style, mixOk(mixOk('#7d8592', light.tone, light.dim * 0.9), light.haze, 0.35)), { depth: 0.45 });
+    const far = farTownscape(
+      rng,
+      W,
+      H,
+      s.land === 'coast' ? farShore - H * 0.02 : horizon,
+      town,
+      s.era,
+      place,
+    );
+    canvas.lit(
+      'town-far',
+      far.blocks,
+      (light) =>
+        toLook(
+          style,
+          mixOk(
+            mixOk('#7d8592', light.tone, light.dim * 0.9),
+            light.haze,
+            0.35,
+          ),
+        ),
+      { depth: 0.45 },
+    );
     canvas.windows('lights-far', far.windows, 0.45);
-    far.smoke.forEach((p, i) => canvas.raw(`smoke-far${i ? `-${i + 1}` : ''}`, '', [p[0] - 1, p[1] - 1, 2, 2], { depth: 0.45 }));
+    far.smoke.forEach((p, i) =>
+      canvas.raw(
+        `smoke-far${i ? `-${i + 1}` : ''}`,
+        '',
+        [p[0] - 1, p[1] - 1, 2, 2],
+        { depth: 0.45 },
+      ),
+    );
   }
 
   // ── The coast: the far shore the place stands on, across the water.
   if (s.land === 'coast')
-    canvas.lit('far-shore', [box(x0, farShore - H * 0.02, x1, farShore + H * 0.014)], landColour(place === 'port' ? '#9a9993' : colours.near, 0.62), { depth: 0.62 });
+    canvas.lit(
+      'far-shore',
+      [box(x0, farShore - H * 0.02, x1, farShore + H * 0.014)],
+      landColour(place === 'port' ? '#9a9993' : colours.near, 0.62),
+      { depth: 0.62 },
+    );
   if (s.land !== 'coast' && s.land !== 'sea')
-    canvas.lit('ground', [silhouette(x0, x1, bottom, (x) => nearBase - H * 0.015 + H * 0.008 * waves(rng, 2)(x / W), 30)], landColour(colours.ground, 1));
+    canvas.lit(
+      'ground',
+      [
+        silhouette(
+          x0,
+          x1,
+          bottom,
+          (x) => nearBase - H * 0.015 + H * 0.008 * waves(rng, 2)(x / W),
+          30,
+        ),
+      ],
+      landColour(colours.ground, 1),
+    );
 
   // ── The place's own buildings on the near ground (or the far shore), the veil that darkens them, their lights.
   // A tall frame is half as wide: what stands in it is drawn twice as big, so it fills the frame's width as it does a wide one.
   const scale = tall ? 2 : 1;
   const hero = heroes(place, town, s, climate, rng, W, scale);
-  const cargo = place === 'port' && ERA_IDS.indexOf(s.era) >= ERA_IDS.indexOf('1945-1975') ? containers(rng, style, W * 0.28, W * 0.62, nearBase, W, scale) : [];
+  const cargo =
+    place === 'port' && ERA_IDS.indexOf(s.era) >= ERA_IDS.indexOf('1945-1975')
+      ? containers(rng, style, W * 0.28, W * 0.62, nearBase, W, scale)
+      : [];
   if (hero.length || cargo.length) {
     const near = placeBuildings(hero, style, s, climate, rng, nearBase, W);
     const depth = s.land === 'coast' ? 0.62 : 0.8;
-    canvas.raw('town', cargo.map(([sh, f]) => `<path d="${sh.d}" fill="${f}"/>`).join('') + near.markup, unionBox([near.box, ...cargo.map(([sh]) => sh.box)]), { depth });
-    canvas.veil('town-veil', [...cargo.map(([sh]) => sh), ...near.silhouettes], depth);
+    canvas.raw(
+      'town',
+      cargo.map(([sh, f]) => `<path d="${sh.d}" fill="${f}"/>`).join('') +
+        near.markup,
+      unionBox([near.box, ...cargo.map(([sh]) => sh.box)]),
+      { depth },
+    );
+    canvas.veil(
+      'town-veil',
+      [...cargo.map(([sh]) => sh), ...near.silhouettes],
+      depth,
+    );
     canvas.windows('lights', near.windows, depth);
-    near.smoke.forEach((p, i) => canvas.raw(i ? `smoke-${i + 1}` : 'smoke', '', [p[0] - 1, p[1] - 1, 2, 2], { depth }));
+    near.smoke.forEach((p, i) =>
+      canvas.raw(
+        i ? `smoke-${i + 1}` : 'smoke',
+        '',
+        [p[0] - 1, p[1] - 1, 2, 2],
+        { depth },
+      ),
+    );
     notes.push(...near.notes);
   }
   if (place === 'ceremony-ground') ceremonyGround(canvas, nearBase);
@@ -754,9 +1242,19 @@ export function drawSet(
   if (watery) {
     const top = s.land === 'sea' ? horizon : farShore + H * 0.014;
     const bottomOfWater = s.land === 'sea' ? bottom : nearShore + H * 0.004;
-    canvas.lit('water', [box(x0, top, x1, bottomOfWater)], (light) => light.water, { depth: 0.8 });
+    canvas.lit(
+      'water',
+      [box(x0, top, x1, bottomOfWater)],
+      (light) => light.water,
+      { depth: 0.8 },
+    );
     // The far shore's shadow on the water, and the glints of the light on it.
-    canvas.lit('water-shade', [box(x0, top, x1, top + H * 0.04)], (light) => mixOk(light.water, '#000000', 0.3), { depth: 0.8, attrs: { opacity: 0.5 } });
+    canvas.lit(
+      'water-shade',
+      [box(x0, top, x1, top + H * 0.04)],
+      (light) => mixOk(light.water, '#000000', 0.3),
+      { depth: 0.8, attrs: { opacity: 0.5 } },
+    );
     const glints: Shape[] = [];
     for (let i = 0; i < 60; i += 1) {
       const y = rng.between(top + H * 0.045, bottomOfWater - H * 0.01);
@@ -765,24 +1263,70 @@ export function drawSet(
       const len = W * rng.between(0.012, 0.04) * (0.5 + near);
       glints.push(box(x - len / 2, y, x + len / 2, y + 1.5 + near * 3, 1));
     }
-    canvas.flat('glints', glints, '#fff3d8', { depth: 0.85, attrs: { opacity: open.glint } });
-    for (const state of SET_STATES) canvas.look(state, 'glints', { opacity: lights[times[state].time].glint });
-    canvas.raw('shimmer', '', [0, top, W, Math.min(H, bottomOfWater) - top], { depth: 0.85 });
+    canvas.flat('glints', glints, '#fff3d8', {
+      depth: 0.85,
+      attrs: { opacity: open.glint },
+    });
+    for (const state of SET_STATES)
+      canvas.look(state, 'glints', {
+        opacity: lights[times[state].time].glint,
+      });
+    canvas.raw('shimmer', '', [0, top, W, Math.min(H, bottomOfWater) - top], {
+      depth: 0.85,
+    });
     if (s.land === 'coast') {
       // The near shore: a quay at a port, a beach elsewhere.
-      const shore = place === 'port' ? box(x0, nearShore, x1, bottom) : silhouette(x0, x1, bottom, (x) => nearShore - H * 0.014 * waves(rng, 2)(x / W), 30);
-      canvas.lit('ground', [shore], landColour(place === 'port' ? '#a19d94' : colours.ground, 1));
+      const shore =
+        place === 'port'
+          ? box(x0, nearShore, x1, bottom)
+          : silhouette(
+              x0,
+              x1,
+              bottom,
+              (x) => nearShore - H * 0.014 * waves(rng, 2)(x / W),
+              30,
+            );
+      canvas.lit(
+        'ground',
+        [shore],
+        landColour(place === 'port' ? '#a19d94' : colours.ground, 1),
+      );
     }
   }
 
   // ── The near ground's marks, and what frames the picture in front.
   if (s.land !== 'sea') {
-    const marks = groundMarks(place, s, rng, W, H, nearBase, groundY, bottom, x0, x1);
+    const marks = groundMarks(
+      place,
+      s,
+      rng,
+      W,
+      H,
+      nearBase,
+      groundY,
+      bottom,
+      x0,
+      x1,
+    );
     if (marks.length)
-      canvas.lit('ground-marks', marks, (light) => mixOk(landColour(s.land === 'coast' && place === 'port' ? '#a19d94' : colours.ground, 1)(light), '#000000', 0.13));
+      canvas.lit('ground-marks', marks, (light) =>
+        mixOk(
+          landColour(
+            s.land === 'coast' && place === 'port' ? '#a19d94' : colours.ground,
+            1,
+          )(light),
+          '#000000',
+          0.13,
+        ),
+      );
     const front = framing(place, s, rng, W, H, groundY, bottom);
     if (front.shapes.length) {
-      canvas.lit('foreground', front.shapes, (light) => toLook(style, toned(front.colour, light)), { depth: 1.12 });
+      canvas.lit(
+        'foreground',
+        front.shapes,
+        (light) => toLook(style, toned(front.colour, light)),
+        { depth: 1.12 },
+      );
       canvas.windows('lamps', front.lamps, 1.12, '#ffe6a8', 0, true);
     }
   }
@@ -792,27 +1336,61 @@ export function drawSet(
     const tile = snowy ? H * 0.4 : H * 0.3;
     const shapes: Shape[] = [];
     const count = s.weather === 'storm' ? 120 : heavy ? 85 : 70;
-    const drops = Array.from({ length: count }, () => ({ x: rng.between(-W * 0.05, W * 1.05), y: rng.between(0, tile), l: rng.between(0.6, 1.2) }));
+    const drops = Array.from({ length: count }, () => ({
+      x: rng.between(-W * 0.05, W * 1.05),
+      y: rng.between(0, tile),
+      l: rng.between(0.6, 1.2),
+    }));
     const unit = Math.min(W, H) / 1000;
     for (let k = -1; k * tile < H + tile; k += 1)
       for (const drop of drops) {
         const y = drop.y + k * tile;
         if (snowy) shapes.push(circle([drop.x, y], 3 * drop.l * unit));
-        else shapes.push(band([drop.x, y], [drop.x - 12 * drop.l * unit, y + 46 * drop.l * unit], 1.8 * unit));
+        else
+          shapes.push(
+            band(
+              [drop.x, y],
+              [drop.x - 12 * drop.l * unit, y + 46 * drop.l * unit],
+              1.8 * unit,
+            ),
+          );
       }
     const id = snowy ? 'snow' : 'rain';
-    canvas.flat(id, shapes, snowy ? '#ffffff' : '#e3ebf2', { depth: 1, attrs: { opacity: snowy ? 0.85 : 0.4 } });
-    canvas.drift[id] = { dy: Math.round(snowy ? H * 0.05 : H * 1.1), wrap: Math.round(tile) };
+    canvas.flat(id, shapes, snowy ? '#ffffff' : '#e3ebf2', {
+      depth: 1,
+      attrs: { opacity: snowy ? 0.85 : 0.4 },
+    });
+    canvas.drift[id] = {
+      dy: Math.round(snowy ? H * 0.05 : H * 1.1),
+      wrap: Math.round(tile),
+    };
     notes.push(`${id} falling`);
   }
 
   // ── Where actors stand, and at what scale: a person about a third of the set's height in front.
-  const unitsPerMetre = Math.round(((H * (tall ? 0.24 : 0.34)) / 1.75) * 10) / 10;
-  canvas.raw('ground-line', '', [0, groundY, W, H - groundY], { value: unitsPerMetre });
+  const unitsPerMetre =
+    Math.round(((H * (tall ? 0.24 : 0.34)) / 1.75) * 10) / 10;
+  canvas.raw('ground-line', '', [0, groundY, W, H - groundY], {
+    value: unitsPerMetre,
+  });
   // The opening's subject: the band from above the place's tallest to its ground, framed whole.
-  const focalTop = Math.max(0, Math.min(nearBase - H * 0.38, horizon - H * 0.22));
-  const focal = fitFocal([W * 0.06, focalTop, W * 0.88, groundY - focalTop], W, H, shape);
-  return { asset: canvas.asset(focal), ground: groundY, unitsPerMetre, air: open.sky[3], notes };
+  const focalTop = Math.max(
+    0,
+    Math.min(nearBase - H * 0.38, horizon - H * 0.22),
+  );
+  const focal = fitFocal(
+    [W * 0.06, focalTop, W * 0.88, groundY - focalTop],
+    W,
+    H,
+    shape,
+  );
+  return {
+    asset: canvas.asset(focal),
+    ground: groundY,
+    unitsPerMetre,
+    air: open.sky[3],
+    notes,
+  };
 }
 
 // ── The townscape ─────────────────────────────────────────────────────────
@@ -832,8 +1410,11 @@ function farTownscape(
   const smoke: Pt[] = [];
   const index = ERA_IDS.indexOf(era);
   const modern = index >= ERA_IDS.indexOf('1945-1975');
-  const industrial = index >= ERA_IDS.indexOf('1800-1900') && index <= ERA_IDS.indexOf('1945-1975');
-  const tall = town === 'city' ? (modern ? 0.24 : 0.12) : town === 'town' ? 0.07 : 0.035;
+  const industrial =
+    index >= ERA_IDS.indexOf('1800-1900') &&
+    index <= ERA_IDS.indexOf('1945-1975');
+  const tall =
+    town === 'city' ? (modern ? 0.24 : 0.12) : town === 'town' ? 0.07 : 0.035;
   const base = line + H * 0.012;
   const unit = Math.min(W, H);
   let x = -W * 0.04;
@@ -843,14 +1424,34 @@ function farTownscape(
       x += w * rng.between(1, 3);
       continue;
     }
-    const h = H * tall * rng.between(0.35, 1) * (town === 'city' && modern && rng.chance(0.25) ? 1.5 : 1);
+    const h =
+      H *
+      tall *
+      rng.between(0.35, 1) *
+      (town === 'city' && modern && rng.chance(0.25) ? 1.5 : 1);
     blocks.push(box(x, base - h, x + w, base + H * 0.02));
     if ((!modern || town !== 'city') && h < H * 0.1 && rng.chance(0.6))
-      blocks.push(poly([[x - w * 0.04, base - h], [x + w / 2, base - h - w * 0.32], [x + w * 1.04, base - h]]));
-    if ((place === 'industry' || (industrial && town !== 'village')) && rng.chance(place === 'industry' ? 0.3 : 0.1)) {
+      blocks.push(
+        poly([
+          [x - w * 0.04, base - h],
+          [x + w / 2, base - h - w * 0.32],
+          [x + w * 1.04, base - h],
+        ]),
+      );
+    if (
+      (place === 'industry' || (industrial && town !== 'village')) &&
+      rng.chance(place === 'industry' ? 0.3 : 0.1)
+    ) {
       const cx = x + w * 0.5;
       const ch = H * rng.between(0.07, 0.13);
-      blocks.push(poly([[cx - w * 0.12, base - h + 2], [cx - w * 0.08, base - h - ch], [cx + w * 0.08, base - h - ch], [cx + w * 0.12, base - h + 2]]));
+      blocks.push(
+        poly([
+          [cx - w * 0.12, base - h + 2],
+          [cx - w * 0.08, base - h - ch],
+          [cx + w * 0.08, base - h - ch],
+          [cx + w * 0.12, base - h + 2],
+        ]),
+      );
       smoke.push([cx, base - h - ch]);
     }
     const cols = Math.max(1, Math.floor(w / (unit * 0.016)));
@@ -860,7 +1461,14 @@ function farTownscape(
         if (!rng.chance(0.6)) continue;
         const wx = x + (w / cols) * (c + 0.3);
         const wy = base - h + (h / rows) * (r + 0.3);
-        windows.push(box(wx, wy, wx + Math.max(2.5, (w / cols) * 0.4), wy + Math.max(2.5, (h / rows) * 0.38)));
+        windows.push(
+          box(
+            wx,
+            wy,
+            wx + Math.max(2.5, (w / cols) * 0.4),
+            wy + Math.max(2.5, (h / rows) * 0.38),
+          ),
+        );
       }
     x += w * rng.between(0.9, 1.12);
   }
@@ -876,16 +1484,39 @@ interface Hero {
 }
 
 /** A row of buildings of one kind across the set, side by side, each its own size: a terrace, a street. */
-function row(list: Hero[], kind: BuildingKind, from: number, to: number, scale: number, rng: Seeded, W: number, widthM: number, gapM: number): void {
+function row(
+  list: Hero[],
+  kind: BuildingKind,
+  from: number,
+  to: number,
+  scale: number,
+  rng: Seeded,
+  W: number,
+  widthM: number,
+  gapM: number,
+): void {
   let u = from;
   while (u <= to) {
-    list.push({ kind, size: rng.pick(['small', 'medium'] as const), at: u, scale });
+    list.push({
+      kind,
+      size: rng.pick(['small', 'medium'] as const),
+      at: u,
+      scale,
+    });
     u += ((widthM * rng.between(0.9, 1.1) + gapM) * scale) / W;
   }
 }
 
 /** What stands on a place's near ground: a farm's barn, a port's cranes and warehouses, a works and its terraces, a market's stalls, a city's towers, a village's houses. */
-function heroes(place: SetPlace, town: SetTown, s: SetSettings, climate: Climate, rng: Seeded, W: number, scale: number): Hero[] {
+function heroes(
+  place: SetPlace,
+  town: SetTown,
+  s: SetSettings,
+  climate: Climate,
+  rng: Seeded,
+  W: number,
+  scale: number,
+): Hero[] {
   const k = (W / 2000) * scale;
   const list: Hero[] = [];
   const modern = ERA_IDS.indexOf(s.era) >= ERA_IDS.indexOf('1945-1975');
@@ -895,10 +1526,26 @@ function heroes(place: SetPlace, town: SetTown, s: SetSettings, climate: Climate
       if (town !== 'none') row(list, 'house', 0.8, 0.95, 14 * k, rng, W, 10, 6);
       break;
     case 'port':
-      list.push({ kind: 'cranes', size: 'medium', at: 0.2, scale: (modern ? 10 : 12) * k });
-      if (modern) list.push({ kind: 'cranes', size: 'medium', at: 0.44, scale: 9 * k });
-      list.push({ kind: 'warehouse', size: 'medium', at: modern ? 0.72 : 0.52, scale: 9 * k });
-      list.push({ kind: 'warehouse', size: 'small', at: modern ? 0.9 : 0.76, scale: 9 * k });
+      list.push({
+        kind: 'cranes',
+        size: 'medium',
+        at: 0.2,
+        scale: (modern ? 10 : 12) * k,
+      });
+      if (modern)
+        list.push({ kind: 'cranes', size: 'medium', at: 0.44, scale: 9 * k });
+      list.push({
+        kind: 'warehouse',
+        size: 'medium',
+        at: modern ? 0.72 : 0.52,
+        scale: 9 * k,
+      });
+      list.push({
+        kind: 'warehouse',
+        size: 'small',
+        at: modern ? 0.9 : 0.76,
+        scale: 9 * k,
+      });
       break;
     case 'industry':
       list.push({ kind: 'factory', size: 'large', at: 0.52, scale: 16 * k });
@@ -914,7 +1561,12 @@ function heroes(place: SetPlace, town: SetTown, s: SetSettings, climate: Climate
       let u = -0.02;
       while (u < 1.02) {
         const tower = modern ? rng.chance(0.55) : rng.chance(0.2);
-        list.push({ kind: tower ? 'tower' : 'flats', size: rng.pick(['small', 'medium', 'large'] as const), at: u, scale: (tower ? 4.4 : 6.5) * k });
+        list.push({
+          kind: tower ? 'tower' : 'flats',
+          size: rng.pick(['small', 'medium', 'large'] as const),
+          at: u,
+          scale: (tower ? 4.4 : 6.5) * k,
+        });
         u += rng.between(0.09, 0.13);
       }
       break;
@@ -923,15 +1575,26 @@ function heroes(place: SetPlace, town: SetTown, s: SetSettings, climate: Climate
     case 'ceremony-ground':
       break;
     default:
-      if (town === 'village') row(list, 'house', 0.08, 0.92, 15 * k, rng, W, 10, 9);
+      if (town === 'village')
+        row(list, 'house', 0.08, 0.92, 15 * k, rng, W, 10, 9);
       else if (town === 'town') {
         row(list, 'house', -0.02, 0.38, 17 * k, rng, W, 9, 0.4);
-        list.push({ kind: climate === 'arid' ? 'flats' : 'school', size: 'small', at: 0.53, scale: 10 * k });
+        list.push({
+          kind: climate === 'arid' ? 'flats' : 'school',
+          size: 'small',
+          at: 0.53,
+          scale: 10 * k,
+        });
         row(list, 'house', 0.68, 1.02, 17 * k, rng, W, 9, 0.4);
       } else if (town === 'city') {
         let u = -0.02;
         while (u < 1.02) {
-          list.push({ kind: rng.chance(0.5) ? 'flats' : 'tower', size: 'small', at: u, scale: 5.5 * k });
+          list.push({
+            kind: rng.chance(0.5) ? 'flats' : 'tower',
+            size: 'small',
+            at: u,
+            scale: 5.5 * k,
+          });
           u += rng.between(0.1, 0.15);
         }
       }
@@ -954,7 +1617,14 @@ function placeBuildings(
   rng: Seeded,
   base: number,
   W: number,
-): { markup: string; box: ShotBox; silhouettes: Shape[]; windows: Shape[]; smoke: Pt[]; notes: string[] } {
+): {
+  markup: string;
+  box: ShotBox;
+  silhouettes: Shape[];
+  windows: Shape[];
+  smoke: Pt[];
+  notes: string[];
+} {
   const parts: string[] = [];
   const silhouettes: Shape[] = [];
   const windows: Shape[] = [];
@@ -964,17 +1634,32 @@ function placeBuildings(
   // The farther (the smaller) first, so the nearer stand over them.
   const sorted = [...list].sort((a, b) => a.scale - b.scale);
   for (const hero of sorted) {
-    const made = buildingParts(hero.kind, { era: s.era, climate, size: hero.size, material: 'auto', small: true }, style, rng.int(1, 1e6));
+    const made = buildingParts(
+      hero.kind,
+      { era: s.era, climate, size: hero.size, material: 'auto', small: true },
+      style,
+      rng.int(1, 1e6),
+    );
     const k = hero.scale / 100;
     const x = hero.at * W;
     const y = base + (hero.kind === 'market' ? W * 0.05 : 0);
     const mine = made.drawing.parts.filter((p) => p.id !== 'building');
-    parts.push(`<g transform="translate(${n1(x)} ${n1(y)}) scale(${Math.round(k * 10000) / 10000})">${mine.filter((p) => p.id !== 'lights').map((p) => p.markup).join('')}</g>`);
+    parts.push(
+      `<g transform="translate(${n1(x)} ${n1(y)}) scale(${Math.round(k * 10000) / 10000})">${mine
+        .filter((p) => p.id !== 'lights')
+        .map((p) => p.markup)
+        .join('')}</g>`,
+    );
     // The shapes it is built of (not its windows, door or glows) for the veil.
     for (const p of mine) {
       if (['lights', 'windows', 'door'].includes(p.id) || !p.markup) continue;
       for (const m of p.markup.matchAll(/<path d="([^"]+)"/g))
-        silhouettes.push({ d: scalePath(m[1], k, x, y), box: p.box ? [x + p.box[0] * k, y + p.box[1] * k, p.box[2] * k, p.box[3] * k] : [x, y, 0, 0] });
+        silhouettes.push({
+          d: scalePath(m[1], k, x, y),
+          box: p.box
+            ? [x + p.box[0] * k, y + p.box[1] * k, p.box[2] * k, p.box[3] * k]
+            : [x, y, 0, 0],
+        });
     }
     const lit = mine.find((p) => p.id === 'lights');
     if (lit?.markup)
@@ -983,22 +1668,52 @@ function placeBuildings(
         const nums = d.match(/-?\d+(?:\.\d+)?/g)?.map(Number) ?? [];
         const xs = nums.filter((_, i) => i % 2 === 0);
         const ys = nums.filter((_, i) => i % 2 === 1);
-        windows.push({ d, box: [Math.min(...xs), Math.min(...ys), Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)] });
+        windows.push({
+          d,
+          box: [
+            Math.min(...xs),
+            Math.min(...ys),
+            Math.max(...xs) - Math.min(...xs),
+            Math.max(...ys) - Math.min(...ys),
+          ],
+        });
       }
     for (const p of made.smoke) smoke.push([x + p[0] * k, y + p[1] * k]);
     const all = unionBox(mine.filter((p) => p.box).map((p) => p.box!));
     boxes.push([x + all[0] * k, y + all[1] * k, all[2] * k, all[3] * k]);
     notes.push(`${hero.kind} (${made.material})`);
   }
-  return { markup: parts.join(''), box: boxes.length ? unionBox(boxes) : [0, 0, 0, 0], silhouettes, windows, smoke, notes: [...new Set(notes)] };
+  return {
+    markup: parts.join(''),
+    box: boxes.length ? unionBox(boxes) : [0, 0, 0, 0],
+    silhouettes,
+    windows,
+    smoke,
+    notes: [...new Set(notes)],
+  };
 }
 
 /** Containers stacked on a quay, one to three high, in the muted colours of shipping (never a real line's). */
-function containers(rng: Seeded, style: KitStyle, from: number, to: number, base: number, W: number, scale: number): (readonly [Shape, string])[] {
+function containers(
+  rng: Seeded,
+  style: KitStyle,
+  from: number,
+  to: number,
+  base: number,
+  W: number,
+  scale: number,
+): (readonly [Shape, string])[] {
   const k = (W / 2000) * scale;
   const cw = 64 * k;
   const ch = 26 * k;
-  const colours = ['#9b4a3c', '#3d6b8e', '#c48a3a', '#4f7d5c', '#7b5a8a', '#b8b2a7'].map((c) => toLook(style, c));
+  const colours = [
+    '#9b4a3c',
+    '#3d6b8e',
+    '#c48a3a',
+    '#4f7d5c',
+    '#7b5a8a',
+    '#b8b2a7',
+  ].map((c) => toLook(style, c));
   const out: (readonly [Shape, string])[] = [];
   for (let x = from; x + cw < to; x += cw + 3 * k) {
     if (rng.chance(0.2)) continue;
@@ -1007,44 +1722,94 @@ function containers(rng: Seeded, style: KitStyle, from: number, to: number, base
       const y = base - (h + 1) * (ch + 1.5 * k);
       const colour = rng.pick(colours);
       out.push([box(x, y, x + cw, y + ch), colour]);
-      out.push([box(x + cw * 0.06, y + ch * 0.22, x + cw * 0.94, y + ch * 0.32), mixOk(colour, '#000000', 0.18)]);
+      out.push([
+        box(x + cw * 0.06, y + ch * 0.22, x + cw * 0.94, y + ch * 0.32),
+        mixOk(colour, '#000000', 0.18),
+      ]);
     }
   }
   return out;
 }
 
 /** The near ground's marks: a field's furrows, a road's edges, a quay's stones, a desert's ripples, grass. */
-function groundMarks(place: SetPlace, s: SetSettings, rng: Seeded, W: number, H: number, nearBase: number, groundY: number, bottom: number, x0: number, x1: number): Shape[] {
+function groundMarks(
+  place: SetPlace,
+  s: SetSettings,
+  rng: Seeded,
+  W: number,
+  H: number,
+  nearBase: number,
+  groundY: number,
+  bottom: number,
+  x0: number,
+  x1: number,
+): Shape[] {
   const marks: Shape[] = [];
   const top = nearBase + H * 0.008;
   if (s.land === 'coast') {
     if (place === 'port') {
       // The near quay's edge and its stones' joints.
       marks.push(box(x0, H * 0.9, x1, H * 0.912));
-      for (let x = x0; x < x1; x += W * 0.08) marks.push(box(x, H * 0.955, x + W * 0.055, H * 0.959));
+      for (let x = x0; x < x1; x += W * 0.08)
+        marks.push(box(x, H * 0.955, x + W * 0.055, H * 0.959));
     }
     return marks;
   }
-  if (place === 'farm' || ((place === 'open' || place === 'oilfield') && (s.land === 'plain' || s.land === 'hills'))) {
+  if (
+    place === 'farm' ||
+    ((place === 'open' || place === 'oilfield') &&
+      (s.land === 'plain' || s.land === 'hills'))
+  ) {
     // Furrows fanning toward the horizon from a point far off.
     const vx = W * rng.between(0.4, 0.6);
     for (let i = -16; i <= 16; i += 1) {
       const bx = vx + i * W * 0.085;
-      marks.push(poly([[vx + i * W * 0.01, top], [vx + i * W * 0.01 + 3, top], [bx + W * 0.012, bottom], [bx - W * 0.012, bottom]]));
+      marks.push(
+        poly([
+          [vx + i * W * 0.01, top],
+          [vx + i * W * 0.01 + 3, top],
+          [bx + W * 0.012, bottom],
+          [bx - W * 0.012, bottom],
+        ]),
+      );
     }
-  } else if (place === 'industry' || place === 'market' || place === 'city' || s.land === 'city' || s.town === 'town') {
+  } else if (
+    place === 'industry' ||
+    place === 'market' ||
+    place === 'city' ||
+    s.land === 'city' ||
+    s.town === 'town'
+  ) {
     // A road across the front: its kerb, its far edge and its middle line.
     marks.push(box(x0, top + H * 0.012, x1, top + H * 0.02));
     marks.push(box(x0, groundY - H * 0.035, x1, groundY - H * 0.028));
-    for (let x = x0; x < x1; x += W * 0.09) marks.push(box(x, groundY + H * 0.02, x + W * 0.045, groundY + H * 0.026));
+    for (let x = x0; x < x1; x += W * 0.09)
+      marks.push(
+        box(x, groundY + H * 0.02, x + W * 0.045, groundY + H * 0.026),
+      );
   } else if (s.land === 'desert') {
-    for (let i = 0; i < 14; i += 1) marks.push(ellipse([rng.between(0, W), rng.between(top + H * 0.03, bottom - H * 0.02)], W * rng.between(0.03, 0.08), H * 0.004));
+    for (let i = 0; i < 14; i += 1)
+      marks.push(
+        ellipse(
+          [rng.between(0, W), rng.between(top + H * 0.03, bottom - H * 0.02)],
+          W * rng.between(0.03, 0.08),
+          H * 0.004,
+        ),
+      );
   } else {
     for (let i = 0; i < 28; i += 1) {
       const x = rng.between(0, W);
       const y = rng.between(top + H * 0.02, bottom - H * 0.02);
       const h = H * rng.between(0.012, 0.024);
-      marks.push(poly([[x - h * 0.6, y], [x - h * 0.2, y - h], [x, y - h * 0.3], [x + h * 0.25, y - h * 1.1], [x + h * 0.6, y]]));
+      marks.push(
+        poly([
+          [x - h * 0.6, y],
+          [x - h * 0.2, y - h],
+          [x, y - h * 0.3],
+          [x + h * 0.25, y - h * 1.1],
+          [x + h * 0.6, y],
+        ]),
+      );
     }
   }
   return marks;
@@ -1056,13 +1821,27 @@ function groundMarks(place: SetPlace, s: SetSettings, rng: Seeded, W: number, H:
  * a street, a fence by a field, bollards on a quay, a trunk at a forest's
  * edge, rocks elsewhere. Its lamps light.
  */
-function framing(place: SetPlace, s: SetSettings, rng: Seeded, W: number, H: number, groundY: number, bottom: number): { shapes: Shape[]; colour: string; lamps: Shape[] } {
+function framing(
+  place: SetPlace,
+  s: SetSettings,
+  rng: Seeded,
+  W: number,
+  H: number,
+  groundY: number,
+  bottom: number,
+): { shapes: Shape[]; colour: string; lamps: Shape[] } {
   const u = Math.min(W, H) / 1000;
   const shapes: Shape[] = [];
   const lamps: Shape[] = [];
   const left = rng.chance(0.5);
   const side = (x: number) => (left ? x : W - x);
-  if (place === 'industry' || place === 'market' || place === 'city' || s.land === 'city' || (place === 'open' && s.town === 'town')) {
+  if (
+    place === 'industry' ||
+    place === 'market' ||
+    place === 'city' ||
+    s.land === 'city' ||
+    (place === 'open' && s.town === 'town')
+  ) {
     // A street lamp to one side.
     const x = side(W * 0.07);
     const top = groundY - 430 * u;
@@ -1071,21 +1850,41 @@ function framing(place: SetPlace, s: SetSettings, rng: Seeded, W: number, H: num
       band([x, groundY + 20 * u], [x, top], 14 * u),
       box(x - 22 * u, groundY - 30 * u, x + 22 * u, groundY + 20 * u),
       band([x, top + 12 * u], [x + arm * 70 * u, top + 12 * u], 9 * u),
-      box(x + arm * 70 * u - 24 * u, top + 8 * u, x + arm * 70 * u + 24 * u, top + 30 * u),
+      box(
+        x + arm * 70 * u - 24 * u,
+        top + 8 * u,
+        x + arm * 70 * u + 24 * u,
+        top + 30 * u,
+      ),
     );
-    lamps.push(box(x + arm * 70 * u - 18 * u, top + 30 * u, x + arm * 70 * u + 18 * u, top + 44 * u));
+    lamps.push(
+      box(
+        x + arm * 70 * u - 18 * u,
+        top + 30 * u,
+        x + arm * 70 * u + 18 * u,
+        top + 44 * u,
+      ),
+    );
     return { shapes, colour: '#3b4048', lamps };
   }
   if (place === 'ceremony-ground') {
     // Two rope posts and the rope between them, at the near edge.
     const a = side(W * 0.05);
     const b = side(W * 0.3);
-    for (const x of [a, b]) shapes.push(box(x - 9 * u, groundY - 110 * u, x + 9 * u, bottom), ellipse([x, groundY - 112 * u], 15 * u, 15 * u));
+    for (const x of [a, b])
+      shapes.push(
+        box(x - 9 * u, groundY - 110 * u, x + 9 * u, bottom),
+        ellipse([x, groundY - 112 * u], 15 * u, 15 * u),
+      );
     const sag: Pt[] = Array.from({ length: 13 }, (_, i) => {
       const t = i / 12;
-      return [a + (b - a) * t, groundY - 96 * u + Math.sin(t * Math.PI) * 40 * u];
+      return [
+        a + (b - a) * t,
+        groundY - 96 * u + Math.sin(t * Math.PI) * 40 * u,
+      ];
     });
-    for (let i = 0; i < sag.length - 1; i += 1) shapes.push(band(sag[i], sag[i + 1], 7 * u));
+    for (let i = 0; i < sag.length - 1; i += 1)
+      shapes.push(band(sag[i], sag[i + 1], 7 * u));
     return { shapes, colour: '#7a2f2f', lamps };
   }
   if (place === 'farm' || s.land === 'plain' || s.land === 'hills') {
@@ -1093,24 +1892,46 @@ function framing(place: SetPlace, s: SetSettings, rng: Seeded, W: number, H: num
     const from = left ? -W * 0.05 : W * 0.62;
     const to = left ? W * 0.38 : W * 1.05;
     for (let x = from; x <= to; x += 120 * u)
-      shapes.push(poly([[x - 7 * u, bottom], [x - 6 * u, groundY - 90 * u], [x + 6 * u, groundY - 92 * u], [x + 7 * u, bottom]]));
-    shapes.push(band([from, groundY - 70 * u], [to, groundY - 66 * u], 9 * u), band([from, groundY - 30 * u], [to, groundY - 26 * u], 9 * u));
+      shapes.push(
+        poly([
+          [x - 7 * u, bottom],
+          [x - 6 * u, groundY - 90 * u],
+          [x + 6 * u, groundY - 92 * u],
+          [x + 7 * u, bottom],
+        ]),
+      );
+    shapes.push(
+      band([from, groundY - 70 * u], [to, groundY - 66 * u], 9 * u),
+      band([from, groundY - 30 * u], [to, groundY - 26 * u], 9 * u),
+    );
     return { shapes, colour: '#6e5640', lamps };
   }
   if (place === 'port' || s.land === 'coast') {
     for (let i = 0; i < 3; i += 1) {
       const x = side(W * (0.06 + i * 0.13));
-      shapes.push(box(x - 26 * u, H * 0.9 - 50 * u, x + 26 * u, H * 0.9 + 4 * u, 10 * u), ellipse([x, H * 0.9 - 50 * u], 32 * u, 10 * u));
+      shapes.push(
+        box(x - 26 * u, H * 0.9 - 50 * u, x + 26 * u, H * 0.9 + 4 * u, 10 * u),
+        ellipse([x, H * 0.9 - 50 * u], 32 * u, 10 * u),
+      );
     }
     return { shapes, colour: '#3b4048', lamps };
   }
   if (s.land === 'forest') {
     // A tree at the near edge: its trunk, and its crown reaching in from above the frame.
     const x = side(W * 0.04);
-    shapes.push(poly([[x - 34 * u, bottom], [x - 22 * u, H * 0.18], [x + 22 * u, H * 0.18], [x + 34 * u, bottom]]));
+    shapes.push(
+      poly([
+        [x - 34 * u, bottom],
+        [x - 22 * u, H * 0.18],
+        [x + 22 * u, H * 0.18],
+        [x + 34 * u, bottom],
+      ]),
+    );
     for (let i = 0; i < 6; i += 1) {
       const cx = side(W * rng.between(-0.02, 0.16));
-      shapes.push(circle([cx, H * rng.between(-0.06, 0.12)], H * rng.between(0.08, 0.14)));
+      shapes.push(
+        circle([cx, H * rng.between(-0.06, 0.12)], H * rng.between(0.08, 0.14)),
+      );
     }
     return { shapes, colour: '#2f4430', lamps };
   }
@@ -1143,38 +1964,111 @@ function ceremonyGround(canvas: SetCanvas, base: number): void {
   const standTop = base - H * (tall ? 0.12 : 0.2);
   const shapes: (readonly [Shape, string])[] = [
     [box(sx0, base - H * 0.12, sx1, base), seats],
-    [box(sx0, base - H * 0.085, sx1, base - H * 0.078), mixOk(seats, '#ffffff', 0.25)],
-    [box(sx0, base - H * 0.045, sx1, base - H * 0.038), mixOk(seats, '#ffffff', 0.25)],
-    [poly([[sx0 - W * 0.02, standTop], [sx1 + W * 0.02, standTop], [sx1, standTop + H * 0.03], [sx0, standTop + H * 0.03]]), roof],
+    [
+      box(sx0, base - H * 0.085, sx1, base - H * 0.078),
+      mixOk(seats, '#ffffff', 0.25),
+    ],
+    [
+      box(sx0, base - H * 0.045, sx1, base - H * 0.038),
+      mixOk(seats, '#ffffff', 0.25),
+    ],
+    [
+      poly([
+        [sx0 - W * 0.02, standTop],
+        [sx1 + W * 0.02, standTop],
+        [sx1, standTop + H * 0.03],
+        [sx0, standTop + H * 0.03],
+      ]),
+      roof,
+    ],
     ...Array.from({ length: 6 }, (_, i): readonly [Shape, string] => {
       const x = sx0 + (standW / 5) * i;
-      return [box(x - W * 0.003, standTop + H * 0.03, x + W * 0.003, base), post];
+      return [
+        box(x - W * 0.003, standTop + H * 0.03, x + W * 0.003, base),
+        post,
+      ];
     }),
-    [box(W / 2 - W * 0.08, base + H * 0.02, W / 2 + W * 0.08, base + H * 0.065), dais],
-    [box(W / 2 - W * 0.085, base + H * 0.015, W / 2 + W * 0.085, base + H * 0.026), mixOk(dais, '#ffffff', 0.2)],
+    [
+      box(
+        W / 2 - W * 0.08,
+        base + H * 0.02,
+        W / 2 + W * 0.08,
+        base + H * 0.065,
+      ),
+      dais,
+    ],
+    [
+      box(
+        W / 2 - W * 0.085,
+        base + H * 0.015,
+        W / 2 + W * 0.085,
+        base + H * 0.026,
+      ),
+      mixOk(dais, '#ffffff', 0.2),
+    ],
   ];
-  canvas.raw('stand', shapes.map(([sh, f]) => `<path d="${sh.d}" fill="${f}"/>`).join(''), unionBox(shapes.map(([sh]) => sh.box)), { depth: 0.85 });
-  canvas.veil('stand-veil', shapes.map(([sh]) => sh), 0.85);
-  const bunting = ['#c4573a', '#e2b04a', '#3d78b5', '#f2efe8'].map((c) => toLook(style, c));
+  canvas.raw(
+    'stand',
+    shapes.map(([sh, f]) => `<path d="${sh.d}" fill="${f}"/>`).join(''),
+    unionBox(shapes.map(([sh]) => sh.box)),
+    { depth: 0.85 },
+  );
+  canvas.veil(
+    'stand-veil',
+    shapes.map(([sh]) => sh),
+    0.85,
+  );
+  const bunting = ['#c4573a', '#e2b04a', '#3d78b5', '#f2efe8'].map((c) =>
+    toLook(style, c),
+  );
   const flags: string[] = [];
   const flagShapes: Shape[] = [];
   for (let x = sx0; x < sx1; x += W * 0.018) {
-    const f = poly([[x, standTop + H * 0.032], [x + W * 0.012, standTop + H * 0.032], [x + W * 0.006, standTop + H * 0.052]]);
+    const f = poly([
+      [x, standTop + H * 0.032],
+      [x + W * 0.012, standTop + H * 0.032],
+      [x + W * 0.006, standTop + H * 0.052],
+    ]);
     flagShapes.push(f);
-    flags.push(`<path d="${f.d}" fill="${bunting[flags.length % bunting.length]}"/>`);
+    flags.push(
+      `<path d="${f.d}" fill="${bunting[flags.length % bunting.length]}"/>`,
+    );
   }
-  canvas.raw('bunting', flags.join(''), unionBox(flagShapes.map((f) => f.box)), { depth: 0.85 });
+  canvas.raw(
+    'bunting',
+    flags.join(''),
+    unionBox(flagShapes.map((f) => f.box)),
+    { depth: 0.85 },
+  );
   const fx = W * (tall ? 0.88 : 0.82);
   const poleTop = base - H * (tall ? 0.3 : 0.44);
-  canvas.lit('flagpole', [band([fx, base + H * 0.02], [fx, poleTop], Math.max(4, W * 0.003)), circle([fx, poleTop], W * 0.004)], (light) => toned(post, light), { depth: 0.85 });
+  canvas.lit(
+    'flagpole',
+    [
+      band([fx, base + H * 0.02], [fx, poleTop], Math.max(4, W * 0.003)),
+      circle([fx, poleTop], W * 0.004),
+    ],
+    (light) => toned(post, light),
+    { depth: 0.85 },
+  );
   canvas.raw('flag', '', [fx - 1, poleTop - 1, 2, 2], { depth: 0.85 });
   const lamps: Shape[] = [];
   const masts: Shape[] = [];
   for (const mx of tall ? [W * 0.1] : [sx0 - W * 0.06, sx1 + W * 0.06]) {
     const top = base - H * (tall ? 0.26 : 0.38);
-    masts.push(band([mx, base], [mx, top], Math.max(5, W * 0.004)), box(mx - W * 0.03, top - H * 0.035, mx + W * 0.03, top));
+    masts.push(
+      band([mx, base], [mx, top], Math.max(5, W * 0.004)),
+      box(mx - W * 0.03, top - H * 0.035, mx + W * 0.03, top),
+    );
     for (let i = 0; i < 4; i += 1)
-      lamps.push(box(mx - W * 0.026 + i * W * 0.0135, top - H * 0.03, mx - W * 0.026 + i * W * 0.0135 + W * 0.011, top - H * 0.008));
+      lamps.push(
+        box(
+          mx - W * 0.026 + i * W * 0.0135,
+          top - H * 0.03,
+          mx - W * 0.026 + i * W * 0.0135 + W * 0.011,
+          top - H * 0.008,
+        ),
+      );
   }
   canvas.lit('masts', masts, (light) => toned(post, light), { depth: 0.85 });
   canvas.windows('lights', lamps, 0.85, '#fff4cf', 0, true);
@@ -1182,9 +2076,16 @@ function ceremonyGround(canvas: SetCanvas, base: number): void {
   for (let r = 0; r < 3; r += 1) {
     const y = base + H * 0.12 + r * H * 0.05;
     const cw = W * (0.012 + r * 0.002) * (tall ? 1.6 : 1);
-    for (let x = W * 0.12 + r * W * 0.01; x < W * 0.88 - r * W * 0.01; x += cw * 1.7) {
+    for (
+      let x = W * 0.12 + r * W * 0.01;
+      x < W * 0.88 - r * W * 0.01;
+      x += cw * 1.7
+    ) {
       if (Math.abs(x - W / 2) < W * 0.03) continue;
-      chairs.push(box(x, y - cw * 1.6, x + cw, y - cw * 0.8), box(x, y - cw * 0.85, x + cw, y - cw * 0.6));
+      chairs.push(
+        box(x, y - cw * 1.6, x + cw, y - cw * 0.8),
+        box(x, y - cw * 0.85, x + cw, y - cw * 0.6),
+      );
     }
   }
   const chair = toLook(style, '#5e6670');
@@ -1201,24 +2102,66 @@ function oilField(canvas: SetCanvas, base: number, rng: Seeded): void {
   const count = W > H ? 4 : 2;
   const u = Math.min(W, H) / 1000;
   for (let i = 0; i < count; i += 1) {
-    const x = W * (0.12 + (0.7 * i) / Math.max(1, count - 1)) + rng.between(-W * 0.02, W * 0.02);
+    const x =
+      W * (0.12 + (0.7 * i) / Math.max(1, count - 1)) +
+      rng.between(-W * 0.02, W * 0.02);
     const k = 1.5 * u * rng.between(0.8, 1.15) * (i % 2 ? 0.8 : 1);
     const y = base + H * (i % 2 ? 0 : 0.05);
     shapes.push(
       [box(x - 90 * k, y - 12 * k, x + 90 * k, y), steel],
-      [poly([[x - 30 * k, y - 12 * k], [x - 6 * k, y - 120 * k], [x + 6 * k, y - 120 * k], [x + 30 * k, y - 12 * k], [x + 18 * k, y - 12 * k], [x, y - 100 * k], [x - 18 * k, y - 12 * k]]), steel],
-      [band([x - 110 * k, y - 116 * k], [x + 80 * k, y - 130 * k], 10 * k), red],
-      [poly([[x - 110 * k, y - 132 * k], [x - 132 * k, y - 112 * k], [x - 126 * k, y - 92 * k], [x - 104 * k, y - 104 * k]]), red],
-      [band([x - 126 * k, y - 96 * k], [x - 126 * k, y - 10 * k], 3 * k), steel],
+      [
+        poly([
+          [x - 30 * k, y - 12 * k],
+          [x - 6 * k, y - 120 * k],
+          [x + 6 * k, y - 120 * k],
+          [x + 30 * k, y - 12 * k],
+          [x + 18 * k, y - 12 * k],
+          [x, y - 100 * k],
+          [x - 18 * k, y - 12 * k],
+        ]),
+        steel,
+      ],
+      [
+        band([x - 110 * k, y - 116 * k], [x + 80 * k, y - 130 * k], 10 * k),
+        red,
+      ],
+      [
+        poly([
+          [x - 110 * k, y - 132 * k],
+          [x - 132 * k, y - 112 * k],
+          [x - 126 * k, y - 92 * k],
+          [x - 104 * k, y - 104 * k],
+        ]),
+        red,
+      ],
+      [
+        band([x - 126 * k, y - 96 * k], [x - 126 * k, y - 10 * k], 3 * k),
+        steel,
+      ],
       [circle([x + 62 * k, y - 70 * k], 20 * k), steel],
     );
   }
-  for (const [tx, r] of [[W * 0.86, 90], [W * 0.95, 70]] as const) {
+  for (const [tx, r] of [
+    [W * 0.86, 90],
+    [W * 0.95, 70],
+  ] as const) {
     const rr = r * u;
-    shapes.push([box(tx - rr, base - rr * 1.3, tx + rr, base), tank], [dome(tx, base - rr * 1.3, rr, rr * 0.25), mixOk(tank, '#000000', 0.12)]);
+    shapes.push(
+      [box(tx - rr, base - rr * 1.3, tx + rr, base), tank],
+      [dome(tx, base - rr * 1.3, rr, rr * 0.25), mixOk(tank, '#000000', 0.12)],
+    );
   }
-  canvas.raw('pumps', shapes.map(([sh, f]) => `<path d="${sh.d}" fill="${f}"/>`).join(''), unionBox(shapes.map(([sh]) => sh.box)), { depth: 0.85 });
-  canvas.veil('pumps-veil', shapes.map(([sh]) => sh), 0.85);
+  canvas.raw(
+    'pumps',
+    shapes.map(([sh, f]) => `<path d="${sh.d}" fill="${f}"/>`).join(''),
+    unionBox(shapes.map(([sh]) => sh.box)),
+    { depth: 0.85 },
+  );
+  canvas.veil(
+    'pumps-veil',
+    shapes.map(([sh]) => sh),
+    0.85,
+  );
 }
 
 /**
@@ -1230,7 +2173,11 @@ function oilField(canvas: SetCanvas, base: number, rng: Seeded): void {
  * and the lamps that light at night. No emblem, no words: over the chair,
  * a plain medallion.
  */
-function assemblyHall(canvas: SetCanvas, s: SetSettings, shape: FilmShape): DrawnSet {
+function assemblyHall(
+  canvas: SetCanvas,
+  s: SetSettings,
+  shape: FilmShape,
+): DrawnSet {
   const { W, H, style } = canvas;
   const tall = shape === 'tall';
   const wall = toLook(style, mixOk('#e5d9c6', style.paper, 0.15));
@@ -1254,19 +2201,34 @@ function assemblyHall(canvas: SetCanvas, s: SetSettings, shape: FilmShape): Draw
   for (let i = 0; i < count; i += 1) {
     const cx = W * ((i + 0.5) / count);
     const w = W * (tall ? 0.1 : 0.05);
-    glass.push(poly([[cx - w / 2, winTop + winH], [cx - w / 2, winTop + w * 0.5], [cx, winTop], [cx + w / 2, winTop + w * 0.5], [cx + w / 2, winTop + winH]]));
+    glass.push(
+      poly([
+        [cx - w / 2, winTop + winH],
+        [cx - w / 2, winTop + w * 0.5],
+        [cx, winTop],
+        [cx + w / 2, winTop + w * 0.5],
+        [cx + w / 2, winTop + winH],
+      ]),
+    );
   }
-  canvas.lit('windows', glass, (light) => (light.lit > 0.5 ? light.sky[1] : light.sky[2]));
+  canvas.lit('windows', glass, (light) =>
+    light.lit > 0.5 ? light.sky[1] : light.sky[2],
+  );
   // Its panelling behind the dais, and the galleries along its sides.
   const panelTop = winTop + winH + H * 0.04;
   const floorTop = H * (tall ? 0.36 : 0.42);
   canvas.flat('panelling', [box(-40, panelTop, W + 40, floorTop)], panel);
   const ribs: Shape[] = [];
-  for (let x = W * 0.025; x < W; x += W * (tall ? 0.08 : 0.05)) ribs.push(box(x - 2.5 * u, panelTop, x + 2.5 * u, floorTop));
+  for (let x = W * 0.025; x < W; x += W * (tall ? 0.08 : 0.05))
+    ribs.push(box(x - 2.5 * u, panelTop, x + 2.5 * u, floorTop));
   canvas.flat('panel-lines', ribs, panelDark);
   const gy = panelTop + (floorTop - panelTop) * 0.25;
   const gw = W * (tall ? 0.2 : 0.26);
-  canvas.flat('gallery', [box(-40, gy, gw, gy + H * 0.045), box(W - gw, gy, W + 40, gy + H * 0.045)], panelDark);
+  canvas.flat(
+    'gallery',
+    [box(-40, gy, gw, gy + H * 0.045), box(W - gw, gy, W + 40, gy + H * 0.045)],
+    panelDark,
+  );
   // The chamber's floor, stepped down to the well.
   canvas.flat('floor', [box(-40, floorTop, W + 40, H + 40)], floor);
   // The dais against the far wall: the chair under its canopy, a plain medallion, the clerks' desk before it.
@@ -1284,11 +2246,22 @@ function assemblyHall(canvas: SetCanvas, s: SetSettings, shape: FilmShape): Draw
       `<path d="${box(cx - dw * 0.42, daisY - H * 0.012, cx + dw * 0.42, daisY + H * 0.03).d}" fill="${desk}"/>`,
       `<path d="${circle([cx, winTop + winH * 0.55], Math.min(W, H) * 0.03).d}" fill="${gold}"/>`,
     ].join(''),
-    [cx - dw / 2, winTop + winH * 0.55 - Math.min(W, H) * 0.03, dw, daisY + H * 0.03 - (winTop + winH * 0.55 - Math.min(W, H) * 0.03)],
+    [
+      cx - dw / 2,
+      winTop + winH * 0.55 - Math.min(W, H) * 0.03,
+      dw,
+      daisY + H * 0.03 - (winTop + winH * 0.55 - Math.min(W, H) * 0.03),
+    ],
   );
   // The well: the open floor before the dais, a half oval.
   const centre: Pt = [cx, daisY + H * 0.03];
-  const halfOval = (rx: number, ry: number, from = 0, to = Math.PI, n = 40): Pt[] =>
+  const halfOval = (
+    rx: number,
+    ry: number,
+    from = 0,
+    to = Math.PI,
+    n = 40,
+  ): Pt[] =>
     Array.from({ length: n + 1 }, (_, i) => {
       const a = from + ((to - from) * i) / n;
       return [centre[0] + rx * Math.cos(a), centre[1] + ry * Math.sin(a)];
@@ -1307,15 +2280,33 @@ function assemblyHall(canvas: SetCanvas, s: SetSettings, shape: FilmShape): Draw
     const rx = wellRx + W * (tall ? 0.03 : 0.02) + r * W * (tall ? 0.12 : 0.09);
     const ry = wellRy + H * 0.015 + r * H * (tall ? 0.065 : 0.085);
     const deep = H * ((tall ? 0.018 : 0.024) + 0.02 * t);
-    desks.push(poly([...halfOval(rx, ry), ...halfOval(rx, ry + deep * 0.4).reverse()]));
-    benches.push(poly([...halfOval(rx + W * 0.006, ry + deep * 0.5), ...halfOval(rx + W * 0.012, ry + deep * 1.2).reverse()]));
-    tops.push(poly([...halfOval(rx + W * 0.006, ry + deep * 0.5), ...halfOval(rx + W * 0.008, ry + deep * 0.68).reverse()]));
+    desks.push(
+      poly([...halfOval(rx, ry), ...halfOval(rx, ry + deep * 0.4).reverse()]),
+    );
+    benches.push(
+      poly([
+        ...halfOval(rx + W * 0.006, ry + deep * 0.5),
+        ...halfOval(rx + W * 0.012, ry + deep * 1.2).reverse(),
+      ]),
+    );
+    tops.push(
+      poly([
+        ...halfOval(rx + W * 0.006, ry + deep * 0.5),
+        ...halfOval(rx + W * 0.008, ry + deep * 0.68).reverse(),
+      ]),
+    );
     // The gaps between seats: short dark strokes across the bench.
     const seats = Math.round(12 + r * 4);
     for (let k = 1; k < seats; k += 1) {
       const a = (Math.PI * k) / seats;
-      const p0: Pt = [centre[0] + (rx + W * 0.006) * Math.cos(a), centre[1] + (ry + deep * 0.5) * Math.sin(a)];
-      const p1: Pt = [centre[0] + (rx + W * 0.012) * Math.cos(a), centre[1] + (ry + deep * 1.2) * Math.sin(a)];
+      const p0: Pt = [
+        centre[0] + (rx + W * 0.006) * Math.cos(a),
+        centre[1] + (ry + deep * 0.5) * Math.sin(a),
+      ];
+      const p1: Pt = [
+        centre[0] + (rx + W * 0.012) * Math.cos(a),
+        centre[1] + (ry + deep * 1.2) * Math.sin(a),
+      ];
       gaps.push(band(p0, p1, (1.6 + t * 2) * u));
     }
   }
@@ -1327,33 +2318,60 @@ function assemblyHall(canvas: SetCanvas, s: SetSettings, shape: FilmShape): Draw
   const aisles: Shape[] = [];
   const steps: Shape[] = [];
   for (const a of [Math.PI * 0.28, Math.PI * 0.5, Math.PI * 0.72]) {
-    const along = (k: number): Pt => [centre[0] + (wellRx + k * W * (tall ? 0.95 : 0.7)) * Math.cos(a), centre[1] + (wellRy + k * H * (tall ? 0.52 : 0.68)) * Math.sin(a)];
+    const along = (k: number): Pt => [
+      centre[0] + (wellRx + k * W * (tall ? 0.95 : 0.7)) * Math.cos(a),
+      centre[1] + (wellRy + k * H * (tall ? 0.52 : 0.68)) * Math.sin(a),
+    ];
     const p0 = along(0);
     const p1 = along(1);
     const nx = -Math.sin(a);
     const ny = Math.cos(a);
     const w0 = W * 0.008;
     const w1 = W * (tall ? 0.04 : 0.03);
-    aisles.push(poly([[p0[0] - nx * w0, p0[1] - ny * w0], [p1[0] - nx * w1, p1[1] - ny * w1], [p1[0] + nx * w1, p1[1] + ny * w1], [p0[0] + nx * w0, p0[1] + ny * w0]]));
+    aisles.push(
+      poly([
+        [p0[0] - nx * w0, p0[1] - ny * w0],
+        [p1[0] - nx * w1, p1[1] - ny * w1],
+        [p1[0] + nx * w1, p1[1] + ny * w1],
+        [p0[0] + nx * w0, p0[1] + ny * w0],
+      ]),
+    );
     for (let k = 1; k < 14; k += 1) {
       const q = along(k / 14);
       const w = w0 + (w1 - w0) * (k / 14);
-      steps.push(band([q[0] - nx * w, q[1] - ny * w], [q[0] + nx * w, q[1] + ny * w], 2 * u + k * 0.3 * u));
+      steps.push(
+        band(
+          [q[0] - nx * w, q[1] - ny * w],
+          [q[0] + nx * w, q[1] + ny * w],
+          2 * u + k * 0.3 * u,
+        ),
+      );
     }
   }
   canvas.flat('aisles', aisles, carpet);
   canvas.flat('aisle-steps', steps, mixOk(carpet, '#000000', 0.25));
   // Lamps along the galleries that light at night (half of them always on).
   const lamps: Shape[] = [];
-  for (let i = 0; i <= count; i += 1) lamps.push(circle([W * (i / count), gy - H * 0.012], Math.min(W, H) * 0.011));
+  for (let i = 0; i <= count; i += 1)
+    lamps.push(
+      circle([W * (i / count), gy - H * 0.012], Math.min(W, H) * 0.011),
+    );
   canvas.windows('lights', lamps, 1, '#ffe2a0', 0.45);
   // The hour's light over the room: a veil that warms at dusk and darkens at night.
   canvas.veil('veil', [box(-40, -40, W + 40, H + 40)], 1, 0.45);
   const groundY = H * 0.95;
   const unitsPerMetre = Math.round(((H * (tall ? 0.2 : 0.3)) / 1.75) * 10) / 10;
-  canvas.raw('ground-line', '', [0, groundY, W, H - groundY], { value: unitsPerMetre });
+  canvas.raw('ground-line', '', [0, groundY, W, H - groundY], {
+    value: unitsPerMetre,
+  });
   const focal = fitFocal([W * 0.05, winTop, W * 0.9, H * 0.86], W, H, shape);
-  return { asset: canvas.asset(focal), ground: groundY, unitsPerMetre, air: wall, notes: [`assembly hall, ${s.time}`, `${rows} rows`] };
+  return {
+    asset: canvas.asset(focal),
+    ground: groundY,
+    unitsPerMetre,
+    air: wall,
+    notes: [`assembly hall, ${s.time}`, `${rows} rows`],
+  };
 }
 
 // ── Reading settings ──────────────────────────────────────────────────────
@@ -1369,8 +2387,15 @@ export const SET_SETTINGS_LISTS = {
 } as const;
 
 /** A set's settings from the plan's words, each made sound (closed lists, defaults). */
-export function setSettingsOf(raw: Partial<Record<keyof SetSettings, unknown>>, era: EraId | null): SetSettings {
-  const one = <T extends string>(list: readonly T[], value: unknown, fallback: T): T =>
+export function setSettingsOf(
+  raw: Partial<Record<keyof SetSettings, unknown>>,
+  era: EraId | null,
+): SetSettings {
+  const one = <T extends string>(
+    list: readonly T[],
+    value: unknown,
+    fallback: T,
+  ): T =>
     (list as readonly unknown[]).includes(value) ? (value as T) : fallback;
   return {
     land: one(SET_LANDS, raw.land, 'plain'),
@@ -1379,7 +2404,8 @@ export function setSettingsOf(raw: Partial<Record<keyof SetSettings, unknown>>, 
     town: one(SET_TOWNS, raw.town, 'none'),
     era: era ?? 'today',
     place: one(SET_PLACES, raw.place, 'open'),
-    ...(typeof raw.climate === 'string' && ['temperate', 'arid', 'tropical', 'cold'].includes(raw.climate)
+    ...(typeof raw.climate === 'string' &&
+    ['temperate', 'arid', 'tropical', 'cold'].includes(raw.climate)
       ? { climate: raw.climate as Climate }
       : {}),
   };

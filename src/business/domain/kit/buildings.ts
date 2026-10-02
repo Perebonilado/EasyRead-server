@@ -605,7 +605,12 @@ function tower(b: Build): void {
         const cx = x0 + 30 + ((w - 60) / cols) * (c + 0.5);
         const half = (w - 60) / cols / 2;
         b.glows.push(
-          box(cx - half + 24, -(f + per) * floor + 40, cx + half - 24, -f * floor - 36),
+          box(
+            cx - half + 24,
+            -(f + per) * floor + 40,
+            cx + half - 24,
+            -f * floor - 36,
+          ),
         );
       }
   } else

@@ -43,8 +43,10 @@ export function dwellMs(words: number): number {
 export const ATTENTION = { cues: 1, moving: 2 } as const;
 
 /**
- * Text sizes as fractions of the frame's height (research §3.8, given at
- * 1080 px), so they hold in either shape and at any export size.
+ * Text sizes as fractions of the frame's SHORT side (research §3.8, given at
+ * 1080 px): its height when wide, its width when tall. So a label is the same
+ * size on a phone whichever way the film was made, and holds at any export
+ * size. The frame checks and the client's recipes both measure it this way.
  */
 export const TEXT = {
   hero: 140 / 1080,

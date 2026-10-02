@@ -11,6 +11,7 @@ import { Resvg } from '@resvg/resvg-js';
 import type { ShotLookDto } from '../src/contracts';
 import {
   drawSet,
+  lightRank,
   setSettingsOf,
   type SetSettings,
 } from '../src/business/domain/kit/sets';
@@ -82,9 +83,22 @@ list.forEach(([raw, seed, state], i) => {
               `rotate(${look.rotate} ${p.box[0] + p.box[2] * p.pivot[0]} ${p.box[1] + p.box[3] * p.pivot[1]})`,
             );
         }
-        if (look.lit !== undefined) setAttr('opacity', String(look.lit));
         return `${h}${t}>`;
       });
+      // Lights: each child lit by its rank, as the player lights them.
+      if (look.lit !== undefined) {
+        const lit = look.lit;
+        const groupRe = new RegExp(`(<g data-part="${part}"[^>]*>)(.*?)(</g>)`);
+        svg = svg.replace(groupRe, (_m, open: string, inner: string, close: string) => {
+          let n = 0;
+          const lighted = inner.replace(/<path d="([^"]+)"(?: opacity="0")?\/>/g, (_p, d: string) => {
+            const on = lightRank(part, n) < lit;
+            n += 1;
+            return `<path d="${d}"${on ? '' : ' opacity="0"'}/>`;
+          });
+          return `${open}${lighted}${close}`;
+        });
+      }
     }
   }
   const [, , W, H] = made.asset.box;

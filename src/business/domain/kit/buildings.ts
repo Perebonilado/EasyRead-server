@@ -296,11 +296,12 @@ function windows(
     const cx = x0 + step * (i + 0.5);
     const left = cx - w / 2;
     const frame = Math.max(6, w * 0.08);
-    // The frame round the glass, then the glass, then a sill under it.
-    b.glass.push([
-      box(left - frame, y - frame, left + w + frame, y + h + frame),
-      b.p.frame,
-    ]);
+    // The frame round the glass (not seen small), then the glass, then a sill under it.
+    if (!b.small)
+      b.glass.push([
+        box(left - frame, y - frame, left + w + frame, y + h + frame),
+        b.p.frame,
+      ]);
     const glass = opts.arch
       ? poly([
           [left, y + h],
@@ -597,16 +598,14 @@ function tower(b: Build): void {
         { bare: true },
       ]);
     }
-    for (let f = 1; f < storeys; f += 1)
+    // Lit panes, a floor at a time (two at a time seen small), inset in their mullions.
+    const per = b.small ? 2 : 1;
+    for (let f = 1; f < storeys; f += per)
       for (let c = 0; c < cols; c += 1) {
         const cx = x0 + 30 + ((w - 60) / cols) * (c + 0.5);
+        const half = (w - 60) / cols / 2;
         b.glows.push(
-          box(
-            cx - (w - 60) / cols / 2 + 12,
-            -(f + 1) * floor + 30,
-            cx + (w - 60) / cols / 2 - 12,
-            -f * floor - 26,
-          ),
+          box(cx - half + 24, -(f + per) * floor + 40, cx + half - 24, -f * floor - 36),
         );
       }
   } else

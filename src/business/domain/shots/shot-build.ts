@@ -823,20 +823,31 @@ export function buildShots(
         return;
       }
       const entry = one.target ? registry.resolve(one.target) : null;
-      // A region the map names itself is named as the voice names it: its
-      // own name brought on, never a second one written beside it.
+      // What names itself is named as the voice names it, never twice: a
+      // region the map draws its name for has that name brought on, and a
+      // part of a chart (which writes all its own words: an event's date, a
+      // side's heading) comes on itself, the chart building as it is said.
       const ownName =
         one.recipe === 'label' && target?.kind === 'asset' && target.part
-          ? `label-${target.part.replace(/^group-/, '')}`
+          ? shotSet.set.kind === 'chart'
+            ? target.part
+            : `label-${target.part.replace(/^group-/, '')}`
           : null;
       if (ownName && target?.kind === 'asset' && svg?.parts[ownName]) {
-        info.push({
-          id: `${id}-i${k + 1}`,
-          recipe: 'enter',
-          target: { kind: 'asset', asset: target.asset, part: ownName },
-          text: 'rise',
-          on: one.on,
-        });
+        const entered = info.some(
+          (x) =>
+            x.recipe === 'enter' &&
+            x.target?.kind === 'asset' &&
+            x.target.part === ownName,
+        );
+        if (!entered)
+          info.push({
+            id: `${id}-i${k + 1}`,
+            recipe: 'enter',
+            target: { kind: 'asset', asset: target.asset, part: ownName },
+            text: 'rise',
+            on: one.on,
+          });
         return;
       }
       const named =

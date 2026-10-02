@@ -490,11 +490,11 @@ describe('the board’s names, as the build resolves them', () => {
     expect(strike.focal).toEqual({ kind: 'asset', asset: 'chart-2' });
   });
 
-  it('finds a part by the words it shows, and a date as its event', () => {
-    expect(timeline.info[0].target).toEqual({
-      kind: 'asset',
-      asset: 'chart-1',
-      part: 'event-1951',
+  it('finds a part by the words it shows, and a date as its event; a label on a chart brings its part on, never a second name', () => {
+    expect(timeline.info[0]).toMatchObject({
+      recipe: 'enter',
+      text: 'rise',
+      target: { kind: 'asset', asset: 'chart-1', part: 'event-1951' },
     });
     expect(timeline.info[1].target).toEqual({
       kind: 'asset',

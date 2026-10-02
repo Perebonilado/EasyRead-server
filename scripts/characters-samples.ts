@@ -504,11 +504,13 @@ function namedScene(shape: FilmShape): SceneDto {
   const { w, h } = STAGES[shape];
   const look = lookFor([{ thing: 'Science', token: 'chart1' }]);
   const tall = shape === 'tall';
-  // The slot: a gilt frame, an empty mount, its caption.
-  const fw = tall ? 520 : 520;
-  const fh = tall ? 660 : 640;
-  const fx = tall ? (w - fw) / 2 : 230;
-  const fy = tall ? 250 : 110;
+  // The slot: a gilt frame, an empty mount, its caption. Side by side
+  // with the character in both shapes, a tall frame's inside its safe
+  // area and above its caption band (288 to 1040 of 1920).
+  const fw = tall ? 290 : 520;
+  const fh = tall ? 400 : 640;
+  const fx = tall ? 445 : 230;
+  const fy = tall ? 300 : 110;
   const slot: ShotSvgAssetDto = {
     kind: 'svg',
     box: [0, 0, w, h],
@@ -519,12 +521,12 @@ function namedScene(shape: FilmShape): SceneDto {
       `<rect x="${fx + 34}" y="${fy + 34}" width="${fw - 68}" height="${fh - 68}" fill="#ece6da" stroke="#6b4f1d" stroke-width="3"/>` +
       `<path d="M${fx + fw / 2 - 120} ${fy + fh - 34} C${fx + fw / 2 - 120} ${fy + fh - 190} ${fx + fw / 2 + 120} ${fy + fh - 190} ${fx + fw / 2 + 120} ${fy + fh - 34} Z" fill="#d8d0c2"/>` +
       `<circle cx="${fx + fw / 2}" cy="${fy + fh - 260}" r="88" fill="#d8d0c2"/></g>` +
-      // The caption under the frame when wide; over it when tall, where the character stands in front of the frame's foot.
-      `<g data-part="caption"><text x="${fx + fw / 2}" y="${tall ? fy - 24 : fy + fh + 54}" text-anchor="middle" font-size="34" fill="${look.palette.muted}" font-family="sans-serif">Archive portrait · the picture desk's</text></g>` +
+      // The caption under the frame.
+      `<g data-part="caption"><text x="${fx + fw / 2}" y="${fy + fh + 54}" text-anchor="middle" font-size="${tall ? 30 : 34}" fill="${look.palette.muted}" font-family="sans-serif">${tall ? 'Archive portrait' : 'Archive portrait · the picture desk’s'}</text></g>` +
       '</svg>',
     parts: {
       portrait: { box: [fx, fy, fw, fh] },
-      caption: { box: [fx, tall ? fy - 58 : fy + fh + 20, fw, 44] },
+      caption: { box: [fx, fy + fh + 20, fw, 44] },
     },
     focal: [0, 0, w, h],
   };
@@ -544,7 +546,7 @@ function namedScene(shape: FilmShape): SceneDto {
     'Science',
   )!;
   const asset = toAsset(made.piece);
-  const size = tall ? 620 : 600;
+  const size = tall ? 560 : 600;
   const shot: ShotDto = {
     id: 'named-1',
     startMs: 0,
@@ -554,7 +556,8 @@ function namedScene(shape: FilmShape): SceneDto {
       {
         id: 'darwin',
         asset: 'darwin',
-        at: tall ? { x: w / 2, y: h - 260 } : { x: 1130, y: 830 },
+        // Tall: on the left, the portrait on the right, its name inside the safe area.
+        at: tall ? { x: 260, y: 900 } : { x: 1130, y: 830 },
         size,
         z: 1,
         moves: [{ move: 'enter', atMs: 300, durMs: 600 }],
@@ -565,7 +568,7 @@ function namedScene(shape: FilmShape): SceneDto {
         id: 'named-1-label',
         recipe: 'label',
         target: { kind: 'actor', actor: 'darwin', part: 'head' },
-        atMs: 1100,
+        atMs: 1400,
         durMs: 250,
         untilMs: 6000,
         text: 'Charles Darwin',

@@ -125,6 +125,12 @@ describe('the picture desk', () => {
       'File:Sir James Robertson, Governor-General of Nigeria, 1958.jpg',
     ]);
     expect(sources.calls).toContain('search-text:james robertson Nigeria');
+    // His photos are looked for by the research's name for him, as the
+    // archives' captions call him, and by Wikidata's.
+    expect(sources.calls).toContain('search-files:james robertson Nigeria');
+    expect(sources.calls).toContain(
+      'search-files:james wilson robertson Nigeria',
+    );
     // The name search alone gave only his namesake, and nobody.
     const named = new FakeSources([ROBERTSON_NAMESAKE]);
     const alone = await deskWith({ sources: named }).desk.find({

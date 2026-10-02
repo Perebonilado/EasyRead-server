@@ -128,7 +128,7 @@ const LOOKUP_DAYS = 30;
  * again (a portrait that is a statue's photograph, once let through, is
  * not handed out for a month after the rule against it).
  */
-export const DESK_RULES = 18;
+export const DESK_RULES = 19;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** The width the desk asks a source for: a full frame's with room for a 12% push; a portrait's print; a page. */
@@ -535,16 +535,30 @@ export class PictureDesk {
     // the board comes back to them without one image again): the same
     // files as photos, others may stand with them, and the files that
     // name them with their place.
+    // By the research's name for them, as the archives' captions call
+    // them ("Sir James Robertson", not Wikidata's "James Wilson
+    // Robertson"), and by Wikidata's when it differs.
     const place = [query.place ?? []].flat().find(Boolean);
-    const named = await this.safely(
-      () =>
-        this.deps.sources.commonsSearch(
-          `${nameWords(person.label).join(' ') || nameWords(query.name).join(' ')}${place ? ` ${place}` : ''}`,
-          FROM_SEARCH,
-          FETCH_WIDTH.photo,
-        ),
-      [],
-    );
+    const names = [
+      ...new Set(
+        [query.name, person.label]
+          .map((n) => nameWords(n).join(' '))
+          .filter(Boolean),
+      ),
+    ];
+    const named: SourceFile[] = [];
+    for (const name of names)
+      named.push(
+        ...(await this.safely(
+          () =>
+            this.deps.sources.commonsSearch(
+              `${name}${place ? ` ${place}` : ''}`,
+              FROM_SEARCH,
+              FETCH_WIDTH.photo,
+            ),
+          [],
+        )),
+      );
     const photos = await this.widen(
       await this.judge(
         this.unique([...files, ...named]),

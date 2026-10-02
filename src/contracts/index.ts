@@ -2516,7 +2516,7 @@ export interface ShotActorDto {
   asset: string;
   /** Where it stands: in the set's units, or on the map. */
   at: { x: number; y: number } | { lng: number; lat: number };
-  /** Its height in the set's units; on a map, as a fraction of the frame's height. */
+  /** Its height in the set's units; on a map, as a share of the frame's short side (its height when wide, its width when tall), as text is sized. */
   size: number;
   z: number;
   state?: string;

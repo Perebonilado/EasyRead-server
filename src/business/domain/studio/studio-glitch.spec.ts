@@ -29,7 +29,11 @@ import {
   madeScene,
   type ComposedScene,
 } from './__fixtures__/adolescent-health';
-import { pictureMismatches, repairExplainer } from './studio-check';
+import {
+  checkExplainer,
+  pictureMismatches,
+  repairExplainer,
+} from './studio-check';
 
 jest.setTimeout(120_000);
 
@@ -53,6 +57,21 @@ describe('the film as made (the faults are there)', () => {
     expect(
       wrong.every((w) => w.why === 'comparison' && w.with === 'brake'),
     ).toBe(true);
+    // The writer is asked to leave such a picture out, never to set it as
+    // a card (explainer-animation-plan §10).
+    const asked = checkExplainer(ADOLESCENT_FILM.scenes[2].sheet, {
+      teach: null,
+      stage: null,
+      maths: false,
+      planned: null,
+    }).problems.filter((p) => p.rule === 'picture');
+    expect(asked).toHaveLength(3);
+    for (const one of asked) {
+      expect(one.message).toMatch(
+        /or leave it out: the picture before it holds/,
+      );
+      expect(one.message).not.toMatch(/keyword card/);
+    }
   });
 });
 

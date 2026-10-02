@@ -1370,8 +1370,16 @@ describe("an explainer's scene written for whom it teaches (Ask 8)", () => {
   });
 
   /** The writer, mocked: each call answers with the next draft. No model is called. */
-  function writing(drafts: unknown[]) {
-    const asked: { profile: string; problems?: string[] }[] = [];
+  function writing(
+    drafts: unknown[],
+    bible = bibleOf({ subject: 'The water cycle' }),
+  ) {
+    const asked: {
+      profile: string;
+      problems?: string[];
+      notes?: string;
+      explainer?: boolean;
+    }[] = [];
     const saved: Partial<StudioSceneRecord>[] = [];
     const processor = new StudioProcessor(
       {
@@ -1432,7 +1440,7 @@ describe("an explainer's scene written for whom it teaches (Ask 8)", () => {
         show,
         { id: 'e1', number: 1 },
         water,
-        bibleOf({ subject: 'The water cycle' }),
+        bible,
         { id: `c${k}`, position: k, sheet: null },
         k,
       );
@@ -1454,6 +1462,24 @@ describe("an explainer's scene written for whom it teaches (Ask 8)", () => {
     );
     // What is still too hard is never shown to the maker.
     expect(saved[0].problems?.some((p) => p.rule === 'plain')).toBe(false);
+  });
+
+  it("tells the writer an explainer's craft, and never the show's cast: its lessons draw no one", async () => {
+    const cast = bibleOf({
+      subject: 'The water cycle',
+      characters: [
+        { name: 'Juno', id: 'juno', voice: 'woman', host: true },
+        { name: 'Tobi', id: 'tobi', voice: 'boy' },
+      ],
+      sets: [
+        { id: 'yard', name: 'The yard', look: 'a sunny yard', kind: 'outdoor' },
+      ],
+    });
+    const { asked, write } = writing([draft(HARD, true)], cast);
+    await write(0);
+    expect(asked[0].explainer).toBe(true);
+    expect(asked[0].notes).toMatch(/Subject: The water cycle/);
+    expect(asked[0].notes).not.toMatch(/Juno|Tobi|The yard|story clips/);
   });
 
   it('lets what is too hard ride along when the scene goes back anyway', async () => {

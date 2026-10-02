@@ -19,11 +19,12 @@ const BELLO: RegistryEntry = {
   picture: {
     asset: '01a0fbbe-ad7b-7dac-bb7a-7308651951d5',
     credit: 'Ahmadu Bello, 1960 · US Department of Energy · Public domain',
-    url: 'studio/pictures/01a0fbbe-ad7b-7dac-bb7a-7308651951d5',
+    url: 'api/v1/studio/pictures/01a0fbbe-ad7b-7dac-bb7a-7308651951d5',
     width: 1280,
     height: 1602,
     focal: [427, 534, 427, 534],
-    depthUrl: 'studio/pictures/01a0fbbe-ad7b-7dac-bb7a-7308651951d5/depth',
+    depthUrl:
+      'api/v1/studio/pictures/01a0fbbe-ad7b-7dac-bb7a-7308651951d5/depth',
     licence: 'Public domain',
     source: 'US Department of Energy',
     sourceUrl: 'https://commons.wikimedia.org/wiki/File:Ahmadu_Bello.jpg',
@@ -43,7 +44,7 @@ const LAGOS_PHOTO: RegistryEntry = {
   picture: {
     asset: 'p2',
     credit: 'Lagos, 1958 · USIA · Public domain',
-    url: 'studio/pictures/p2',
+    url: 'api/v1/studio/pictures/p2',
     width: 2560,
     height: 1700,
     focal: [800, 500, 900, 700],
@@ -86,10 +87,11 @@ describe('a cleared picture as a set', () => {
     const made = pictureAssetOf(BELLO)!;
     expect(made.asset).toEqual({
       kind: 'image',
-      url: 'studio/pictures/01a0fbbe-ad7b-7dac-bb7a-7308651951d5',
+      url: 'api/v1/studio/pictures/01a0fbbe-ad7b-7dac-bb7a-7308651951d5',
       width: 1280,
       height: 1602,
-      depthUrl: 'studio/pictures/01a0fbbe-ad7b-7dac-bb7a-7308651951d5/depth',
+      depthUrl:
+        'api/v1/studio/pictures/01a0fbbe-ad7b-7dac-bb7a-7308651951d5/depth',
       focal: [427, 534, 427, 534],
       credit: {
         text: 'Ahmadu Bello, 1960 · US Department of Energy · Public domain',

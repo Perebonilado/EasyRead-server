@@ -158,7 +158,7 @@ export interface RegistryEntry {
   picture?: {
     asset: string;
     credit: string;
-    /** Our copy, relative to the API's root ("studio/pictures/<id>"), its size and its subject's box in its pixels. */
+    /** Our copy, relative to the API's origin ("api/v1/studio/pictures/<id>"), its size and its subject's box in its pixels. */
     url?: string;
     width?: number;
     height?: number;

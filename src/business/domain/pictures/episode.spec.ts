@@ -186,7 +186,7 @@ describe("an episode's desk pass", () => {
       picture: {
         asset: 'p1',
         credit: 'Ahmadu Bello, 1960 · US Department of Energy · Public domain',
-        url: 'studio/pictures/p1',
+        url: 'api/v1/studio/pictures/p1',
         width: 1280,
         height: 1601,
         kind: 'portrait',
@@ -213,7 +213,7 @@ describe("an episode's desk pass", () => {
       name: 'photo:Lagos 1958',
       kind: 'photo',
       about: 'an archive photo of Lagos, 1958 (USIA)',
-      picture: { kind: 'photo', depthUrl: 'studio/pictures/p2/depth' },
+      picture: { kind: 'photo', depthUrl: 'api/v1/studio/pictures/p2/depth' },
     });
   });
 

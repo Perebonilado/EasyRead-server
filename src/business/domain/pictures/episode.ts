@@ -185,9 +185,13 @@ export function passQuestions(input: PassInput): PassQuestion[] {
   return out;
 }
 
-/** The address our copy is served at, relative to the API's root (the stage puts its base before it). */
-export const pictureUrl = (id: string) => `studio/pictures/${id}`;
-export const depthUrl = (id: string) => `studio/pictures/${id}/depth`;
+/**
+ * The address our copy is served at, relative to the API's origin (the
+ * stage puts the origin before it: scene-stage's assetBase), its global
+ * prefix included, so a scene stored on one host plays on any.
+ */
+export const pictureUrl = (id: string) => `api/v1/studio/pictures/${id}`;
+export const depthUrl = (id: string) => `api/v1/studio/pictures/${id}/depth`;
 
 /** A picture the pass cleared, as a registry entry: a person's portrait on their name, a photo under its own. */
 export function entryOf(

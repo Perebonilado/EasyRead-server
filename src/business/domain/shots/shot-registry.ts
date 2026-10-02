@@ -646,9 +646,20 @@ export function buildRegistry(input: RegistryInput): TargetRegistry {
 
   // People: those of the research and the world these lines are about.
   const quotes = [...claims.values()].filter((c) => c.kind === 'quote');
-  const addPerson = (name: string, role: string, ids: readonly string[]) => {
+  const addPerson = (
+    name: string,
+    role: string,
+    ids: readonly string[],
+    likeness?: string,
+  ) => {
     const clean = line(name, 80);
     if (!clean) return;
+    // Known already (the research's people come first): the world's likeness added to them.
+    const known = entries.find((e) => e.name === `person:${clean}`);
+    if (known) {
+      if (likeness && !known.likeness) known.likeness = likeness.slice(0, 240);
+      return;
+    }
     const surname = keysOf(clean).at(-1) ?? '';
     const kept = real(ids);
     const said = named(clean) || (surname.length >= 4 && named(surname));
@@ -685,12 +696,13 @@ export function buildRegistry(input: RegistryInput): TargetRegistry {
       about: clip(role, 10) || 'a person of the story',
       ...(kept.length ? { claim: kept[0], claims: kept } : {}),
       ...(trace ? { trace } : {}),
+      ...(likeness ? { likeness: likeness.slice(0, 240) } : {}),
     });
   };
   for (const person of research?.people ?? [])
     addPerson(person.name, person.role, person.claims);
   for (const person of world?.people ?? [])
-    addPerson(person.name, person.role, person.claims);
+    addPerson(person.name, person.role, person.claims, person.likeness);
 
   // Numbers: the research's, where these lines rest on them or say them;
   // a number claim of these lines, where it gives one.

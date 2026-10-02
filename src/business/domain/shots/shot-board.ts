@@ -125,6 +125,7 @@ const registryFor = (input: BoardShotsInput) =>
 const optionsFor = (input: BoardShotsInput): PlanOptions => ({
   kit: input.kit ?? kitIdsFor(input.look ?? 'editorial'),
   map: Boolean(readMapBase(input.world?.base)),
+  look: input.look ?? 'editorial',
   lines: linesOf(input),
   opening: input.scene?.index === 0,
 });
@@ -202,8 +203,13 @@ function kitPart(input: BoardShotsInput): string {
     .split('\n')
     .filter((row) => ids.some((id) => row.startsWith(`- ${id}:`)))
     .join('\n');
+  // An illustrated show draws named people as their characters, whatever the list says of portraits and traces.
+  const named =
+    input.look === 'illustrated'
+      ? '\nThis show is illustrated: a person of the list may be drawn as their character, labelled with their name (character.person with name), whether or not they have a portrait or a trace.'
+      : '';
   return guide
-    ? `The kit (pieces that may stand on a set or on the map; settings and moves as written):\n${guide}`
+    ? `The kit (pieces that may stand on a set or on the map; settings and moves as written):\n${guide}${named}`
     : 'The kit has nothing for this show: plan no actors.';
 }
 
@@ -818,7 +824,8 @@ export async function boardShots(
   const parts = shotParts(input, registry);
   const usage: LlmUsage[] = [];
 
-  const first = await llm.shotsBoard({ parts });
+  const look = input.look ?? 'editorial';
+  const first = await llm.shotsBoard({ parts, look });
   usage.push(first.usage);
   const answers: unknown[] = [first.value];
   let plan = planOf(first.value, narration, options);
@@ -830,6 +837,7 @@ export async function boardShots(
     sentBack = true;
     const again = await llm.shotsBoard({
       parts,
+      look,
       previous: first.value,
       problems: problems.map((p) => p.message).slice(0, 16),
     });

@@ -2289,7 +2289,9 @@ export type ShotInfoRecipe =
   | 'mark'
   | 'enter'
   | 'exit'
-  | 'ask';
+  | 'ask'
+  /** A speech bubble of a few words from an actor's head (the illustrated look's, sparingly). */
+  | 'say';
 
 /** How a shot hands over to the next. */
 export type ShotJoin =
@@ -2320,7 +2322,9 @@ export type ShotLifeEffect =
   | 'drift'
   | 'fire'
   | 'sparks'
-  | 'splash';
+  | 'splash'
+  /** A pair of eyes on a region of the map, glancing and blinking: a country made a character (the illustrated look's). */
+  | 'eyes';
 
 /** A scene's shots, the assets they draw on, the look, and the sound effects their motion makes. */
 export interface ShotSceneDto {
@@ -2354,6 +2358,12 @@ export interface ShotLookDto {
   grain: number;
   /** The show's motion personality (research §3.6). */
   motion: 'springy' | 'mechanical' | 'stepped';
+  /**
+   * How its people are drawn (tech §11): 'editorial', verified portraits
+   * and silhouettes; 'illustrated', era-dressed cartoon characters, with
+   * speech bubbles and eyes on the map. Absent is editorial.
+   */
+  style?: 'editorial' | 'illustrated';
 }
 
 export type ShotAssetDto =
@@ -2629,6 +2639,10 @@ export interface ShotLifeDto {
   at?: ShotTargetDto;
   /** A Lottie asset's id, for the effects drawn from one. */
   asset?: string;
+  /** What it turns toward: the place or region a pair of eyes glances at. Absent, they look about. */
+  to?: ShotTargetDto;
+  /** A pair of eyes' brows: calm, angry, worried or surprised. Absent, calm. */
+  face?: 'calm' | 'angry' | 'worried' | 'surprised';
 }
 
 export interface ShotCameraDto {
@@ -3513,6 +3527,8 @@ export interface StudioBriefDto {
   style?: 'picture-book' | 'bold-cartoon' | 'sitcom' | 'adventure' | 'cosy';
   /** An explainer's look, as the maker chose it; absent, chosen by code from the subject and the audience. */
   look?: SceneThemeName;
+  /** How an explainer draws its people, as the maker chose it: portraits and silhouettes, or cartoon characters; absent, chosen by code. */
+  lookStyle?: 'editorial' | 'illustrated';
   /** The document given in the chat, and the pages last chosen of it; absent without one. */
   document?: StudioBriefDocumentDto;
   /** An explainer's host, on or off, as the maker said; absent, on for children and off for grown-ups. */
@@ -4148,6 +4164,8 @@ export interface StudioShowDto {
   bible: StudioBibleDto | null;
   /** The look an explainer plays in: the maker's, or the one code chose; absent for a story. */
   theme?: SceneThemeName;
+  /** How an explainer draws its people: the maker's choice, or the one code chose with its world; absent for a story. */
+  lookStyle?: 'editorial' | 'illustrated';
   episodes: {
     id: string;
     number: number;

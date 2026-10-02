@@ -175,6 +175,11 @@ export const shotActorSchema = z.object({
   dress: maybe(),
   facing: maybe(),
   wagons: looseNumber(),
+  // An illustrated show's characters: their role, face, what they hold, and a named person's name.
+  role: maybe(),
+  expression: maybe(),
+  prop: maybe(),
+  name: maybe(),
   moves: z
     .array(z.object({ move: words(), on: words(), to: maybe() }))
     .catch([]),
@@ -192,6 +197,9 @@ export const shotBoardSchema = z.object({
         life: z.array(oneOf(LIFE_EFFECTS)).catch([]),
         join: oneOf(SHOT_JOINS),
         focal: maybe(),
+        eyes: z
+          .array(z.object({ at: maybe(), to: maybe(), face: maybe() }))
+          .catch([]),
       }),
     )
     .catch([]),

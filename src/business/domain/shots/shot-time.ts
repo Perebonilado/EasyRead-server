@@ -25,7 +25,7 @@ import type {
   ShotSetDto,
   ShotTargetDto,
 } from '../../../contracts';
-import { PACE } from '../studio/explainer-rules';
+import { PACE, dwellMs } from '../studio/explainer-rules';
 
 // ── The shots before their times ──────────────────────────────────────────
 
@@ -100,6 +100,7 @@ export const RECIPE_MS: Readonly<Record<ShotInfoRecipe, number>> = {
   enter: 500,
   exit: 400,
   ask: 600,
+  say: 350,
 };
 
 /**
@@ -175,6 +176,9 @@ export const MIN_SHOT_MS = PACE.minGapMs;
  * otherwise gather every label it ever showed. What builds the picture
  * (a pin, a fill, a line drawn, a part brought on) stays for the run.
  */
+/** How much longer than its reading time a speech bubble stays: the joke lands, then it goes. */
+export const SAY_LINGER_MS = 600;
+
 export const LEAVES_WITH_SHOT: ReadonlySet<ShotInfoRecipe> =
   new Set<ShotInfoRecipe>(['label', 'spotlight', 'mark', 'flow', 'ask']);
 
@@ -442,6 +446,19 @@ export function timeShots(
             );
           else notes.push(`${where}: "${until}" is not said; ${item.id} stays`);
         }
+        // A speech bubble stays as long as its words take to read, a little more, then goes.
+        if (untilMs === undefined && item.recipe === 'say')
+          untilMs = Math.round(
+            Math.min(
+              endMs,
+              timed.atMs +
+                timed.durMs +
+                dwellMs(
+                  (item.text ?? '').split(/\s+/u).filter(Boolean).length,
+                ) +
+                SAY_LINGER_MS,
+            ),
+          );
         // A stream (a machine's air going through it) runs on with its shot, as its machine does.
         const stream =
           item.recipe === 'flow' &&

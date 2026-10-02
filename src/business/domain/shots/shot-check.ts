@@ -99,6 +99,7 @@ import type {
   PlanActor,
   PlanCamera,
   PlanChart,
+  PlanEyes,
   PlanInfo,
   PlanSet,
   PlanSetScene,
@@ -206,6 +207,8 @@ export interface PlanOptions {
   kit?: readonly string[];
   /** Whether the show has its one map (world.base): a map shot needs it, or a place with a point. */
   map?: boolean;
+  /** How the show draws its people (tech §11): an illustrated show's characters, bubbles and eyes; never an editorial one's. */
+  look?: 'editorial' | 'illustrated';
   /**
    * The scene's lines, said one after another as the narration: what a
    * count is held to (a number its own line says, resting on that line's
@@ -421,9 +424,14 @@ function infoOf(raw: unknown): PlanInfo | null {
   const to = targetName(said.to);
   // What changes the picture for good never lets go: no until on it.
   const until = LASTING.has(recipe) ? '' : phrase(said.until);
-  // Only a label is words on the stage: what any other recipe wrote is
-  // dropped, and a label reading "label" is no words at all.
-  const written = recipe === 'label' ? clip(said.text, TEXT.labelWordsMax) : '';
+  // Only a label and a speech bubble are words on the stage: what any other
+  // recipe wrote is dropped, and a label reading "label" is no words at all.
+  const written =
+    recipe === 'label'
+      ? clip(said.text, TEXT.labelWordsMax)
+      : recipe === 'say'
+        ? clip(said.text, SAY_WORDS)
+        : '';
   const text = roleOnly(written) ? '' : written;
   const value = numberIn(said.value);
   const from = numberIn(said.from);
@@ -471,7 +479,14 @@ const ACTOR_SETTINGS = [
   'dress',
   'facing',
   'wagons',
+  'role',
+  'expression',
+  'prop',
+  'name',
 ] as const;
+
+/** Settings that are words of the board's own (a dress from the look notes, a person's name): kept longer. */
+const LONG_SETTINGS = new Set(['dress', 'name']);
 
 function actorOf(
   raw: unknown,
@@ -489,7 +504,7 @@ function actorOf(
     if (['string', 'number', 'boolean'].includes(typeof value))
       params[key.slice(0, 24)] =
         typeof value === 'string'
-          ? value.slice(0, 40)
+          ? value.slice(0, LONG_SETTINGS.has(key) ? 90 : 40)
           : (value as number | boolean);
   // An era in words ("the 1950s", "Victorian") as the kit names eras.
   if (typeof params.era === 'string') {
@@ -634,7 +649,18 @@ function actorFaults(
   );
   const person = own.find((e) => e?.kind === 'person');
   const few = actor.kit === 'people.person' || actor.kit === 'people.pair';
-  if (person || (few && named))
+  // An illustrated show's character may be a named person of the list,
+  // drawn from their look notes and labelled (tech §11); a name the list
+  // has not is no one's, and is taken away.
+  if (entry.named) {
+    const given = actor.params?.name;
+    if (typeof given === 'string' && given && !personOf(given, registry))
+      out.push({
+        code: 'unknown-person',
+        message: `${actor.id} is named "${given}", who is not in the list: a character is named only for a person of the list.`,
+        drop: false,
+      });
+  } else if (person || (few && named))
     out.push({
       code: 'silhouette-person',
       message: `${actor.id} is a silhouette where the line is about ${person ? splitTarget(person.name).rest : named}: a named person is shown only by their portrait or a trace of them, never a figure.`,
@@ -662,6 +688,14 @@ function actorFaults(
   return out;
 }
 
+/** The list's person a name stands for, as the list writes their name; null for no one the list has. */
+function personOf(name: string, registry: TargetRegistry): string | null {
+  const found =
+    registry.resolve(name.startsWith('person:') ? name : `person:${name}`) ??
+    registry.resolve(name);
+  return found?.kind === 'person' ? splitTarget(found.name).rest : null;
+}
+
 /** An actor made sound: dropped when it breaks a rule of people, its untrue count and the moves it cannot make taken away. */
 function soundActor(
   actor: PlanActor,
@@ -674,6 +708,22 @@ function soundActor(
   const entry = KIT[actor.kit];
   const params = { ...(actor.params ?? {}) };
   if (faults.some((f) => f.code === 'untrue-count')) delete params.count;
+  if (entry?.named) {
+    // A named character is the list's person, written as the list writes them.
+    const given =
+      typeof params.name === 'string' ? personOf(params.name, registry) : null;
+    const standsFor =
+      [actor.place, actor.id]
+        .map((name) => (name ? registry.resolve(name) : null))
+        .find((e) => e?.kind === 'person') ?? null;
+    const asked = typeof params.name === 'string' && params.name;
+    const name = asked
+      ? given
+      : ((standsFor ? splitTarget(standsFor.name).rest : null) ??
+        (actor.kit === 'character.person' && named ? named : null));
+    if (name) params.name = name;
+    else delete params.name;
+  }
   const moves = (actor.moves ?? []).filter(
     (m) => !entry || entry.moves.includes(actorMove(m.move)),
   );
@@ -708,38 +758,91 @@ export function planOf(
       const on = phrase(said.on);
       if (!set || !on) return [];
       const focal = targetName(said.focal);
+      // Held to the show's look with its own answer (its eyes), before any
+      // shot is dropped or cut, so each reads the eyes it was given.
       return [
-        {
-          on,
-          set,
-          actors: list(said.actors)
-            .map((a, k) => actorOf(a, kit, k))
-            .filter((a): a is PlanActor => a !== null)
-            .slice(0, SHOT_LIMITS.actors),
-          info: list(said.info)
-            .map(infoOf)
-            .filter((i): i is PlanInfo => i !== null)
-            .slice(0, SHOT_LIMITS.info),
-          life: [
-            ...new Set(
-              list(said.life)
-                .map(lifeOf)
-                .filter((l): l is NonNullable<typeof l> => l !== null),
-            ),
-          ].slice(0, SHOT_LIMITS.life),
-          camera: list(said.camera)
-            .map(cameraOf)
-            .filter((c): c is PlanCamera => c !== null)
-            .slice(0, SHOT_LIMITS.camera),
-          join: joinOf(said.join) ?? 'cut',
-          ...(focal ? { focal } : {}),
-        },
+        lookOf(
+          {
+            on,
+            set,
+            actors: list(said.actors)
+              .map((a, k) => actorOf(a, kit, k))
+              .filter((a): a is PlanActor => a !== null)
+              .slice(0, SHOT_LIMITS.actors),
+            info: list(said.info)
+              .map(infoOf)
+              .filter((i): i is PlanInfo => i !== null)
+              .slice(0, SHOT_LIMITS.info),
+            life: [
+              ...new Set(
+                list(said.life)
+                  .map(lifeOf)
+                  .filter((l): l is NonNullable<typeof l> => l !== null),
+              ),
+            ].slice(0, SHOT_LIMITS.life),
+            camera: list(said.camera)
+              .map(cameraOf)
+              .filter((c): c is PlanCamera => c !== null)
+              .slice(0, SHOT_LIMITS.camera),
+            join: joinOf(said.join) ?? 'cut',
+            ...(focal ? { focal } : {}),
+          },
+          said,
+          options,
+        ),
       ];
     })
     // Twice the scene's share at most: the mend's own cap, which keeps
     // what the pace needs, decides past that.
     .slice(0, narration ? 2 * mostShots(narration) : 64);
   return { shots };
+}
+
+/** The most words in a speech bubble. */
+export const SAY_WORDS = 6;
+/** The most eyes a shot has, and a scene. */
+export const EYES_MOST = { shot: 2, scene: 4 } as const;
+const FACES = ['calm', 'angry', 'worried', 'surprised'] as const;
+
+/** A pair of eyes read: on a region, toward another, with a face. */
+function eyesOf(raw: unknown): PlanEyes | null {
+  const said = record(raw);
+  const at = targetName(said.at);
+  if (!at) return null;
+  const to = targetName(said.to);
+  const face = line(said.face, 20).toLowerCase();
+  const known = FACES.find((f) => face.startsWith(f.slice(0, 4)));
+  return {
+    at,
+    ...(to && to !== at ? { to } : {}),
+    ...(known && known !== 'calm' ? { face: known } : {}),
+  };
+}
+
+/**
+ * A shot held to its show's look (tech §11): an illustrated show keeps its
+ * eyes on the map; an editorial one has no speech bubble and no eyes.
+ */
+function lookOf(
+  shot: PlanShot,
+  said: Record<string, unknown>,
+  options: PlanOptions,
+): PlanShot {
+  if (options.look !== 'illustrated')
+    return {
+      ...shot,
+      info: shot.info.filter((one) => one.recipe !== 'say'),
+      life: shot.life.filter((one) => one !== 'eyes'),
+    };
+  const eyes = list(said.eyes)
+    .map(eyesOf)
+    .filter((e): e is PlanEyes => e !== null)
+    .slice(0, EYES_MOST.shot);
+  return {
+    ...shot,
+    life: shot.life.filter((one) => one !== 'eyes'),
+    ...(eyes.length ? { eyes } : {}),
+  };
 }
 
 // ── What a name means in a shot ───────────────────────────────────────────
@@ -773,9 +876,15 @@ function targetIn(
     if (actor) return { kind: 'actor', name: `actor:${actor.id}` };
     // A part of an actor (a machine's combustor, its core flow): actor:<id>.<part>.
     const dot = rest.indexOf('.');
-    const owner = dot > 0 ? shot.actors.find((a) => a.id === rest.slice(0, dot)) : undefined;
+    const owner =
+      dot > 0
+        ? shot.actors.find((a) => a.id === rest.slice(0, dot))
+        : undefined;
     if (owner && rest.slice(dot + 1).trim())
-      return { kind: 'part', name: `actor:${owner.id}.${partKey(rest.slice(dot + 1))}` };
+      return {
+        kind: 'part',
+        name: `actor:${owner.id}.${partKey(rest.slice(dot + 1))}`,
+      };
     if (prefix === 'actor') return null;
   }
   const entry = registry.resolve(name);
@@ -805,7 +914,8 @@ function shownBy(shot: PlanShot, target: Target): boolean {
   if (target.kind === 'set') return true;
   if (target.kind === 'actor') return true;
   const set = shot.set;
-  if (target.kind === 'part') return set.kind === 'chart' || target.name.startsWith('actor:');
+  if (target.kind === 'part')
+    return set.kind === 'chart' || target.name.startsWith('actor:');
   const entry = target.entry;
   switch (set.kind) {
     case 'map':
@@ -885,6 +995,8 @@ const RECIPE_TARGETS: Record<
   },
   enter: { needs: true, kinds: ['part', 'actor'] },
   exit: { needs: true, kinds: ['part', 'actor'] },
+  // A speech bubble comes from a character on the stage.
+  say: { needs: true, kinds: ['actor'] },
   ask: {
     needs: false,
     kinds: [
@@ -1803,8 +1915,13 @@ function mendShot(
     // What changes the picture for good never lets go.
     if (LASTING.has(item.recipe)) delete item.until;
     // A label's words name what it is on: its own words when they do, else
-    // the name of what it labels; a field's name ("label") is no words.
-    if (item.text) item.text = clip(item.text, TEXT.labelWordsMax);
+    // the name of what it labels; a field's name ("label") is no words. A
+    // speech bubble keeps its own few words (SAY_WORDS).
+    if (item.text)
+      item.text = clip(
+        item.text,
+        item.recipe === 'say' ? SAY_WORDS : TEXT.labelWordsMax,
+      );
     if (item.text && roleOnly(item.text)) delete item.text;
     if (
       item.recipe === 'label' &&
@@ -2102,13 +2219,26 @@ function mendShots(
             }
           : actor,
       );
+    // A person is one character a shot: the first named for them keeps the name.
+    const seen = new Set<string>();
+    const people = actors.map((actor) => {
+      const name = actor.params?.name;
+      if (typeof name !== 'string') return actor;
+      if (!seen.has(name)) {
+        seen.add(name);
+        return actor;
+      }
+      const { name: _n, ...rest } = actor.params ?? {};
+      void _n;
+      return { ...actor, params: rest };
+    });
     return {
       ...p.shot,
       set,
       on: phraseText(n, own.at, own.length),
       info,
       camera,
-      actors,
+      actors: people,
     };
   });
 
@@ -2132,7 +2262,52 @@ function mendShots(
       ? { ...shot, join: 'continue' }
       : shot;
   });
-  return { shots };
+  return { shots: humourOf(shots, n.keys.length, registry, options) };
+}
+
+/**
+ * An illustrated show's humour kept sparing and true (WP17): a speech
+ * bubble only from a character of its shot, at most one for every fifty
+ * words said (about twenty seconds); eyes only on a region or a place of
+ * the list, glancing at one, a few a scene. An editorial show has none.
+ */
+function humourOf(
+  shots: PlanShot[],
+  words: number,
+  registry: TargetRegistry,
+  options: PlanOptions,
+): PlanShot[] {
+  const illustrated = options.look === 'illustrated';
+  let bubbles = illustrated ? Math.max(1, Math.floor(words / 50)) : 0;
+  let eyes = illustrated ? EYES_MOST.scene : 0;
+  const onMap = (name: string | undefined) => {
+    const found = name ? registry.resolve(name) : null;
+    return found && (found.kind === 'region' || found.kind === 'place')
+      ? found
+      : null;
+  };
+  return shots.map((shot) => {
+    const actors = new Set(shot.actors.map((a) => a.id));
+    const info = shot.info.filter((one) => {
+      if (one.recipe !== 'say') return true;
+      const from = (one.target ?? '').replace(/^actor:/u, '');
+      if (!bubbles || !one.text || !actors.has(from)) return false;
+      bubbles -= 1;
+      return true;
+    });
+    const kept = (shot.eyes ?? []).flatMap((one): PlanEyes[] => {
+      if (!eyes || shot.set.kind !== 'map' || !onMap(one.at)) return [];
+      eyes -= 1;
+      return [
+        onMap(one.to)
+          ? one
+          : { at: one.at, ...(one.face ? { face: one.face } : {}) },
+      ];
+    });
+    const { eyes: _e, ...rest } = shot;
+    void _e;
+    return { ...rest, info, ...(kept.length ? { eyes: kept } : {}) };
+  });
 }
 
 // ── The plan across its lines ─────────────────────────────────────────────

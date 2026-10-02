@@ -106,11 +106,13 @@ export interface BuildContext {
   seed: string;
   /** The show's look (tech §11): editorial silhouettes, or illustrated characters. Editorial when absent. */
   look?: KitLook;
+  /** The named characters the episode's scenes before this one showed (namedIn): each is labelled once an episode. */
+  named?: readonly string[];
 }
 
 /** The show's look as the shots draw it: its theme's paper and ink, its accent, its held colour and each side's colour. */
 export function shotLook(
-  ctx: Pick<BuildContext, 'palette' | 'held' | 'theme'>,
+  ctx: Pick<BuildContext, 'palette' | 'held' | 'theme' | 'look'>,
 ): ShotLookDto {
   const theme = THEMES[ctx.theme] ?? PAPER;
   const sides: Record<string, string> = {};
@@ -129,6 +131,8 @@ export function shotLook(
     fonts: { display: DISPLAY_FACE[theme.font], text: TEXT_FACE },
     grain: GRAIN,
     motion: 'springy',
+    // How its people are drawn: the stage and the checks read it.
+    ...(ctx.look === 'illustrated' ? { style: 'illustrated' as const } : {}),
   };
 }
 
@@ -294,6 +298,9 @@ export interface BuiltShots {
   shots: UntimedShot[];
   notes: string[];
 }
+
+/** How long a character's face takes to change at a word: a blink. */
+const FACE_MS = 160;
 
 /** A map's tilt when the plan asks for one and the map can tilt (a geo map): the brief's 45–55°, steep enough to read as ground. */
 export const MAP_TILT = 50;
@@ -661,6 +668,8 @@ export function buildShots(
   const look = shotLook(ctx);
   const assets: Record<string, ShotAssetDto> = {};
   const notes: string[] = [];
+  /** The named characters labelled already in this episode: each only the first time. */
+  const namesShown = new Set<string>(ctx.named ?? []);
   /** Each chart drawn, by its kind and spec: drawn once, shown by every shot that asks for it. */
   const charts = new Map<string, { id: string; dto: ShotSvgAssetDto }>();
   const pictures = new Map<string, string>();
@@ -680,7 +689,10 @@ export function buildShots(
           set: {
             kind: 'map',
             asset: map.id,
-            style: planned.style ?? 'atlas',
+            // An illustrated show's map is the reference's natural relief.
+            style:
+              planned.style ??
+              (ctx.look === 'illustrated' ? 'relief' : 'atlas'),
             tilt: !map.flat && planned.tilt === 'tilted' ? MAP_TILT : 0,
             bearing: 0,
             terrain: !map.flat && planned.terrain === true,
@@ -871,9 +883,21 @@ export function buildShots(
     const planned_actors = planned.actors ?? [];
     planned_actors.forEach((one, k) => {
       const side = one.side ? sideOf(one.side) : null;
+      // A named character is drawn from the look notes' likeness of them (WP17).
+      const person =
+        typeof one.params?.name === 'string' && one.params.name
+          ? registry.resolve(`person:${one.params.name}`)
+          : null;
       const made = kitPiece(
         one.kit,
-        withSetDefaults(one.kit, one.params, shotSet.stage),
+        // Its era and climate its set's where the plan leaves them out.
+        withSetDefaults(
+          one.kit,
+          person?.likeness
+            ? { ...(one.params ?? {}), looks: person.likeness }
+            : one.params,
+          shotSet.stage,
+        ),
         look,
         ctx,
         side ?? 'ink',
@@ -946,9 +970,22 @@ export function buildShots(
               toBox[1] + toBox[3] - placed.at.y,
             )
           : 0;
-        const durMs = moveMs(name, distance, setBox[2], placed.scale);
+        // A face changes in a blink; the rest as long as their way.
+        const durMs =
+          moveMs(name, distance, setBox[2], placed.scale) ??
+          (made.asset.rig?.states[name] && name !== 'sit' && name !== 'stand'
+            ? FACE_MS
+            : undefined);
+        // A sit starts from standing; a move named for one of the piece's
+        // states (a character's face at a word) ends in that state.
         const state =
-          name === 'sit' ? 'seated' : name === 'stand' ? 'standing' : undefined;
+          name === 'sit'
+            ? 'seated'
+            : name === 'stand'
+              ? 'standing'
+              : made.asset.rig?.states[name]
+                ? name
+                : undefined;
         moves.push({
           move: name,
           on: move.on,
@@ -1336,6 +1373,22 @@ export function buildShots(
       });
     });
 
+    // A named character is labelled with their name the first time the
+    // episode shows them (WP17), on the words that bring them on.
+    for (const one of planned.actors ?? []) {
+      const name = one.params?.name;
+      if (typeof name !== 'string' || !name || !actorIds.has(one.id)) continue;
+      if (namesShown.has(name)) continue;
+      namesShown.add(name);
+      info.push({
+        id: `${id}-name-${one.id}`,
+        recipe: 'label',
+        target: { kind: 'actor', actor: one.id, part: 'head' },
+        text: wordsUpTo(name, TEXT.labelWordsMax),
+        on: one.moves?.[0]?.on ?? planned.on,
+      });
+    }
+
     /**
      * The set as a whole as the camera frames it. A drawing on paper (a
      * chart, a document) is framed whole, a little paper round it and room
@@ -1540,6 +1593,27 @@ export function buildShots(
           ? { at: { kind: 'actor' as const, actor: chimney.id, part: 'smoke' } }
           : {}),
       }));
+
+    // Eyes on the map's regions (an illustrated show's), each glancing at another.
+    if (ctx.look === 'illustrated' && onMap)
+      (planned.eyes ?? []).forEach((one, k) => {
+        const at = targetOf(one.at);
+        if (!at) {
+          notes.push(
+            `shot ${i + 1}: eyes on "${one.at}" left out (not on the map)`,
+          );
+          return;
+        }
+        const to = one.to ? targetOf(one.to) : null;
+        life.push({
+          effect: 'eyes',
+          seed: seedOf(`${ctx.seed}:${i}:eyes:${k}`),
+          amount: 1,
+          at,
+          ...(to ? { to } : {}),
+          ...(one.face && one.face !== 'calm' ? { face: one.face } : {}),
+        });
+      });
 
     built.push({
       shot: {

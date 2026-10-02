@@ -2619,11 +2619,14 @@ export class FakeLlmAdapter implements LlmGatewayPort {
 
   // The shot board (fake-shots): each line's shot from the scene's own list.
   async shotsBoard(
-    input: { parts: string[] } & StudioRevision,
+    input: {
+      parts: string[];
+      look?: 'editorial' | 'illustrated';
+    } & StudioRevision,
   ): Promise<LlmResult<Record<string, unknown>>> {
     const started = Date.now();
     return {
-      value: fakeShotsAnswer(input.parts),
+      value: fakeShotsAnswer(input.parts, input.look),
       usage: this.usage(started, 6000, 900),
     };
   }

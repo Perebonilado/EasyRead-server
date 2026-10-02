@@ -1060,6 +1060,12 @@ export interface EditorWorld {
   places: EditorPlace[];
   people: EditorPerson[];
   things: EditorThing[];
+  /**
+   * How the show draws its people (tech §11): portraits and silhouettes, or
+   * era-dressed cartoon characters; chosen by code when the world is made
+   * (studio-look's lookStyleFor), the maker's Style choice over it.
+   */
+  style?: 'editorial' | 'illustrated';
 }
 
 export const WORLD_LIMITS = {
@@ -1194,6 +1200,10 @@ export function worldOf(
         return name ? [{ name, look: plainText(t.look, 240) }] : [];
       })
       .slice(0, WORLD_LIMITS.things),
+    // How its people are drawn, as code chose it when the world was made.
+    ...(said.style === 'editorial' || said.style === 'illustrated'
+      ? { style: said.style }
+      : {}),
   };
 }
 

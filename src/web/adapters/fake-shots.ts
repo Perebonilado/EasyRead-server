@@ -48,8 +48,12 @@ const SMALL = new Set(
 
 export function fakeShotsAnswer(
   parts: readonly string[],
+  look: 'editorial' | 'illustrated' = 'editorial',
 ): Record<string, unknown> {
   const all = parts.join('\n');
+  // An illustrated show's people are its characters (WP17).
+  const characters =
+    look === 'illustrated' && /^- character\.group:/mu.test(all);
   const lines = linesOf(all);
   const pins = [...all.matchAll(/^- place:(.+?) \[pin\]/gmu)].map((m) => m[1]);
   const regions = [
@@ -106,8 +110,8 @@ export function fakeShotsAnswer(
       // People gathered there, when the kit has crowds: counted by the line's own number.
       const gathered =
         place &&
-        /^- people\.crowd:/mu.test(all) &&
-        /\b(crowds?|people|gathered|marched|protesters|workers)\b/iu.test(
+        (characters || /^- people\.crowd:/mu.test(all)) &&
+        /\b(crowds?|people|gathered|marched|protesters|workers|soldiers|armies|army|legions?)\b/iu.test(
           line.say,
         );
       const said =
@@ -118,22 +122,36 @@ export function fakeShotsAnswer(
         {
           on,
           set: { kind: 'map', tilt: 'flat' },
-          ...(gathered
+          ...(gathered && characters
             ? {
                 actors: [
                   {
-                    id: 'crowd',
-                    kit: 'people.crowd',
+                    id: 'people',
+                    kit: 'character.group',
                     place: target,
-                    pose: /march|protest/iu.test(line.say)
-                      ? 'protest'
-                      : 'standing',
-                    count: said ? Number(said.replace(/,/gu, '')) : null,
+                    dress: line.say.slice(0, 80),
+                    count: 3,
+                    pose: /march/iu.test(line.say) ? 'marching' : 'standing',
                     moves: [{ move: 'enter', on }],
                   },
                 ],
               }
-            : {}),
+            : gathered
+              ? {
+                  actors: [
+                    {
+                      id: 'crowd',
+                      kit: 'people.crowd',
+                      place: target,
+                      pose: /march|protest/iu.test(line.say)
+                        ? 'protest'
+                        : 'standing',
+                      count: said ? Number(said.replace(/,/gu, '')) : null,
+                      moves: [{ move: 'enter', on }],
+                    },
+                  ],
+                }
+              : {}),
           info: [{ recipe: place ? 'pin' : 'fill', target, on }],
           camera: [{ move: 'push', target, amount: 'small', on }],
           life: ['cloud-shadows'],

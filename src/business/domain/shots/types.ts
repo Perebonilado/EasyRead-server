@@ -1,0 +1,156 @@
+/**
+ * The shots engine's server-side types (explainer-animation-tech.md §4).
+ *
+ * The board (GPT-5.4 mini) writes a ShotPlan for each lesson scene: shots
+ * anchored to the exact words that cause them, every name from a closed
+ * list or from the scene's target registry. It never writes a coordinate,
+ * a time or a colour. Code then checks the plan (shot-check), builds its
+ * assets (shot-build), times it on the voice's words (shot-time), adds the
+ * sounds its motion makes (shot-sound) and composes the ShotSceneDto the
+ * client plays (shot-compose).
+ */
+import type {
+  ShotCameraMove,
+  ShotInfoRecipe,
+  ShotJoin,
+  ShotLifeEffect,
+} from '../../../contracts';
+
+/** The board's plan for one scene. */
+export interface ShotPlan {
+  shots: PlanShot[];
+}
+
+/** One shot as the board writes it. Names are target names (see TargetRegistry) or closed-list ids. */
+export interface PlanShot {
+  /** The exact words of the scene's narration the shot starts on. */
+  on: string;
+  set: PlanSet;
+  actors: PlanActor[];
+  info: PlanInfo[];
+  life: ShotLifeEffect[];
+  camera: PlanCamera[];
+  /** How it hands over to the next shot. */
+  join: ShotJoin;
+  /** The target the shot is about; the camera frames it when no move says otherwise. */
+  focal?: string;
+}
+
+export type PlanSet =
+  | {
+      kind: 'map';
+      style?: 'atlas' | 'relief' | 'night';
+      /** Degrees from straight down; the board says flat or tilted, code picks the angle. */
+      tilt?: 'flat' | 'tilted';
+      terrain?: boolean;
+    }
+  | { kind: 'photo'; photo: string; treatment?: 'natural' | 'duotone' | 'halftone' | 'cutout' }
+  | { kind: 'portrait'; person: string }
+  | { kind: 'document'; document: string }
+  | { kind: 'set'; set: PlanSetScene }
+  | { kind: 'chart'; chart: PlanChart }
+  | { kind: 'plain' };
+
+/** A code-drawn set: a kind of place, never a named one (kit/sets). */
+export interface PlanSetScene {
+  land: 'plain' | 'hills' | 'mountains' | 'coast' | 'desert' | 'forest' | 'city' | 'sea';
+  time: 'day' | 'dusk' | 'night' | 'dawn';
+  weather?: 'clear' | 'cloud' | 'rain' | 'snow' | 'storm' | 'haze';
+  /** Townscape density and era, when there are buildings. */
+  town?: 'none' | 'village' | 'town' | 'city';
+  era?: string;
+}
+
+/**
+ * A chart, timeline, counter or other code kind, drawn full frame with
+ * named parts (shots/shot-charts.ts). `kind` is one of the code kinds;
+ * `spec` is that kind's own fields, as the scene writer's schema has them.
+ */
+export interface PlanChart {
+  kind: string;
+  spec: Record<string, unknown>;
+}
+
+/** A kit piece on the set (kit/registry). */
+export interface PlanActor {
+  /** The shot's own name for it, so info, camera and moves can point at it. */
+  id: string;
+  /** A kit id, e.g. "people.silhouette.walking", "vehicle.ship.steam". */
+  kit: string;
+  params?: Record<string, string | number | boolean>;
+  /** Where it stands: a target name (a place on the map, a part of the set) or a position word. */
+  place?: string;
+  /** A side's name from the visual system, for its colour. */
+  side?: string;
+  moves?: { move: string; on: string; to?: string }[];
+}
+
+export interface PlanInfo {
+  recipe: ShotInfoRecipe;
+  target?: string;
+  to?: string;
+  on: string;
+  until?: string;
+  text?: string;
+  value?: number;
+  from?: number;
+  unit?: string;
+  colour?: string;
+  replace?: string;
+}
+
+export interface PlanCamera {
+  move: ShotCameraMove;
+  target?: string;
+  on: string;
+  /** A push's or a pull's size: small, medium or large; code turns it into a fraction. */
+  amount?: 'small' | 'medium' | 'large';
+}
+
+/** What a target name can stand for. */
+export type TargetKind =
+  | 'place'
+  | 'person'
+  | 'number'
+  | 'region'
+  | 'seam'
+  | 'route'
+  | 'photo'
+  | 'document'
+  | 'part'
+  | 'actor'
+  | 'claim';
+
+/** One entry of a scene's target registry: what the board may name, and what it resolves to. */
+export interface RegistryEntry {
+  /** The name the board uses, e.g. "place:Kano", "person:Herbert Macaulay", "number:c12". */
+  name: string;
+  kind: TargetKind;
+  /** A few words for the board's prompt. */
+  about: string;
+  /** The research claim it rests on, when it is a fact. */
+  claim?: string;
+  geo?: { lng: number; lat: number };
+  /** A feature of the scene's geo asset: a region, a seam, a route, a pin. */
+  feature?: { asset: string; id: string };
+  /** A picture the picture desk cleared (photos, portraits, documents). */
+  picture?: { asset: string; credit: string };
+  value?: number;
+  unit?: string;
+  /** Wikidata's id for a person, place or thing, when known. */
+  qid?: string;
+}
+
+/** What the board may name in a scene, built from the research log, the world, the show map and the picture desk. */
+export interface TargetRegistry {
+  entries(): RegistryEntry[];
+  resolve(name: string): RegistryEntry | null;
+}
+
+/** A problem a check found in a plan or a timed scene, with the shot it is in. */
+export interface ShotProblem {
+  shot: number;
+  code: string;
+  /** In plain words, for the board's second try and for the logs. */
+  message: string;
+}

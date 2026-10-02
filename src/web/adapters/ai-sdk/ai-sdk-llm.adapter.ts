@@ -86,6 +86,7 @@ import {
 } from '../editor-prompts';
 import { shotBoardPrompt } from '../shot-prompts';
 import { shotBoardSchema } from './shot-schemas';
+import { pictureFocusPrompt, pictureFocusSchema } from './picture-schemas';
 import {
   effortOptions,
   filled,
@@ -3118,6 +3119,37 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     );
     return {
       value: filled(result.object, full) as Record<string, unknown>,
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
+  async pictureFocus(input: {
+    png: Buffer;
+    about: string;
+  }): Promise<LlmResult<Record<string, unknown>>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('picture_focus');
+    const result = await generateObject({
+      model,
+      schema: pictureFocusSchema,
+      system: pictureFocusPrompt(),
+      messages: [
+        {
+          role: 'user' as const,
+          content: [
+            { type: 'file' as const, data: input.png, mediaType: 'image/png' },
+            {
+              type: 'text' as const,
+              text: `The archive says this picture shows: ${input.about.slice(0, 200)}`,
+            },
+          ],
+        },
+      ],
+      maxRetries: this.maxRetries(),
+    });
+    return {
+      value: result.object,
       usage: this.usage(ref, result.usage, started),
     };
   }

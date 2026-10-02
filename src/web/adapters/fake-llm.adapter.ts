@@ -2631,6 +2631,24 @@ export class FakeLlmAdapter implements LlmGatewayPort {
     };
   }
 
+  /** A picture's subject in its middle, one person's face above it: a plain photograph. */
+  async pictureFocus(input: {
+    png: Buffer;
+    about: string;
+  }): Promise<LlmResult<Record<string, unknown>>> {
+    const started = Date.now();
+    void input;
+    return Promise.resolve({
+      value: {
+        faces: ['C2', 'D2'],
+        subject: ['C2', 'D2', 'C3', 'D3', 'C4', 'D4'],
+        people: 1,
+        kind: 'photograph',
+      },
+      usage: this.usage(started, 900, 60),
+    });
+  }
+
   async moderate(input: {
     text: string;
   }): Promise<{ flagged: boolean; categories: string[] }> {

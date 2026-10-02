@@ -172,6 +172,7 @@ import { StudioController } from './web/controllers/studio.controller';
 import { StudioService } from './business/handlers/studio/studio.service';
 import { StudioDocumentsController } from './web/controllers/studio-documents.controller';
 import { StudioExportController } from './web/controllers/studio-export.controller';
+import { StudioPicturesController } from './web/controllers/studio-pictures.controller';
 import { StudioExportService } from './business/handlers/studio/studio-export.service';
 import { StudioDocumentsService } from './business/handlers/studio/studio-documents.service';
 import { StudioDocumentsQuery } from './query/studio-documents.query';
@@ -407,6 +408,7 @@ const queries = [
     StudioController,
     StudioDocumentsController,
     StudioExportController,
+    StudioPicturesController,
     GuidedController,
     InstitutionsController,
     AdminInstitutionsController,

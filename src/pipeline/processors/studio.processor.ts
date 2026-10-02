@@ -123,7 +123,13 @@ import type {
   StudioCheckVerdict,
 } from '../../business/ports/llm.port';
 import type { StoragePort } from '../../business/ports/storage.port';
-import { JOB_QUEUE, LLM_GATEWAY, STORAGE } from '../../business/ports/tokens';
+import {
+  JOB_QUEUE,
+  LLM_GATEWAY,
+  PICTURE_DESK,
+  STORAGE,
+} from '../../business/ports/tokens';
+import type { DeskLike } from '../../business/domain/pictures/episode';
 import type {
   JobQueuePort,
   StudioAsk,
@@ -742,6 +748,10 @@ export class StudioProcessor {
     @Optional() private readonly config?: ConfigService,
     /** An explainer made from a document: its pages, as notes or as they are (studio-material). */
     @Optional() private readonly material?: StudioMaterialService,
+    /** Archive photos and portraits for a shots episode (WP11). */
+    @Optional()
+    @Inject(PICTURE_DESK)
+    private readonly pictures?: DeskLike,
   ) {
     this.editor = new StudioEditorProcessor({
       studio: this.studio,
@@ -750,6 +760,7 @@ export class StudioProcessor {
       queue: this.queue,
       setting: (name) => this.config?.get<string>(name) ?? process.env[name],
       material: this.material ?? null,
+      pictures: this.pictures ?? null,
       logger: this.logger,
     });
   }

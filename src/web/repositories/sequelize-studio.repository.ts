@@ -33,6 +33,7 @@ import {
   StudioShowModel,
 } from '../database/models';
 import { newId } from '../database/uuid';
+import type { SceneFrames } from '../../business/domain/shots/critic-loop';
 
 /** JSON as kept, read back; null for none, or for what cannot be read. */
 function parsed(kept: string | null | undefined): unknown {
@@ -51,6 +52,14 @@ const json = (value: unknown) =>
 function activityOf(kept: string | null | undefined): StudioActivity | null {
   const value = parsed(kept) as StudioActivity | null;
   return value && typeof value === 'object' && typeof value.at === 'string'
+    ? value
+    : null;
+}
+
+/** A scene's frames as kept, read back: null for none, or for what cannot be read. */
+function framesOf(kept: string | null | undefined): SceneFrames | null {
+  const value = parsed(kept) as SceneFrames | null;
+  return value && typeof value === 'object' && Array.isArray(value.rounds)
     ? value
     : null;
 }
@@ -136,6 +145,7 @@ export class SequelizeStudioRepository implements StudioRepository {
       durationMs: row.durationMs,
       activity: activityOf(row.activity),
       ...(row.twinOf ? { twinOf: row.twinOf } : {}),
+      frames: framesOf(row.frames),
       updatedAt: row.updatedAt,
     };
   }
@@ -356,7 +366,7 @@ export class SequelizeStudioRepository implements StudioRepository {
     id: string,
     patch: Parameters<StudioRepository['updateScene']>[1],
   ): Promise<void> {
-    const { sheet, previousSheet, problems, ...rest } = patch;
+    const { sheet, previousSheet, problems, frames, ...rest } = patch;
     await this.scenes.update(
       {
         ...rest,
@@ -365,6 +375,7 @@ export class SequelizeStudioRepository implements StudioRepository {
           ? { previousSheet: json(previousSheet) }
           : {}),
         ...(problems !== undefined ? { problems: json(problems) } : {}),
+        ...(frames !== undefined ? { frames: json(frames) } : {}),
       },
       { where: { id } },
     );

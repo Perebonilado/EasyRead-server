@@ -2,9 +2,12 @@ import { WALL_RESEARCH, WALL_ROWS, WALL_WORLD } from './__fixtures__/wall';
 import { mentionsOf, numbersSaid } from './shot-mentions';
 import {
   PLAN_PACE,
+  cutIn,
   planEvents,
   planGaps,
+  planHolds,
   reframes,
+  replaceSpan,
   spareShots,
   stallWords,
 } from './shot-pace';
@@ -167,5 +170,117 @@ describe("a plan's pace, on its words", () => {
     // Either of the shots at 4 and at 8 may go (8 words each side is
     // inside the pace); the last may not: the stretch to the end grows.
     expect(spareShots(plan, n)).toEqual([1, 2]);
+  });
+});
+
+describe('a declared hold, and a picture cut into a shot', () => {
+  const n = narrationOf(sceneNarration(WALL_ROWS));
+  const photo = (on: string): PlanShot =>
+    shot({
+      on,
+      set: { kind: 'photo', photo: 'photo:Berlin 1961' },
+      camera: [{ move: 'push', on, amount: 'small' }],
+      focal: 'set',
+    });
+
+  it('excuses a stretch a hold runs through at least half of, as the frames checker does', () => {
+    const still: ShotPlan = { shots: [photo('In 1961, Berlin')] };
+    expect(planGaps(still, n)).toHaveLength(1);
+    const held: ShotPlan = {
+      shots: [
+        {
+          ...still.shots[0],
+          camera: [
+            ...still.shots[0].camera,
+            { move: 'hold', on: 'two overnight' },
+          ],
+        },
+      ],
+    };
+    // The hold runs from its words to the shot's end.
+    expect(planHolds(held, n)).toEqual([[6, n.keys.length]]);
+    expect(planGaps(held, n)).toEqual([]);
+    // A hold that comes too late leaves the stretch.
+    const late: ShotPlan = {
+      shots: [
+        {
+          ...still.shots[0],
+          camera: [...still.shots[0].camera, { move: 'hold', on: 'held on' }],
+        },
+      ],
+    };
+    expect(planGaps(late, n)).toHaveLength(1);
+  });
+
+  it('puts a picture over a shot’s words, the shot going on after it with what it brings on there', () => {
+    const map: PlanShot = shot({
+      on: 'In 1961',
+      set: { kind: 'map', tilt: 'flat' },
+      info: [
+        { recipe: 'pin', target: 'place:Berlin', on: 'Berlin' },
+        { recipe: 'seam', target: 'seam:inner border', on: 'inner border' },
+        { recipe: 'mark', target: 'place:Berlin', on: 'Brandenburg Gate' },
+      ],
+      focal: 'place:Berlin',
+    });
+    const shots = [map];
+    // Over "The inner border ran for 1,393 kilometres" (8 to 16).
+    expect(replaceSpan(shots, 0, 8, 16, photo('The inner border'), n)).toBe(
+      true,
+    );
+    expect(shots.map((s) => [s.on, s.set.kind, s.info.length])).toEqual([
+      ['In 1961', 'map', 1],
+      ['The inner border', 'photo', 0],
+      ['In 1987, Reagan', 'map', 1],
+    ]);
+    expect(shots[0].join).toBe('cut');
+    expect(shots[2].focal).toBe('place:Berlin');
+    // Too few words for the picture: nothing changes.
+    expect(replaceSpan(shots, 1, 12, 13, photo('Berlin'), n)).toBe(false);
+    expect(shots).toHaveLength(3);
+  });
+
+  it('cuts a picture in as its subject is named, holding until the shot’s next change', () => {
+    const quote: PlanShot = shot({
+      on: 'In 1987',
+      set: {
+        kind: 'chart',
+        chart: {
+          kind: 'quote',
+          spec: { text: 'Mr. Gorbachev, tear down this wall!', speaker: null },
+        },
+      },
+      info: [{ recipe: 'mark', target: 'part:speaker', on: 'Reagan' }],
+      camera: [{ move: 'push', on: 'Tear down this wall', amount: 'small' }],
+      focal: 'set',
+    });
+    const before = shot({ on: 'In 1961', set: { kind: 'map' }, focal: 'set' });
+    const shots = [before, quote];
+    // Reagan, named as the quote's shot begins: his picture takes its
+    // first words, the quote goes on at its push, the mark with it.
+    expect(cutIn(shots, 18, photo('Reagan'), n)).toBe(true);
+    expect(shots.map((s) => [s.on, s.set.kind])).toEqual([
+      ['In 1961', 'map'],
+      ['In 1987', 'photo'],
+      ['Tear down this', 'chart'],
+    ]);
+    expect(shots[2].info).toEqual([
+      { recipe: 'mark', target: 'part:speaker', on: 'Tear down this' },
+    ]);
+    // Nothing before the first shot to cut into.
+    expect(cutIn([], 3, photo('Berlin'), n)).toBe(false);
+  });
+
+  it('is the same every time for the same plan', () => {
+    const plan: ShotPlan = {
+      shots: [
+        {
+          ...photo('In 1961, Berlin'),
+          camera: [{ move: 'hold', on: 'two overnight' }],
+        },
+      ],
+    };
+    expect(planGaps(plan, n)).toEqual(planGaps(plan, n));
+    expect(planHolds(plan, n)).toEqual(planHolds(plan, n));
   });
 });

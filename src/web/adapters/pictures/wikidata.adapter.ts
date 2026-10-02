@@ -140,6 +140,29 @@ export class WikidataAdapter {
     }));
   }
 
+  /** Items by their words (CirrusSearch over labels, descriptions and aliases), people only when asked. */
+  async searchText(
+    words: string,
+    opts: { limit: number; humans?: boolean },
+  ): Promise<{ qid: string }[]> {
+    const url = `${API}?${new URLSearchParams({
+      action: 'query',
+      list: 'search',
+      srsearch: `${words}${opts.humans ? ' haswbstatement:P31=Q5' : ''}`,
+      srnamespace: '0',
+      srlimit: String(Math.max(1, Math.min(20, opts.limit))),
+      srprop: '',
+      format: 'json',
+    })}`;
+    const said = await this.http.json<{
+      query?: { search?: { title?: string }[] };
+    }>(url);
+    return (said.query?.search ?? [])
+      .map((hit) => hit.title ?? '')
+      .filter((qid) => /^Q\d+$/u.test(qid))
+      .map((qid) => ({ qid }));
+  }
+
   /** Entities by id, fifty at a time. */
   async entities(ids: readonly string[], props: string): Promise<WikiEntity[]> {
     const out: WikiEntity[] = [];

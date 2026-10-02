@@ -180,8 +180,26 @@ export const shotActorSchema = z.object({
   expression: maybe(),
   prop: maybe(),
   name: maybe(),
+  // A device of the UI kit: its kind of screen (or its pieces), theme,
+  // the script's words on it, and parts that start in another state.
+  screen: maybe(),
+  pieces: maybe(),
+  theme: maybe(),
+  title: maybe(),
+  words: maybe(),
+  items: maybe(),
+  state: maybe(),
   moves: z
-    .array(z.object({ move: words(), on: words(), to: maybe() }))
+    .array(
+      z.object({
+        move: words(),
+        on: words(),
+        to: maybe(),
+        // A cursor's: the state its click leaves the part in, or a slider's value; the words it types.
+        state: maybe(),
+        text: maybe(),
+      }),
+    )
     .catch([]),
 });
 

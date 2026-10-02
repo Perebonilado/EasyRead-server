@@ -10,6 +10,7 @@ import type { DocumentPick } from '../domain/studio/studio-document';
 import type { StudioEditor } from '../domain/studio/studio-editor';
 import type { StudioEditorial } from '../domain/studio/studio-editorial';
 import type { FilmShape } from '../domain/scene-shape';
+import type { SceneFrames } from '../domain/shots/critic-loop';
 
 /**
  * Where an episode has got to: its brief being talked through, its
@@ -139,6 +140,8 @@ export interface StudioSceneRecord {
   activity?: StudioActivity | null;
   /** A twin episode's scene: the scene of the episode it is the twin of that it is the same scene of. */
   twinOf?: string | null;
+  /** What the critic's loop did to it (a scene of shots), its last rounds; absent or null before any. */
+  frames?: SceneFrames | null;
   updatedAt: Date;
 }
 
@@ -302,6 +305,7 @@ export interface StudioRepository {
         | 'thumbKey'
         | 'madeHash'
         | 'durationMs'
+        | 'frames'
       >
     >,
   ): Promise<void>;

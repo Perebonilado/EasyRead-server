@@ -7,17 +7,24 @@
  * makes the box; a model never writes a coordinate.
  */
 import { z } from 'zod';
-import { CELLS, PICTURE_KINDS } from '../../../business/domain/pictures/focus';
+import {
+  CELLS,
+  PICTURE_KINDS,
+  SHOWS,
+} from '../../../business/domain/pictures/focus';
 
 const cells = () => z.array(z.string().catch('')).max(36).catch([]);
 
 export const pictureFocusSchema = z.object({
   faces: cells(),
   subject: cells(),
-  people: z.number().int().min(0).max(30).catch(0),
+  // Any count: focusOf rounds it and holds it to 0–30. Capped here, a
+  // crowd of forty was caught as no one.
+  people: z.number().catch(0),
   kind: z
     .enum(PICTURE_KINDS as unknown as [string, ...string[]])
     .catch('other'),
+  shows: z.enum(SHOWS as unknown as [string, ...string[]]).catch('unsure'),
 });
 
 /** What the desk asks of a picture, every answer named from a list. */
@@ -29,7 +36,8 @@ export function pictureFocusPrompt(): string {
     '- faces: every cell holding part of a clearly visible human face (none for none);',
     '- subject: the cells holding what the picture is of: the people, the building, the scene that matters;',
     '- people: how many people are clearly visible;',
-    `- kind: what the picture is, one of ${PICTURE_KINDS.join(', ')}. "photograph-of-a-print" is a photograph of another photograph or a framed print (its edges, glare, a wall behind it); "screen" is a photograph of a screen or a frame of a video.`,
+    `- kind: what the picture is, one of ${PICTURE_KINDS.join(', ')}. "photograph-of-a-print" is a camera's photograph of another photograph or a framed print (glare, a wall or a frame behind it, its edges askew); a flat scan of a photograph, a postcard or a page, its edges straight and its border plain, is a "photograph"; "screen" is a photograph of a screen or a frame of a video.`,
+    `- shows: when you are asked whether it shows something (a place, an event, a thing), ${SHOWS.join(', ')}. Judge only by what you can see, never by the archive's words. Yes only when the picture itself shows that very kind of scene or thing: for a place, the place itself (its streets, buildings, skyline or landscape); for an event, people taking part in that kind of event with what it was about (a ceremony, a conference table, the apparatus being demonstrated); for a thing, the object itself. No when it shows something else: a plaque, a memorial or a museum of it; the place as it is now, in colour, for an event long ago; a landmark of another city than the one asked; a map, a document or a poster; a close portrait of one person; a sky, a field or a crowd that could be anywhere. Unsure when you cannot tell. When nothing is asked, unsure.`,
     `Cells only from: ${CELLS.join(' ')}.`,
   ].join('\n');
 }

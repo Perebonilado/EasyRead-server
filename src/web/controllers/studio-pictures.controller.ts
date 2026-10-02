@@ -15,9 +15,11 @@ const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
  * tech §4.3). Open without an account, as a film shared by its link is:
  * the stage draws them with <img>, which cannot send a token (the player,
  * the render page and a shared film all load them the same way); every
- * one is a public-domain, CC0 or CC BY work of a public archive, found at
- * an id nobody can guess. A refused picture, or one with no copy, is not
- * found. A picture never changes once kept, so browsers keep it for good.
+ * one is a file its archive shows the world, credited in the film and its
+ * description (under the licence switch, PICTURE_LICENCE, a public-domain,
+ * CC0 or CC BY one only), found at an id nobody can guess. A refused
+ * picture, or one with no copy, is not found. A picture never changes once
+ * kept, so browsers keep it for good.
  */
 @Controller('studio/pictures')
 export class StudioPicturesController {

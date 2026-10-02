@@ -178,6 +178,43 @@ describe("a picture's words", () => {
     expect(
       yearOf(file({ title: 'Lagos street', date: '', description: '' })),
     ).toBeUndefined();
+    // A span of years is someone's term, not the photograph's year.
+    expect(
+      yearOf(
+        file({
+          title: 'Sir James Robertson arriving for the state banquet',
+          date: '',
+          description:
+            'Sir James Robertson, the last colonial Governor General of Nigeria (1955 -1960), arriving for state banquet, October 1960.',
+        }),
+      ),
+    ).toBe(1960);
+    // A Navy print put on Flickr in 2015, dated by its scan: no year.
+    expect(
+      yearOf(
+        file({
+          title: '330-ps-7978-usn-708689 16257864287 o',
+          date: '2015-02-24',
+          uploaded: '2015-03-01',
+          description: '',
+          categories: ['PD US Navy'],
+        }),
+      ),
+    ).toBeUndefined();
+    // A crowd upload dated the year it went online keeps its year.
+    expect(
+      yearOf(
+        file({
+          title: 'Ocean Beach',
+          date: '2015-02-24',
+          uploaded: '2015-03-01',
+          description: '',
+          artist: 'A Walker',
+          credit: 'Own work',
+          categories: ['San Francisco'],
+        }),
+      ),
+    ).toBe(2015);
   });
 
   it("writes a person's years and who they were in three words", () => {
@@ -199,5 +236,29 @@ describe("a picture's words", () => {
   it('clips words at a word’s end', () => {
     expect(clipWords('one two three four', 9)).toBe('one two');
     expect(clipWords('short', 9)).toBe('short');
+  });
+
+  it('keeps a photographer’s initial in their name: “Philo T. Farnsworth”, not “Philo T”', () => {
+    expect(
+      sourceOf({
+        source: 'commons',
+        artist: 'Philo T. Farnsworth',
+        credit: '',
+        description: 'Farnsworth image dissector tube',
+        categories: [],
+      }),
+    ).toBe('Philo T. Farnsworth');
+  });
+
+  it('names an archive that is its own photographer once', () => {
+    expect(
+      sourceOf({
+        source: 'commons',
+        artist: 'US Navy',
+        credit: 'US Navy',
+        description: '',
+        categories: ['PD US Navy'],
+      }),
+    ).toBe('US Navy');
   });
 });

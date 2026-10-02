@@ -67,6 +67,22 @@ export function shotsSwitchOn(setting: string | undefined | null) {
   return /^(?:on|true|1|yes)$/iu.test((setting ?? '').trim());
 }
 
+/**
+ * Whether a scene of shots is looked at by the critic once made
+ * (EXPLAINER_CRITIC, explainer-animation-plan §9.3; WP13): on with shots
+ * unless set off, so every film of shots is scored and fixed before it is
+ * shown.
+ */
+export function criticSwitchOn(setting: string | undefined | null) {
+  return !/^(?:off|false|0|no)$/iu.test((setting ?? '').trim());
+}
+
+/** What the critic may spend on an episode, in dollars (EXPLAINER_CRITIC_BUDGET): $0.60 unless set. */
+export function criticBudget(setting: string | undefined | null): number {
+  const n = Number.parseFloat((setting ?? '').trim());
+  return Number.isFinite(n) && n >= 0 ? n : 0.6;
+}
+
 /** A run of rows that will be one scene: from `first` to `last`, of one act and family. */
 interface Run {
   first: number;

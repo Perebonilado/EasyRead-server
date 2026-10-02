@@ -6,6 +6,8 @@ import {
   editorOutline,
   sceneOfRow,
   shotsSwitchOn,
+  criticBudget,
+  criticSwitchOn,
 } from './studio-editor-cut';
 
 // Its places and people the research's, each with a claim (worldOf).
@@ -177,5 +179,22 @@ describe('the shots switch (EXPLAINER_SHOTS)', () => {
       expect(shotsSwitchOn(on)).toBe(true);
     for (const off of [undefined, null, '', 'off', 'false', '0', 'no', 'shots'])
       expect(shotsSwitchOn(off)).toBe(false);
+  });
+});
+
+describe("the critic's switch and budget (EXPLAINER_CRITIC, EXPLAINER_CRITIC_BUDGET)", () => {
+  it('is on with shots unless set off', () => {
+    for (const on of [undefined, null, '', 'on', 'yes', 'anything'])
+      expect(criticSwitchOn(on)).toBe(true);
+    for (const off of ['off', 'OFF', 'false', '0', 'no', ' off '])
+      expect(criticSwitchOn(off)).toBe(false);
+  });
+
+  it('spends $0.60 an episode unless set', () => {
+    expect(criticBudget(undefined)).toBe(0.6);
+    expect(criticBudget('0.25')).toBe(0.25);
+    expect(criticBudget('0')).toBe(0);
+    expect(criticBudget('-1')).toBe(0.6);
+    expect(criticBudget('lots')).toBe(0.6);
   });
 });

@@ -62,6 +62,8 @@ export type PlanSet =
   | { kind: 'document'; document: string }
   | { kind: 'set'; set: PlanSetScene }
   | { kind: 'chart'; chart: PlanChart }
+  /** A device's screen on the UI kit's desk (WP18): the devices and the cursor are the shot's actors. */
+  | { kind: 'screen' }
   | { kind: 'plain' };
 
 /** A code-drawn set: a kind of place, never a named one (kit/sets). */
@@ -121,7 +123,18 @@ export interface PlanActor {
   place?: string;
   /** A side's name from the visual system, for its colour. */
   side?: string;
-  moves?: { move: string; on: string; to?: string }[];
+  /**
+   * Its moves on their words, each to a target; a cursor's (the UI kit's)
+   * also with the state its click leaves a part in (or a slider's value),
+   * and the words it types.
+   */
+  moves?: {
+    move: string;
+    on: string;
+    to?: string;
+    state?: string;
+    text?: string;
+  }[];
 }
 
 export interface PlanInfo {
@@ -230,6 +243,14 @@ export interface RegistryEntry {
   aliases?: string[];
   /** A person's described likeness from the look notes: an illustrated show draws their character from it. */
   likeness?: string;
+  /**
+   * What a photo entry shows (Richard, 2026-10-02: real pictures first, the
+   * map only for geography): a person (another photo of them), a place, a
+   * thing or an event, by its name in this registry where it has one (a
+   * person's or a place's), else the research's words. The board cuts to
+   * it when the voice names what it shows, and the stand-in takes it first.
+   */
+  shows?: { kind: 'person' | 'place' | 'thing' | 'event'; name: string };
 }
 
 /** What the board may name in a scene, built from the research log, the world, the show map and the picture desk. */

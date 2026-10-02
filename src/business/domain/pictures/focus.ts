@@ -8,7 +8,9 @@
  *
  * What it says also screens a portrait: one that shows several people, or
  * that is a photograph of a print, a screen or a statue, is no portrait of
- * them (research §3.5: a wrong face is worse than none).
+ * them (research §3.5: a wrong face is worse than none). Asked what a
+ * picture of an event or a thing should show, it says whether it does
+ * (yes, no or unsure): a picture of an event is taken only when it agrees.
  */
 
 /** The grid the model names cells of. */
@@ -28,6 +30,10 @@ export const PICTURE_KINDS = [
 ] as const;
 export type PictureKindSeen = (typeof PICTURE_KINDS)[number];
 
+/** Whether a picture shows what it was asked to. */
+export const SHOWS = ['yes', 'no', 'unsure'] as const;
+export type Shows = (typeof SHOWS)[number];
+
 /** Every cell's name, "A1" to "F6". */
 export const CELLS: readonly string[] = Array.from(
   { length: GRID * GRID },
@@ -42,6 +48,8 @@ export interface Focus {
   subject: [number, number, number, number] | null;
   people: number;
   kind: PictureKindSeen;
+  /** Whether it shows what it was asked to (an event, a thing); unsure when nothing was asked. */
+  shows: Shows;
 }
 
 /** Cells named, read from the closed list ("b2", " C 3" are B2 and C3). */
@@ -86,11 +94,15 @@ export function focusOf(raw: unknown): Focus {
   const kind = PICTURE_KINDS.includes(said.kind as PictureKindSeen)
     ? (said.kind as PictureKindSeen)
     : 'other';
+  const shows = SHOWS.includes(said.shows as Shows)
+    ? (said.shows as Shows)
+    : 'unsure';
   return {
     faces: boxOfCells(cellsOf(said.faces)),
     subject: boxOfCells(cellsOf(said.subject)),
     people: Number.isFinite(people) ? Math.min(30, Math.max(0, people)) : 0,
     kind,
+    shows,
   };
 }
 
@@ -132,4 +144,43 @@ export function photoDoubt(focus: Focus): string | null {
     return 'it is a photograph of a print, not the print';
   if (focus.kind === 'screen') return 'it is a picture of a screen';
   return null;
+}
+
+/** Why a photo of a person among others will not do, by what the model saw; null when it can. */
+export function personPhotoDoubt(focus: Focus): string | null {
+  const doubt = photoDoubt(focus);
+  if (doubt) return doubt;
+  if (focus.kind === 'statue') return 'it is a statue of them';
+  if (focus.kind === 'document' || focus.kind === 'other')
+    return `it is no photograph of them (${focus.kind})`;
+  // No one: no count and no face seen.
+  if (focus.people < 1 && !focus.faces) return 'no one shows in it';
+  return null;
+}
+
+/**
+ * Why a photo of a place, an event or a thing will not do: the model does
+ * not see in it what was asked; or, for a place or an event, it is no
+ * photograph at all (a map, a page, a drawing). A thing may be drawn.
+ */
+export function agreeDoubt(
+  focus: Focus,
+  asked: string,
+  opts: { photograph?: boolean; unsure?: boolean } = {},
+): string | null {
+  const doubt = photoDoubt(focus);
+  if (doubt) return doubt;
+  if (
+    opts.photograph &&
+    (focus.kind === 'document' ||
+      focus.kind === 'drawing' ||
+      focus.kind === 'other')
+  )
+    return `it is no photograph (${focus.kind})`;
+  // A place's photo, its name and year already the file's own, will do
+  // unless the look sees something else; an event's and a thing's need it
+  // to see them.
+  return focus.shows === 'yes' || (opts.unsure && focus.shows === 'unsure')
+    ? null
+    : `the look does not see ${asked} in it (${focus.shows})`;
 }

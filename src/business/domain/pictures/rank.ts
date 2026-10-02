@@ -9,11 +9,17 @@
  *           + 0.10·tier + 0.05·sourceRank   (+ 0.10 for a person's own
  *           Wikidata picture, house: the one their editors chose)
  */
-import { nameWords, textWords } from './match';
-import type { PictureKind, PictureQuery, SourceFile } from './types';
+import { placeNamed, placesIn } from '../scene-map-places';
+import { kmBetween, nameWords, stems, textWords } from './match';
+import type {
+  PictureKind,
+  PictureQuery,
+  PictureUseOf,
+  SourceFile,
+} from './types';
 
 /** What a picture is for: a person's portrait card, a full photo, a document's page. */
-export type PictureUse = 'portrait' | 'photo' | 'document';
+export type PictureUse = PictureUseOf;
 
 export const useOf = (kind: PictureKind): PictureUse =>
   kind === 'person' ? 'portrait' : kind === 'document' ? 'document' : 'photo';
@@ -115,7 +121,10 @@ export function scoreOf(input: ScoreInput): {
   const era = eraOf(input.year, input.years);
   const tier = input.tier === 'A' ? 1 : 0.8;
   const sourceRank = file.institutional ? 1 : 0.6;
-  const chosen = use === 'portrait' && file.chosen ? CHOSEN : 0;
+  // Their editors' choice: a person's own portrait, or a place's own
+  // picture when any good photo of it will do (no years asked).
+  const chosen =
+    file.chosen && (use === 'portrait' || !input.years?.length) ? CHOSEN : 0;
   const score =
     0.25 * res +
     0.2 * crop +
@@ -142,6 +151,32 @@ export function scoreOf(input: ScoreInput): {
 }
 
 // ── Whether it can serve ──────────────────────────────────────────────────
+
+/**
+ * Work made to mock or to hate (propaganda, caricature, racist or
+ * antisemitic material): never shown as a picture of anyone or anything,
+ * whatever it depicts (a 1940 montage "Kto rządzi USA?" names David
+ * Sarnoff among the men it hates).
+ */
+const CONTEMPT =
+  /\bpropaganda\b|anti-?semiti|\bcaricatur|\bracis[mt]\b|\bhate\b|\bslur|blackface|\bjudenfrage\b|\bstürmer\b/iu;
+
+/** A picture made, not a photograph of the moment: a poster, a cartoon, a collage, an advertisement, a cover. */
+const MADE_PICTURE =
+  /\bposters?\b|\bcartoons?\b|\bcollage\b|\bmontage\b|\bmemes?\b|\badvertis\w*|\bsheet music\b|\b(?:book|magazine|album|record) cover\b|\bleaflets?\b|\bflyers?\b/iu;
+
+/** Why a file is no picture of anyone or anything: hate's or mockery's work; or, but for a thing's, a made picture. */
+export function contemptOf(
+  file: Pick<SourceFile, 'title' | 'description' | 'categories'>,
+  made = true,
+): string | null {
+  const said = `${file.title} ${file.description} ${file.categories.join(' ')}`;
+  if (CONTEMPT.test(said))
+    return 'it is propaganda or caricature, made to mock or to hate';
+  if (made && MADE_PICTURE.test(said))
+    return 'it is a poster, a cartoon or a collage, not a photograph';
+  return null;
+}
 
 /** A title that names more than one subject. */
 const GROUP_TITLE =
@@ -177,7 +212,9 @@ const THEIRS = /['’]s\s+\p{L}/u;
  * never cut down to one of its faces.
  */
 export function portraitOf(
-  file: Pick<SourceFile, 'title' | 'description' | 'depicts' | 'chosen'>,
+  file: Pick<SourceFile, 'title' | 'description' | 'depicts' | 'chosen'> & {
+    categories?: readonly string[];
+  },
   person: { qid: string; name: string; died?: number },
   year?: number,
 ): { ok: true } | { ok: false; reason: string } {
@@ -191,6 +228,8 @@ export function portraitOf(
     (nameWords(person.name).length > 1 &&
       namesIt(file.title, nameWords(person.name).slice(-1)[0]));
   if (!ofThem) return { ok: false, reason: 'it does not say it is of them' };
+  const made = contemptOf({ ...file, categories: file.categories ?? [] });
+  if (made) return { ok: false, reason: made };
   if (depicts.length > 1 && depicts.some((d) => d.qid !== person.qid))
     return { ok: false, reason: 'it depicts someone else too' };
   if (GROUP_TITLE.test(file.title) || GROUP_WORDS.test(file.description))
@@ -235,6 +274,8 @@ export function photoOf(
   const depicted = Boolean(qid && file.depicts?.some((d) => d.qid === qid));
   const named = depicted || Boolean(file.chosen) || namesIt(said, query.name);
   if (!named) return { ok: false, reason: `it does not name ${query.name}` };
+  const made = contemptOf(file);
+  if (made) return { ok: false, reason: made };
   const within = [query.place ?? []]
     .flat()
     .filter(
@@ -265,5 +306,306 @@ export function photoOf(
         reason: `taken in ${year}, ${off} years from the research’s`,
       };
   }
+  return { ok: true };
+}
+
+// ── More photos of a person, and photos of events and things ─────────────
+
+/** Likenesses of a person that are not them as they were: in bronze, in paint on a wall, on a note or a stamp. */
+const LIKENESS =
+  /\b(?:statue|bust|monument|memorial|grave|tomb|mausoleum|mural|plaque|sculpture|banknote|bank note|stamp|coin|waxwork|effigy|signature)\b/iu;
+
+/** "Azikiwe's house": a title about a thing of theirs. */
+const THEIR_THING =
+  /['’]s\s+(?:house|home|residence|birthplace|estate|grave|tomb|car|office|desk|library|statue|bust|signature)\b/iu;
+
+/** What is named after a person rather than of them: "Ahmadu Bello University", "Ahmadu Bello Way". */
+const NAMED_FOR =
+  'university|stadium|way|road|street|avenue|airport|square|bridge|hall|college|school|hospital|library|mosque|house|museum|park|estate|crescent|close|drive|lane|centre|center|foundation|award|prize';
+
+/**
+ * Whether a file can be one more photo of a person (Richard, 2026-10-02:
+ * the board comes back to a person without repeating one image): of them
+ * (their own Wikidata picture, a file that says it depicts them, one that
+ * names them in full, or one of their own category naming them by their
+ * surname), never a likeness of them in bronze or on a note, nor a thing
+ * named after them, nor made after they died, and dated unless it says it
+ * depicts them. Others may stand with them, as they do in a delegation, a
+ * ceremony or a meeting: a photo, unlike a portrait, may be of a group.
+ */
+export function personPhotoOf(
+  file: Pick<
+    SourceFile,
+    'title' | 'description' | 'categories' | 'depicts' | 'chosen'
+  >,
+  person: { qid: string; name: string; died?: number; category?: string },
+  year?: number,
+): { ok: true } | { ok: false; reason: string } {
+  const said = Boolean(file.depicts?.some((d) => d.qid === person.qid));
+  const words = nameWords(person.name);
+  const surname = words.length > 1 ? words[words.length - 1] : '';
+  const category = person.category?.trim().toLowerCase();
+  const filed = Boolean(
+    category &&
+    file.categories.some((c) => c.trim().toLowerCase() === category),
+  );
+  const ofThem =
+    file.chosen ||
+    said ||
+    namesIt(file.title, person.name) ||
+    namesIt(file.description, person.name) ||
+    (filed && surname.length >= 4 && namesIt(file.title, surname));
+  if (!ofThem) return { ok: false, reason: 'it does not say it is of them' };
+  const made = contemptOf(file);
+  if (made) return { ok: false, reason: made };
+  if (
+    LIKENESS.test(file.title) ||
+    LIKENESS.test(file.description) ||
+    THEIR_THING.test(file.title)
+  )
+    return {
+      ok: false,
+      reason: 'it is a likeness or a thing of theirs, not them',
+    };
+  if (
+    surname &&
+    new RegExp(`\\b${surname}\\s+(?:${NAMED_FOR})\\b`, 'iu').test(
+      textWords(file.title).join(' '),
+    )
+  )
+    return { ok: false, reason: 'it is of something named after them' };
+  if (year !== undefined && person.died !== undefined && year > person.died + 1)
+    return {
+      ok: false,
+      reason: `made in ${year}, after they died in ${person.died}`,
+    };
+  if (year === undefined && !file.chosen && !said)
+    return {
+      ok: false,
+      reason: 'it has no date, and nobody says it depicts them',
+    };
+  return { ok: true };
+}
+
+/**
+ * Verbs a timeline tells its events with ("Baird demonstrates television",
+ * "the BBC opens…"): nothing a photo's title names, so never searched by.
+ */
+export const EVENT_VERBS = new Set(
+  'become becomes move moves set sets expose exposes ask asks choose chooses establish establishes introduce introduces announce announces open opens drop drops transmit transmits demonstrate demonstrates launch launches sign signs hold holds win wins lose loses begin begins end ends start starts take takes make makes give gives form forms join joins leave leaves meet meets visit visits return returns adopt adopts approve approves pass passes declare declares elect elects appoint appoints create creates build builds unveil unveils show shows send sends receive receives reach reaches enter enters arrive arrives land lands fall falls rise rises grow grows expand expands invent invents publish publishes call calls found founds close closes ratify ratifies abolish abolishes replace replaces add adds split splits break breaks want wants get gets keep keeps lead leads rule rules run runs turn turns bring brings sell sells pay pays come comes go goes agree agreed agrees vote votes'.split(
+    ' ',
+  ),
+);
+
+/** An event's key words: its words' stems, and its short names in capitals ("BBC", "RCA") whole. */
+function keysIn(text: string): Set<string> {
+  const keys = stems(text);
+  for (const m of text.matchAll(
+    /(?<![\p{L}\p{N}])(\p{Lu}{2,3})(?![\p{L}\p{N}])/gu,
+  ))
+    keys.add(m[1].toLowerCase());
+  return keys;
+}
+
+/**
+ * Stems that tell no event from another: directions, and the words of any
+ * region's politics ("East and West move into regional self-government"
+ * is in West Virginia's climate tables too).
+ */
+const GENERIC_KEYS = new Set([
+  'north',
+  'northe',
+  'south',
+  'southe',
+  'east',
+  'easter',
+  'west',
+  'wester',
+  'centra',
+  'region',
+  'self',
+  'govern',
+  'nation',
+  'people',
+  'power',
+]);
+
+/** How far from where an event happened a photo's own city may be and still be there. */
+const SAME_CITY_KM = 150;
+
+/** A city the map knows, by name or by a part of a name ("London" of "Frith Street, London"). */
+function cityOf(names: readonly string[]) {
+  for (const name of names) {
+    const parts = name.split(',').map((p) => p.trim());
+    for (const tried of [name, ...parts.reverse()]) {
+      const place = placeNamed(tried);
+      if (place && (place.kind === 'city' || place.kind === 'capital'))
+        return place;
+    }
+  }
+  return null;
+}
+
+/** The cities a file's words name, as the map knows them. */
+function citiesIn(text: string) {
+  return placesIn(text)
+    .filter((p) => p.kind === 'place')
+    .map((p) => placeNamed(p.name))
+    .filter(
+      (p): p is NonNullable<typeof p> =>
+        p !== null && (p.kind === 'city' || p.kind === 'capital'),
+    );
+}
+
+/** A commemoration of an event (a plaque, a memorial) is no photo of the event itself. */
+const COMMEMORATION =
+  /\b(?:plaque|memorial|monument|commemorat\w*|statue|museum|exhibit(?:ion)?|replica|anniversary|re-?enactment|stamp|banknote|coin|postage)\b/iu;
+
+/** A thing's name as whole words, a plural allowed ("cathode-ray tube" in "Cathode ray tubes"). */
+function namesThing(said: string, name: string): boolean {
+  const text = ` ${textWords(said).join(' ')} `;
+  const words = textWords(name);
+  if (!words.length) return false;
+  const pattern = words
+    .map((w) => w.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'))
+    .map((w, i) => (i === words.length - 1 ? `${w}(?:s|es)?` : w))
+    .join(' ');
+  return new RegExp(` ${pattern} `, 'u').test(text);
+}
+
+/**
+ * Whether a file can be a photo of an event (the truth rule: a picture
+ * of an event is of that event): taken in its year, or the next for one
+ * that ran over; carrying its key words, the research's own, in its
+ * title, description or categories (two of them, or one with the place it
+ * happened); and no commemoration of it (a blue plaque photographed last
+ * year says "1926" in its title too). The desk's look must then agree.
+ */
+export function eventPhotoOf(
+  file: Pick<SourceFile, 'title' | 'description' | 'categories'>,
+  query: Pick<
+    PictureQuery,
+    'name' | 'years' | 'place' | 'words' | 'names' | 'persons'
+  >,
+  year: number | undefined,
+): { ok: true } | { ok: false; reason: string } {
+  const years = query.years ?? [];
+  if (!years.length)
+    return { ok: false, reason: 'the research gives the event no year' };
+  if (year === undefined)
+    return { ok: false, reason: 'it has no date to match the event’s year' };
+  // Its year, or the next for one that ran over; never the year before:
+  // a photo taken before an event is of something else (the 1957
+  // conference's opening is no photo of the conference resumed in 1958).
+  if (!years.some((y) => year >= y && year <= y + EVENT_YEARS))
+    return { ok: false, reason: `taken in ${year}, not in the event’s year` };
+  const said = `${file.title} ${file.description} ${file.categories.join(' ')}`;
+  if (COMMEMORATION.test(`${file.title} ${file.description}`))
+    return { ok: false, reason: 'it commemorates the event; it is not of it' };
+  const made = contemptOf(file);
+  if (made) return { ok: false, reason: made };
+  // Where it happened, when the map knows the city: a photo its words
+  // place only in a city far from it is of something else (the FCC's
+  // chairman before a camera in Washington, for RCA at New York's fair).
+  const city = cityOf([query.place ?? []].flat());
+  if (city) {
+    const named = citiesIn(`${file.title} ${file.description}`);
+    const there = named.some(
+      (p) =>
+        kmBetween(
+          { lng: city.lon, lat: city.lat },
+          { lng: p.lon, lat: p.lat },
+        ) <= SAME_CITY_KM,
+    );
+    const elsewhere = named.find(
+      (p) =>
+        kmBetween(
+          { lng: city.lon, lat: city.lat },
+          { lng: p.lon, lat: p.lat },
+        ) > SAME_CITY_KM,
+    );
+    if (elsewhere && !there)
+      return {
+        ok: false,
+        reason: `its words place it in ${elsewhere.name}, not ${city.name}`,
+      };
+  }
+  const seen = keysIn(said);
+  const placed = [...keysIn([query.place ?? []].flat().join(' '))];
+  // Its own words, but the verbs that tell it: "demonstrates" is in a
+  // Dutch "Demonstratie" of aircraft too.
+  const told = (query.words ?? [query.name])
+    .join(' ')
+    .split(/\s+/u)
+    .filter((w) => !EVENT_VERBS.has(w.toLowerCase().replace(/[^\p{L}]/gu, '')))
+    .join(' ');
+  const keys = [...keysIn(told)].filter(
+    (k) => !placed.includes(k) && !GENERIC_KEYS.has(k),
+  );
+  // Its names (its people, its bodies), but where it happened: a photo of
+  // it names one of them.
+  const names = [...keysIn((query.names ?? []).join(' '))].filter(
+    (k) => !placed.includes(k),
+  );
+  if (names.length && !names.some((n) => seen.has(n)))
+    return {
+      ok: false,
+      reason: `it names none of the event’s own (${names.slice(0, 3).join(', ')})`,
+    };
+  // Its setting, when it names one in several words (the New York World's
+  // Fair, the Royal Institution, the BBC Television Service): a photo of it
+  // names that setting, or one of its people. A body alone will not do:
+  // RCA's antenna on the Empire State Building is no photo of RCA at the
+  // fair.
+  const settings = (query.names ?? [])
+    .filter((n) => n.trim().split(/\s+/u).length >= 2)
+    .map((n) => [...keysIn(n)].filter((k) => !placed.includes(k)))
+    .filter((k) => k.length);
+  const persons = [...keysIn((query.persons ?? []).join(' '))];
+  if (
+    settings.length &&
+    !persons.some((p) => seen.has(p)) &&
+    !settings.some(
+      (set) => set.filter((k) => seen.has(k)).length >= Math.min(2, set.length),
+    )
+  )
+    return {
+      ok: false,
+      reason: `it names neither where it was (${settings.map((s) => s.join(' ')).join('; ')}) nor its people`,
+    };
+  const hits = keys.filter((k) => seen.has(k)).length;
+  const there = placed.some((p) => seen.has(p));
+  const enough =
+    keys.length >= 2 ? hits >= 2 || (hits >= 1 && there) : hits >= 1;
+  if (!enough)
+    return {
+      ok: false,
+      reason: `it does not carry the event’s words (${keys.slice(0, 4).join(', ')})`,
+    };
+  return { ok: true };
+}
+
+/**
+ * Whether a file can be a photo of a thing a line names (a televisor, an
+ * iconoscope): it names the thing in whole words, or says it depicts it.
+ * A thing is shown as it is; its year is on the chip, and the research's
+ * years only rank it.
+ */
+export function thingPhotoOf(
+  file: Pick<
+    SourceFile,
+    'title' | 'description' | 'categories' | 'depicts' | 'chosen'
+  >,
+  query: Pick<PictureQuery, 'name' | 'words'>,
+  qid: string | undefined,
+): { ok: true } | { ok: false; reason: string } {
+  const said = `${file.title} ${file.description} ${file.categories.join(' ')}`;
+  const depicted = Boolean(qid && file.depicts?.some((d) => d.qid === qid));
+  const names = query.words?.length ? query.words : [query.name];
+  if (!depicted && !names.some((n) => namesThing(said, n)))
+    return { ok: false, reason: `it does not name ${query.name}` };
+  // A thing may be shown by its maker's advertisement or a drawing of it; never by hate's work.
+  const made = contemptOf(file, false);
+  if (made) return { ok: false, reason: made };
   return { ok: true };
 }

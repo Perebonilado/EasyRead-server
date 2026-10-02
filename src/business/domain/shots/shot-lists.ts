@@ -44,6 +44,10 @@ export const RECIPE_USES: Record<ShotInfoRecipe, string> = {
   exit: 'a part leaves',
   ask: 'a question the voice asks, held over what is still open, then a moment of quiet',
   say: 'a speech bubble of one to six words from a character (target the actor; its words in text): an illustrated show only, at most one in twenty seconds, for a short line of humour or surprise ("Wait!"), never the voice’s words',
+  callout:
+    'a numbered dot on a leader to a part of a device’s screen, coming on in the order the voice counts them (problems, steps, features): code numbers them',
+  swap: 'a part of a device changing state on its words (text: the state, from its list): a button loading, a switch on, a dialog shown, a screen turning dark; a cursor’s click makes one by itself',
+  type: 'words typed into a field of a device, a letter at a time (text: the few words typed); a cursor’s type move makes one by itself',
 };
 export const INFO_RECIPES = Object.keys(RECIPE_USES) as ShotInfoRecipe[];
 
@@ -72,28 +76,38 @@ export const JOIN_USES: Record<ShotJoin, string> = {
   dissolve: 'time passes',
   dip: 'a dip to black after a grave fact, or at an act’s end',
   push: 'the next item of a list pushes in',
+  frost:
+    'a chapter break in a how-it-works film: the frame frosts over with the chapter’s number, then clears into the next shot',
 };
 export const SHOT_JOINS = Object.keys(JOIN_USES) as ShotJoin[];
 
-/** The life layer's effects: motion that carries no information, only what the place really has. */
+/**
+ * The life layer's effects: motion that carries no information, only what
+ * the place really has. A set's own life comes with it by itself
+ * (shot-life: its chimneys smoke, its water shimmers, its lights waver
+ * once lit, its rain falls, its flag stirs, the map's clouds pass, the
+ * grain turns), so the board names only what a line makes matter.
+ */
 export const LIFE_USES: Record<ShotLifeEffect, string> = {
-  clouds: 'clouds drifting across a sky',
-  'cloud-shadows': 'cloud shadows crossing the land of a map',
+  clouds: 'clouds drifting across a sky that has none of its own',
+  'cloud-shadows': 'cloud shadows crossing the land of a map or a drawn set',
   rain: 'rain',
   snow: 'snow',
-  wind: 'wind in grass, trees or cloth',
+  wind: 'wind: streaks in the air, smoke bending, flags flying hard (a stormy or windy line)',
   smoke: 'smoke from a chimney, a fire, an engine',
   steam: 'steam from a kettle, a vent, an engine',
-  dust: 'dust in a shaft of light',
+  dust: 'dust in a shaft of light (a hall, a workshop, a quiet room)',
   shimmer: 'light on water',
-  flicker: 'lights flickering',
-  crowd: 'a crowd shifting (silhouettes; none yet)',
-  flags: 'flags stirring',
-  grain: 'paper grain on a document',
-  drift: 'a slow drift of the whole picture',
-  fire: 'a real fire the voice speaks of',
-  sparks: 'real sparks: welding, a furnace, a spark plug',
-  splash: 'a real splash of water',
+  flicker: 'lights wavering in their windows at dusk or night',
+  crowd:
+    'people standing in a crowd or a group, shifting their weight while they wait',
+  flags: 'flags stirring on their poles',
+  grain: 'the paper’s grain moving',
+  drift: 'a slow drift of the whole picture, for a hold or an ask',
+  fire: 'a real fire the voice speaks of (only where the effects have one)',
+  sparks:
+    'real sparks: welding, a furnace, a spark plug (only where the effects have one)',
+  splash: 'a real splash of water (only where the effects have one)',
   eyes: 'a region of the map made a character by a pair of eyes glancing at another: written in the shot’s "eyes" (at, to, face), never in its life; an illustrated show only, sparingly',
 };
 export const LIFE_EFFECTS = Object.keys(LIFE_USES) as ShotLifeEffect[];
@@ -109,6 +123,8 @@ export const SET_USES: Record<SetKind, string> = {
   photo: 'an archive photo: only a photo the list gives',
   document: 'a scan of a real document: only a document the list gives',
   set: 'a code-drawn kind of place (a coast at dusk, a city at night), never a named one: for a feeling or an atmosphere',
+  screen:
+    'a device on a desk (the kit’s ui devices and cursor as the actors): how an app, a site or a tool works, a design looked at closely, a before and an after',
   plain: 'paper',
 };
 export const SET_KINDS = Object.keys(SET_USES) as SetKind[];
@@ -177,7 +193,10 @@ export const SET_TOWNS: readonly NonNullable<PlanSetScene['town']>[] = [
   'city',
 ];
 /** What a drawn set's place is for, with when the board names it. */
-export const SET_PLACE_USES: Record<NonNullable<PlanSetScene['place']>, string> = {
+export const SET_PLACE_USES: Record<
+  NonNullable<PlanSetScene['place']>,
+  string
+> = {
   open: 'open land, a village or a town as its town says',
   farm: 'a farm: barn, silo, fields',
   port: 'a port across the water: cranes, warehouses, containers',
@@ -185,19 +204,20 @@ export const SET_PLACE_USES: Record<NonNullable<PlanSetScene['place']>, string> 
   market: 'market stalls before houses',
   city: 'a city of towers and blocks',
   oilfield: 'an oil field: pump jacks and tanks',
-  'assembly-hall': 'inside an assembly or parliament: rows round the well, the chair on its dais',
-  'ceremony-ground': 'a ceremony ground: a stand with bunting, a flagpole, floodlights, chairs',
-  display: 'a clean studio backdrop for a machine or a thing shown on its own, big (a jet engine cut open, a pump, a ballot)',
+  'assembly-hall':
+    'inside an assembly or parliament: rows round the well, the chair on its dais',
+  'ceremony-ground':
+    'a ceremony ground: a stand with bunting, a flagpole, floodlights, chairs',
+  display:
+    'a clean studio backdrop for a machine or a thing shown on its own, big (a jet engine cut open, a pump, a ballot)',
 };
-export const SET_PLACES = Object.keys(SET_PLACE_USES) as NonNullable<PlanSetScene['place']>[];
+export const SET_PLACES = Object.keys(SET_PLACE_USES) as NonNullable<
+  PlanSetScene['place']
+>[];
 /** The states a drawn set's light can change to while a shot is on. */
-export const SET_STATES: readonly NonNullable<PlanSetScene['becomes']>['state'][] = [
-  'day',
-  'dusk',
-  'night',
-  'dawn',
-  'lights-on',
-];
+export const SET_STATES: readonly NonNullable<
+  PlanSetScene['becomes']
+>['state'][] = ['day', 'dusk', 'night', 'dawn', 'lights-on'];
 export const SET_CLIMATES: readonly NonNullable<PlanSetScene['climate']>[] = [
   'temperate',
   'arid',
@@ -274,6 +294,18 @@ export function nearestOf<T extends string>(
 
 /** A recipe a model named: its own, a synonym, or the nearest; null for none (glows and sparkles are none). */
 export const recipeOf = nearestOf(INFO_RECIPES, {
+  // The UI kit's.
+  numbered: 'callout',
+  numberedcallout: 'callout',
+  annotate: 'callout',
+  annotation: 'callout',
+  state: 'swap',
+  setstate: 'swap',
+  toggle: 'swap',
+  switch: 'swap',
+  typing: 'type',
+  typein: 'type',
+  typewrite: 'type',
   highlight: 'mark',
   circle: 'mark',
   underline: 'mark',
@@ -380,6 +412,10 @@ export const moveOf = nearestOf(CAMERA_MOVES, {
 
 /** A join a model named, or the nearest. */
 export const joinOf = nearestOf(SHOT_JOINS, {
+  chapter: 'frost',
+  chapterbreak: 'frost',
+  frosted: 'frost',
+  blur: 'frost',
   hardcut: 'cut',
   straightcut: 'cut',
   fade: 'dissolve',
@@ -438,6 +474,16 @@ export const setKindOf = nearestOf(SET_KINDS, {
   backdrop: 'set',
   paper: 'plain',
   blank: 'plain',
+  device: 'screen',
+  phone: 'screen',
+  app: 'screen',
+  ui: 'screen',
+  desk: 'screen',
+  laptop: 'screen',
+  website: 'screen',
+  browser: 'screen',
+  mockup: 'screen',
+  interface: 'screen',
 });
 
 /** A chart kind a model named, or the nearest; a name card is none. */

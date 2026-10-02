@@ -11,8 +11,12 @@
  *                  pinned), else named in words only.
  *   region:<Name>  a region of the show's one map; seam:<Name> a seam.
  *   person:<Name>  a real person of the research: a verified portrait
- *                  once the picture desk clears one (WP11); until then
+ *                  once the picture desk clears one (WP11), and photos of
+ *                  them (photo: entries that show them); without either,
  *                  only a trace of them (their own words, their place).
+ *   photo:<Name>   a photo the picture desk cleared, saying what it shows
+ *                  (shows: a person's or a place's name here, an event's
+ *                  or a thing's words), offered where the lines name it.
  *   number:<label> a number of the research, with its value and unit.
  *   date:<when>    an event of the research's timeline.
  *   claim:<id>     a claim the scene's lines rest on.
@@ -785,8 +789,9 @@ export function buildRegistry(input: RegistryInput): TargetRegistry {
   }
 
   // Pictures the desk cleared: a portrait on its person, a photo or a
-  // document as its own. A portrait never brings its person in: only a
-  // person these lines are about is on screen.
+  // document as its own (a photo of a person, a place, an event or a
+  // thing says so in `shows`). A portrait never brings its person in: only
+  // a person these lines are about is on screen.
   for (const picture of input.pictures ?? []) {
     const had = entries.find((e) => e.name === picture.name);
     if (had && picture.picture) had.picture = picture.picture;
@@ -836,8 +841,10 @@ export function promptList(registry: TargetRegistry): string {
     'Seams of the show’s map (draw one with "seam"):',
     of('seam').map((e) => `- ${e.name}: ${e.about}`),
   );
+  // Which photos show each person and each place, and what each photo
+  // shows, the board's list (shot-board's boardList) says from `shows`.
   section(
-    'People (a portrait only for one marked [portrait]; a person with neither a portrait nor a trace is never on screen):',
+    'People (a portrait only for one marked [portrait]; their photos are listed with them; a person with no portrait, no photo and no trace is never on screen):',
     of('person').map(
       (e) =>
         `- ${e.name}${e.picture ? ' [portrait]' : ''}: ${e.about}${
@@ -850,7 +857,7 @@ export function promptList(registry: TargetRegistry): string {
     ),
   );
   section(
-    'Pictures (archive photos and documents the picture desk cleared):',
+    'Pictures (real photos and documents the picture desk cleared; each says what it shows):',
     [...of('photo'), ...of('document')].map((e) => `- ${e.name}: ${e.about}`),
   );
   section(

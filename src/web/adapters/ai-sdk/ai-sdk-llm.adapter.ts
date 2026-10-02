@@ -87,6 +87,8 @@ import {
 import { shotBoardPrompt } from '../shot-prompts';
 import { shotBoardSchema } from './shot-schemas';
 import { pictureFocusPrompt, pictureFocusSchema } from './picture-schemas';
+import { shotCriticSchema } from './critic-schemas';
+import { criticPrompt } from '../critic-prompts';
 import {
   effortOptions,
   filled,
@@ -3123,9 +3125,55 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     };
   }
 
+  /**
+   * A scene of shots judged from its contact sheet (explainer_critic): the
+   * sheet as a picture and the scene's words, read leniently and filled
+   * as the board's answer is; shot-critic's critiqueOf makes it sound.
+   */
+  async shotsCritic(input: {
+    image: Buffer;
+    mediaType?: 'image/png' | 'image/jpeg';
+    parts: string[];
+  }): Promise<LlmResult<Record<string, unknown>>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } =
+      await this.registry.languageModel('explainer_critic');
+    const full = shotCriticSchema as z.ZodTypeAny;
+    const result = await this.againIfMisshapen(() =>
+      generateObject({
+        model,
+        schema: lenient(full),
+        system: criticPrompt(),
+        messages: [
+          {
+            role: 'user' as const,
+            content: [
+              {
+                type: 'file' as const,
+                data: input.image,
+                mediaType: input.mediaType ?? 'image/png',
+              },
+              { type: 'text' as const, text: input.parts.join('\n\n') },
+            ],
+          },
+        ],
+        maxRetries: this.maxRetries(),
+        // Medium: on the calibration sheets it told the references from
+        // our old films every time; low could not (critic-calibrate).
+        ...this.effort(ref, 'EXPLAINER_CRITIC_EFFORT', 'medium'),
+      }),
+    );
+    return {
+      value: filled(result.object, full) as Record<string, unknown>,
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
   async pictureFocus(input: {
     png: Buffer;
     about: string;
+    asked?: string;
   }): Promise<LlmResult<Record<string, unknown>>> {
     const started = Date.now();
     const { generateObject } = await this.registry.modules();
@@ -3141,7 +3189,11 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
             { type: 'file' as const, data: input.png, mediaType: 'image/png' },
             {
               type: 'text' as const,
-              text: `The archive says this picture shows: ${input.about.slice(0, 200)}`,
+              text: `The archive says this picture shows: ${input.about.slice(0, 200)}${
+                input.asked
+                  ? `\nDoes it show ${input.asked.slice(0, 240)}?`
+                  : ''
+              }`,
             },
           ],
         },

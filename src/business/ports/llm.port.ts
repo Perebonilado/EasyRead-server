@@ -74,6 +74,9 @@ export type LlmTask =
   // The picture desk (WP11): where an archive picture's subject is, and
   // what the picture is, so it is cropped to the subject, never past a face.
   | 'picture_focus'
+  // The critic (WP13; explainer-animation-plan §9.3): a scene's contact
+  // sheet scored on the rules' axes, its worst problems named as fixes.
+  | 'explainer_critic'
   | 'topic_quiz'
   | 'item_write'
   | 'item_verify'
@@ -1030,6 +1033,22 @@ export interface LlmGatewayPort {
   ): Promise<LlmResult<Record<string, unknown>>>;
 
   /**
+   * A scene of shots judged from its contact sheet (explainer_critic;
+   * explainer-animation-plan §9.3): the sheet as a picture beside the
+   * scene's words (its lines, its shots as made with the words said over
+   * each, what the code checks measured); each axis scored from 1 to 10
+   * with why, and the worst problems named as fixes from the closed list.
+   * Made sound by shot-critic's critiqueOf.
+   */
+  shotsCritic(input: {
+    /** The contact sheet. */
+    image: Buffer;
+    /** Its type: a PNG by default; the reference sheets are JPEGs. */
+    mediaType?: 'image/png' | 'image/jpeg';
+    parts: string[];
+  }): Promise<LlmResult<Record<string, unknown>>>;
+
+  /**
    * Where an archive picture's subject is (picture_focus; WP11), on a grid
    * of six columns (A–F) by six rows (1–6): the cells of the people's
    * faces, the cells of what it is of, how many people show, and what the
@@ -1040,6 +1059,8 @@ export interface LlmGatewayPort {
     png: Buffer;
     /** What the desk was told it shows: "Ahmadu Bello, 1960". */
     about: string;
+    /** What a picture of an event or a thing should show, for the model to agree it does ("shows"). */
+    asked?: string;
   }): Promise<LlmResult<Record<string, unknown>>>;
 
   /** Whether text asks for what no one should be made: flagged, with the categories. */

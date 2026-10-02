@@ -10,6 +10,12 @@
  *   npm run shots:remake -- --episode <id> --user <id> --copy [--scenes 1,2] [--voice kokoro]
  *   npm run shots:remake -- --episode <copy id> --user <id> --again [--scenes 1,2]
  *
+ * Before the board, the picture desk's pass runs as the worker's does
+ * (people's portraits and photos, places, events, things; PICTURE_DESK=off
+ * skips it, PICTURE_LICENCE=on checks licences), so the copy's scenes are
+ * offered every picture that clears, and with every scene boarded the
+ * description lists their credits.
+ *
  * --again makes a shots copy's scenes again as they are boarded (after a
  * change to the build, the timing or the charts), asking nothing of the
  * board; it refuses an episode any of whose lessons is not a scene of
@@ -40,8 +46,9 @@ import { Logger, Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { CoreModule } from '../src/core.module';
+import type { DeskLike } from '../src/business/domain/pictures/episode';
 import type { LlmGatewayPort } from '../src/business/ports/llm.port';
-import { LLM_GATEWAY } from '../src/business/ports/tokens';
+import { LLM_GATEWAY, PICTURE_DESK } from '../src/business/ports/tokens';
 import type { AiCallLogRepository } from '../src/business/repositories/ai-call-log.repository';
 import type {
   StudioEpisodeRecord,
@@ -172,7 +179,10 @@ async function main() {
     const asked = scenesAsked(copy.outline!.scenes.length);
 
     // Boarded with the real board and the switch on: lesson scenes as
-    // shots, an illustrated scene as the editor boards it.
+    // shots, an illustrated scene as the editor boards it; the picture
+    // desk's pass first, as the worker's, so the copy's scenes are offered
+    // every picture that clears (PICTURE_DESK=off skips it).
+    const pictures = app.get<DeskLike>(PICTURE_DESK, { strict: false });
     const editor = new StudioEditorProcessor({
       studio,
       llm,
@@ -180,6 +190,7 @@ async function main() {
       queue: { enqueueStudio: () => Promise.resolve() },
       setting: (name) => process.env[name],
       material: app.get(StudioMaterialService),
+      pictures,
       logger: { log: (l) => logger.log(l), warn: (l) => logger.warn(l) },
     });
     if (again) {
@@ -189,10 +200,12 @@ async function main() {
       rows = await studio.listScenes(copy.id);
     } else {
       rows = await studio.replaceScenes(copy.id, copy.outline!.scenes.length);
+      // The episode's pictures, once, for the scenes asked as for all.
+      const found = await editor.pictureDesk(show, copy);
       for (const k of asked)
         if (isIllustrated(copy.outline!.scenes[k]))
           await editor.illustratedBoard(show, copy, show.bible, rows[k], k);
-        else await editor.shotsBoard(show, copy, show.bible, rows[k], k);
+        else await editor.shotsBoard(show, copy, show.bible, rows[k], k, found);
       rows = await studio.listScenes(copy.id);
     }
     const shots = rows.filter(

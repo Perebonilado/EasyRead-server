@@ -14,6 +14,7 @@ import type {
   StudioSceneRecord,
 } from '../../repositories/studio.repository';
 import {
+  framesDto,
   blockersOf,
   briefDto,
   explainerCard,
@@ -388,5 +389,57 @@ describe('clothes carried from one scene into the next', () => {
     expect(
       needsMaking(row, coatBible, brief, carriedWears(rows, coatBible).get(1)),
     ).toBe(false);
+  });
+});
+
+describe("the critic's frames, as the Studio's debug view reads them", () => {
+  it('gives the kept scores, how the loop ended, its rounds and the last code checks', () => {
+    const dto = framesDto({
+      version: 1,
+      rules: 2,
+      at: '2026-10-02T13:00:00.000Z',
+      ended: 'rounds',
+      costUsd: 0.08,
+      kept: 'k2',
+      scores: { clarity: 8, motion: 6 },
+      pass: false,
+      rounds: [1, 2, 3].map((round) => ({
+        round,
+        sceneKey: `k${round}`,
+        sheetKey: null,
+        stills: 12,
+        checks:
+          round < 3
+            ? {
+                readability: 7,
+                composition: 9,
+                pace: 6,
+                truth: 10,
+                overall: 8 + round / 10,
+              }
+            : null,
+        problems: [],
+        critic: round < 3 ? { scores: {}, verdict: '' } : null,
+        fixes: [],
+        applied: [],
+        costUsd: 0.02,
+        ms: 1000,
+      })),
+    });
+    expect(dto).toEqual({
+      scores: { clarity: 8, motion: 6 },
+      pass: false,
+      rounds: 2,
+      ended: 'rounds',
+      checks: {
+        readability: 7,
+        composition: 9,
+        pace: 6,
+        truth: 10,
+        overall: 8.2,
+      },
+      costUsd: 0.08,
+      at: '2026-10-02T13:00:00.000Z',
+    });
   });
 });

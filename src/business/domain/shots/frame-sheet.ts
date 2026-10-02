@@ -143,6 +143,69 @@ export function sheetSvg(input: SheetInput): {
   return { svg: parts.join(''), width, height };
 }
 
+/** One still on the critic's sheet: its PNG (base64) and its label ("s3 · 12.4s"). */
+export interface CriticTile {
+  png: string;
+  label: string;
+}
+
+/** The critic's tile sizes, by the film's shape: big enough to judge at a glance, small enough for a sheet the model takes whole. */
+export const CRITIC_TILE: Record<
+  FilmShape,
+  { w: number; h: number; columns: number }
+> = {
+  wide: { w: 400, h: 225, columns: 5 },
+  tall: { w: 225, h: 400, columns: 8 },
+};
+
+/**
+ * The critic's contact sheet (explainer-animation-plan §9.3): the scene's
+ * stills in order, five across (eight for a tall film), each labelled in
+ * its corner with its shot and moment, as the reference sheets are; no
+ * check codes or borders, so the critic judges what a viewer sees, and is
+ * told what code measured in words. Pure: rendered by the caller.
+ */
+export function criticSheetSvg(input: {
+  title: string;
+  subtitle: string;
+  tiles: CriticTile[];
+  shape: FilmShape;
+  /** Tiles of another size (the calibration's, as the references are). */
+  tile?: { w: number; h: number; columns: number };
+}): { svg: string; width: number; height: number } {
+  const tile = input.tile ?? CRITIC_TILE[input.shape];
+  const columns = Math.max(1, Math.min(tile.columns, input.tiles.length || 1));
+  const rows = Math.max(1, Math.ceil(input.tiles.length / columns));
+  const gap = 8;
+  const margin = 12;
+  const header = input.title || input.subtitle ? 56 : 0;
+  const width = margin * 2 + columns * tile.w + (columns - 1) * gap;
+  const height = margin * 2 + header + rows * tile.h + (rows - 1) * gap;
+  const chip = Math.round(Math.min(tile.w, tile.h) * 0.085);
+  const parts: string[] = [
+    `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" font-family="${FONT}">`,
+    `<rect width="${width}" height="${height}" fill="#14161b"/>`,
+  ];
+  if (header)
+    parts.push(
+      `<text x="${margin}" y="${margin + 22}" font-size="22" font-weight="700" fill="#ffffff">${escapeXml(cut(input.title, Math.floor(width / 13)))}</text>`,
+      `<text x="${margin}" y="${margin + 44}" font-size="15" fill="#b8bec9">${escapeXml(cut(input.subtitle, Math.floor(width / 8)))}</text>`,
+    );
+  input.tiles.forEach((one, k) => {
+    const x = margin + (k % columns) * (tile.w + gap);
+    const y = margin + header + Math.floor(k / columns) * (tile.h + gap);
+    const label = escapeXml(cut(one.label, 18));
+    const labelW = Math.round(chip * 0.62 * one.label.length + chip * 0.9);
+    parts.push(
+      `<image x="${x}" y="${y}" width="${tile.w}" height="${tile.h}" preserveAspectRatio="xMidYMid meet" href="data:image/png;base64,${one.png}" xlink:href="data:image/png;base64,${one.png}"/>`,
+      `<rect x="${x + 4}" y="${y + 4}" width="${labelW}" height="${Math.round(chip * 1.5)}" rx="3" fill="#000000" fill-opacity="0.72"/>`,
+      `<text x="${x + 4 + Math.round(chip * 0.45)}" y="${y + 4 + Math.round(chip * 1.12)}" font-size="${chip}" font-weight="700" fill="#ffffff">${label}</text>`,
+    );
+  });
+  parts.push('</svg>');
+  return { svg: parts.join(''), width, height };
+}
+
 /** A scene's scores in a line: each axis, the overall, the word cards' and the subject's shares. */
 export function scoresLine(scores: FrameScores): string {
   const share = (n: number | null) =>

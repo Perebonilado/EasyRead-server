@@ -133,9 +133,35 @@ export interface PlanGap {
 }
 
 /**
+ * The plan's declared rests, on the narration's keys: each camera hold,
+ * from its words to the shot's next camera move or the shot's end, as the
+ * timing runs it (shot-time) and the frames checker excuses it
+ * (frame-checks' shotHolds).
+ */
+export function planHolds(plan: ShotPlan, n: Narration): [number, number][] {
+  const starts = shotStarts(plan, n);
+  return plan.shots.flatMap((shot, k) => {
+    const from = starts[k];
+    if (from < 0) return [];
+    const end = starts.slice(k + 1).find((s) => s > from) ?? n.keys.length;
+    const moves = shot.camera
+      .map((c) => ({ move: c.move, at: landingOf(n, c.on, from) }))
+      .filter((c) => c.at >= from && c.at < end)
+      .sort((a, b) => a.at - b.at);
+    return moves.flatMap((c): [number, number][] => {
+      if (c.move !== 'hold') return [];
+      const next = moves.find((m) => m.at > c.at)?.at ?? end;
+      return [[c.at, next]];
+    });
+  });
+}
+
+/**
  * The plan's stretches with nothing new longer than the pace allows:
  * between one event and the next, and from the last to the narration's
- * end. `lineStarts` are the keys each line after the first starts at.
+ * end, but for one a declared hold runs through at least half of (the
+ * rules' "unless it is a declared hold", as the frames checker reads it).
+ * `lineStarts` are the keys each line after the first starts at.
  */
 export function planGaps(
   plan: ShotPlan,
@@ -144,6 +170,11 @@ export function planGaps(
   most: number = PLAN_PACE.maxWords,
 ): PlanGap[] {
   const events = planEvents(plan, n);
+  const holds = planHolds(plan, n);
+  const held = (from: number, to: number) =>
+    holds.some(
+      ([a, b]) => Math.min(b, to) - Math.max(a, from) >= (to - from) / 2,
+    );
   const marks = [...events.map((e) => e.at), n.keys.length];
   const out: PlanGap[] = [];
   for (let k = 0; k + 1 < marks.length; k += 1) {
@@ -152,7 +183,8 @@ export function planGaps(
       to -
       from +
       PLAN_PACE.lineWords * lineStarts.filter((s) => s > from && s < to).length;
-    if (words > most) out.push({ from, to, words, shot: events[k].shot });
+    if (words > most && !held(from, to))
+      out.push({ from, to, words, shot: events[k].shot });
   }
   return out;
 }
@@ -191,6 +223,161 @@ export function spareShots(
   );
 }
 
+/** An actor with only its moves before a word (`early`), or from it on. */
+function movesOf(
+  actor: PlanActor,
+  before: (on: string) => boolean,
+  early: boolean,
+): PlanActor {
+  const { moves: all, ...rest } = actor;
+  const kept = (all ?? []).filter((m) => before(m.on) === early);
+  return kept.length ? { ...rest, moves: kept } : rest;
+}
+
+/** Whether an actor has left before a word. */
+const goneBy = (actor: PlanActor, before: (on: string) => boolean) =>
+  (actor.moves ?? []).some(
+    (m) => ['exit', 'leave'].includes(m.move) && before(m.on),
+  );
+
+/** Whether an actor is on before a word: there from the start, or come on by then. */
+const thereBy = (actor: PlanActor, before: (on: string) => boolean) => {
+  const enter = (actor.moves ?? []).find((m) => m.move === 'enter');
+  return !enter || before(enter.on);
+};
+
+/** A shot moved onto other words: its own, and each of its changes that were on its words. */
+export function onWords(shot: PlanShot, on: string): PlanShot {
+  const was = shot.on;
+  return {
+    ...shot,
+    on,
+    info: shot.info.map((i) => (i.on === was ? { ...i, on } : i)),
+    camera: shot.camera.map((c) => (c.on === was ? { ...c, on } : c)),
+  };
+}
+
+/**
+ * Another picture put over shot `k`'s words from `from` to `to` (in place,
+ * in `shots`): the shot keeps what it brings on before `from`, where it
+ * has words enough of its own before it to be read (else the picture
+ * starts on the shot's own words); the picture holds from there; and the
+ * shot goes on after `to` as its continuation, with what it brings on
+ * from there, where it has room. What the shot brought on between goes,
+ * or, with `keep`, comes on as its continuation begins. False, and
+ * nothing changed, when the shot has no words or the picture would have
+ * no room.
+ */
+export function replaceSpan(
+  shots: PlanShot[],
+  k: number,
+  from: number,
+  to: number,
+  picture: PlanShot,
+  n: Narration,
+  keep = false,
+): boolean {
+  const starts = shotStarts({ shots }, n);
+  const start = starts[k];
+  if (start === undefined || start < 0) return false;
+  const end = starts.slice(k + 1).find((s) => s > start) ?? n.keys.length;
+  // Too few words of its own before it to be read: the picture takes them.
+  const a = from - start < PLAN_PACE.roomWords ? start : from;
+  const b = Math.min(to, end);
+  if (b - a < PLAN_PACE.roomWords) return false;
+  const shot = shots[k];
+  const lands = (on: string) => landingOf(n, on, start);
+  const beforeA = (on: string) => lands(on) < a;
+  const beforeB = (on: string) => lands(on) < b;
+  const between = (on: string) => !beforeA(on) && beforeB(on);
+  const pieces: PlanShot[] = [];
+  if (a > start)
+    pieces.push({
+      ...shot,
+      info: shot.info.filter((i) => beforeA(i.on)),
+      camera: shot.camera.filter((c) => beforeA(c.on)),
+      actors: shot.actors
+        .filter((x) => thereBy(x, beforeA))
+        .map((x) => movesOf(x, beforeA, true)),
+      join: 'cut',
+    });
+  const tail = end - b >= PLAN_PACE.roomWords;
+  const spot = uniquePhrase(n, a, 3);
+  pieces.push({
+    ...onWords(
+      picture,
+      a === start ? shot.on : phraseText(n, spot.at, spot.length),
+    ),
+    join: tail ? 'cut' : shot.join,
+  });
+  if (tail) {
+    const at = uniquePhrase(n, b, 3);
+    const on = phraseText(n, at.at, at.length);
+    const kept = (on: string) => !beforeB(on) || (keep && between(on));
+    const moved = <T extends { on: string }>(x: T): T =>
+      between(x.on) ? { ...x, on } : x;
+    const info = shot.info.filter((i) => kept(i.on)).map(moved);
+    // A map going on is framed on what it now brings on first.
+    const subject =
+      shot.set.kind === 'map'
+        ? info.find((i) => i.target && !i.target.startsWith('part:'))?.target
+        : undefined;
+    pieces.push({
+      ...shot,
+      on,
+      info,
+      camera: shot.camera.filter((c) => !beforeB(c.on)),
+      actors: shot.actors
+        .filter((x) => !goneBy(x, beforeB))
+        .map((x) => movesOf(x, beforeB, false)),
+      join: shot.join,
+      ...(subject ? { focal: subject } : {}),
+    });
+  }
+  shots.splice(k, 1, ...pieces);
+  return true;
+}
+
+/**
+ * A picture cut into the plan where the voice names what it shows, at key
+ * `at` (in place, in `shots`), within the pace's limits: it holds at
+ * least a few words (PLAN_PACE.roomWords), until the next change of the
+ * shot it cuts into, which then goes on (what that shot brought on in the
+ * picture's first words coming on as it goes on); it starts on that
+ * shot's own words when the name is said as the shot begins. False, and
+ * nothing changed, when there is no shot there or no room for it.
+ */
+export function cutIn(
+  shots: PlanShot[],
+  at: number,
+  picture: PlanShot,
+  n: Narration,
+): boolean {
+  const starts = shotStarts({ shots }, n);
+  let k = -1;
+  starts.forEach((s, i) => {
+    if (s >= 0 && s <= at && (k < 0 || s >= starts[k])) k = i;
+  });
+  if (k < 0) return false;
+  const start = starts[k];
+  const end = starts.slice(k + 1).find((s) => s > start) ?? n.keys.length;
+  const from = at - start < PLAN_PACE.roomWords ? start : at;
+  const shot = shots[k];
+  const changes = [
+    ...shot.info.map((i) => i.on),
+    ...shot.camera.map((c) => c.on),
+    ...shot.actors.flatMap((x) => (x.moves ?? []).map((m) => m.on)),
+  ]
+    .map((on) => landingOf(n, on, start))
+    .filter((x) => x > from && x < end);
+  const room = from + PLAN_PACE.roomWords;
+  const later = changes.filter((x) => x >= room);
+  // The shot goes on at its next change after the picture has been read;
+  // one only in the picture's first words, as soon as it has been.
+  const to = later.length ? Math.min(...later) : changes.length ? room : end;
+  return replaceSpan(shots, k, from, to, picture, n, true);
+}
+
 /**
  * A shot with no room for another change goes on from where the change
  * lands as its continuation (in place, in `shots`): the same set, framed
@@ -218,22 +405,6 @@ export function splitShot(
   if (later.length + (change ? 1 : 0) > most) return false;
   if (!change && !later.length) return false;
   const spot = uniquePhrase(n, at, 3);
-  /** An actor with only its moves before the change (early), or from it on. */
-  const keep = (a: PlanActor, early: boolean): PlanActor => {
-    const { moves: all, ...rest } = a;
-    const kept = (all ?? []).filter((m) => before(m.on) === early);
-    return kept.length ? { ...rest, moves: kept } : rest;
-  };
-  const gone = (a: PlanActor) =>
-    (a.moves ?? []).some(
-      (m) => ['exit', 'leave'].includes(m.move) && before(m.on),
-    );
-  const comes = (a: PlanActor) =>
-    (a.moves ?? []).find((m) => m.move === 'enter');
-  const there = (a: PlanActor) => {
-    const enter = comes(a);
-    return !enter || before(enter.on);
-  };
   shots.splice(
     k,
     1,
@@ -241,13 +412,17 @@ export function splitShot(
       ...shot,
       info: shot.info.filter((i) => before(i.on)),
       camera: shot.camera.filter((c) => before(c.on)),
-      actors: shot.actors.filter(there).map((a) => keep(a, true)),
+      actors: shot.actors
+        .filter((a) => thereBy(a, before))
+        .map((a) => movesOf(a, before, true)),
       join: 'continue',
     },
     {
       on: change ? change.on : phraseText(n, spot.at, spot.length),
       set: shot.set,
-      actors: shot.actors.filter((a) => !gone(a)).map((a) => keep(a, false)),
+      actors: shot.actors
+        .filter((a) => !goneBy(a, before))
+        .map((a) => movesOf(a, before, false)),
       info: change ? [change, ...later] : later,
       life: [...shot.life],
       camera: shot.camera.filter((c) => !before(c.on)),

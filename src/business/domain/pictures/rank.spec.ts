@@ -1,10 +1,14 @@
 import {
+  contemptOf,
   eraOf,
+  eventPhotoOf,
   fitsCrop,
+  personPhotoOf,
   photoOf,
   portraitOf,
   qualityOf,
   scoreOf,
+  thingPhotoOf,
 } from './rank';
 
 const centre: [number, number, number, number] = [1 / 3, 1 / 3, 1 / 3, 1 / 3];
@@ -296,5 +300,382 @@ describe('whether a picture can serve', () => {
     };
     expect(photoOf(file, event, undefined, 1961).ok).toBe(true);
     expect(photoOf(file, event, undefined, 1963).ok).toBe(false);
+  });
+});
+
+describe('whether a picture can be one more photo of a person, of an event or of a thing', () => {
+  const bello = {
+    qid: 'Q401032',
+    name: 'Ahmadu Bello',
+    died: 1966,
+    category: 'Ahmadu Bello',
+  };
+  const file = (title: string, over: object = {}) => ({
+    title,
+    description: '',
+    categories: [] as string[],
+    ...over,
+  });
+
+  it('takes a photo of a person among others, as a portrait never would be', () => {
+    const group = file(
+      'Premier of Nigeria Sir Ahmadu Bello far right leaving the Atomic Museum',
+    );
+    expect(portraitOf(group, bello, 1960).ok).toBe(false);
+    expect(personPhotoOf(group, bello, 1960)).toEqual({ ok: true });
+    // Named in the description in full, or by surname in a file of their own category.
+    expect(
+      personPhotoOf(
+        file('Independence ceremony, Lagos', {
+          description: 'Sir Ahmadu Bello and the Governor-General',
+        }),
+        bello,
+        1960,
+      ).ok,
+    ).toBe(true);
+    expect(
+      personPhotoOf(
+        file('Bello at Kaduna airport arrival', {
+          categories: ['Ahmadu Bello'],
+        }),
+        bello,
+        1961,
+      ).ok,
+    ).toBe(true);
+    expect(personPhotoOf(file('Bello at Kaduna'), bello, 1961).ok).toBe(false);
+  });
+
+  it('never takes a likeness, a thing named after them, a photo after their death, or an undated one', () => {
+    const no = (title: string, year?: number, over: object = {}) => {
+      const fit = personPhotoOf(file(title, over), bello, year);
+      return fit.ok ? 'ok' : fit.reason;
+    };
+    expect(no('Statue of Ahmadu Bello in Kaduna', 1970)).toMatch(/likeness/u);
+    expect(no('Ahmadu Bello on a Nigerian stamp', 1966)).toMatch(/likeness/u);
+    expect(no('Ahmadu Bello University main gate', 1964)).toMatch(
+      /named after/u,
+    );
+    expect(no('Ahmadu Bello Way, Kaduna', 1964)).toMatch(/named after/u);
+    expect(
+      no('Ahmadu Bello at the opening of Kaduna Polytechnic', 1975),
+    ).toMatch(/after they died/u);
+    expect(no('Ahmadu Bello at a rally')).toMatch(/no date/u);
+    expect(
+      no('Ahmadu Bello at a rally', undefined, {
+        depicts: [{ qid: 'Q401032' }],
+      }),
+    ).toBe('ok');
+  });
+
+  const independence = {
+    name: 'Nigeria becomes independent',
+    years: [1960],
+    place: ['Nigeria'],
+    words: ['Nigeria becomes independent by act and constitutional order'],
+  };
+
+  it('takes an event’s photo of its year carrying its words: two of them, or one with its place', () => {
+    expect(
+      eventPhotoOf(
+        file(
+          'The Prime Minister, Sir Abubakar Tafawa Balewa on Independence Day, October 1, 1960',
+          {
+            categories: ['1960 in Nigeria'],
+          },
+        ),
+        independence,
+        1960,
+      ),
+    ).toEqual({ ok: true });
+    expect(
+      eventPhotoOf(
+        file('Independence constitutional order signed'),
+        independence,
+        1961,
+      ).ok,
+    ).toBe(true);
+  });
+
+  it('refuses an event’s photo of another year, with no date, without its words, or commemorating it', () => {
+    const why = (
+      title: string,
+      year: number | undefined,
+      over: object = {},
+    ) => {
+      const fit = eventPhotoOf(file(title, over), independence, year);
+      return fit.ok ? 'ok' : fit.reason;
+    };
+    expect(why('Nigerian independence parade', 1965)).toMatch(
+      /not in the event’s year/u,
+    );
+    // The year before an event is never of it: the 1957 conference's
+    // opening for the conference resumed in 1958.
+    expect(
+      eventPhotoOf(
+        file('The 1957 Nigerian Constitutional Conference'),
+        {
+          name: 'Resumed constitutional conference',
+          years: [1958],
+          place: ['Nigeria'],
+          words: [
+            'Resumed constitutional conference sets out the path to independence',
+          ],
+        },
+        1957,
+      ),
+    ).toEqual({ ok: false, reason: 'taken in 1957, not in the event’s year' });
+    expect(why('Nigerian independence parade', undefined)).toMatch(/no date/u);
+    expect(
+      why('A street in Lagos', 1960, { categories: ['1960 in Nigeria'] }),
+    ).toMatch(/does not carry the event’s words/u);
+    expect(why('Nigerian independence memorial plaque', 1960)).toMatch(
+      /commemorates/u,
+    );
+    expect(
+      eventPhotoOf(
+        file('Independence Day, Lagos'),
+        { ...independence, years: [] },
+        1960,
+      ).ok,
+    ).toBe(false);
+  });
+
+  it('takes a thing’s photo only when it names the thing in whole words, or depicts it', () => {
+    const iconoscope = { name: 'iconoscope', words: ['iconoscope'] };
+    expect(
+      thingPhotoOf(file('Zworykin and iconoscope'), iconoscope, undefined).ok,
+    ).toBe(true);
+    expect(thingPhotoOf(file('Iconoscopes'), iconoscope, undefined).ok).toBe(
+      true,
+    );
+    expect(
+      thingPhotoOf(file('An early camera tube'), iconoscope, undefined).ok,
+    ).toBe(false);
+    expect(
+      thingPhotoOf(
+        file('An early camera tube', { depicts: [{ qid: 'Q1570706' }] }),
+        iconoscope,
+        'Q1570706',
+      ).ok,
+    ).toBe(true);
+    // A televisor is not any television.
+    expect(
+      thingPhotoOf(
+        file('Mechanical television receiver 1927'),
+        { name: 'televisor' },
+        undefined,
+      ).ok,
+    ).toBe(false);
+  });
+});
+
+describe('what is never a picture of anyone or anything', () => {
+  // A 1940 Polish montage, "Who rules the USA?", that names David Sarnoff
+  // among the men it hates: the desk once took it as a photo of him.
+  const montage = {
+    title:
+      'Kto rządzi USA? Henry Morgenthau, Walter Lippmann, Felix Frankfurter, Bernhard M. Baruch, David Sarnott, Sol Bloom',
+    description: 'Antisemitic propaganda leaflet, 1940',
+    categories: ['Antisemitic propaganda', 'David Sarnoff'],
+    depicts: [{ qid: 'Q360106' }],
+  };
+  const sarnoff = { qid: 'Q360106', name: 'David Sarnoff', died: 1971 };
+
+  it('refuses hate’s and mockery’s work for every use', () => {
+    expect(personPhotoOf(montage, sarnoff, 1940)).toEqual({
+      ok: false,
+      reason: 'it is propaganda or caricature, made to mock or to hate',
+    });
+    expect(portraitOf({ ...montage, chosen: true }, sarnoff, 1940).ok).toBe(
+      false,
+    );
+    expect(
+      thingPhotoOf(
+        { ...montage, title: 'A television set in a propaganda poster' },
+        { name: 'television set' },
+        undefined,
+      ).ok,
+    ).toBe(false);
+  });
+
+  it('refuses a poster, a cartoon or a collage as a photo of a person, a place or an event; a thing may be shown by its advertisement', () => {
+    const poster = {
+      title: '1939 RCA Television Advertisement',
+      description: 'An RCA poster for its television sets',
+      categories: ['Advertisements in the United States'],
+    };
+    expect(contemptOf(poster)).toBe(
+      'it is a poster, a cartoon or a collage, not a photograph',
+    );
+    expect(contemptOf(poster, false)).toBeNull();
+    expect(
+      eventPhotoOf(
+        { ...poster, title: 'RCA television World’s Fair 1939 poster' },
+        {
+          name: 'RCA introduces television',
+          years: [1939],
+          words: ['RCA introduces television at the New York World’s Fair'],
+        },
+        1939,
+      ),
+    ).toEqual({
+      ok: false,
+      reason: 'it is a poster, a cartoon or a collage, not a photograph',
+    });
+  });
+});
+
+describe('an event is of its own people, bodies and things, not of its verbs', () => {
+  const baird = {
+    name: 'Baird demonstrates television',
+    years: [1926],
+    place: ['Frith Street, London'],
+    words: [
+      'Baird demonstrates television to members of the Royal Institution',
+      'Frith Street, London',
+    ],
+    names: ['baird', 'Royal Institution'],
+    persons: ['baird'],
+  };
+
+  it('refuses a Dutch 1926 demonstration of aircraft for Baird’s of television', () => {
+    expect(
+      eventPhotoOf(
+        {
+          title:
+            "Demonstratie van twee experimentele vliegtuigen het staartloze vliegtuig en de 'windmolen'",
+          description: 'Londen, 1926',
+          categories: ['1926 in London'],
+        },
+        baird,
+        1926,
+      ),
+    ).toEqual({
+      ok: false,
+      reason: 'it names none of the event’s own (baird, royal, instit)',
+    });
+  });
+
+  it('takes a photo naming its person though not its setting (Baird, not the Royal Institution)', () => {
+    expect(
+      eventPhotoOf(
+        {
+          title: 'John Logie Baird with his apparatus, 1926',
+          description: 'Baird and his television transmitter',
+          categories: [],
+        },
+        baird,
+        1926,
+      ),
+    ).toEqual({ ok: true });
+  });
+
+  it('takes a photo naming Baird and his television that year', () => {
+    expect(
+      eventPhotoOf(
+        {
+          title: 'John Logie Baird and his television apparatus, 1926',
+          description: '',
+          categories: [],
+        },
+        baird,
+        1926,
+      ),
+    ).toEqual({ ok: true });
+  });
+});
+
+describe('an event is where it happened', () => {
+  const fair = {
+    name: 'RCA introduces television',
+    years: [1939],
+    place: ['New York'],
+    words: [
+      "RCA introduces television at the New York World's Fair",
+      'New York',
+    ],
+    names: ['RCA', "New York World's Fair"],
+  };
+
+  it('refuses a photo its words place in another city far off', () => {
+    expect(
+      eventPhotoOf(
+        {
+          title:
+            'FCC Chairman faces lens of television camera. Washington, D.C., Chairman Frank R. McNinch',
+          description: 'RCA television demonstration, 1939',
+          categories: [],
+        },
+        fair,
+        1939,
+      ),
+    ).toEqual({
+      ok: false,
+      reason: 'its words place it in Washington, D.C., not New York',
+    });
+  });
+
+  it('refuses a photo naming its body but not its setting: RCA’s antenna is no photo of RCA at the fair', () => {
+    expect(
+      eventPhotoOf(
+        {
+          title: 'Empire State Building television antenna 1939',
+          description:
+            'The RCA-NBC television antenna atop the Empire State Building',
+          categories: [],
+        },
+        fair,
+        1939,
+      ),
+    ).toEqual({
+      ok: false,
+      reason: 'it names neither where it was (world fair) nor its people',
+    });
+  });
+
+  it('takes one placed there, or placed nowhere', () => {
+    expect(
+      eventPhotoOf(
+        {
+          title: "RCA television at the 1939 New York World's Fair",
+          description: '',
+          categories: [],
+        },
+        fair,
+        1939,
+      ).ok,
+    ).toBe(true);
+    expect(
+      eventPhotoOf(
+        {
+          title: "RCA television pavilion, World's Fair",
+          description: '',
+          categories: [],
+        },
+        fair,
+        1939,
+      ).ok,
+    ).toBe(true);
+  });
+});
+
+describe('an event of generic words only', () => {
+  it('finds nothing to carry in "East and West move into regional self-government", and clears no climate table of West Virginia', () => {
+    expect(
+      eventPhotoOf(
+        {
+          title: 'Climatological data, West Virginia (1957)',
+          description: 'Monthly summaries, east and west divisions',
+          categories: ['1957 in West Virginia'],
+        },
+        {
+          name: 'East and West',
+          years: [1957],
+          place: ['Nigeria'],
+          words: ['East and West move into regional self-government'],
+        },
+        1957,
+      ).ok,
+    ).toBe(false);
   });
 });

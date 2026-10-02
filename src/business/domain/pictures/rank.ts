@@ -407,6 +407,29 @@ function keysIn(text: string): Set<string> {
   return keys;
 }
 
+/**
+ * Stems that tell no event from another: directions, and the words of any
+ * region's politics ("East and West move into regional self-government"
+ * is in West Virginia's climate tables too).
+ */
+const GENERIC_KEYS = new Set([
+  'north',
+  'northe',
+  'south',
+  'southe',
+  'east',
+  'easter',
+  'west',
+  'wester',
+  'centra',
+  'region',
+  'self',
+  'govern',
+  'nation',
+  'people',
+  'power',
+]);
+
 /** How far from where an event happened a photo's own city may be and still be there. */
 const SAME_CITY_KM = 150;
 
@@ -513,7 +536,9 @@ export function eventPhotoOf(
     .split(/\s+/u)
     .filter((w) => !EVENT_VERBS.has(w.toLowerCase().replace(/[^\p{L}]/gu, '')))
     .join(' ');
-  const keys = [...keysIn(told)].filter((k) => !placed.includes(k));
+  const keys = [...keysIn(told)].filter(
+    (k) => !placed.includes(k) && !GENERIC_KEYS.has(k),
+  );
   // Its names (its people, its bodies), but where it happened: a photo of
   // it names one of them.
   const names = [...keysIn((query.names ?? []).join(' '))].filter(

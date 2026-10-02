@@ -625,3 +625,24 @@ describe('an event is where it happened', () => {
     ).toBe(true);
   });
 });
+
+describe('an event of generic words only', () => {
+  it('finds nothing to carry in "East and West move into regional self-government", and clears no climate table of West Virginia', () => {
+    expect(
+      eventPhotoOf(
+        {
+          title: 'Climatological data, West Virginia (1957)',
+          description: 'Monthly summaries, east and west divisions',
+          categories: ['1957 in West Virginia'],
+        },
+        {
+          name: 'East and West',
+          years: [1957],
+          place: ['Nigeria'],
+          words: ['East and West move into regional self-government'],
+        },
+        1957,
+      ).ok,
+    ).toBe(false);
+  });
+});

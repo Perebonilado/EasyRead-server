@@ -13,7 +13,7 @@ import {
   INFOGRAPHIC_KINDS_CAST,
   INFOGRAPHIC_KINDS_GUIDE,
   MAP_GROUPS_GUIDE,
-  PROMPTS,
+  explainerWrite,
 } from './prompts';
 import {
   ERAS,
@@ -278,28 +278,34 @@ export const EDITOR_PROMPTS = {
       '  "glow" for a front or a fault line; name, or null). year: the year',
       '  the story’s map is about, or null; bordersDiffer: true when that',
       '  year’s borders were not today’s, false when they were, else null.',
-      '- places: the real places the story happens in, where its illustrated',
-      '  scenes show people (up to six): a square, a hall, a field, a harbour, a',
-      '  street, a home of the time. Never a diagram, a board, a desk or a',
-      '  page: those are the lesson’s pictures, drawn as diagrams. For a topic',
-      '  with no famous people, the everyday places where its effect is felt',
-      '  (a farm at sowing time, a market on a feast day). Each: name;',
-      `  kind, the nearest of ${quoted(WORLD_PLACE_KINDS)};`,
+      '- places: the real places the story happens in (up to six), each one',
+      '  the research names: a city, a building, a square, a harbour, a field',
+      '  that a source says something happened in. Never a place made up for',
+      '  the story, and never a kind of place standing for many (an everyday',
+      '  market, a typical village): a place no claim names is left out, and',
+      '  none at all is fine. Never a diagram, a board, a desk or a page:',
+      '  those are the lesson’s pictures, drawn as diagrams. Each: name, as',
+      `  the research names it; kind, the nearest of ${quoted(WORLD_PLACE_KINDS)};`,
       '  look, from the look notes (what is there, the materials, the light);',
-      '  time, the light it is usually seen in (dawn, day, dusk or night).',
-      '- people: living people of the story as they were in their time, never',
-      '  a statue, a bust, a portrait or a photo of them: the cast’s recurring',
-      '  people first, then those on screen once, and ordinary people of the',
-      '  time where the story needs them (up to seven in all): name, as the',
-      '  research names them (or "A farmer", "A clerk"); role, in a',
-      '  few words; likeness, from the look notes (build, face, hair, beard or',
-      '  glasses, signature headwear and clothes); voice; and figure, how the',
-      '  figure kit draws them, each field from its list (age, build, skin 1',
-      '  to 10 as the look notes say it, hair, hairColour, facialHair,',
-      '  headwear, top, the colours, extras). Dress them as the look notes and',
-      '  the era say, never as a stereotype of a culture, and never as a',
-      '  caricature; where the research says nothing of how someone looked,',
-      '  keep them plain and leave the field null.',
+      '  time, the light it is usually seen in (dawn, day, dusk or night);',
+      '  claims, the research’s claim ids (c1…) that name it or say what',
+      '  happened there.',
+      '- people: the real people of the story, each one the research names,',
+      '  as they were in their time, never a statue, a bust, a portrait or a',
+      '  photo of them: the cast’s recurring people first, then those on',
+      '  screen once (up to seven in all). Never an ordinary person made up',
+      '  for the story ("a farmer", "a clerk"), never a stand-in for a group',
+      '  and never anyone standing in for the viewer: someone no claim names',
+      '  is left out, and none at all is fine. Each: name, as the research',
+      '  names them; role, in a few words; likeness, from the look notes',
+      '  (build, face, hair, beard or glasses, signature headwear and',
+      '  clothes); voice; figure, how the figure kit draws them, each field',
+      '  from its list (age, build, skin 1 to 10 as the look notes say it,',
+      '  hair, hairColour, facialHair, headwear, top, the colours, extras);',
+      '  and claims, the research’s claim ids (c1…) about them. Dress them as',
+      '  the look notes and the era say, never as a stereotype of a culture,',
+      '  and never as a caricature; where the research says nothing of how',
+      '  someone looked, keep them plain and leave the field null.',
       '- things: recurring things of the story (a flag, a printing press, a',
       '  calendar), each with its look.',
     ].join('\n'),
@@ -494,14 +500,27 @@ export const EDITOR_PROMPTS = {
   ].join('\n\n'),
 } as const;
 
-/** The board of a lesson scene: the lesson writer's own craft, on narration already written. */
+/**
+ * The board of a lesson scene: the lesson writer's own craft as an
+ * explainer's writers are told it (explainerWrite), on narration already
+ * written. No one is drawn, a real place is the show's map with a pin,
+ * and nothing is set in type in place of a picture (explainer-animation-
+ * plan §10).
+ */
 export function boardLessonPrompt(): string {
-  const write = PROMPTS.sceneWrite;
+  const write = explainerWrite();
   // Each guide once: the writer's craft already lists the kinds' fields
-  // and the map's regions, so the editor's guide adds its decision rule.
-  const kinds = write.includes(INFOGRAPHIC_KINDS_CAST)
-    ? INFOGRAPHIC_KINDS_GUIDE.replace(INFOGRAPHIC_KINDS_CAST, '')
-    : INFOGRAPHIC_KINDS_GUIDE;
+  // and the map's regions, so the editor's guide adds its decision rule;
+  // an event with people in it is shown by what is real in it, never a
+  // drawing of them.
+  const kinds = (
+    write.includes(INFOGRAPHIC_KINDS_CAST)
+      ? INFOGRAPHIC_KINDS_GUIDE.replace(INFOGRAPHIC_KINDS_CAST, '')
+      : INFOGRAPHIC_KINDS_GUIDE
+  ).replace(
+    'A feeling, an atmosphere, an event with people in it: a scene with people (or a drawing).',
+    'An event with people in it: where it happened (the map with a pin), a document, a number, their exact words as a quote; never a drawing of people or of a place.',
+  );
   return [
     write,
     kinds.replace(/\s{2,}/gu, ' ').trim(),
@@ -515,8 +534,18 @@ export function boardLessonPrompt(): string {
       'each beat’s pause, delivery and music.',
     ].join(' '),
     [
-      '- Each line comes with what the editor wants seen ("show"): draw that,',
-      '  on that line.',
+      '- Each line comes with what the editor wants seen ("show"): show that,',
+      '  on that line, as these rules allow.',
+      '- No one is drawn: never a "person", never a drawing of people, of a',
+      '  group or of a crowd, and never anyone standing in for the viewer. A',
+      '  real person is their namecard, their exact words as a quote, a',
+      '  document they signed; the voice says who they were.',
+      '- A real place is the show’s map (kind "map") with the place pinned',
+      '  (map.pins), never a drawing of it, and never a place made up for',
+      '  the story.',
+      '- Never a keyword card standing in for a picture: where nothing can',
+      '  be shown truthfully, bring nothing new on, and the picture before it',
+      '  holds.',
       '- The decision rule: a place → a map (kind "map", by names; the show’s',
       '  regions by their names); when → a calendar for a date or two, a',
       '  timeline for several; how many → a counter for one number, icons for',

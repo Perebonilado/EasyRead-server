@@ -49,7 +49,7 @@ import {
   type DrawingKind,
   type DrawingVerdict,
 } from '../../../business/domain/drawing-score';
-import { PROMPTS } from '../prompts';
+import { PROMPTS, explainerWrite } from '../prompts';
 import { STUDIO_PROMPTS } from '../studio-prompts';
 import type { z } from 'zod';
 import {
@@ -888,6 +888,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     profile?: string;
     story?: string;
     notes?: string;
+    explainer?: boolean;
     previous?: SceneScriptDraft;
     problems?: string[];
   }): Promise<LlmResult<SceneScriptDraft>> {
@@ -898,7 +899,9 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
       generateObject({
         model,
         schema: sceneScriptSchema,
-        system: PROMPTS.sceneWrite,
+        // A Studio explainer's writer is told the explainer's craft; a
+        // book's page keeps the writer's own (explainer-animation-plan §10).
+        system: input.explainer ? explainerWrite() : PROMPTS.sceneWrite,
         prompt: [
           `Document: ${input.documentTitle}`,
           `Chapter: ${input.topicTitle}`,

@@ -76,6 +76,7 @@ import {
   mendScript,
   quietStretches,
   wordsAloneStretches,
+  WORDS_ALONE,
   type MendOptions,
   type SceneScript,
 } from '../scene-script';
@@ -3493,8 +3494,15 @@ export function checkExplainer(
 ): { script: SceneScript; problems: SheetProblem[] } {
   const mended = mendScript(sheet.draft, {
     material: studioMaterial(sheet, options.teach, options.source ?? null),
-    formats: options.maths ? ['explainer', 'maths'] : ['explainer'],
+    // An explainer quotes exact words as a quote: the one picture of what
+    // someone said that is always true (explainer-animation-plan §5.3).
+    formats: options.maths
+      ? ['explainer', 'maths', 'reading']
+      : ['explainer', 'reading'],
     stage: options.stage,
+    // What cannot be shown truthfully is left out, never a card, and no
+    // one is drawn (explainer-animation-plan §10).
+    explainer: true,
     ...(options.palette?.length
       ? { palette: options.palette, held: options.held ?? null }
       : {}),
@@ -3516,7 +3524,7 @@ export function checkExplainer(
         mended.script,
         stillWordsFor(mended.script, options.stage),
       ),
-      ...wordsAloneStretches(mended.script),
+      ...wordsAloneStretches(mended.script, WORDS_ALONE, true),
       ...fewStageChanges(
         mended.script,
         stageWordsFor(mended.script, options.stage),
@@ -3546,9 +3554,11 @@ export function checkExplainer(
     problems.push({
       rule: 'picture',
       message:
+        // Never "show it as a keyword card": an explainer leaves out what
+        // it cannot draw truthfully (explainer-animation-plan §10).
         wrong.why === 'comparison'
-          ? `The drawing "${wrong.id}" is labelled "${wrong.name}" but draws the comparison the voice makes (${wrong.with}), not ${wrong.name} itself: draw what its label says, or show it as a keyword card.`
-          : `The drawing "${wrong.id}" is labelled "${wrong.name}" but is drawn just as "${wrong.with}" is: draw what its label says, or show it as a keyword card.`,
+          ? `The drawing "${wrong.id}" is labelled "${wrong.name}" but draws the comparison the voice makes (${wrong.with}), not ${wrong.name} itself: draw what its label says, or leave it out: the picture before it holds, or the map shows it.`
+          : `The drawing "${wrong.id}" is labelled "${wrong.name}" but is drawn just as "${wrong.with}" is: draw what its label says, or leave it out: the picture before it holds, or the map shows it.`,
       beat: null,
       level: 'warning',
     });
@@ -3693,8 +3703,10 @@ export function repairedWith(
 
 /**
  * An explainer scene made sound whatever its writer left wrong: a chart,
- * a timeline, a graph, a map or a quotation the check turns down is shown as its
- * name in type instead, so nothing made up is drawn, and the film is made.
+ * a timeline, a graph, a map or a quotation the check turns down is left
+ * out, so nothing made up is drawn, and the film is made. Never a card of
+ * its name in its place (explainer-animation-plan §10): its steps drop it
+ * as they drop any name not in the cast, and the stage keeps what it had.
  */
 export function repairExplainer(
   sheet: ExplainerSheet,
@@ -3711,36 +3723,15 @@ export function repairExplainer(
   );
   // A drawing that would not show what its label says (three brake
   // calipers captioned "Parental support", "Education", "Positive peer
-  // influence") is its label in type: true, and never a puzzle.
+  // influence") is left out too: never a puzzle, and never its label in
+  // type standing in for it.
   for (const wrong of pictureMismatches(sheet)) refused.add(wrong.id);
   if (!refused.size) return sheet;
   return {
     ...sheet,
     draft: {
       ...sheet.draft,
-      cast: sheet.draft.cast.map((thing) =>
-        refused.has(thing.id)
-          ? {
-              ...thing,
-              kind: 'words',
-              style: 'keyword',
-              plot: null,
-              chart: null,
-              timeline: null,
-              quote: null,
-              phrases: null,
-              lines: null,
-              map: null,
-              flag: null,
-              equation: null,
-              flow: null,
-              molecule: null,
-              counter: null,
-              icons: null,
-              seats: null,
-            }
-          : thing,
-      ),
+      cast: sheet.draft.cast.filter((thing) => !refused.has(thing.id)),
     },
   };
 }

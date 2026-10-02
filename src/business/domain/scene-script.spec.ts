@@ -15,7 +15,11 @@ import {
   betterDraft,
   type MendedScript,
   tellsOfLoss,
+  withoutThings,
+  MAX_DRAWINGS,
+  type SceneScript,
   type SceneScriptDraft,
+  type SceneThing,
 } from './scene-script';
 
 const thing = (
@@ -1712,5 +1716,300 @@ describe("a story's characters kept in their own words", () => {
       { characters, material },
     );
     expect(problems).toEqual([]);
+  });
+});
+
+describe('a script with things left out (withoutThings)', () => {
+  const stat = (id: string): SceneThing => ({
+    id,
+    kind: 'stat',
+    value: '1',
+    caption: id,
+  });
+  const at = (beat: number, word = 0) => ({ at: { beat, phrase: 'x' }, word });
+  const script: Pick<SceneScript, 'cast' | 'steps'> = {
+    cast: [stat('a'), stat('b'), stat('c')],
+    steps: [
+      {
+        ...at(0),
+        stage: { layout: 'one', show: ['a'], arrows: [] },
+        effects: [],
+      },
+      {
+        ...at(1),
+        stage: {
+          layout: 'compare',
+          show: ['a', 'b'],
+          arrows: [{ from: 'a', to: 'b', label: 'to', flow: true }],
+          arrive: ['b'],
+        },
+        effects: [{ target: 'b', part: null, do: 'pulse' }],
+      },
+      {
+        ...at(2),
+        stage: { layout: 'one', show: ['b'], arrows: [] },
+        effects: [],
+      },
+      {
+        ...at(2, 3),
+        stage: null,
+        effects: [{ target: 'a', part: null, do: 'pulse' }],
+      },
+    ],
+  };
+
+  it('takes them off the cast and every stage, the stage keeping what it had', () => {
+    const left = withoutThings(script, new Set(['b']));
+    expect(left.cast.map((t) => t.id)).toEqual(['a', 'c']);
+    expect(left.steps).toEqual([
+      script.steps[0],
+      // What came on with it stays, laid out for as many; its arrows,
+      // comings and effects go with it.
+      {
+        ...at(1),
+        stage: { layout: 'one', show: ['a'], arrows: [] },
+        effects: [],
+      },
+      // A stage of it alone is no change, and a step left with nothing is gone.
+      script.steps[3],
+    ]);
+  });
+
+  it('opens on its next picture when what it opened on is left out', () => {
+    const left = withoutThings(script, new Set(['a']));
+    expect(left.steps.map((s) => [s.at.beat, s.stage?.show ?? null])).toEqual([
+      [0, ['b']],
+      [1, null],
+      [2, ['b']],
+    ]);
+    // The effect on what is still there stays where it was said.
+    expect(left.steps[1].effects).toEqual([
+      { target: 'b', part: null, do: 'pulse' },
+    ]);
+  });
+
+  it('is pure: the script given is untouched, and the same ask gives the same script', () => {
+    const before = JSON.stringify(script);
+    const once = withoutThings(script, new Set(['b']));
+    expect(withoutThings(script, new Set(['b']))).toEqual(once);
+    expect(JSON.stringify(script)).toBe(before);
+    // Nothing of its own to leave out: the script itself.
+    expect(withoutThings(script, new Set(['z']))).toBe(script);
+  });
+});
+
+describe("an explainer's floor: left out, never a card, and no one drawn", () => {
+  /** A lesson: a stat, then the thing beside it on the next sentence, pointed at on the last. */
+  const lesson = (one: SceneScriptDraft['cast'][number]): SceneScriptDraft => ({
+    fit: 'good',
+    fitReason: null,
+    title: 'A lesson',
+    mood: 'calm',
+    beats: [
+      {
+        say: 'About seven in ten people agree.',
+        pause: 'short',
+        delivery: 'hook',
+      },
+      {
+        say: 'Here is what that looks like.',
+        pause: 'short',
+        delivery: 'explain',
+      },
+      { say: 'And it is still true today.', pause: 'long', delivery: 'key' },
+    ],
+    cast: [thing('share', 'stat', { name: 'Agree', value: '70%' }), one],
+    steps: [
+      step(0, 'About seven', { layout: 'one', show: ['share'] }),
+      step(1, 'Here is', {
+        layout: 'row',
+        show: ['share', one.id],
+        arrows: [{ from: 'share', to: one.id, label: null, flow: false }],
+      }),
+      step(2, 'still true', { effects: [{ target: one.id, do: 'pulse' }] }),
+    ],
+  });
+
+  const cases: [
+    string,
+    SceneScriptDraft['cast'][number],
+    'words' | 'person',
+  ][] = [
+    ['a stat with no value', thing('count', 'stat', { value: null }), 'words'],
+    [
+      'an equation with no lines',
+      thing('law', 'equation', { equation: [] }),
+      'words',
+    ],
+    [
+      'a character the story does not have',
+      thing('ada', 'character', { ref: 'ada' }),
+      'words',
+    ],
+    [
+      'a drawing with no brief',
+      thing('vague', 'drawing', { brief: null }),
+      'words',
+    ],
+    [
+      'a chart with fewer than two numbers',
+      thing('bars', 'chart', {
+        chart: { kind: 'bar', unit: null, bars: [{ label: 'One', value: 1 }] },
+      }),
+      'words',
+    ],
+    [
+      'a map of nowhere',
+      thing('where', 'map', {
+        map: { region: 'Narnia', highlight: null, places: null, routes: null },
+      }),
+      'words',
+    ],
+    [
+      'a person',
+      thing('doctor', 'person', { name: 'Doctor', figure: { age: 'adult' } }),
+      'person',
+    ],
+    [
+      'a drawing that is someone',
+      thing('kid', 'drawing', { name: 'Sick child' }),
+      'person',
+    ],
+    [
+      'a drawing whose brief is about someone',
+      thing('bed', 'drawing', {
+        name: 'Hospital bed',
+        brief: 'A patient lying in a hospital bed',
+      }),
+      'person',
+    ],
+  ];
+
+  it.each(cases)(
+    "leaves out %s, the stage keeping what it had; a book's page keeps it as before",
+    (_, one, before) => {
+      const book = mendScript(lesson(one), { formats: ['explainer'] });
+      expect(book.script.cast.find((t) => t.id === one.id)?.kind).toBe(before);
+      const { script, mended } = mendScript(lesson(one), {
+        formats: ['explainer'],
+        explainer: true,
+      });
+      expect(script.cast.map((t) => t.id)).toEqual(['share']);
+      expect(mended).toEqual(
+        expect.arrayContaining([
+          expect.stringMatching(`^${one.id}: .*; left out$`),
+        ]),
+      );
+      // The stat stays on the stage from its words; nothing comes on in
+      // the thing's place, and nothing is pointed at for it.
+      expect(script.steps.map((s) => [s.at.beat, s.stage?.show])).toEqual([
+        [0, ['share']],
+      ]);
+    },
+  );
+
+  it('opens on its next picture where the first was left out, never an empty stage', () => {
+    const person = thing('student', 'person', {
+      name: 'Teen student',
+      figure: { age: 'teen' },
+    });
+    const opened: SceneScriptDraft = {
+      ...lesson(person),
+      steps: [
+        step(0, 'About seven', { layout: 'one', show: ['student'] }),
+        step(1, 'Here is', { layout: 'one', show: ['share'] }),
+        step(2, 'still true', { effects: [{ target: 'share', do: 'pulse' }] }),
+      ],
+    };
+    const { script, mended } = mendScript(opened, {
+      formats: ['explainer'],
+      explainer: true,
+    });
+    expect(
+      script.steps.map((s) => [s.at.beat, s.at.phrase, s.stage?.show ?? null]),
+    ).toEqual([
+      [0, 'About seven', ['share']],
+      [2, 'still true', null],
+    ]);
+    expect(mended).toContain('step 2: opens the scene, at "About seven"');
+    // A book's page as it was: the person on, then the number.
+    const book = mendScript(opened, { formats: ['explainer'] });
+    expect(book.script.steps.map((s) => s.stage?.show ?? null)).toEqual([
+      ['student'],
+      ['share'],
+      null,
+    ]);
+  });
+
+  it('leaves out drawings past the most an explainer draws, the first seen kept', () => {
+    const drawings = Array.from({ length: MAX_DRAWINGS + 2 }, (_, k) =>
+      thing(`d${k + 1}`, 'drawing', { name: `Part ${k + 1}` }),
+    );
+    const many: SceneScriptDraft = {
+      ...lesson(drawings[0]),
+      cast: drawings,
+      // Seen in their order: four on the first sentence, three on each after.
+      steps: drawings.map((d, k) =>
+        step(
+          k < 4 ? 0 : k < 7 ? 1 : 2,
+          k < 4 ? 'About seven' : k < 7 ? 'Here is' : 'still true',
+          { layout: 'one', show: [d.id] },
+        ),
+      ),
+    };
+    const book = mendScript(many, { formats: ['explainer'] });
+    expect(book.script.cast.filter((t) => t.kind === 'words')).toHaveLength(2);
+    const { script, mended } = mendScript(many, {
+      formats: ['explainer'],
+      explainer: true,
+    });
+    expect(script.cast.filter((t) => t.kind === 'drawing')).toHaveLength(
+      MAX_DRAWINGS,
+    );
+    expect(script.cast.some((t) => t.kind === 'words')).toBe(false);
+    expect(mended).toEqual(
+      expect.arrayContaining([
+        `d${MAX_DRAWINGS + 1}: more than ${MAX_DRAWINGS} drawings; left out`,
+        `d${MAX_DRAWINGS + 2}: more than ${MAX_DRAWINGS} drawings; left out`,
+      ]),
+    );
+    expect(
+      script.steps
+        .flatMap((s) => s.stage?.show ?? [])
+        .filter((id) =>
+          [`d${MAX_DRAWINGS + 1}`, `d${MAX_DRAWINGS + 2}`].includes(id),
+        ),
+    ).toEqual([]);
+  });
+
+  it('asks an explainer for no people where a drawing wants them', () => {
+    const market = thing('progress', 'drawing', {
+      name: 'Progression',
+      brief:
+        'Three panels: first a person falling asleep, then lying in bed, then a flat line.',
+    });
+    const book = mendScript(lesson(market), { formats: ['explainer'] });
+    expect(book.problems.join(' ')).toMatch(/show each person as a person/);
+    const { problems } = mendScript(lesson(market), {
+      formats: ['explainer'],
+      explainer: true,
+    });
+    expect(problems.join(' ')).toMatch(/an explainer draws no one/);
+    expect(problems.join(' ')).not.toMatch(/as a person/);
+  });
+
+  it('tells an explainer of a card alone what may show the idea, never a person', () => {
+    const { script } = mendScript(
+      {
+        ...lesson(thing('term', 'words', { name: 'Photosynthesis' })),
+        cast: [thing('term', 'words', { name: 'Photosynthesis' })],
+        steps: [step(0, 'About seven', { layout: 'one', show: ['term'] })],
+      },
+      { formats: ['explainer'], explainer: true },
+    );
+    const [said] = wordsAloneStretches(script, 4, true);
+    expect(said).toMatch(/a map, a chart, a counter/);
+    expect(said).not.toMatch(/a person/);
+    expect(wordsAloneStretches(script, 4)[0]).toMatch(/a person/);
   });
 });

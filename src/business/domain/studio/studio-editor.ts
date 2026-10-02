@@ -1093,9 +1093,24 @@ function voiceOf(raw: unknown, figure: FigureSpec, words: string): StudioVoice {
   return he ? 'man' : 'woman';
 }
 
-/** The world made sound: tokens from the theme's list, ids unique, each list capped. */
-export function worldOf(raw: unknown): EditorWorld {
+/**
+ * The world made sound: tokens from the theme's list, ids unique, each
+ * list capped. Its places and people are real ones, each with a claim of
+ * the research (explainer-animation-plan §1, §10): one with none is left
+ * out, never a place or a person made up for the story; and, given the
+ * research, a claim it has not got is no claim.
+ */
+export function worldOf(
+  raw: unknown,
+  research: Pick<EditorResearch, 'claims'> | null = null,
+): EditorWorld {
   const said = record(raw);
+  const known = research ? new Set(research.claims.map((c) => c.id)) : null;
+  const claimsOf = (value: unknown) =>
+    list(value)
+      .map((c) => text(c, 16))
+      .filter((c) => c && (!known || known.has(c)))
+      .slice(0, 6);
   const things = new Set<string>();
   const palette = list(said.palette)
     .flatMap((one) => {
@@ -1114,7 +1129,8 @@ export function worldOf(raw: unknown): EditorWorld {
     .flatMap((one): EditorPlace[] => {
       const p = record(one);
       const name = plainText(p.name, 60);
-      if (!name) return [];
+      const claims = claimsOf(p.claims);
+      if (!name || !claims.length) return [];
       let id = studioId(text(p.id, 40) || name, 'place');
       while (placeIds.has(id)) id = `${id}-2`;
       placeIds.add(id);
@@ -1125,10 +1141,7 @@ export function worldOf(raw: unknown): EditorWorld {
           kind: oneOf(WORLD_PLACE_KINDS)(p.kind) ?? 'street',
           look: plainText(p.look, 400),
           time: oneOf(STORY_TIMES)(p.time) ?? 'day',
-          claims: list(p.claims)
-            .map((c) => text(c, 16))
-            .filter(Boolean)
-            .slice(0, 6),
+          claims,
         },
       ];
     })
@@ -1138,7 +1151,8 @@ export function worldOf(raw: unknown): EditorWorld {
     .flatMap((one): EditorPerson[] => {
       const p = record(one);
       const name = plainText(p.name, 60);
-      if (!name) return [];
+      const claims = claimsOf(p.claims);
+      if (!name || !claims.length) return [];
       let id = studioId(text(p.id, 40) || name, 'someone');
       while (peopleIds.has(id)) id = `${id}-2`;
       peopleIds.add(id);
@@ -1154,10 +1168,7 @@ export function worldOf(raw: unknown): EditorWorld {
           recurring: p.recurring !== false,
           figure,
           voice: voiceOf(p.voice, figure, `${role} ${likeness}`),
-          claims: list(p.claims)
-            .map((c) => text(c, 16))
-            .filter(Boolean)
-            .slice(0, 6),
+          claims,
         },
       ];
     })
@@ -1235,6 +1246,7 @@ export const EMPTY_EDITOR: StudioEditor = {
 export function editorOf(raw: unknown): StudioEditor | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const said = raw as Record<string, unknown>;
+  const research = said.research ? researchOf(said.research) : null;
   return {
     stage: oneOf(EDITOR_STAGES)(said.stage),
     question: plainText(said.question, 200) || null,
@@ -1243,11 +1255,11 @@ export function editorOf(raw: unknown): StudioEditor | null {
     notThis: texts(said.notThis, 6, 200),
     subThemes: texts(said.subThemes, 8, 200),
     angles: anglesOf(said.angles),
-    research: said.research ? researchOf(said.research) : null,
-    plan: said.plan
-      ? planOf(said.plan, said.research ? researchOf(said.research) : null)
-      : null,
-    world: said.world ? worldOf(said.world) : null,
+    research,
+    plan: said.plan ? planOf(said.plan, research) : null,
+    // Its places and people the research's own: one with no claim of it
+    // is no longer the world's (worldOf).
+    world: said.world ? worldOf(said.world, research) : null,
   };
 }
 

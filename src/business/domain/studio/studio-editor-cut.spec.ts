@@ -3,15 +3,25 @@ import { worldOf } from './studio-editor';
 import { beatsOf, rowsOf } from './studio-editorial';
 import { cutScenes, editorOutline, sceneOfRow } from './studio-editor-cut';
 
+// Its places and people the research's, each with a claim (worldOf).
 const world = worldOf({
   era: '1582',
   places: [
-    { name: 'Saint Peter’s Square', kind: 'square', time: 'day' },
-    { name: 'The Vatican library', kind: 'hall' },
+    {
+      name: 'Saint Peter’s Square',
+      kind: 'square',
+      time: 'day',
+      claims: ['c1'],
+    },
+    { name: 'The Vatican library', kind: 'hall', claims: ['c2'] },
   ],
   people: [
-    { name: 'Pope Gregory XIII', role: 'the pope who signed it' },
-    { name: 'Christopher Clavius', role: 'the astronomer' },
+    {
+      name: 'Pope Gregory XIII',
+      role: 'the pope who signed it',
+      claims: ['c1'],
+    },
+    { name: 'Christopher Clavius', role: 'the astronomer', claims: ['c2'] },
   ],
 });
 const beats = beatsOf({

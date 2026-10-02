@@ -62,12 +62,14 @@ const editor: StudioEditor = {
     era: '1582',
     palette: [{ thing: 'the old calendar', token: 'chart1' }],
     held: { token: 'accent', for: 'the corrected date' },
-    places: [{ name: 'Rome', kind: 'square' }],
+    // Each with a claim of the research, as every world's are (worldOf).
+    places: [{ name: 'Rome', kind: 'square', claims: ['c1'] }],
     people: [
       {
         name: 'Clavius',
         role: 'astronomer',
         likeness: 'bearded, in a black robe',
+        claims: ['c1'],
       },
     ],
   }),

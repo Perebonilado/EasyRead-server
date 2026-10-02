@@ -60,6 +60,32 @@ export const AZIKIWE_NAMESAKE: WikiPerson = {
   images: [],
 };
 
+/** Nigeria's last governor-general, as Wikidata has him: its name search for "Sir James Robertson" never reaches him. */
+export const ROBERTSON: WikiPerson = {
+  qid: 'Q6145713',
+  label: 'James Wilson Robertson',
+  aliases: ['Sir James Wilson Robertson'],
+  description: 'British colonial governor (1899-1983)',
+  human: true,
+  born: 1899,
+  died: 1983,
+  roles: ['politician', 'colonial governor', 'Governor-General of Nigeria'],
+  places: ['Nigeria', 'Broughty Ferry'],
+  images: [],
+};
+
+/** One of the James Robertsons the name search gives first, with nothing of the research's. */
+export const ROBERTSON_NAMESAKE: WikiPerson = {
+  qid: 'Q108162573',
+  label: 'James Robertson',
+  aliases: [],
+  description: 'British Royal Navy officer, lieutenant in 1815',
+  human: true,
+  roles: ['naval officer'],
+  places: ['United Kingdom of Great Britain and Ireland'],
+  images: [],
+};
+
 export const LAGOS: WikiItem = {
   qid: 'Q8673',
   label: 'Lagos',
@@ -159,6 +185,31 @@ export const FILES: readonly SourceFile[] = [
     categories: ['Nnamdi Azikiwe', 'Self-published work'],
     structured: { status: ['Q50423863'], licences: ['Q18199165'] },
   }),
+  // Its licence a bare "PD US" on a 1937 photograph: refused with the
+  // screen on, taken with it off (PICTURE_LICENCE).
+  commonsFile({
+    sourceId: 'File:Nnamdi Azikiwe in Office, 1937.jpg',
+    width: 2000,
+    height: 2500,
+    artist: 'Unknown author',
+    credit: 'Northwestern University Library',
+    description: 'Nnamdi Azikiwe in his office, 1937',
+    date: '1937',
+    categories: ['Nnamdi Azikiwe', 'PD US'],
+    structured: null,
+  }),
+  commonsFile({
+    sourceId: 'File:Sir James Robertson, Governor-General of Nigeria, 1958.jpg',
+    width: 1600,
+    height: 2000,
+    artist: 'Unknown author',
+    credit: 'The National Archives (United Kingdom)',
+    description: 'Sir James Robertson, Governor-General of Nigeria',
+    date: '1958',
+    categories: ['PD-UKGov'],
+    depicts: [{ qid: 'Q6145713' }],
+    structured: null,
+  }),
   commonsFile({
     sourceId: 'File:Lagos skyline 2019.jpg',
     width: 4000,
@@ -213,6 +264,35 @@ export class FakeSources implements PictureSourcesPort {
           label: e.label,
           description: e.description,
         })),
+    );
+  }
+  /** Wikidata's full-text search: every word in a person's or an item's words. */
+  searchText(words: string, opts: { limit: number; humans?: boolean }) {
+    this.calls.push(`search-text:${words}`);
+    const asked = words.toLowerCase().split(/\s+/u).filter(Boolean);
+    const all: { qid: string; words: string; human: boolean }[] = [
+      ...this.people_.map((p) => ({
+        qid: p.qid,
+        words: [p.label, ...p.aliases, p.description, ...p.roles, ...p.places]
+          .join(' ')
+          .toLowerCase(),
+        human: p.human,
+      })),
+      ...this.items_.map((i) => ({
+        qid: i.qid,
+        words: [i.label, ...i.aliases, i.description].join(' ').toLowerCase(),
+        human: false,
+      })),
+    ];
+    return Promise.resolve(
+      all
+        .filter(
+          (e) =>
+            (!opts.humans || e.human) &&
+            asked.every((w) => e.words.includes(w)),
+        )
+        .slice(0, opts.limit)
+        .map((e) => ({ qid: e.qid })),
     );
   }
   people(qids: readonly string[]) {
@@ -341,13 +421,23 @@ export const FAKE_PIXELS: PicturePixelsPort = {
 /**
  * A model that sees, answering by the file's name: the tractor print
  * shows six people photographed off a museum wall; anything else is one
- * person's photograph, their face high on the right. Its calls counted.
+ * person's photograph, their face high on the right. Asked whether it
+ * shows an event or a thing, it says yes, but for a file whose name
+ * `disagrees` (a crowd it cannot place, a modern set). Its calls counted.
  */
 export class FakeFocus {
   calls: string[] = [];
-  readonly ask = (input: { png: Buffer; about: string }) => {
+  asked: string[] = [];
+  constructor(private readonly disagrees: RegExp = /(?!)/u) {}
+  readonly ask = (input: { png: Buffer; about: string; asked?: string }) => {
     this.calls.push(input.about);
+    if (input.asked) this.asked.push(input.asked);
     const print = /tractor|museum wall/iu.test(input.about);
+    const shows = !input.asked
+      ? 'unsure'
+      : this.disagrees.test(input.about)
+        ? 'no'
+        : 'yes';
     return Promise.resolve({
       value: print
         ? {
@@ -355,12 +445,14 @@ export class FakeFocus {
             subject: ['A2', 'F5'],
             people: 6,
             kind: 'photograph-of-a-print',
+            shows,
           }
         : {
             faces: ['E2'],
             subject: ['D2', 'F6'],
             people: 1,
             kind: 'photograph',
+            shows,
           },
       usage: { model: 'fake:see', tokensIn: 900, tokensOut: 40, latencyMs: 1 },
     });

@@ -8,6 +8,15 @@
  * right of whoever gave it. An agency photo passed off as free is worse
  * than no picture (Philpot v. IJR: the credit a file asks for is owed).
  *
+ * The screen is behind a switch (PICTURE_LICENCE; Richard, 2026-10-02:
+ * "for now ignore license checks, let's just use the images", agency and
+ * magazine photos too). Off, the default, any file its sources hold may
+ * be used, under the licence its source names, with the credit and chip
+ * as ever; what the screen would have said is kept as a note, so the
+ * pictures in use can be read again when the licences are. Two refusals
+ * are no licence's and stand either way: a picture a machine made is no
+ * picture of the thing (the truth rule), and a watermark is on screen.
+ *
  * Pure: it reads what the source said of the file (plain text, as the
  * adapters hand it over) and answers yes with the licence's words, or no
  * with the reason in plain words for the cache and the logs.
@@ -388,5 +397,80 @@ export function licenceOf(file: LicenceInput): LicenceVerdict {
     ...(CC_URLS[code] ? { url: CC_URLS[code] } : {}),
     attribution: ccBy,
     flags,
+  };
+}
+
+// ── The switch ────────────────────────────────────────────────────────────
+
+/** Whether the licence and provenance screen runs: 'on', today's rules; 'off', none. */
+export type LicenceMode = 'on' | 'off';
+
+/** The switch as the settings say it (PICTURE_LICENCE): on only when said; off by default. */
+export function licenceModeOf(setting: string | null | undefined): LicenceMode {
+  return /^(?:on|true|1|yes|strict)$/iu.test((setting ?? '').trim())
+    ? 'on'
+    : 'off';
+}
+
+/** A licence's name as its source writes it, short enough for the chip: "CC BY-SA 3.0", "Public domain". */
+export function licenceWordsOf(
+  file: Pick<LicenceInput, 'licenceName' | 'licenceCode'>,
+): string {
+  const named = plainText(file.licenceName) || plainText(file.licenceCode);
+  if (!named) return '';
+  if (/^(?:pd|public domain|pdm)\b/iu.test(named)) return 'Public domain';
+  if (/^cc0\b|^cc[- ]zero/iu.test(named)) return 'CC0';
+  // Commons writes Flickr's "no known copyright restrictions" as two words.
+  if (/^no (?:known )?(?:copyright )?restrictions$/iu.test(named))
+    return 'No known restrictions';
+  return named.length <= 28 ? named : `${named.slice(0, 27).trimEnd()}…`;
+}
+
+/**
+ * Why a file is no picture whatever its licence: a machine made it (the
+ * truth rule: never a real image of the person or the place), or a
+ * watermark is on it that nothing may crop away. Null when neither.
+ */
+export function unusableOf(
+  file: Pick<LicenceInput, 'categories' | 'description' | 'title'>,
+): string | null {
+  const categories = file.categories.map((c) => c.trim());
+  if (
+    categories.some((c) => MADE_BY_AI.test(c)) ||
+    MADE_BY_AI.test(`${file.description} ${file.title}`)
+  )
+    return 'it was made by a machine, not taken of the thing';
+  if (categories.some((c) => WATERMARK.test(c)))
+    return 'it carries a watermark';
+  return null;
+}
+
+/**
+ * The desk's verdict on a file under the switch. On, the screen as it
+ * stands (licenceOf, exactly). Off, the screen's own yes where it gives
+ * one; else yes under the licence the source names ("unchecked"), with a
+ * note of what the screen said, attribution owed but for public domain
+ * and CC0, and the credit and chip made as ever. A machine's picture and
+ * a watermark are refused either way.
+ */
+export function licenceUnder(
+  file: LicenceInput,
+  mode: LicenceMode,
+): LicenceVerdict {
+  const strict = licenceOf(file);
+  if (mode === 'on' || strict.ok) return strict;
+  const unusable = unusableOf(file);
+  if (unusable) return refuse(unusable);
+  const short = licenceWordsOf(file);
+  const free = /^(?:Public domain|CC0|No known restrictions)$/u.test(short);
+  const url = plainText(file.licenceUrl ?? '');
+  return {
+    ok: true,
+    code: 'unchecked',
+    short,
+    tier: free ? 'A' : 'B',
+    ...(/^https?:\/\//u.test(url) ? { url } : {}),
+    attribution: !free,
+    flags: [`licence not checked: ${strict.reason}`],
   };
 }

@@ -30,7 +30,30 @@ export interface PictureQuery {
   role?: string;
   /** Where it is, when code knows (a place on the show's map). */
   geo?: { lng: number; lat: number };
+  /**
+   * The words a picture of it must carry in its title, description or
+   * categories (an event's and a thing's: the research's own words for
+   * it), so a picture of the 1958 conference is of that conference.
+   */
+  words?: readonly string[];
+  /**
+   * The names a photo of an event must carry one of (the people, the
+   * bodies and the named things it tells of, but where it happened): a
+   * photo of a 1926 demonstration of aircraft is no photo of Baird's.
+   */
+  names?: readonly string[];
+  /** Of those names, the research's people (surnames): a photo naming one of them is of their event though it names no setting. */
+  persons?: readonly string[];
+  /**
+   * What the desk's look at a picture is asked it shows, in the research's
+   * words ("an event: Nigeria becomes independent, 1 October 1960, Lagos"):
+   * a picture of an event or a thing is taken only when the look agrees.
+   */
+  asked?: string;
 }
+
+/** What a picture is used for: a person's portrait card, a full photo, a document's page. */
+export type PictureUseOf = 'portrait' | 'photo' | 'document';
 
 /** A file as its source describes it, every field plain text, before the desk's checks. */
 export interface SourceFile {
@@ -84,8 +107,13 @@ export interface SourceFile {
   quality?: 'featured' | 'quality' | 'valued' | null;
 }
 
-/** A licence the desk may use, with what it allows. */
+/**
+ * A licence the desk may use, with what it allows; 'unchecked' is a file
+ * taken with the licence screen off (PICTURE_LICENCE), under the licence
+ * its source names.
+ */
 export type LicenceCode =
+  | 'unchecked'
   | 'PD'
   | 'PD-old'
   | 'PD-USGov'
@@ -118,6 +146,8 @@ export interface PictureCandidate {
   file: SourceFile;
   licence: Extract<LicenceVerdict, { ok: true }>;
   kind: PictureKind;
+  /** What it would be used for: a person's portrait, or a photo (of them among others, of a place, an event, a thing). */
+  use: PictureUseOf;
   /** Who or what it shows, as the chip names it. */
   subject: string;
   qid?: string;
@@ -197,4 +227,10 @@ export interface PictureRecord {
   /** For a portrait: the person's years ("1910–1966") and who they were (three words at most). */
   dates?: string;
   role?: string;
+  /** What it was taken for: a person's portrait, or a photo (absent in a record kept before photos of people). */
+  use?: PictureUseOf;
+  /** Its title at its source, in words: what the board's list says it shows. */
+  title?: string;
+  /** Its print (pictures/depth's printOf): the same photograph under another file is known by it. */
+  print?: string;
 }

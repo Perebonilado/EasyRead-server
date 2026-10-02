@@ -35,6 +35,9 @@ export class PictureSourcesAdapter implements PictureSourcesPort {
   searchEntities(name: string, limit?: number) {
     return this.wikidata.searchEntities(name, limit);
   }
+  searchText(words: string, opts: { limit: number; humans?: boolean }) {
+    return this.wikidata.searchText(words, opts);
+  }
   people(qids: readonly string[]) {
     return this.wikidata.people(qids);
   }

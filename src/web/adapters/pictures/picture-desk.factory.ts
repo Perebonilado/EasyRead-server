@@ -11,8 +11,14 @@
  *                      picture's faces and subject are (picture_focus,
  *                      AI_MODEL_PICTURE_FOCUS), once a picture; 'off', the
  *                      middle third a little high.
+ *   PICTURE_LICENCE    'off' (the default; Richard, 2026-10-02) takes any
+ *                      file its sources hold, under the licence they name,
+ *                      credited as ever; 'on', the licence and provenance
+ *                      screen (public domain, CC0 and CC BY only, no agency
+ *                      or magazine files).
  */
 import { PictureDesk } from '../../../business/domain/pictures/desk';
+import { licenceModeOf } from '../../../business/domain/pictures/licence';
 import type { PictureCacheRepository } from '../../../business/repositories/picture-cache.repository';
 import type { LlmGatewayPort } from '../../../business/ports/llm.port';
 import type { StoragePort } from '../../../business/ports/storage.port';
@@ -64,6 +70,7 @@ export function pictureDeskOf(input: {
       llm && switchOn(input.setting('PICTURE_FOCUS'))
         ? (ask) => llm.pictureFocus(ask)
         : null,
+    licence: licenceModeOf(input.setting('PICTURE_LICENCE')),
     ...(input.log ? { log: input.log } : {}),
   });
 }

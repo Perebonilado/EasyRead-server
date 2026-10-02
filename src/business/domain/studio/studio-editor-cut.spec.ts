@@ -1,7 +1,12 @@
 import { outlineOf } from './studio';
 import { worldOf } from './studio-editor';
 import { beatsOf, rowsOf } from './studio-editorial';
-import { cutScenes, editorOutline, sceneOfRow } from './studio-editor-cut';
+import {
+  cutScenes,
+  editorOutline,
+  sceneOfRow,
+  shotsSwitchOn,
+} from './studio-editor-cut';
 
 const world = worldOf({
   era: '1582',
@@ -153,5 +158,14 @@ describe("an editor's script cut into scenes", () => {
     });
     expect(old.scenes).toHaveLength(12);
     expect(old.scenes.some((s) => s.kind === 'illustrated')).toBe(false);
+  });
+});
+
+describe('the shots switch (EXPLAINER_SHOTS)', () => {
+  it('is off unless set on', () => {
+    for (const on of ['on', 'ON', 'true', '1', 'yes', ' on '])
+      expect(shotsSwitchOn(on)).toBe(true);
+    for (const off of [undefined, null, '', 'off', 'false', '0', 'no', 'shots'])
+      expect(shotsSwitchOn(off)).toBe(false);
   });
 });

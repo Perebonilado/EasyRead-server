@@ -16,7 +16,7 @@
  * or line, unit, bars [{label, value}]}; plot {fn, xFrom, xTo, yFrom,
  * yTo, xLabel, yLabel, points}; flow {direction, nodes [{label, kind}],
  * edges [{from, to, label}]}; and two of the board's own: timeline
- * {events [{when, name}]} and quote {text, speaker, when}. Any of them may
+ * {events [{when, name}]} and quote {text, speaker, when, claim}. Any of them may
  * carry `source` (where its numbers come from) and `colour` (a token).
  */
 import { readCalendar } from '../scene-calendar';
@@ -311,6 +311,8 @@ function specOf(kind: ChartKind, raw: unknown): Record<string, unknown> {
         text: line(text, 400).split(' ').slice(0, QUOTE_WORDS).join(' '),
         speaker: label(said.speaker ?? said.who, 4),
         when: line(said.when ?? said.date, 30) || null,
+        // The claim its words are, for the check that they are its words.
+        claim: line(said.claim, 12) || null,
       };
     }
   }

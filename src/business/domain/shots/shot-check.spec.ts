@@ -288,6 +288,21 @@ describe("the board's plan checked (checkPlan)", () => {
     expect(found).toContain('0:named-set');
   });
 
+  it("names a quote whose words are no one's own, the narrator's included", () => {
+    const plan = good();
+    plan.shots[2].set = {
+      kind: 'chart',
+      chart: {
+        kind: 'quote',
+        spec: { text: 'Tear down this wall', speaker: null, when: null },
+      },
+    };
+    expect(codes(plan)).not.toContain('2:untrue-quote');
+    plan.shots[2].set.chart.spec.text =
+      'The inner border ran for 1,393 kilometres';
+    expect(codes(plan)).toContain('2:untrue-quote');
+  });
+
   it('names a pin on a place that is not on the map', () => {
     const plan = good();
     plan.shots[0].info.push({
@@ -462,6 +477,30 @@ describe("the board's plan mended (mendPlan)", () => {
     });
     expect(traced.focal).toBe(WHOLE_SET);
     plan.shots[2].set = { kind: 'portrait', person: 'person:Erich Honecker' };
+    expect(mend(plan).shots.map((s) => s.on)).toEqual([
+      'In 1961',
+      'The inner border',
+    ]);
+  });
+
+  it("takes a quote's words from the claim it names, and drops a quote of no one's words", () => {
+    const plan = good();
+    plan.shots[2].set = {
+      kind: 'chart',
+      chart: {
+        kind: 'quote',
+        spec: {
+          text: 'Gorbachev, open this gate',
+          speaker: 'Ronald Reagan',
+          when: null,
+          claim: 'c3',
+        },
+      },
+    };
+    expect(mend(plan).shots[2].set).toMatchObject({
+      chart: { spec: { text: 'Mr. Gorbachev, tear down this wall!' } },
+    });
+    delete plan.shots[2].set.chart.spec.claim;
     expect(mend(plan).shots.map((s) => s.on)).toEqual([
       'In 1961',
       'The inner border',

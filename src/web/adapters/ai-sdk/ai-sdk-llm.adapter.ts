@@ -84,6 +84,8 @@ import {
   boardIllustratedPrompt,
   boardLessonPrompt,
 } from '../editor-prompts';
+import { shotBoardPrompt } from '../shot-prompts';
+import { shotBoardSchema } from './shot-schemas';
 import {
   effortOptions,
   filled,
@@ -3078,6 +3080,34 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
         prompt: revisedPrompt(input.parts, input),
         maxRetries: this.maxRetries(),
         ...this.effort(ref, 'EXPLAINER_BOARD_EFFORT', 'low'),
+      }),
+    );
+    return {
+      value: filled(result.object, full) as Record<string, unknown>,
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
+  /**
+   * A lesson scene's plan of shots (explainer_shots): named from the
+   * closed lists in its instructions and the scene's registry in its
+   * parts, read leniently and filled as the board's storyboard is.
+   */
+  async shotsBoard(
+    input: { parts: string[] } & StudioRevision,
+  ): Promise<LlmResult<Record<string, unknown>>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('explainer_shots');
+    const full = shotBoardSchema as z.ZodTypeAny;
+    const result = await this.againIfMisshapen(() =>
+      generateObject({
+        model,
+        schema: lenient(full),
+        system: shotBoardPrompt(),
+        prompt: revisedPrompt(input.parts, input),
+        maxRetries: this.maxRetries(),
+        ...this.effort(ref, 'EXPLAINER_SHOTS_EFFORT', 'low'),
       }),
     );
     return {

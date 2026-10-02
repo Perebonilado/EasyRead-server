@@ -68,6 +68,9 @@ export type LlmTask =
   | 'explainer_edit'
   | 'explainer_research'
   | 'explainer_board'
+  // The shots engine's board (explainer-animation-tech §4.1): a lesson
+  // scene's plan of shots, named from closed lists and the scene's registry.
+  | 'explainer_shots'
   | 'topic_quiz'
   | 'item_write'
   | 'item_verify'
@@ -1000,6 +1003,17 @@ export interface LlmGatewayPort {
    */
   editorBoard(
     input: { kind: 'lesson' | 'illustrated'; parts: string[] } & StudioRevision,
+  ): Promise<LlmResult<Record<string, unknown>>>;
+
+  /**
+   * A lesson scene's plan of shots (explainer_shots; explainer-animation-
+   * tech §4.1): each shot's set, information, camera, life and join,
+   * every name from the closed lists or the scene's registry (its parts
+   * say both), never a coordinate, a time or a colour. Made sound by
+   * shot-check's planOf, held to the rules by checkPlan and mendPlan.
+   */
+  shotsBoard(
+    input: { parts: string[] } & StudioRevision,
   ): Promise<LlmResult<Record<string, unknown>>>;
 
   /** Whether text asks for what no one should be made: flagged, with the categories. */

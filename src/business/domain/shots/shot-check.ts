@@ -716,6 +716,24 @@ function chartIsName(chart: PlanChart, registry: TargetRegistry): boolean {
   return texts.length > 0 && texts.every((t) => standsFor(t, registry));
 }
 
+/**
+ * Whether a quote's words are someone's own, as the research has them: in
+ * a quote claim, or inside quotation marks in another claim. The
+ * narrator's words are never a quote.
+ */
+function quoteIsTrue(chart: PlanChart, registry: TargetRegistry): boolean {
+  if (chart.kind !== 'quote') return true;
+  const said = keysOf(line(chart.spec.text, 400)).join(' ');
+  if (!said) return false;
+  return registry.entries().some((e) => {
+    if (e.kind !== 'claim') return false;
+    const quoted = e.about.startsWith('quote:')
+      ? [e.about]
+      : [...e.about.matchAll(/[“"]([^”"]+)[”"]/gu)].map((m) => m[1]);
+    return quoted.some((q) => ` ${keysOf(q).join(' ')} `.includes(` ${said} `));
+  });
+}
+
 /** The person a portrait set names, read in the registry. */
 const portraitOf = (set: PlanSet, registry: TargetRegistry) =>
   set.kind === 'portrait' ? registry.resolve(set.person) : null;
@@ -872,6 +890,12 @@ export function checkPlan(
           k,
           'chart-empty',
           `${S}: the ${set.chart.kind} has nothing to draw; give it its fields.`,
+        );
+      else if (!quoteIsTrue(set.chart, registry))
+        say(
+          k,
+          'untrue-quote',
+          `${S}: the quote's words are no one's own as the research gives them; quote a quote claim's words exactly.`,
         );
       else if (chartIsName(set.chart, registry))
         say(
@@ -1083,6 +1107,7 @@ export const SERIOUS = new Set([
   'person-unseen',
   'named-set',
   'untrue-number',
+  'untrue-quote',
   'no-map',
   'wrong-target',
   'too-many-words',
@@ -1100,7 +1125,13 @@ export interface MendOptions extends PlanOptions {
   start?: boolean;
 }
 
-const sameSet = (a: PlanSet, b: PlanSet) =>
+/** How much a shot shows: its information, and a chart's, a portrait's or a picture's own. */
+export const shows = (shot: PlanShot) =>
+  shot.info.length +
+  (['chart', 'portrait', 'photo', 'document'].includes(shot.set.kind) ? 2 : 0);
+
+/** Whether two shots show one set: the show's map is one map whatever its tilt; any other set, the same in every field. */
+export const sameSet = (a: PlanSet, b: PlanSet) =>
   a.kind === b.kind &&
   (a.kind === 'map' || JSON.stringify(a) === JSON.stringify(b));
 
@@ -1250,6 +1281,23 @@ function mendShot(
             },
           },
         };
+    }
+    // A quote is its claim's own words: taken from the claim it names when
+    // the board's differ, else no quote at all.
+    if (chart.kind === 'quote' && !quoteIsTrue(chart, registry)) {
+      const claim = registry.resolve(line(chart.spec.claim, 12));
+      const text =
+        claim?.kind === 'claim' && claim.about.startsWith('quote:')
+          ? quotedWords(claim.about)
+          : '';
+      if (!text) return null;
+      out = {
+        ...out,
+        set: {
+          kind: 'chart',
+          chart: { kind: 'quote', spec: { ...chart.spec, text } },
+        },
+      };
     }
     const now = out.set.kind === 'chart' ? out.set.chart : chart;
     if (chartNumbers(now).some((v) => !given.has(v))) return null;
@@ -1428,12 +1476,31 @@ export function mendPlan(
     }
     kept.push(p);
   }
+  // Shots of one set, one after another, are one shot where all they
+  // show fits in one: a new shot only for a new set.
+  for (let k = kept.length - 1; k > 0; k -= 1) {
+    const [a, b] = [kept[k - 1].shot, kept[k].shot];
+    if (
+      sameSet(a.set, b.set) &&
+      a.info.length + b.info.length <= SHOT_LIMITS.info &&
+      a.camera.length + b.camera.length <= SHOT_LIMITS.camera
+    ) {
+      kept[k - 1].shot = {
+        ...a,
+        info: [...a.info, ...b.info],
+        camera: [...a.camera, ...b.camera],
+        life: [...new Set([...a.life, ...b.life])].slice(0, SHOT_LIMITS.life),
+        join: b.join,
+      };
+      kept.splice(k, 1);
+    }
+  }
   // At most eight a minute: the ones that show least go (never the first).
   const most = mostShots(narration);
   while (kept.length > most) {
     let least = 1;
     for (let k = 2; k < kept.length; k += 1)
-      if (kept[k].shot.info.length < kept[least].shot.info.length) least = k;
+      if (shows(kept[k].shot) < shows(kept[least].shot)) least = k;
     kept.splice(least, 1);
   }
   if (options.start !== false && kept.length && kept[0].at > 0) {
@@ -1496,6 +1563,21 @@ const shotOf = (
   join: 'cut',
   ...shot,
 });
+
+/**
+ * The camera move that carries a shot on over a line with nothing new: a
+ * slow push on its subject, or a pull after a push, so the picture holds
+ * and keeps alive.
+ */
+export function carryMove(shot: PlanShot, on: string): PlanCamera {
+  const pushed = shot.camera.some((c) => c.move === 'push');
+  return {
+    move: pushed ? 'pull' : 'push',
+    on,
+    amount: 'small',
+    ...(shot.focal && shot.focal !== WHOLE_SET ? { target: shot.focal } : {}),
+  };
+}
 
 /**
  * A line's picture when the board gave it none, by the research's
@@ -1608,26 +1690,15 @@ export function safeShot(
   }
   // 4. The shot before, carried on with the camera moving.
   const { previous, next } = around;
-  if (previous) {
-    const pushed = previous.camera.some((c) => c.move === 'push');
+  if (previous)
     return shotOf({
       on,
       set: previous.set,
-      camera: [
-        {
-          move: pushed ? 'pull' : 'push',
-          on,
-          amount: 'small',
-          ...(previous.focal && previous.focal !== WHOLE_SET
-            ? { target: previous.focal }
-            : {}),
-        },
-      ],
+      camera: [carryMove(previous, on)],
       life: previous.life,
       join: 'continue',
       focal: previous.focal ?? WHOLE_SET,
     });
-  }
   // 5. The shot after, its set begun early.
   if (next)
     return shotOf({

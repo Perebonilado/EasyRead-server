@@ -40,6 +40,7 @@ import type {
   EditorWriteStep,
 } from '../../business/ports/llm.port';
 import { fakeEditorAnswer, fakeFound, fakeTopic } from './fake-editor';
+import { fakeShotsAnswer } from './fake-shots';
 import type {
   DrawingThing,
   SceneScriptDraft,
@@ -2613,6 +2614,17 @@ export class FakeLlmAdapter implements LlmGatewayPort {
     return {
       value: fakeEditorAnswer(input.kind, input.parts),
       usage: this.usage(started, 3000, 600),
+    };
+  }
+
+  // The shot board (fake-shots): each line's shot from the scene's own list.
+  async shotsBoard(
+    input: { parts: string[] } & StudioRevision,
+  ): Promise<LlmResult<Record<string, unknown>>> {
+    const started = Date.now();
+    return {
+      value: fakeShotsAnswer(input.parts),
+      usage: this.usage(started, 6000, 900),
     };
   }
 

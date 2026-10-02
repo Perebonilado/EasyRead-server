@@ -980,7 +980,7 @@ export function drawMachine(
 /** A wind turbine: a tapered tower, its nacelle, and three blades about the hub that the run recipe turns. */
 function windTurbine(style: KitStyle, height = 9000): KitPiece {
   const d = new Drawing(style, 3000);
-  const white = inLook(style, '#dfe3e6');
+  const white = inLook(style, '#c8cfd5');
   const shade = shadeOf(white, 0.22);
   const hubY = -height;
   const blade = height * 0.52;
@@ -1769,7 +1769,24 @@ export const MACHINE_KIT: Readonly<Record<string, KitEntry>> = {
     about:
       'A machine whose parts move from one shaft (run starts it): kind gears (three meshed, a ratio), pulleys (two on a belt), pump (a beam pump), steam-engine, printing-press, loom, conveyor, wind-turbine, water-wheel.',
     params: {
-      kind: { values: MACHINE_KINDS, default: 'gears', about: 'which machine' },
+      kind: {
+        values: MACHINE_KINDS,
+        default: 'gears',
+        about: 'which machine',
+        strict: true,
+        aliases: {
+          gearwheel: 'gears',
+          cog: 'gears',
+          cogs: 'gears',
+          press: 'printing-press',
+          'steam-pump': 'pump',
+          'conveyor-belt': 'conveyor',
+          waterwheel: 'water-wheel',
+          'mill-wheel': 'water-wheel',
+          'wind-generator': 'wind-turbine',
+          'weaving-loom': 'loom',
+        },
+      },
     },
     moves: ['enter', 'exit'],
     make(params: KitParams, style: KitStyle): KitPiece {

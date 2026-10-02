@@ -1278,6 +1278,28 @@ export function drawSet(
     canvas.raw('shimmer', '', [0, top, W, Math.min(H, bottomOfWater) - top], {
       depth: 0.85,
     });
+    // A port's ship, moored at the far quay in front of its cranes.
+    if (place === 'port') {
+      const ship = mooredShip(
+        rng,
+        style,
+        s.era,
+        W,
+        top + H * 0.034,
+        (W / 2000) * scale,
+      );
+      const shapes = ship.shapes.map(([sh]) => sh);
+      canvas.raw(
+        'ship',
+        ship.shapes
+          .map(([sh, f]) => `<path d="${sh.d}" fill="${f}"/>`)
+          .join(''),
+        unionBox(shapes.map((sh) => sh.box)),
+        { depth: 0.66 },
+      );
+      canvas.veil('ship-veil', shapes, 0.66);
+      canvas.windows('ship-lights', ship.windows, 0.66);
+    }
     if (s.land === 'coast') {
       // The near shore: a quay at a port, a beach elsewhere.
       const shore =
@@ -1530,12 +1552,14 @@ function heroes(
       if (town !== 'none') row(list, 'house', 0.8, 0.95, 14 * k, rng, W, 10, 6);
       break;
     case 'port':
-      list.push({
-        kind: 'cranes',
-        size: 'medium',
-        at: 0.2,
-        scale: (modern ? 10 : 12) * k,
-      });
+      // Cranes of iron or steel from the steam age on (before it, a ship was worked by its own tackle).
+      if (ERA_IDS.indexOf(s.era) >= ERA_IDS.indexOf('1800-1900'))
+        list.push({
+          kind: 'cranes',
+          size: 'medium',
+          at: 0.2,
+          scale: (modern ? 10 : 12) * k,
+        });
       if (modern)
         list.push({ kind: 'cranes', size: 'medium', at: 0.44, scale: 9 * k });
       list.push({
@@ -1735,6 +1759,247 @@ function containers(
   return out;
 }
 
+/**
+ * A ship moored at a port's far quay, its waterline on `waterline`, its
+ * bow to the left, at the set's scale (`k`: ten units a metre in a wide
+ * frame): a container ship (its boxes stacked in bays on deck, its bridge
+ * and funnel aft) once containers came, a steamer (a funnel amidships,
+ * masts with their derricks) before them, a sailing ship (three masts,
+ * sails furled on their yards) before steam; never a real line's colours
+ * or name. Its bridge's or cabins' windows are lights.
+ */
+function mooredShip(
+  rng: Seeded,
+  style: KitStyle,
+  era: EraId,
+  W: number,
+  waterline: number,
+  k: number,
+): { shapes: (readonly [Shape, string])[]; windows: Shape[] } {
+  const at = ERA_IDS.indexOf(era);
+  const shapes: (readonly [Shape, string])[] = [];
+  const windows: Shape[] = [];
+  const look = (colour: string) => toLook(style, colour);
+  const add = (shape: Shape, colour: string) => shapes.push([shape, colour]);
+  // A row of small windows from x to x + w at height y.
+  const row = (x: number, w: number, y: number, size: number, step: number) => {
+    for (let wx = x; wx + size <= x + w; wx += step)
+      windows.push(box(wx, y, wx + size, y + size * 0.8));
+  };
+  const pale = look('#ebe6dc');
+  const mast = look('#8f877c');
+
+  if (at >= ERA_IDS.indexOf('1945-1975')) {
+    // A container ship (a feeder, about a hundred metres long).
+    const L = Math.min(1050 * k, W * 0.92);
+    const x0 = W * 0.04;
+    const x1 = x0 + L;
+    const deck = waterline - 50 * k;
+    add(
+      poly([
+        [x0, deck - 10 * k],
+        [x0 + 0.09 * L, deck],
+        [x1, deck],
+        [x1 - 0.006 * L, waterline + 4 * k],
+        [x0 + 0.075 * L, waterline + 4 * k],
+        [x0 + 0.03 * L, deck + 22 * k],
+      ]),
+      look('#34404f'),
+    );
+    add(
+      poly([
+        [x0 + 0.062 * L, waterline - 9 * k],
+        [x1 - 0.004 * L, waterline - 9 * k],
+        [x1 - 0.006 * L, waterline + 4 * k],
+        [x0 + 0.075 * L, waterline + 4 * k],
+      ]),
+      look('#8a3a30'),
+    );
+    // The boxes, bay by bay, most three or four high.
+    const colours = [
+      '#9b4a3c',
+      '#3d6b8e',
+      '#c48a3a',
+      '#4f7d5c',
+      '#7b5a8a',
+      '#b8b2a7',
+    ].map(look);
+    const cw = 61 * k;
+    const ch = 26 * k;
+    for (let x = x0 + 0.1 * L; x + cw <= x1 - 0.235 * L; x += cw + 2.5 * k) {
+      const high = rng.chance(0.15) ? 2 : rng.int(3, 4);
+      for (let h = 0; h < high; h += 1) {
+        const y = deck - (h + 1) * (ch + 1.2 * k);
+        const colour = rng.pick(colours);
+        add(box(x, y, x + cw, y + ch), colour);
+        add(
+          box(x + cw * 0.06, y + ch * 0.2, x + cw * 0.94, y + ch * 0.3),
+          mixOk(colour, '#000000', 0.18),
+        );
+      }
+    }
+    // The bridge aft: its decks, its wings, the funnel behind it, a mast forward.
+    const b0 = x1 - 0.2 * L;
+    const b1 = x1 - 0.1 * L;
+    const top = deck - 135 * k;
+    add(box(b0, top + 14 * k, b1, deck), pale);
+    add(box(b0 - 0.02 * L, top, b1 + 0.006 * L, top + 15 * k), pale);
+    add(
+      box(b0 - 0.02 * L, top + 15 * k, b1 + 0.006 * L, top + 18 * k),
+      mixOk(pale, '#000000', 0.25),
+    );
+    windows.push(
+      box(b0 - 0.012 * L, top + 4 * k, b1 - 0.004 * L, top + 10 * k),
+    );
+    for (let y = top + 30 * k; y < deck - 14 * k; y += 22 * k)
+      row(b0 + 6 * k, b1 - b0 - 12 * k, y, 7 * k, 15 * k);
+    add(
+      poly([
+        [x1 - 0.092 * L, deck],
+        [x1 - 0.098 * L, top - 18 * k],
+        [x1 - 0.05 * L, top - 18 * k],
+        [x1 - 0.045 * L, deck],
+      ]),
+      look('#46525f'),
+    );
+    add(
+      box(x1 - 0.098 * L, top - 18 * k, x1 - 0.05 * L, top - 6 * k),
+      look('#23272c'),
+    );
+    add(
+      band(
+        [x0 + 0.04 * L, deck - 8 * k],
+        [x0 + 0.04 * L, deck - 72 * k],
+        3 * k,
+      ),
+      mast,
+    );
+  } else if (at >= ERA_IDS.indexOf('1800-1900')) {
+    // A cargo steamer: a black hull, a white house amidships, a funnel, masts and derricks.
+    const L = Math.min(880 * k, W * 0.8);
+    const x0 = W * 0.06;
+    const x1 = x0 + L;
+    const deck = waterline - 46 * k;
+    add(
+      poly([
+        [x0, deck - 14 * k],
+        [x0 + 0.12 * L, deck],
+        [x1 - 0.1 * L, deck],
+        [x1, deck - 10 * k],
+        [x1 - 0.02 * L, waterline + 4 * k],
+        [x0 + 0.06 * L, waterline + 4 * k],
+      ]),
+      look('#2b2d30'),
+    );
+    add(
+      poly([
+        [x0 + 0.05 * L, waterline - 8 * k],
+        [x1 - 0.017 * L, waterline - 8 * k],
+        [x1 - 0.02 * L, waterline + 4 * k],
+        [x0 + 0.06 * L, waterline + 4 * k],
+      ]),
+      look('#8a3a30'),
+    );
+    const h0 = x0 + 0.42 * L;
+    const h1 = x0 + 0.64 * L;
+    add(box(h0, deck - 40 * k, h1, deck), pale);
+    add(box(h0 + 0.02 * L, deck - 66 * k, h0 + 0.1 * L, deck - 40 * k), pale);
+    windows.push(
+      box(h0 + 0.026 * L, deck - 60 * k, h0 + 0.094 * L, deck - 53 * k),
+    );
+    row(h0 + 8 * k, h1 - h0 - 16 * k, deck - 28 * k, 6 * k, 14 * k);
+    add(
+      poly([
+        [h0 + 0.13 * L, deck - 40 * k],
+        [h0 + 0.125 * L, deck - 150 * k],
+        [h0 + 0.18 * L, deck - 150 * k],
+        [h0 + 0.185 * L, deck - 40 * k],
+      ]),
+      look('#c9a66b'),
+    );
+    add(
+      box(h0 + 0.125 * L, deck - 150 * k, h0 + 0.18 * L, deck - 132 * k),
+      look('#23272c'),
+    );
+    // The cargo hatches, and a mast forward and aft, each with its derrick.
+    for (const u of [0.2, 0.3, 0.72, 0.82])
+      add(
+        box(x0 + u * L, deck - 9 * k, x0 + (u + 0.07) * L, deck),
+        look('#5a554e'),
+      );
+    for (const u of [0.26, 0.78]) {
+      const mx = x0 + u * L;
+      add(band([mx, deck], [mx, deck - 170 * k], 4 * k), mast);
+      add(
+        band(
+          [mx, deck - 20 * k],
+          [mx + (u < 0.5 ? -1 : 1) * 0.1 * L, deck - 95 * k],
+          2.5 * k,
+        ),
+        mast,
+      );
+    }
+  } else {
+    // A sailing ship: a wooden hull with its raised stern, three masts, its sails furled on their yards.
+    const L = Math.min(420 * k, W * 0.5);
+    const x0 = W * 0.12;
+    const x1 = x0 + L;
+    const deck = waterline - 40 * k;
+    add(
+      poly([
+        [x0, deck - 12 * k],
+        [x0 + 0.15 * L, deck],
+        [x1 - 0.22 * L, deck],
+        [x1 - 0.2 * L, deck - 20 * k],
+        [x1 + 0.01 * L, deck - 24 * k],
+        [x1 - 0.03 * L, waterline + 4 * k],
+        [x0 + 0.1 * L, waterline + 4 * k],
+      ]),
+      look('#6b4a32'),
+    );
+    add(
+      box(x0 + 0.13 * L, deck + 8 * k, x1 - 0.04 * L, deck + 13 * k),
+      look('#d9c9a3'),
+    );
+    for (let i = 0; i < 3; i += 1)
+      windows.push(
+        box(
+          x1 - 0.15 * L + i * 0.045 * L,
+          deck - 15 * k,
+          x1 - 0.12 * L + i * 0.045 * L,
+          deck - 9 * k,
+        ),
+      );
+    add(
+      band(
+        [x0 + 0.06 * L, deck - 6 * k],
+        [x0 - 0.12 * L, deck - 60 * k],
+        4 * k,
+      ),
+      mast,
+    );
+    const sail = look('#e6dcc4');
+    for (const [u, h] of [
+      [0.24, 250],
+      [0.5, 290],
+      [0.74, 230],
+    ] as const) {
+      const mx = x0 + u * L;
+      add(band([mx, deck], [mx, deck - h * k], 4.5 * k), mast);
+      for (const [j, up] of [0.42, 0.66, 0.88].entries()) {
+        const y = deck - h * k * up;
+        const half = (0.13 - j * 0.03) * L;
+        add(band([mx - half, y], [mx + half, y], 3 * k), mast);
+        add(
+          box(mx - half * 0.9, y - 6 * k, mx + half * 0.9, y + 2 * k, 4 * k),
+          sail,
+        );
+      }
+    }
+  }
+  return { shapes, windows };
+}
+
 /** The near ground's marks: a field's furrows, a road's edges, a quay's stones, a desert's ripples, grass. */
 function groundMarks(
   place: SetPlace,
@@ -1910,12 +2175,36 @@ function framing(
     );
     return { shapes, colour: '#6e5640', lamps };
   }
-  if (place === 'port' || s.land === 'coast') {
+  if (place === 'port') {
     for (let i = 0; i < 3; i += 1) {
       const x = side(W * (0.06 + i * 0.13));
       shapes.push(
         box(x - 26 * u, H * 0.9 - 50 * u, x + 26 * u, H * 0.9 + 4 * u, 10 * u),
         ellipse([x, H * 0.9 - 50 * u], 32 * u, 10 * u),
+      );
+    }
+    return { shapes, colour: '#3b4048', lamps };
+  }
+  if (s.land === 'coast') {
+    // A boat drawn up on the beach, and a rock or two.
+    const x = side(W * 0.12);
+    const y = H * 0.965;
+    shapes.push(
+      poly([
+        [x - 150 * u, y - 58 * u],
+        [x - 112 * u, y - 4 * u],
+        [x - 80 * u, y],
+        [x + 104 * u, y],
+        [x + 134 * u, y - 46 * u],
+        [x + 120 * u, y - 44 * u],
+        [x - 130 * u, y - 50 * u],
+      ]),
+      band([x - 12 * u, y - 48 * u], [x - 4 * u, y - 210 * u], 7 * u),
+    );
+    for (let i = 0; i < 2; i += 1) {
+      const r = rng.between(36, 70) * u;
+      shapes.push(
+        dome(side(W * rng.between(0.3, 0.42)), H + H * 0.01, r * 1.5, r),
       );
     }
     return { shapes, colour: '#3b4048', lamps };
@@ -2247,6 +2536,14 @@ function assemblyHall(
       `<path d="${box(cx - chairW * 1.3, panelTop + H * 0.01, cx + chairW * 1.3, panelTop + H * 0.035, H * 0.008).d}" fill="${panelDark}"/>`,
       `<path d="${box(cx - chairW / 2, panelTop + H * 0.04, cx + chairW / 2, daisY - H * 0.04, chairW * 0.18).d}" fill="${seat}"/>`,
       `<path d="${box(cx - chairW / 2, panelTop + H * 0.04, cx + chairW / 2, panelTop + H * 0.06, chairW * 0.18).d}" fill="${seatLit}"/>`,
+      // Its seat, and its arms on their posts: a high-backed chair, not a cabinet.
+      ...((chairH: number, foot: number) => [
+        `<path d="${box(cx - chairW * 0.6, foot - chairH * 0.3, cx + chairW * 0.6, foot - chairH * 0.2, chairW * 0.06).d}" fill="${seatLit}"/>`,
+        ...[-1, 1].map(
+          (side) =>
+            `<path d="${box(cx + side * chairW * 0.42, foot - chairH * 0.46, cx + side * chairW * 0.8, foot - chairH * 0.39, chairW * 0.04).d}" fill="${panelDark}"/><path d="${box(cx + side * chairW * 0.66, foot - chairH * 0.42, cx + side * chairW * 0.76, foot).d}" fill="${panelDark}"/>`,
+        ),
+      ])(daisY - H * 0.04 - (panelTop + H * 0.04), daisY - H * 0.04),
       `<path d="${box(cx - dw * 0.42, daisY - H * 0.012, cx + dw * 0.42, daisY + H * 0.03).d}" fill="${desk}"/>`,
       `<path d="${circle([cx, winTop + winH * 0.55], Math.min(W, H) * 0.03).d}" fill="${gold}"/>`,
     ].join(''),
@@ -2360,9 +2657,9 @@ function assemblyHall(
     lamps.push(
       circle([W * (i / count), gy - H * 0.012], Math.min(W, H) * 0.011),
     );
+  // The hour's light over the room: a veil that warms at dusk and dims it a little at night (the room is lit), the lamps glowing over it.
+  canvas.veil('veil', [box(-40, -40, W + 40, H + 40)], 1, 0.32);
   canvas.windows('lights', lamps, 1, '#ffe2a0', 0.45);
-  // The hour's light over the room: a veil that warms at dusk and darkens at night.
-  canvas.veil('veil', [box(-40, -40, W + 40, H + 40)], 1, 0.45);
   const groundY = H * 0.95;
   const unitsPerMetre = Math.round(((H * (tall ? 0.2 : 0.3)) / 1.75) * 10) / 10;
   canvas.raw('ground-line', '', [0, groundY, W, H - groundY], {

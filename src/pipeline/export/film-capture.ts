@@ -158,6 +158,12 @@ export function chromePath(env: string | undefined): string {
  *  - 'gpu': the machine's own GPU (Metal on a Mac; Vulkan elsewhere, as on
  *    a GPU worker), where there is one;
  *  - 'off': none; a map is drawn flat by the player's canvas fallback.
+ *
+ * Measured on an M3 (2026-10-02), a tilted terrain map at 1920 × 1080,
+ * seek and JPEG together, the median frame: GPU 50 ms; SwiftShader 300 to
+ * 450 ms (its 90th percentile 600 to 800 ms, the Mac shared with other
+ * work); off 80 ms, without the shading. A frame of a new view waits for
+ * its tiles once (5 s on a cold cache).
  */
 export type ExportGl = 'swiftshader' | 'gpu' | 'off';
 

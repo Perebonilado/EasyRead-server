@@ -44,7 +44,11 @@ export type PlanSet =
       tilt?: 'flat' | 'tilted';
       terrain?: boolean;
     }
-  | { kind: 'photo'; photo: string; treatment?: 'natural' | 'duotone' | 'halftone' | 'cutout' }
+  | {
+      kind: 'photo';
+      photo: string;
+      treatment?: 'natural' | 'duotone' | 'halftone' | 'cutout';
+    }
   | { kind: 'portrait'; person: string }
   | { kind: 'document'; document: string }
   | { kind: 'set'; set: PlanSetScene }
@@ -53,7 +57,15 @@ export type PlanSet =
 
 /** A code-drawn set: a kind of place, never a named one (kit/sets). */
 export interface PlanSetScene {
-  land: 'plain' | 'hills' | 'mountains' | 'coast' | 'desert' | 'forest' | 'city' | 'sea';
+  land:
+    | 'plain'
+    | 'hills'
+    | 'mountains'
+    | 'coast'
+    | 'desert'
+    | 'forest'
+    | 'city'
+    | 'sea';
   time: 'day' | 'dusk' | 'night' | 'dawn';
   weather?: 'clear' | 'cloud' | 'rain' | 'snow' | 'storm' | 'haze';
   /** Townscape density and era, when there are buildings. */
@@ -119,7 +131,11 @@ export type TargetKind =
   | 'document'
   | 'part'
   | 'actor'
-  | 'claim';
+  | 'claim'
+  /** A side of the show's visual system: a colour by the name of what it colours. */
+  | 'side'
+  /** A dated event of the research's timeline: what a timeline or a calendar may show. */
+  | 'date';
 
 /** One entry of a scene's target registry: what the board may name, and what it resolves to. */
 export interface RegistryEntry {
@@ -139,6 +155,21 @@ export interface RegistryEntry {
   unit?: string;
   /** Wikidata's id for a person, place or thing, when known. */
   qid?: string;
+  /** Every research claim it rests on (a person's, a number's), the first of them `claim`. */
+  claims?: string[];
+  /**
+   * What may stand for a person with no picture (research §3.5's traces
+   * ladder): their own words (a quote claim, by id) or their place on the
+   * map (a place's name in this registry). Absent with no picture, the
+   * person is never on screen.
+   */
+  trace?: { kind: 'quote' | 'place'; ref: string };
+  /** A region's or a side's colour, a theme token (scene-palette). */
+  colour?: string;
+  /** Where its claim comes from, for a chart's source line: the first source's title. */
+  source?: string;
+  /** Other names it is known by, for a name the board writes another way ("the North"). */
+  aliases?: string[];
 }
 
 /** What the board may name in a scene, built from the research log, the world, the show map and the picture desk. */

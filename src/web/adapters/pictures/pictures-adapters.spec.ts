@@ -96,6 +96,41 @@ describe("the picture desk's adapters", () => {
     expect(fileOf({ title: 'File:Gone.jpg', missing: '' })).toBeNull();
   });
 
+  it('keeps Commons’ JPEG of a TIFF at any width, the desk reading no TIFF', () => {
+    const tiff = fileOf({
+      pageid: 1,
+      title:
+        'File:ASC Leiden - NSAG - Crebolder 2 - 40 - Independence ceremony - Lagos, Nigeria - October 1, 1960.tif',
+      imageinfo: [
+        {
+          url: 'https://upload.wikimedia.org/wikipedia/commons/x/xx/Leiden.tif',
+          descriptionurl: 'https://commons.wikimedia.org/wiki/File:Leiden.tif',
+          thumburl:
+            'https://upload.wikimedia.org/wikipedia/commons/thumb/x/xx/Leiden.tif/lossy-page1-1533px-Leiden.tif.jpg',
+          thumbwidth: 1533,
+          thumbheight: 1095,
+          width: 1533,
+          height: 1095,
+          mime: 'image/tiff',
+          extmetadata: {},
+        },
+      ],
+    })!;
+    expect(tiff.thumb?.url).toMatch(/\.jpg$/u);
+    // A JPEG no wider than asked is fetched as it is.
+    const jpeg = fileOf({
+      ...PAGE,
+      imageinfo: [
+        {
+          ...PAGE.imageinfo[0],
+          thumbwidth: PAGE.imageinfo[0].width,
+          mime: 'image/jpeg',
+        },
+      ],
+    })!;
+    expect(jpeg.thumb).toBeUndefined();
+  });
+
   it('reads IIIF regions and files with no structured data', () => {
     expect(regionOf('pct:10,20,30,40')).toEqual([0.1, 0.2, 0.3, 0.4]);
     expect(regionOf('pct:10,20,300,40')).toBeUndefined();

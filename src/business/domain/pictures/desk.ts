@@ -1058,8 +1058,13 @@ export class PictureDesk {
     const { file } = candidate;
     const asked = opts.asked;
     const had = await this.deps.cache.bySource(file.source, file.sourceId);
-    // The copy this use wants: the source's sized one where it made one.
-    const sized = Boolean(file.thumb && file.thumb.width < file.width);
+    // The copy this use wants: the source's sized one where it made one,
+    // and always for a file the desk cannot read itself (a TIFF's JPEG).
+    const sized = Boolean(
+      file.thumb &&
+      (file.thumb.width < file.width ||
+        !/^image\/(?:jpeg|png)$/u.test(file.mime)),
+    );
     const wanted = sized ? file.thumb!.width : file.width;
     if (
       had?.storageKey &&

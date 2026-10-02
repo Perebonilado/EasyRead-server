@@ -4,7 +4,7 @@ import { DOCUMENT_KINDS, drawDocument } from './documents';
 import { ERA_IDS } from './eras';
 import { HP_RATIO, MACHINE_KINDS, MACHINE_LAYOUTS, drawTurbofan, ratiosOf } from './machines';
 import { OBJECT_KINDS, drawObject } from './objects';
-import { KIT, kitGuide, kitIdsFor, makeKit } from './registry';
+import { KIT, kitGuide, kitIdsFor, makeKit, unknownOf } from './registry';
 import { type KitPiece, validateRig } from './rig';
 import { type KitLook, kitStyle } from './style';
 import { THINGS_KIT } from './things';
@@ -75,6 +75,23 @@ describe('the things kit (buildings, documents, objects, machines)', () => {
       expect(kitGuide(look)).toMatch(/- building: .*Settings: kind house \| flats/);
       expect(kitGuide(look)).toMatch(/- machine\.turbofan: .*core-flow/);
     }
+  });
+
+  it('reads the words people use for a kind, and draws nothing for a kind it does not have, never its default', () => {
+    const kindOf = (id: string, kind: string) => makeKit(id, { kind }, styleOf('editorial'), 1)?.params.kind;
+    expect(kindOf('object', 'laptop')).toBe('computer');
+    expect(kindOf('object', 'padlock')).toBe('lock');
+    expect(kindOf('object', 'oil drum')).toBe('barrel');
+    expect(kindOf('document', 'treaty')).toBe('charter');
+    expect(kindOf('building', 'skyscraper')).toBe('tower');
+    expect(kindOf('building', 'Factories')).toBe('factory');
+    expect(kindOf('machine', 'waterwheel')).toBe('water-wheel');
+    // Not coins for a microscope, not a house for a power station.
+    expect(unknownOf('object', { kind: 'microscope' })).toEqual(['kind']);
+    expect(makeKit('object', { kind: 'microscope' }, styleOf('editorial'), 1)).toBeNull();
+    expect(makeKit('building', { kind: 'power station' }, styleOf('editorial'), 1)).toBeNull();
+    // A kind left out is the default.
+    expect(makeKit('building', {}, styleOf('editorial'), 1)?.params.kind).toBe('house');
   });
 });
 

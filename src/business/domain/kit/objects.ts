@@ -17,13 +17,7 @@
 import type { ShotBox, ShotRigDto } from '../../../contracts';
 import type { KitEntry, KitParams } from './registry';
 import type { KitPiece } from './rig';
-import {
-  type Pt,
-  circle,
-  ellipse,
-  groundShadow,
-  unionBox,
-} from './shape';
+import { type Pt, circle, ellipse, groundShadow, unionBox } from './shape';
 import type { KitStyle } from './style';
 import { mixOk } from './style';
 import {
@@ -556,15 +550,49 @@ export const OBJECT_KIT: Readonly<Record<string, KitEntry>> = {
     about:
       'An everyday thing, big and simple: kind phone and computer (screens light: states on, off), book, coins (a stack of count coins), sack (of grain), barrel (an oil drum), crate, battery (count tenths charged), lamp (states on, off), key, lock (states closed, open), chain (its links are parts).',
     params: {
-      kind: { values: OBJECT_KINDS, default: 'coins', about: 'which thing' },
-      count: { range: [0, 20], default: 8, about: 'coins in the stack, or a battery\u2019s tenths of charge' },
+      kind: {
+        values: OBJECT_KINDS,
+        default: 'coins',
+        about: 'which thing',
+        strict: true,
+        aliases: {
+          smartphone: 'phone',
+          mobile: 'phone',
+          'mobile-phone': 'phone',
+          cellphone: 'phone',
+          laptop: 'computer',
+          pc: 'computer',
+          coin: 'coins',
+          money: 'coins',
+          grain: 'sack',
+          'grain-sack': 'sack',
+          bag: 'sack',
+          drum: 'barrel',
+          'oil-drum': 'barrel',
+          'oil-barrel': 'barrel',
+          box: 'crate',
+          'shipping-crate': 'crate',
+          bulb: 'lamp',
+          'light-bulb': 'lamp',
+          padlock: 'lock',
+        },
+      },
+      count: {
+        range: [0, 20],
+        default: 8,
+        about: 'coins in the stack, or a battery\u2019s tenths of charge',
+      },
     },
     moves: ['enter', 'exit'],
     make: (params: KitParams, style: KitStyle, seed: number) =>
       drawObject(
-        (OBJECT_KINDS as readonly unknown[]).includes(params.kind) ? (params.kind as ObjectKind) : 'coins',
+        (OBJECT_KINDS as readonly unknown[]).includes(params.kind)
+          ? (params.kind as ObjectKind)
+          : 'coins',
         {
-          ...(typeof params.colour === 'string' ? { colour: params.colour } : {}),
+          ...(typeof params.colour === 'string'
+            ? { colour: params.colour }
+            : {}),
           ...(typeof params.count === 'number' ? { count: params.count } : {}),
         },
         style,

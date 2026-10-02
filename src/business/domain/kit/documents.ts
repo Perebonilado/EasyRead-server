@@ -572,11 +572,35 @@ export const DOCUMENT_KIT: Readonly<Record<string, KitEntry>> = {
     looks: ['editorial', 'illustrated'],
     about:
       'A document as a prop, its lines bars, never words of its own: kind letter (a signature part to draw), charter (a treaty: clauses, signatures, a seal), newspaper (masthead, headline, columns), ballot (its cross the state marked), note (like a banknote, never a currency), booklet, stamp (a rubber stamp). Each has a stamp spot (part stamp).',
-    params: { kind: { values: DOCUMENT_KINDS, default: 'letter', about: 'which document' } },
+    params: {
+      kind: {
+        values: DOCUMENT_KINDS,
+        default: 'letter',
+        about: 'which document',
+        strict: true,
+        aliases: {
+          treaty: 'charter',
+          constitution: 'charter',
+          declaration: 'charter',
+          agreement: 'charter',
+          contract: 'charter',
+          paper: 'newspaper',
+          'front-page': 'newspaper',
+          'voting-slip': 'ballot',
+          banknote: 'note',
+          'bank-note': 'note',
+          passport: 'booklet',
+          pamphlet: 'booklet',
+          'rubber-stamp': 'stamp',
+        },
+      },
+    },
     moves: ['enter', 'exit'],
     make: (params: KitParams, style: KitStyle, seed: number) =>
       drawDocument(
-        (DOCUMENT_KINDS as readonly unknown[]).includes(params.kind) ? (params.kind as DocumentKind) : 'letter',
+        (DOCUMENT_KINDS as readonly unknown[]).includes(params.kind)
+          ? (params.kind as DocumentKind)
+          : 'letter',
         typeof params.colour === 'string' ? { colour: params.colour } : {},
         style,
         seed,

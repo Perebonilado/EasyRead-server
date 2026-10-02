@@ -1504,8 +1504,11 @@ export function drawBuilding(
 const KINDS_ABOUT =
   'A building of its era and climate (never a named one): kind house (homes), flats (housing), tower (business), factory (industry; smoke rises from its stacks), warehouse (goods), hall (a legislature in general, a flag over it), court (the law), school, hospital, market (stalls: trade, prices), cranes (a port\u2019s), farm (barn and silo).';
 
-const oneOf = <T extends string>(list: readonly T[], raw: unknown, fallback: T): T =>
-  (list as readonly unknown[]).includes(raw) ? (raw as T) : fallback;
+const oneOf = <T extends string>(
+  list: readonly T[],
+  raw: unknown,
+  fallback: T,
+): T => ((list as readonly unknown[]).includes(raw) ? (raw as T) : fallback);
 
 export const BUILDING_KIT: Readonly<Record<string, KitEntry>> = {
   building: {
@@ -1513,15 +1516,55 @@ export const BUILDING_KIT: Readonly<Record<string, KitEntry>> = {
     looks: ['editorial', 'illustrated'],
     about: KINDS_ABOUT,
     params: {
-      kind: { values: BUILDING_KINDS, default: 'house', about: 'which building' },
-      era: { values: ERA_IDS, default: 'today', about: 'when it is: sets how it is built' },
+      kind: {
+        values: BUILDING_KINDS,
+        default: 'house',
+        about: 'which building',
+        strict: true,
+        aliases: {
+          home: 'house',
+          cottage: 'house',
+          apartments: 'flats',
+          'apartment-block': 'flats',
+          'block-of-flats': 'flats',
+          skyscraper: 'tower',
+          office: 'tower',
+          'office-tower': 'tower',
+          mill: 'factory',
+          works: 'factory',
+          plant: 'factory',
+          depot: 'warehouse',
+          parliament: 'hall',
+          legislature: 'hall',
+          assembly: 'hall',
+          congress: 'hall',
+          courthouse: 'court',
+          'law-court': 'court',
+          clinic: 'hospital',
+          bazaar: 'market',
+          stalls: 'market',
+          barn: 'farm',
+          'port-cranes': 'cranes',
+          docks: 'cranes',
+        },
+      },
+      era: {
+        values: ERA_IDS,
+        default: 'today',
+        about: 'when it is: sets how it is built',
+      },
       climate: {
         values: CLIMATES,
         default: 'temperate',
-        about: 'never a country: arid has flat roofs, cold steep ones, tropical wide eaves',
+        about:
+          'never a country: arid has flat roofs, cold steep ones, tropical wide eaves',
       },
       size: { values: SIZES, default: 'medium', about: 'how big' },
-      material: { values: MATERIALS, default: 'auto', about: 'auto follows era and climate' },
+      material: {
+        values: MATERIALS,
+        default: 'auto',
+        about: 'auto follows era and climate',
+      },
     },
     moves: ['enter', 'exit'],
     make(params: KitParams, style: KitStyle, seed: number): KitPiece {
@@ -1532,7 +1575,9 @@ export const BUILDING_KIT: Readonly<Record<string, KitEntry>> = {
           climate: oneOf(CLIMATES, params.climate, 'temperate'),
           size: oneOf(SIZES, params.size, 'medium'),
           material: oneOf(MATERIALS, params.material, 'auto'),
-          ...(typeof params.colour === 'string' ? { colour: params.colour } : {}),
+          ...(typeof params.colour === 'string'
+            ? { colour: params.colour }
+            : {}),
         },
         style,
         seed,

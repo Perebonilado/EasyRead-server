@@ -10,7 +10,7 @@ import {
   slugOf,
   wrap,
 } from './shot-chart-kit';
-import { CHART_KINDS, chartAsset, chartPartIds } from './shot-charts';
+import { CHART_KINDS, chartAsset, chartPartIds, mapAsset } from './shot-charts';
 
 const SHAPES: FilmShape[] = ['wide', 'tall'];
 
@@ -421,5 +421,73 @@ describe('the kit', () => {
     expect(colours[3].role).toBe('muted');
     expect(new Set(colours.map((c) => c.colour)).size).toBe(4);
     expect(contrast('#000000', '#FFFFFF')).toBeCloseTo(21, 0);
+  });
+});
+
+describe('mapAsset', () => {
+  const base = {
+    kind: 'map' as const,
+    region: 'Nigeria',
+    groups: [
+      {
+        name: 'Northern Region',
+        members: ['Kano', 'Kaduna', 'Sokoto', 'Borno'],
+      },
+      { name: 'Western Region', members: ['Lagos', 'Ogun', 'Oyo'] },
+    ],
+    seams: [],
+    year: null,
+    bordersDiffer: null,
+  };
+
+  it("draws the show's map full frame, its regions named parts in their sides' colours, with no motion of its own", async () => {
+    for (const shape of SHAPES) {
+      const asset = await mapAsset(base, LIGHT_LOOK, shape);
+      expect(asset).not.toBeNull();
+      const { W, H } = frameOf(shape);
+      expect(asset!.box).toEqual([0, 0, W, H]);
+      expect(asset!.svg).not.toMatch(/<style|@keyframes|animation|class="/);
+      expect(asset!.svg).not.toMatch(/id="map-(frame|land)"/);
+      expect(asset!.parts['group-northern-region'].role).toBe(
+        'Northern Region',
+      );
+      expect(asset!.svg).toContain('#B26F00');
+      expect([...partsIn(asset!.svg)].sort()).toEqual(
+        Object.keys(asset!.parts).sort(),
+      );
+      for (const part of Object.values(asset!.parts)) {
+        const [x, y, w, h] = part.box;
+        expect(x >= 0 && y >= 0 && x + w <= W + 1 && y + h <= H + 1).toBe(true);
+      }
+    }
+  });
+
+  it('gives a route its path and a place its mark', async () => {
+    const asset = await mapAsset(
+      {
+        region: 'Nigeria',
+        highlight: null,
+        places: ['Kano', 'Lagos'],
+        routes: [{ from: 'Lagos', to: 'Kano', name: 'The tour north' }],
+        base,
+      },
+      LIGHT_LOOK,
+      'wide',
+    );
+    expect(asset!.parts['route-the-tour-north'].path).toMatch(
+      /^M[\d.]+ [\d.]+Q/,
+    );
+    expect(asset!.parts['place-kano']).toBeDefined();
+    expect(asset!.parts['label-kano']).toBeDefined();
+  });
+
+  it('draws nothing for a map of nowhere code knows', async () => {
+    expect(
+      await mapAsset(
+        { region: 'Atlantis', highlight: null, places: null, routes: null },
+        LIGHT_LOOK,
+        'wide',
+      ),
+    ).toBeNull();
   });
 });

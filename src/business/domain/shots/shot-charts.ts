@@ -24,6 +24,7 @@ import { counterAsset } from './shot-chart-counter';
 import { documentAsset } from './shot-chart-document';
 import { flowAsset } from './shot-chart-flow';
 import { iconsAsset } from './shot-chart-icons';
+export { mapAsset, type MapInput } from './shot-chart-map';
 import { plotAsset } from './shot-chart-plot';
 import { quoteAsset } from './shot-chart-quote';
 import { seatsAsset } from './shot-chart-seats';

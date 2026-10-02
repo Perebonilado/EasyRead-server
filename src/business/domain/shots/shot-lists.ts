@@ -134,6 +134,14 @@ export const CHART_USES = {
 export type ChartKind = keyof typeof CHART_USES;
 export const CHART_KINDS = Object.keys(CHART_USES) as ChartKind[];
 
+/**
+ * Whether code can draw a set yet (WP10's kit/sets; shot-build's kitSet):
+ * until it can, a drawn set is not offered to the board, and a plan's
+ * drawn set is dropped for a picture that can be drawn (the build would
+ * only fall back to the shot before, holding while the voice talks on).
+ */
+export const DRAWN_SETS = false;
+
 /** A code-drawn set's settings (kit/sets), as the board names them. */
 export const SET_LANDS: readonly PlanSetScene['land'][] = [
   'plain',

@@ -657,7 +657,8 @@ describe("the board's plan mended (mendPlan)", () => {
       kind: 'set',
       set: { land: 'city', time: 'night', era: 'Berlin, 1987' },
     };
-    const mended = mend(plan);
+    // Where code can draw a set: a kind of place, its real place's name gone.
+    const mended = mendPlan(plan, narration, registry, { drawnSets: true });
     expect(mended.shots.map((s) => s.set.kind)).toEqual(['map', 'set', 'map']);
     expect(mended.shots[1].set).toEqual({
       kind: 'set',
@@ -665,6 +666,8 @@ describe("the board's plan mended (mendPlan)", () => {
     });
     // Two shots gone leave stretches for the board's pace (withPace) to fill.
     expect(codes(mended).filter((c) => !c.endsWith('gap-long'))).toEqual([]);
+    // Until code can draw one, a drawn set goes, for a picture that can be drawn.
+    expect(mend(plan).shots.map((s) => s.set.kind)).toEqual(['map', 'map']);
   });
 
   it('leaves nothing for the check to find, whatever the board wrote', () => {
@@ -815,17 +818,34 @@ describe('a safe shot for a line with none', () => {
         kind: 'quote',
         spec: {
           text: 'Mr. Gorbachev, tear down this wall!',
-          speaker: null,
+          speaker: 'Ronald Reagan',
           when: null,
         },
       },
     });
   });
 
+  it('shows a line about when its date, named by what happened', () => {
+    expect(safeShot(WALL_ROWS[5], registry, WALL_WORLD)).toMatchObject({
+      on: 'Two years later',
+      set: {
+        kind: 'chart',
+        chart: {
+          kind: 'calendar',
+          spec: { calendars: [{ label: 'Wall opens', dates: ['1989'] }] },
+        },
+      },
+      camera: [{ move: 'establish', on: 'Two years later' }],
+    });
+  });
+
+  /** The Wall's last line resting on nothing: no picture of its own. */
+  const bare = { ...WALL_ROWS[5], claims: [] };
+
   it('carries the shot before on with the camera moving, pushing, then pulling', () => {
     const world = { ...WALL_WORLD, base: null };
     const before = good().shots[1];
-    const carried = safeShot(WALL_ROWS[5], registry, world, {
+    const carried = safeShot(bare, registry, world, {
       previous: before,
     });
     expect(carried).toMatchObject({
@@ -836,7 +856,7 @@ describe('a safe shot for a line with none', () => {
       join: 'continue',
       focal: WHOLE_SET,
     });
-    const again = safeShot(WALL_ROWS[5], registry, world, {
+    const again = safeShot(bare, registry, world, {
       previous: carried,
     });
     expect(again.camera[0].move).toBe('pull');
@@ -845,14 +865,13 @@ describe('a safe shot for a line with none', () => {
   it('begins the next shot early, else the whole map, else the dates, else a quiet set', () => {
     const next = good().shots[2];
     expect(
-      safeShot(WALL_ROWS[5], registry, { ...WALL_WORLD, base: null }, { next })
-        .set,
+      safeShot(bare, registry, { ...WALL_WORLD, base: null }, { next }).set,
     ).toEqual(next.set);
-    expect(safeShot(WALL_ROWS[5], registry, WALL_WORLD).set).toEqual({
+    expect(safeShot(bare, registry, WALL_WORLD).set).toEqual({
       kind: 'map',
       tilt: 'flat',
     });
-    expect(safeShot(WALL_ROWS[5], registry, null).set).toMatchObject({
+    expect(safeShot(bare, registry, null).set).toMatchObject({
       kind: 'chart',
       chart: { kind: 'timeline' },
     });
@@ -861,7 +880,7 @@ describe('a safe shot for a line with none', () => {
       research: null,
       world: null,
     });
-    expect(safeShot(WALL_ROWS[5], empty, null).set.kind).toBe('set');
+    expect(safeShot(bare, empty, null).set.kind).toBe('set');
   });
 
   it('is never a word card: every safe shot passes the check', () => {
@@ -1210,5 +1229,16 @@ describe('people and vehicles on the stage (the kit)', () => {
     expect(mended.shots[0].actors[0].moves).toEqual([
       { move: 'enter', on: 'cut in two' },
     ]);
+  });
+});
+
+describe('a plan as stored, read again', () => {
+  it('reads its charts as they are kept ({kind, spec}), and mends to the same plan', () => {
+    const plan = good();
+    const again = planOf(JSON.parse(JSON.stringify(plan)), narration);
+    expect(again.shots.map((s) => s.set)).toEqual(plan.shots.map((s) => s.set));
+    expect(mendPlan(again, narration, registry)).toEqual(
+      mendPlan(plan, narration, registry),
+    );
   });
 });

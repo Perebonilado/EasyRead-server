@@ -36,10 +36,12 @@ import {
 } from '../src/business/domain/studio/studio';
 import { boardShots } from '../src/business/domain/shots/shot-board';
 import { checkPlan } from '../src/business/domain/shots/shot-check';
+import { kitIdsFor } from '../src/business/domain/kit/registry';
 import { sceneNarration } from '../src/business/domain/shots/shot-phrases';
 import { promptList } from '../src/business/domain/shots/shot-registry';
 import type { PlanSet, PlanShot } from '../src/business/domain/shots/types';
-import { StudioEditorProcessor } from '../src/pipeline/processors/studio-editor.processor';
+import { shotsSheet } from '../src/pipeline/processors/studio-editor.processor';
+import { sceneFingerprint } from '../src/business/handlers/studio/studio-views';
 
 @Module({
   imports: [ConfigModule.forRoot({ isGlobal: true }), CoreModule],
@@ -157,6 +159,9 @@ async function main() {
       dollars += cost;
       const left = checkPlan(board.plan, sceneNarration(rows), board.registry, {
         map: Boolean(world?.base),
+        kit: kitIdsFor('editorial'),
+        lines: rows,
+        opening: k === 0,
       });
       console.log(
         [
@@ -212,27 +217,9 @@ async function main() {
           );
           continue;
         }
-        // Saved as the worker's board saves it, the plan just made given
-        // back as the board's answer: the same sheet, its calls in the ledger.
+        // Saved as the worker's board saves it: the very plan printed above,
+        // its sheet the shots engine's, its calls in the ledger.
         const ledger = app.get<AiCallLogRepository>(AI_CALL_LOG_REPOSITORY);
-        const editor = new StudioEditorProcessor({
-          studio,
-          llm: {
-            shotsBoard: () =>
-              Promise.resolve({
-                value: { shots: board.plan.shots },
-                usage: board.usage[0],
-              }),
-          } as unknown as LlmGatewayPort,
-          calls: ledger,
-          queue: { enqueueStudio: () => Promise.resolve() },
-          setting: (name) => process.env[name],
-          material: null,
-          logger: {
-            log: (l) => console.log(`  · ${l}`),
-            warn: (l) => console.log(`  ! ${l}`),
-          },
-        });
         const bible: StudioBible = show.bible ?? {
           characters: [],
           sets: [],
@@ -241,9 +228,32 @@ async function main() {
           maths: false,
           pictures: [],
         };
-        await editor.shotsBoard(show, episode, bible, row, k);
-        for (const usage of board.usage.slice(1))
-          await editor.record(episode.id, usage, 'explainer_shots');
+        const sheet = shotsSheet(
+          scene,
+          rows,
+          board.plan,
+          board.registry.entries(),
+        );
+        await studio.updateScene(row.id, {
+          sheet,
+          sheetHash: sceneFingerprint(sheet, bible, show.brief),
+          problems: [],
+          status: 'ready',
+          error: null,
+        });
+        for (const usage of board.usage)
+          await ledger
+            .record({
+              documentId: episode.id,
+              task: 'explainer_shots',
+              model: usage.model,
+              tokensIn: usage.tokensIn,
+              tokensOut: usage.tokensOut,
+              tokensCached: usage.tokensCached ?? null,
+              latencyMs: usage.latencyMs,
+              outcome: 'ok',
+            })
+            .catch(() => undefined);
         console.log(`  saved onto scene row ${row.id}\n`);
       }
     }

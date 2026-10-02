@@ -10,6 +10,8 @@
  *    that side ("southern" leaders are the regions south of the map's
  *    middle: in a Nigeria of North, West and East, the West's and the
  *    East's), from the regions' own points, never a default;
+ *  - the regions together, by the word for their kind ("regional
+ *    leaders" when every region is a "… Region");
  *  - a number said in figures ("1,393") or in words ("three").
  */
 import { numbersIn } from '../scene-chart';
@@ -99,6 +101,18 @@ export function numbersSaid(
   }
   return out.sort((a, b) => a.at - b.at || a.length - b.length);
 }
+
+/** The words of a kind of region, its plural and its adjective: the regions together. */
+const KIND_WORDS: Readonly<Record<string, readonly string[]>> = {
+  region: ['region', 'regions', 'regional'],
+  state: ['states'],
+  province: ['province', 'provinces', 'provincial'],
+  district: ['districts'],
+  county: ['counties'],
+  territory: ['territories', 'territorial'],
+  colony: ['colonies', 'colonial'],
+  zone: ['zones'],
+};
 
 type Side = 'north' | 'south' | 'east' | 'west';
 const COMPASS: Readonly<Record<string, Side>> = {
@@ -198,6 +212,18 @@ export function mentionsOf(n: Narration, registry: TargetRegistry): Mention[] {
         break;
     }
   }
+  // The regions together: when every region of the show's map is named
+  // for one kind ("North Region", "West Region"), that kind's words name
+  // them all ("regional leaders", "three regions").
+  const kinds = regions.map((r) => keysOf(splitTarget(r.name).rest).at(-1));
+  const together =
+    regions.length >= 2 && kinds.every((k) => k && k === kinds[0])
+      ? (KIND_WORDS[kinds[0] ?? ''] ?? [])
+      : [];
+  n.keys.forEach((key, at) => {
+    if (together.includes(key))
+      for (const entry of regions) out.push({ at, length: 1, entry });
+  });
   // A side of the map no region is named for: the regions on that side.
   const named = new Set(
     regions.flatMap((r) =>

@@ -184,7 +184,10 @@ export function chartOf(raw: unknown): PlanChart | null {
   const said = record(raw);
   const kind = chartKindOf(said.kind);
   if (!kind) return null;
-  const own = said[kind];
+  // The kind's own field as the board writes it ("counter": {…}); a plan's
+  // chart as stored ({kind, spec}); else the fields at the top.
+  const own =
+    said[kind] ?? (record(said.spec) === said.spec ? said.spec : null);
   const fields = own === undefined || own === null ? said : own;
   const spec = specOf(kind, fields);
   // A source is where the numbers come from, in words: never a claim's id.
@@ -366,7 +369,7 @@ function specOf(kind: ChartKind, raw: unknown): Record<string, unknown> {
         speaker: label(said.speaker ?? said.who, 4),
         when: line(said.when ?? said.date, 30) || null,
         // The claim its words are, for the check that they are its words.
-        claim: line(said.claim, 12) || null,
+        ...(line(said.claim, 12) ? { claim: line(said.claim, 12) } : {}),
       };
     }
   }

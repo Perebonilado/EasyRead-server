@@ -20,6 +20,7 @@ import {
   AMOUNTS,
   CAMERA_MOVES,
   CHART_KINDS,
+  DRAWN_SETS,
   INFO_RECIPES,
   LIFE_EFFECTS,
   SET_KINDS,
@@ -116,7 +117,9 @@ export const shotChartSchema = z
 
 /** A shot's set: its kind, and the fields of that kind (the others null). Blank paper is never offered. */
 export const shotSetSchema = z.object({
-  kind: oneOf(SET_KINDS.filter((k) => k !== 'plain')),
+  kind: oneOf(
+    SET_KINDS.filter((k) => k !== 'plain' && (DRAWN_SETS || k !== 'set')),
+  ),
   // A map: the show's own; flat or tilted, with its terrain or not.
   tilt: oneOf(['flat', 'tilted'] as const),
   terrain: z.boolean().nullable().catch(null),

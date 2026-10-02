@@ -45,6 +45,7 @@ import {
   SET_TOWNS,
   SET_WEATHERS,
   CAMERA_MOVES,
+  DRAWN_SETS,
   SHOT_JOINS,
   joinOf,
   lifeOf,
@@ -153,6 +154,22 @@ export function mostShots(narration: string): number {
   return Math.max(2, Math.ceil(SHOT_LIMITS.perMinute * minutes));
 }
 
+/**
+ * The shots past the eight a minute that may go: one that shows nothing
+ * of its own (an empty map, a picture carried on) and whose going leaves
+ * the voice talking over nothing new no longer. What the board put on
+ * screen stays.
+ */
+function idleShots(
+  plan: ShotPlan,
+  n: ReturnType<typeof narrationOf>,
+  pauses: readonly number[],
+): number[] {
+  return spareShots(plan, n, pauses).filter(
+    (k) => !plan.shots[k].info.length && plan.shots[k].set.kind === 'map',
+  );
+}
+
 /** Words that put the audience on screen: never an explainer's (research §3.5). */
 const AUDIENCE =
   /\b(?:you|your|viewers?|audience|students?|learners?|pupils?|kids?|teens?|children|mascot|host)\b/iu;
@@ -193,6 +210,8 @@ export interface PlanOptions {
   lines?: readonly Pick<EditorialRow, 'say' | 'claims'>[];
   /** The scene opens its episode: something changes by its third or fourth word. */
   opening?: boolean;
+  /** Whether a drawn set can be drawn (default DRAWN_SETS): when not, a drawn set's shot goes. */
+  drawnSets?: boolean;
 }
 
 const amountOf = nearestOf(AMOUNTS, {
@@ -1074,7 +1093,7 @@ export function checkPlan(
   }
   if (
     plan.shots.length > mostShots(narration) &&
-    spareShots(plan, n, pausesOf(options)).length
+    idleShots(plan, n, pausesOf(options)).length
   )
     say(
       -1,
@@ -1548,6 +1567,7 @@ function mendShot(
   registry: TargetRegistry,
   given: Set<number>,
   kit: readonly string[],
+  drawnSets = DRAWN_SETS,
 ): PlanShot | null {
   let out: PlanShot = {
     ...shot,
@@ -1577,6 +1597,8 @@ function mendShot(
         ? { ...out, set: { ...out.set, photo: entry.name } }
         : { ...out, set: { ...out.set, document: entry.name } };
   }
+  // A drawn set code cannot draw yet is no picture: the line gets one that can be.
+  if (out.set.kind === 'set' && !drawnSets) return null;
   // A drawn set never takes a real place's name.
   if (out.set.kind === 'set' && setIsNamed(out.set, registry)) {
     const { era: _named, ...rest } = out.set.set;
@@ -1802,7 +1824,9 @@ function mendShots(
 
   // Each shot on its own: its set, names, words and numbers.
   let shots = plan.shots
-    .map((shot) => mendShot(shot, registry, given, kit))
+    .map((shot) =>
+      mendShot(shot, registry, given, kit, options.drawnSets ?? DRAWN_SETS),
+    )
     .filter((s): s is PlanShot => s !== null)
     .filter(
       (s) =>
@@ -1947,7 +1971,7 @@ function mendShots(
   const most = mostShots(narration);
   const pauses = pausesOf(options);
   while (shots.length > most) {
-    const spare = spareShots({ shots }, n, pauses);
+    const spare = idleShots({ shots }, n, pauses);
     if (!spare.length) break;
     const least = spare.reduce((a, b) =>
       shows(shots[b]) < shows(shots[a]) ? b : a,
@@ -2424,6 +2448,33 @@ export function carryMove(shot: PlanShot, on: string): PlanCamera {
   };
 }
 
+/** A date's calendar sheet, named by what happened as the research says it, for a line that says the date. */
+export function calendarShot(entry: RegistryEntry, on: string): PlanShot {
+  const when = splitTarget(entry.name).rest;
+  const name = clip(entry.about.replace(/^(?:the|a|an)\s+/iu, ''), 3);
+  return {
+    on,
+    set: {
+      kind: 'chart',
+      chart: {
+        kind: 'calendar',
+        spec: {
+          calendars: [
+            { label: name && !roleOnly(name) ? name : null, dates: [when] },
+          ],
+          merge: null,
+        },
+      },
+    },
+    actors: [],
+    info: [],
+    life: [],
+    camera: [{ move: 'establish', on }],
+    join: 'cut',
+    focal: WHOLE_SET,
+  };
+}
+
 /**
  * A line's picture when the board gave it none, by the research's
  * ladder: the show's map held with a slow push on the line's place (a
@@ -2443,53 +2494,47 @@ export function safeShot(
   const n = narrationOf(row.say);
   const on = wordsFrom(n, 0, 3);
   const all = registry.entries();
-  const lineKeys = ` ${n.keys.join(' ')} `;
-  const named = (name: string) => {
-    const keys = keysOf(splitTarget(name).rest).join(' ');
-    return Boolean(keys) && lineKeys.includes(` ${keys} `);
-  };
   const rests = (e: RegistryEntry) => e.claims ?? (e.claim ? [e.claim] : []);
   const mine = (e: RegistryEntry) =>
     rests(e).some((id) => row.claims.includes(id));
   const base = readMapBase(world?.base);
 
-  // 1. The show's map, held with a slow push on the line's place.
-  if (base) {
-    const place =
-      all.find((e) => e.kind === 'place' && e.geo && named(e.name)) ??
-      all.find(
-        (e) =>
-          e.kind === 'region' &&
-          [looseKey(splitTarget(e.name).rest), ...(e.aliases ?? [])].some(
-            (a) => a && lineKeys.includes(` ${a} `),
-          ),
-      );
-    if (place)
-      return shotOf({
-        on,
-        set: { kind: 'map', tilt: 'flat' },
-        info: [
-          {
-            recipe: place.kind === 'place' ? 'pin' : 'fill',
-            target: place.name,
-            on,
-          },
-        ],
-        camera: [{ move: 'push', target: place.name, on, amount: 'small' }],
-        life: ['cloud-shadows'],
-        focal: place.name,
-      });
-  }
-  // 2. A count of the line's number.
-  const lineNumbers = new Set(numbersIn(row.say));
-  const number =
-    all.find((e) => e.kind === 'number' && mine(e) && e.value !== undefined) ??
-    all.find(
-      (e) =>
-        e.kind === 'number' &&
-        e.value !== undefined &&
-        lineNumbers.has(e.value),
-    );
+  const named = mentionsOf(n, registry);
+  const onMap = base
+    ? named.find(
+        (m) =>
+          (m.entry.kind === 'place' && m.entry.geo) ||
+          m.entry.kind === 'region',
+      )
+    : undefined;
+  const date = named.find((m) => m.entry.kind === 'date');
+  const mapShot = (entry: RegistryEntry) =>
+    shotOf({
+      on,
+      set: { kind: 'map', tilt: 'flat' },
+      info: [
+        {
+          recipe: entry.kind === 'place' ? 'pin' : 'fill',
+          target: entry.name,
+          on,
+        },
+      ],
+      camera: [{ move: 'push', target: entry.name, on, amount: 'small' }],
+      life: ['cloud-shadows'],
+      focal: entry.name,
+    });
+  // 1. The show's map, held with a slow push on the place or the region
+  // the line names first: the line's own place, before its date.
+  if (onMap) return mapShot(onMap.entry);
+  // 2. A count of a number the line says, resting on its claims.
+  const said = numbersSaid(n).map((x) => x.value);
+  const number = all.find(
+    (e) =>
+      e.kind === 'number' &&
+      e.value !== undefined &&
+      said.includes(e.value) &&
+      (!row.claims.length || mine(e)),
+  );
   if (number)
     return shotOf({
       on,
@@ -2514,10 +2559,25 @@ export function safeShot(
       info: [{ recipe: 'count', target: number.name, on }],
       focal: WHOLE_SET,
     });
+  // A date the line says, or the date a line about when rests on: its
+  // calendar sheet, named by what happened.
+  if (date) return calendarShot(date.entry, on);
+  const when =
+    row.visual === 'when'
+      ? all.find((e) => e.kind === 'date' && mine(e))
+      : undefined;
+  if (when) return calendarShot(when, on);
   // 3. Exact words: a quote of them.
   if (row.visual === 'exact-words') {
     const quote = all.find(
       (e) => e.kind === 'claim' && e.about.startsWith('quote:') && mine(e),
+    );
+    // Its speaker: the person whose own words they are.
+    const speaker = all.find(
+      (e) =>
+        e.kind === 'person' &&
+        e.trace?.kind === 'quote' &&
+        registry.resolve(e.trace.ref)?.name === quote?.name,
     );
     if (quote)
       return shotOf({
@@ -2526,7 +2586,11 @@ export function safeShot(
           kind: 'chart',
           chart: {
             kind: 'quote',
-            spec: { text: quotedWords(quote.about), speaker: null, when: null },
+            spec: {
+              text: quotedWords(quote.about),
+              speaker: speaker ? clip(splitTarget(speaker.name).rest, 4) : null,
+              when: null,
+            },
           },
         },
         life: ['grain'],

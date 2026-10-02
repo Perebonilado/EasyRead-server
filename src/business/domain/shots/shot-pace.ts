@@ -31,6 +31,8 @@ export const PLAN_PACE = {
   subWords: 1,
   /** The least room an added change keeps from the changes beside it. */
   roomWords: 3,
+  /** The soonest after a change another may come, in words (about a second). */
+  nextWords: 2,
   /** The latest word the opening's first change may land on (about 1.5 seconds in). */
   openingWords: 4,
   /** Seconds a word takes, for messages. */
@@ -74,7 +76,7 @@ export function shotStarts(plan: ShotPlan, n: Narration): number[] {
 }
 
 /** Where a shot's change lands: its words after the shot's start, else anywhere. */
-const landing = (n: Narration, on: string, from: number) => {
+export const landingOf = (n: Narration, on: string, from: number) => {
   const after = phraseAt(n, on, Math.max(0, from));
   return after >= 0 ? after : phraseAt(n, on);
 };
@@ -88,12 +90,12 @@ export function planEvents(plan: ShotPlan, n: Narration): PlanEvent[] {
     if (from < 0) return;
     all.push({ at: from, shot: k, kind: 'shot' });
     for (const info of shot.info) {
-      const at = landing(n, info.on, from);
+      const at = landingOf(n, info.on, from);
       if (at >= 0) all.push({ at, shot: k, kind: 'info' });
     }
     for (const move of shot.camera)
       if (reframes(move, shot)) {
-        const at = landing(n, move.on, from);
+        const at = landingOf(n, move.on, from);
         if (at >= 0) all.push({ at, shot: k, kind: 'camera' });
       }
   });

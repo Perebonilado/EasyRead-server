@@ -15,6 +15,7 @@ import { RULES_PROMPT } from '../../business/domain/studio/explainer-rules';
 import {
   CHART_KINDS,
   CHART_USES,
+  DRAWN_SETS,
   JOIN_USES,
   LIFE_USES,
   MOVE_USES,
@@ -82,7 +83,9 @@ const DECIDE = [
   '- exact words: a quote of a quote claim’s words.',
   '- many people (a crowd, workers, voters, migrants): the kit’s silhouettes in their side’s colour, on the map at their place or on a drawn set, counted only by a number the list or the line gives.',
   '- what moves people or goods (a train, a ship, a lorry): the kit’s vehicle of its era, travelling on the map or across a drawn set.',
-  '- a scene (a moment of people in a place), a feeling, an atmosphere: the place on the map when the line names one the list gives; else a drawn set of a kind of place (a coast at dusk, a city at night), never a named one, with life; or the shot before carried on with a slow push.',
+  DRAWN_SETS
+    ? '- a scene (a moment of people in a place), a feeling, an atmosphere: the place on the map when the line names one the list gives; else a drawn set of a kind of place (a coast at dusk, a city at night), never a named one, with life; or the shot before carried on with a slow push.'
+    : '- a scene (a moment of people in a place), a feeling, an atmosphere: the place or the regions on the map when the line names them; else what the line is about by the rows above (a date, a number, someone’s words); never a drawn set (there are none yet).',
 ].join('\n');
 
 /** How the plan is written. */
@@ -231,10 +234,14 @@ export function shotBoardPrompt(): string {
     uses(
       'The sets (one a shot):',
       Object.fromEntries(
-        SET_KINDS.filter((k) => k !== 'plain').map((k) => [k, SET_USES[k]]),
+        SET_KINDS.filter(
+          (k) => k !== 'plain' && (DRAWN_SETS || k !== 'set'),
+        ).map((k) => [k, SET_USES[k]]),
       ),
     ),
-    `A drawn set’s settings: land ${quoted(SET_LANDS)}; time ${quoted(SET_TIMES)}; weather ${quoted(SET_WEATHERS)}; town ${quoted(SET_TOWNS)}; era (a period in words, never a place).`,
+    DRAWN_SETS
+      ? `A drawn set’s settings: land ${quoted(SET_LANDS)}; time ${quoted(SET_TIMES)}; weather ${quoted(SET_WEATHERS)}; town ${quoted(SET_TOWNS)}; era (a period in words, never a place).`
+      : '',
     `The charts (${CHART_KINDS.length}):\n${CHART_GUIDE}`,
     uses('The information recipes (each on its exact words):', RECIPE_USES),
     uses(
@@ -250,5 +257,7 @@ export function shotBoardPrompt(): string {
     HOW,
     EXAMPLES,
     'Answer with the plan only.',
-  ].join('\n\n');
+  ]
+    .filter(Boolean)
+    .join('\n\n');
 }

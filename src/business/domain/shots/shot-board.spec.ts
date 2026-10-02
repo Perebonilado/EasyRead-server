@@ -96,7 +96,15 @@ describe("a lesson scene's shots boarded", () => {
     const sets = made.plan.shots.map((s) =>
       s.set.kind === 'chart' ? s.set.chart.kind : s.set.kind,
     );
-    expect(sets).toEqual(['map', 'counter', 'calendar', 'quote', 'map']);
+    // The last line, about when, its date's calendar as the voice moves on to it.
+    expect(sets).toEqual([
+      'map',
+      'counter',
+      'calendar',
+      'quote',
+      'map',
+      'calendar',
+    ]);
     // The episode's opening: the pin lands as Berlin is named, by the third word.
     expect(made.plan.shots[0].info[0]).toEqual({
       recipe: 'pin',
@@ -173,7 +181,8 @@ describe("a lesson scene's shots boarded", () => {
       research: WALL_RESEARCH,
       world: null,
     });
-    const rows = [WALL_ROWS[1], WALL_ROWS[5]];
+    // The last line resting on nothing: no picture of its own.
+    const rows = [WALL_ROWS[1], { ...WALL_ROWS[5], claims: [] }];
     const counter: ShotPlan = {
       shots: [
         {

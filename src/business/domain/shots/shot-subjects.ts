@@ -550,7 +550,7 @@ export function momentShot(
           time,
           ...(weather ? { weather } : {}),
           ...(place.place === 'city' ? { town: 'city' as const } : {}),
-          ...(eraId && options.era ? { era: options.era } : {}),
+          ...(eraId ? { era: eraId } : {}),
           place: place.place,
           ...(place.event ? { illustration: true } : {}),
         },

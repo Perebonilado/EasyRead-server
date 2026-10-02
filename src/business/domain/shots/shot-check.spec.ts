@@ -1,17 +1,25 @@
-import { KIT_IDS } from '../kit/registry';
+import { KIT_IDS, kitIdsFor } from '../kit/registry';
 import { WALL_RESEARCH, WALL_ROWS, WALL_WORLD } from './__fixtures__/wall';
+import {
+  REAGAN_AT_THE_GATE,
+  WALL_OPENS,
+  WALL_PICTURES,
+} from './__fixtures__/wall-pictures';
 import {
   calendarShot,
   checkPlan,
+  mapsOffPlace,
   mendPlan,
   mostShots,
   planOf,
   safeShot,
+  SERIOUS,
   stageWords,
   WHOLE_SET,
 } from './shot-check';
-import { sceneNarration } from './shot-phrases';
+import { narrationOf, sceneNarration } from './shot-phrases';
 import { buildRegistry, registryOf } from './shot-registry';
+import { mapMentions } from './shot-subjects';
 import type { PlanShot, RegistryEntry, ShotPlan } from './types';
 
 const registry = buildRegistry({
@@ -1447,5 +1455,252 @@ describe('a plan as stored, read again', () => {
     expect(mendPlan(again, narration, registry)).toEqual(
       mendPlan(plan, narration, registry),
     );
+  });
+});
+
+describe('real pictures first, the map only for where (Richard, 2026-10-02)', () => {
+  const lines = WALL_ROWS;
+  const pictured = buildRegistry({
+    rows: WALL_ROWS,
+    research: WALL_RESEARCH,
+    world: WALL_WORLD,
+    pictures: WALL_PICTURES,
+  });
+  const sets = (plan: ShotPlan) =>
+    plan.shots.map((s) =>
+      s.set.kind === 'chart' ? s.set.chart.kind : s.set.kind,
+    );
+  const map = () => good().shots[0];
+
+  it('never stands the map in for a line that names no place, whatever the shots around it', () => {
+    const placeless = [
+      { say: 'Two years later, the Wall opened.', claims: [] },
+      { say: 'Then the fight changed.', claims: [], visual: 'why' as const },
+      {
+        say: 'Nobody knew what would come next.',
+        claims: [],
+        visual: 'scene' as const,
+      },
+    ];
+    for (const reg of [registry, pictured])
+      for (const row of placeless)
+        expect(
+          safeShot(row, reg, WALL_WORLD, { previous: map(), next: map() }).set
+            .kind,
+        ).not.toBe('map');
+    // Over all the Wall's lines, with maps around each: the map only on a
+    // line that names a place it shows.
+    for (const row of WALL_ROWS) {
+      const one = safeShot(row, registry, WALL_WORLD, {
+        previous: map(),
+        next: map(),
+      });
+      if (one.set.kind === 'map')
+        expect(
+          mapMentions(narrationOf(row.say), registry).length,
+        ).toBeGreaterThan(0);
+    }
+  });
+
+  it('stands a photo of what the line names in first: a person’s before their year, the next of theirs, an event’s', () => {
+    // Reagan's line: his portrait, before the calendar of 1987.
+    expect(safeShot(WALL_ROWS[2], pictured, WALL_WORLD)).toMatchObject({
+      on: 'In 1987, Reagan',
+      set: { kind: 'portrait', person: 'person:Ronald Reagan' },
+      camera: [{ move: 'push', amount: 'small' }],
+      focal: 'person:Ronald Reagan',
+    });
+    // His portrait shown already: his other photo.
+    expect(
+      safeShot(WALL_ROWS[2], pictured, WALL_WORLD, {
+        used: ['person:Ronald Reagan'],
+      }).set,
+    ).toEqual({ kind: 'photo', photo: REAGAN_AT_THE_GATE.name });
+    // The night the Wall opened, by its photo.
+    expect(safeShot(WALL_ROWS[5], pictured, WALL_WORLD).set).toEqual({
+      kind: 'photo',
+      photo: WALL_OPENS.name,
+    });
+    // Berlin's line: Berlin's photo, before its year and before the map.
+    expect(safeShot(WALL_ROWS[0], pictured, WALL_WORLD).set).toEqual({
+      kind: 'photo',
+      photo: 'photo:Berlin 1961',
+    });
+  });
+
+  it('names a map on over a line that names no place, and gives those words the line’s own picture', () => {
+    // The map on East Germany carried on over the last line, which names none.
+    const plan: ShotPlan = { shots: good().shots.slice(0, 4) };
+    const found = checkPlan(plan, narration, registry, { lines });
+    expect(found.map((p) => `${p.shot}:${p.code}`)).toEqual([
+      '3:gap-long',
+      '3:map-off-place',
+    ]);
+    expect(found.find((p) => p.code === 'map-off-place')?.message).toContain(
+      '"Two years later, the Wall opened"',
+    );
+    expect(SERIOUS.has('map-off-place')).toBe(true);
+    expect(mapsOffPlace(plan, narrationOf(narration), registry, lines)).toEqual(
+      [{ shot: 3, line: 5, from: 37, to: 43 }],
+    );
+    const mended = mendPlan(plan, narration, registry, { lines });
+    expect(sets(mended)).toEqual([
+      'map',
+      'counter',
+      'quote',
+      'map',
+      'calendar',
+    ]);
+    expect(mended.shots[3]).toMatchObject({
+      on: 'East Germany’s leader',
+      focal: 'region:East Germany',
+    });
+    expect(mended.shots[4]).toMatchObject({
+      on: 'Two years later',
+      set: {
+        chart: { kind: 'calendar', spec: { calendars: [{ dates: ['1989'] }] } },
+      },
+    });
+    expect(checkPlan(mended, narration, registry, { lines })).toEqual([]);
+    expect(mendPlan(mended, narration, registry, { lines })).toEqual(mended);
+  });
+
+  it('keeps a map while its lines name its places, and brings it back after a line that names none', () => {
+    // The map from Berlin to East Germany, over Reagan's lines between.
+    const plan: ShotPlan = {
+      shots: [
+        shot({
+          on: 'In 1961',
+          set: { kind: 'map', tilt: 'flat' },
+          info: [
+            { recipe: 'pin', target: 'place:Berlin', on: 'Berlin' },
+            { recipe: 'seam', target: 'seam:inner border', on: 'inner border' },
+            {
+              recipe: 'fill',
+              target: 'region:East Germany',
+              on: 'East Germany’s leader',
+            },
+          ],
+          focal: 'place:Berlin',
+        }),
+        good().shots[4],
+      ],
+    };
+    const mended = mendPlan(plan, narration, registry, { lines });
+    // Berlin and its border on the map; Reagan's year and his own words;
+    // the map again for East Germany; the year the Wall opened.
+    expect(sets(mended)).toEqual([
+      'map',
+      'calendar',
+      'quote',
+      'map',
+      'calendar',
+    ]);
+    expect(mended.shots[3].info).toEqual([
+      {
+        recipe: 'fill',
+        target: 'region:East Germany',
+        on: 'East Germany’s leader',
+      },
+    ]);
+    expect(
+      mapsOffPlace(mended, narrationOf(narration), registry, lines),
+    ).toEqual([]);
+  });
+
+  it('cuts a person’s photo in as they are named where nothing over their line shows them', () => {
+    const mended = mendPlan(good(), narration, pictured, { lines, map: true });
+    // Reagan's portrait from his line's first words, his quote after it.
+    expect(sets(mended)).toEqual([
+      'map',
+      'counter',
+      'portrait',
+      'quote',
+      'map',
+      'calendar',
+    ]);
+    expect(mended.shots[2]).toMatchObject({
+      on: 'In 1987',
+      set: { kind: 'portrait', person: 'person:Ronald Reagan' },
+    });
+    expect(mended.shots[3]).toMatchObject({
+      on: 'Tear down this',
+      info: [{ recipe: 'mark', target: 'part:speaker' }],
+    });
+    expect(checkPlan(mended, narration, pictured, { lines })).toEqual([]);
+    expect(mendPlan(mended, narration, pictured, { lines, map: true })).toEqual(
+      mended,
+    );
+    // With no photo of him, nothing is cut in.
+    expect(sets(mendPlan(good(), narration, registry, { lines }))).toEqual(
+      sets(good()),
+    );
+  });
+
+  it('shows a person with a photo by it, never as a drawing of them', () => {
+    const kit = kitIdsFor('illustrated');
+    const options = {
+      lines,
+      kit,
+      look: 'illustrated' as const,
+      map: true,
+    };
+    // Reagan drawn as his character over his lines.
+    const plan = good();
+    plan.shots[2] = shot({
+      on: 'In 1987',
+      set: { kind: 'set', set: { land: 'city', time: 'day' } },
+      actors: [
+        {
+          id: 'reagan',
+          kit: 'character.person',
+          params: { name: 'Ronald Reagan' },
+          place: 'centre',
+        },
+      ],
+      focal: WHOLE_SET,
+    });
+    expect(
+      checkPlan(plan, narration, pictured, options).map((p) => p.code),
+    ).toContain('character-has-photo');
+    expect(SERIOUS.has('character-has-photo')).toBe(true);
+    const mended = mendPlan(plan, narration, pictured, options);
+    expect(
+      mended.shots.flatMap((s) => s.actors).map((a) => a.kit),
+    ).not.toContain('character.person');
+    expect(mended.shots.map((s) => s.set.kind)).toContain('portrait');
+    // With no photo of him, his character may stand for him.
+    expect(
+      checkPlan(plan, narration, registry, options).map((p) => p.code),
+    ).not.toContain('character-has-photo');
+    expect(
+      mendPlan(plan, narration, registry, options).shots.flatMap((s) =>
+        s.actors.map((a) => a.params?.name),
+      ),
+    ).toContain('Ronald Reagan');
+  });
+
+  it('shows a person by another photo of theirs where a portrait is asked and none cleared, never by their place', () => {
+    const photoOnly = buildRegistry({
+      rows: WALL_ROWS,
+      research: WALL_RESEARCH,
+      world: WALL_WORLD,
+      pictures: [REAGAN_AT_THE_GATE],
+    });
+    const plan = good();
+    plan.shots[2] = shot({
+      on: 'In 1987',
+      set: { kind: 'portrait', person: 'person:Ronald Reagan' },
+      focal: 'person:Ronald Reagan',
+    });
+    expect(
+      checkPlan(plan, narration, photoOnly).find(
+        (p) => p.code === 'person-unseen',
+      )?.message,
+    ).toContain(REAGAN_AT_THE_GATE.name);
+    expect(mendPlan(plan, narration, photoOnly).shots[2].set).toEqual({
+      kind: 'photo',
+      photo: REAGAN_AT_THE_GATE.name,
+    });
   });
 });

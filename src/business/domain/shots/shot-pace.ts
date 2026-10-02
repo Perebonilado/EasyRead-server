@@ -228,12 +228,13 @@ export function onWords(shot: PlanShot, on: string): PlanShot {
 /**
  * Another picture put over shot `k`'s words from `from` to `to` (in place,
  * in `shots`): the shot keeps what it brings on before `from`, where it
- * has words of its own before it (else the picture starts on the shot's
- * own words); the picture holds from there; and the shot goes on after
- * `to` as its continuation, with what it brings on from there, where it
- * has room. What the shot brought on between goes, or, with `keep`, comes
- * on as its continuation begins. False, and nothing changed, when the
- * shot has no words or the picture would have no room.
+ * has words enough of its own before it to be read (else the picture
+ * starts on the shot's own words); the picture holds from there; and the
+ * shot goes on after `to` as its continuation, with what it brings on
+ * from there, where it has room. What the shot brought on between goes,
+ * or, with `keep`, comes on as its continuation begins. False, and
+ * nothing changed, when the shot has no words or the picture would have
+ * no room.
  */
 export function replaceSpan(
   shots: PlanShot[],
@@ -248,7 +249,8 @@ export function replaceSpan(
   const start = starts[k];
   if (start === undefined || start < 0) return false;
   const end = starts.slice(k + 1).find((s) => s > start) ?? n.keys.length;
-  const a = from - start < PLAN_PACE.nextWords ? start : from;
+  // Too few words of its own before it to be read: the picture takes them.
+  const a = from - start < PLAN_PACE.roomWords ? start : from;
   const b = Math.min(to, end);
   if (b - a < PLAN_PACE.roomWords) return false;
   const shot = shots[k];
@@ -308,10 +310,10 @@ export function replaceSpan(
  * A picture cut into the plan where the voice names what it shows, at key
  * `at` (in place, in `shots`), within the pace's limits: it holds at
  * least a few words (PLAN_PACE.roomWords), until the next change of the
- * shot it cuts into, which then goes on; it starts on that shot's own
- * words when the name is said as the shot begins. False, and nothing
- * changed, when the shot under it has a change too soon after the name
- * for a picture to be read between.
+ * shot it cuts into, which then goes on (what that shot brought on in the
+ * picture's first words coming on as it goes on); it starts on that
+ * shot's own words when the name is said as the shot begins. False, and
+ * nothing changed, when there is no shot there or no room for it.
  */
 export function cutIn(
   shots: PlanShot[],
@@ -327,7 +329,7 @@ export function cutIn(
   if (k < 0) return false;
   const start = starts[k];
   const end = starts.slice(k + 1).find((s) => s > start) ?? n.keys.length;
-  const from = at - start < PLAN_PACE.nextWords ? start : at;
+  const from = at - start < PLAN_PACE.roomWords ? start : at;
   const shot = shots[k];
   const changes = [
     ...shot.info.map((i) => i.on),
@@ -336,9 +338,11 @@ export function cutIn(
   ]
     .map((on) => landingOf(n, on, start))
     .filter((x) => x > from && x < end);
-  // A change of its own too soon after the name: no room for a picture.
-  if (changes.some((x) => x < from + PLAN_PACE.roomWords)) return false;
-  const to = changes.length ? Math.min(...changes) : end;
+  const room = from + PLAN_PACE.roomWords;
+  const later = changes.filter((x) => x >= room);
+  // The shot goes on at its next change after the picture has been read;
+  // one only in the picture's first words, as soon as it has been.
+  const to = later.length ? Math.min(...later) : changes.length ? room : end;
   return replaceSpan(shots, k, from, to, picture, n, true);
 }
 

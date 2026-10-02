@@ -2904,7 +2904,7 @@ function checkLines(
     say(
       gap.shot,
       'gap-long',
-      `Shot ${gap.shot + 1}: nothing new for about ${Math.round(gap.words * PLAN_PACE.secondsPerWord)} seconds, from "${phraseText(n, gap.from, 4)}" to "${phraseText(n, Math.max(gap.from, gap.to - 4), 4)}"; put something new every few words on the words that name it (a pin, a fill, a label, a mark, a count, a move to what is named), or a new shot where the voice moves on to something the map or a picture can show.`,
+      `Shot ${gap.shot + 1}: nothing new for about ${Math.round(gap.words * PLAN_PACE.secondsPerWord)} seconds, from "${phraseText(n, gap.from, 4)}" to "${phraseText(n, Math.max(gap.from, gap.to - 4), 4)}"; put something new every few words on the words that name it (a pin, a fill, a label, a mark, a count, a move to what is named), or a new picture where the voice moves on: a photo of what it names, its number, someone's own words, a date's calendar; the map only for where something is.`,
     );
 }
 

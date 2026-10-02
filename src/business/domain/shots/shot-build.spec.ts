@@ -496,9 +496,18 @@ describe('the board’s names, as the build resolves them', () => {
   const named = buildShots(plan, entries, ctx);
   const [timeline, map, strike, quote] = named.shots;
 
-  it('takes "set" as the set’s own subject: the box its drawing frames, never the whole asset edge to edge', () => {
-    expect(timeline.focal).toEqual({ kind: 'box', box: [200, 200, 1200, 500] });
-    expect(strike.focal).toEqual({ kind: 'box', box: [200, 200, 1200, 500] });
+  it('takes "set" as the set’s own subject: a chart whole, a map by the box its drawing frames', () => {
+    expect(timeline.focal).toEqual({ kind: 'asset', asset: 'chart-1' });
+    expect(strike.focal).toEqual({ kind: 'asset', asset: 'chart-2' });
+    const map = buildShots(
+      { shots: [{ ...plan.shots[1], focal: 'set' }] },
+      entries,
+      ctx,
+    );
+    expect(map.shots[0].focal).toEqual({
+      kind: 'box',
+      box: [100, 50, 700, 600],
+    });
   });
 
   it('finds a part by the words it shows, and a date as its event; a label on a chart brings its part on, never a second name', () => {
@@ -1031,5 +1040,37 @@ describe('what a chart writes', () => {
       source: 'Nigeria: a country study',
     });
     expect(specs[1]).not.toHaveProperty('source');
+  });
+
+  it('ends a source too long for a chart on a whole word', () => {
+    const asked = chartAsset as jest.Mock;
+    asked.mockClear();
+    const source =
+      'Reports by the Resumed Nigeria Constitutional Conference held in London in September and October, 1958';
+    buildShots(
+      {
+        shots: [
+          {
+            on: 'After the 1945 strikes',
+            set: {
+              kind: 'chart',
+              chart: { kind: 'counter', spec: { value: 4, source } },
+            },
+            actors: [],
+            info: [],
+            life: [],
+            camera: [],
+            join: 'cut',
+          },
+        ],
+      },
+      registryOf(REGISTRY),
+      ctx,
+    );
+    const [[, spec]] = asked.mock.calls as [string, { source: string }][];
+    expect(spec.source).toBe(
+      'Reports by the Resumed Nigeria Constitutional Conference held in London in September and…',
+    );
+    expect(spec.source.length).toBeLessThanOrEqual(90);
   });
 });

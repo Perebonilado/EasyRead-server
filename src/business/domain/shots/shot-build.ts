@@ -291,6 +291,9 @@ export function travelMs(from: ShotBox, to: ShotBox, width: number): number {
   return Math.round(Math.max(400, Math.min(1200, 300 + 600 * across)));
 }
 
+/** The longest source line a chart writes (shot-chart-kit's extraOf cuts there, mid-word). */
+const SOURCE_MOST = 90;
+
 /** A research claim named by its id ("c7", "claim:c7"): never words a viewer reads. */
 const CLAIM_ID = /^(?:claim:)?(c\d+)$/i;
 
@@ -316,6 +319,16 @@ function drawnSpec(
     const source = sourceOf(id.toLowerCase());
     if (source) spec.source = source;
     else delete spec.source;
+  }
+  // A source longer than a chart writes ends on a whole word, not cut
+  // mid-word where the chart's own limit falls.
+  if (typeof spec.source === 'string') {
+    const text = spec.source.replace(/\s+/g, ' ').trim();
+    if (text.length > SOURCE_MOST) {
+      const cut = text.slice(0, SOURCE_MOST - 1);
+      const end = cut.lastIndexOf(' ');
+      spec.source = `${(end > SOURCE_MOST / 2 ? cut.slice(0, end) : cut).replace(/[\s,;:.\-–—]+$/, '')}…`;
+    }
   }
   const key = (raw: unknown) =>
     typeof raw === 'string' || typeof raw === 'number'
@@ -722,9 +735,7 @@ export function buildShots(
     function boxOf(target: ShotTargetDto): ShotBox | null {
       if (target.kind === 'box') return target.box;
       if (target.kind === 'asset' && target.asset === assetId && svg)
-        return target.part
-          ? (svg.parts[target.part]?.box ?? null)
-          : (svg.focal ?? svg.box);
+        return target.part ? (svg.parts[target.part]?.box ?? null) : svg.box;
       return null;
     }
 
@@ -998,21 +1009,35 @@ export function buildShots(
     });
 
     /**
+     * The set as a whole as the camera frames it. A drawing on paper (a
+     * chart, a document) is framed whole, a little paper round it and room
+     * for the captions; a set that fills the frame to its edges (a map, a
+     * picture) is framed by the box its drawing names as its subject, as
+     * framing it whole would show the paper past its sides.
+     */
+    const onPaper =
+      shotSet.set.kind === 'chart' || shotSet.set.kind === 'document';
+    const setWhole: ShotTargetDto | null =
+      svg && assetId
+        ? !onPaper && svg.focal
+          ? { kind: 'box', box: svg.focal }
+          : { kind: 'asset', asset: assetId }
+        : null;
+
+    /**
      * What the camera is aimed at, with room round it: a point or a small
-     * box (a place) widened to a share of its set, kept inside the set.
-     * The set as a whole is its own subject, the box its drawing says the
-     * camera frames (on the stage the whole asset is framed edge to edge,
-     * past the set's sides onto paper).
+     * box (a place) widened to a share of its set, kept inside the set;
+     * the set as a whole as it is framed.
      */
     function inContext(target: ShotTargetDto): ShotTargetDto {
       if (!svg) return target;
       if (
+        setWhole &&
         target.kind === 'asset' &&
         target.asset === assetId &&
-        !target.part &&
-        svg.focal
+        !target.part
       )
-        return { kind: 'box', box: svg.focal };
+        return setWhole;
       const box =
         target.kind === 'box'
           ? target.box
@@ -1139,17 +1164,20 @@ export function buildShots(
         const whole = out
           .flatMap((o) => o.boxes)
           .reduce((a, b) => around(a, b), view);
-        // Most of the set's subject: the subject whole, never a slice of it
-        // with its last part at the frame's edge.
+        // Most of the set's subject: the set whole as it is framed, never a
+        // slice of it with its last part at the frame's edge.
         const subject = svg.focal ?? svg.box;
         const most =
           whole[2] * whole[3] >= subject[2] * subject[3] * SUBJECT_MOST;
-        const target = inContext({
-          kind: 'box',
-          box: (most ? around(subject, whole) : whole).map(
-            (n) => Math.round(n * 10) / 10,
-          ) as ShotBox,
-        });
+        const target: ShotTargetDto =
+          most && onPaper && setWhole
+            ? setWhole
+            : inContext({
+                kind: 'box',
+                box: (most ? around(subject, whole) : whole).map(
+                  (n) => Math.round(n * 10) / 10,
+                ) as ShotBox,
+              });
         const wholeBox = boxOf(target) ?? whole;
         const on = out[0].x.on;
         const same = camera.findIndex((c) => c.on === on && c !== safeMove);

@@ -150,10 +150,9 @@ describe('a scene of shots from the board to the stage', () => {
     const [, counter, quote] = scene.shots!.shots;
     const count = counter.info.find((i) => i.recipe === 'count')!;
     expect(count).toMatchObject({ value: 1393, target: { part: 'number' } });
-    const drawn = scene.shots!.assets[(quote.set as { asset: string }).asset];
     expect(quote.focal).toEqual({
-      kind: 'box',
-      box: drawn.kind === 'svg' ? drawn.focal : null,
+      kind: 'asset',
+      asset: (quote.set as { asset: string }).asset,
     });
   });
 

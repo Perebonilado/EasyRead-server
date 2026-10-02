@@ -1,14 +1,17 @@
 /**
  * The picture desk's demo for the shots stage's lab (WP11): a history
  * scene of three shots made from what the desk clears for "The Regional
- * Turn"'s research (its claims name Ahmadu Bello and Nnamdi Azikiwe):
+ * Turn"'s research (its claims name Ahmadu Bello and Abubakar Tafawa
+ * Balewa):
  *
  *   1. Ahmadu Bello's portrait card (his own Wikidata picture: Oak Ridge,
  *      1960, a US Department of Energy photograph, public domain);
- *   2. an archive photograph of an event, depth off: Nnamdi Azikiwe in his
- *      office, 1937 (public domain in the US);
- *   3. an archive photograph of Bello's 1960 visit to Oak Ridge, with its
- *      depth map, so the camera moves through its planes.
+ *   2. an archive photograph of an event, depth off: Abubakar Tafawa
+ *      Balewa at the White House, July 1961 (White House photographs, JFK
+ *      Library: a US government work), a small copy shown as a print;
+ *   3. an archive photograph with its depth map, the camera moving through
+ *      its planes: Bello and his delegation at Oak Ridge, 1960 (US
+ *      Department of Energy).
  *
  * Each set is made by the same code the build uses (shot-pictures), timed
  * by hand, in both shapes; our copies are copied beside the scenes so the
@@ -66,16 +69,21 @@ const QUESTIONS: (PassQuestion & { depth: boolean })[] = [
     },
   },
   {
+    // An archive photograph of an event, depth off: the prime minister at
+    // the White House, July 1961 (a small copy: shown as a print on paper).
     for: 'photo',
     depth: false,
     query: {
-      name: 'Nnamdi Azikiwe',
+      name: 'Abubakar Tafawa Balewa',
       kind: 'event',
-      years: [1937],
-      place: ['Nigeria'],
+      years: [1961],
+      place: ['Washington'],
     },
   },
   {
+    // An archive photograph with its depth map, the camera moving through
+    // its planes: the Northern Region's premier and his delegation at Oak
+    // Ridge, 1960.
     for: 'photo',
     depth: true,
     query: {

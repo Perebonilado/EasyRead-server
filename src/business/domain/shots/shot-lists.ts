@@ -94,7 +94,7 @@ export const LIFE_USES: Record<ShotLifeEffect, string> = {
   fire: 'a real fire the voice speaks of',
   sparks: 'real sparks: welding, a furnace, a spark plug',
   splash: 'a real splash of water',
-  eyes: 'a pair of eyes on a region of the map (at: the region), glancing at another (to: a region or a place): a country made a character, in an illustrated show only, sparingly',
+  eyes: 'a region of the map made a character by a pair of eyes glancing at another: written in the shot’s "eyes" (at, to, face), never in its life; an illustrated show only, sparingly',
 };
 export const LIFE_EFFECTS = Object.keys(LIFE_USES) as ShotLifeEffect[];
 

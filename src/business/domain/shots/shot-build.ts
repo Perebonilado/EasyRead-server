@@ -107,7 +107,7 @@ export interface BuildContext {
 
 /** The show's look as the shots draw it: its theme's paper and ink, its accent, its held colour and each side's colour. */
 export function shotLook(
-  ctx: Pick<BuildContext, 'palette' | 'held' | 'theme'>,
+  ctx: Pick<BuildContext, 'palette' | 'held' | 'theme' | 'look'>,
 ): ShotLookDto {
   const theme = THEMES[ctx.theme] ?? PAPER;
   const sides: Record<string, string> = {};
@@ -126,6 +126,8 @@ export function shotLook(
     fonts: { display: DISPLAY_FACE[theme.font], text: TEXT_FACE },
     grain: GRAIN,
     motion: 'springy',
+    // How its people are drawn: the stage and the checks read it.
+    ...(ctx.look === 'illustrated' ? { style: 'illustrated' as const } : {}),
   };
 }
 
@@ -555,6 +557,8 @@ export function buildShots(
   const look = shotLook(ctx);
   const assets: Record<string, ShotAssetDto> = {};
   const notes: string[] = [];
+  /** The named characters labelled already in this scene: each only the first time. */
+  const namesShown = new Set<string>();
   /** Each chart drawn, by its kind and spec: drawn once, shown by every shot that asks for it. */
   const charts = new Map<string, { id: string; dto: ShotSvgAssetDto }>();
   const pictures = new Map<string, string>();
@@ -569,7 +573,10 @@ export function buildShots(
           set: {
             kind: 'map',
             asset: map.id,
-            style: planned.style ?? 'atlas',
+            // An illustrated show's map is the reference's natural relief.
+            style:
+              planned.style ??
+              (ctx.look === 'illustrated' ? 'relief' : 'atlas'),
             tilt: !map.flat && planned.tilt === 'tilted' ? MAP_TILT : 0,
             bearing: 0,
             terrain: !map.flat && planned.terrain === true,
@@ -739,9 +746,16 @@ export function buildShots(
     const planned_actors = planned.actors ?? [];
     planned_actors.forEach((one, k) => {
       const side = one.side ? sideOf(one.side) : null;
+      // A named character is drawn from the look notes' likeness of them (WP17).
+      const person =
+        typeof one.params?.name === 'string' && one.params.name
+          ? registry.resolve(`person:${one.params.name}`)
+          : null;
       const made = kitPiece(
         one.kit,
-        one.params,
+        person?.likeness
+          ? { ...(one.params ?? {}), looks: person.likeness }
+          : one.params,
         look,
         ctx,
         side ?? 'ink',
@@ -1137,6 +1151,22 @@ export function buildShots(
       });
     });
 
+    // A named character is labelled with their name the first time the
+    // scene shows them (WP17), on the words that bring them on.
+    for (const one of planned.actors ?? []) {
+      const name = one.params?.name;
+      if (typeof name !== 'string' || !name || !actorIds.has(one.id)) continue;
+      if (namesShown.has(name)) continue;
+      namesShown.add(name);
+      info.push({
+        id: `${id}-name-${one.id}`,
+        recipe: 'label',
+        target: { kind: 'actor', actor: one.id, part: 'head' },
+        text: wordsUpTo(name, TEXT.labelWordsMax),
+        on: one.moves?.[0]?.on ?? planned.on,
+      });
+    }
+
     /**
      * The set as a whole as the camera frames it. A drawing on paper (a
      * chart, a document) is framed whole, a little paper round it and room
@@ -1345,6 +1375,27 @@ export function buildShots(
           ? { at: { kind: 'actor' as const, actor: chimney.id, part: 'smoke' } }
           : {}),
       }));
+
+    // Eyes on the map's regions (an illustrated show's), each glancing at another.
+    if (ctx.look === 'illustrated' && onMap)
+      (planned.eyes ?? []).forEach((one, k) => {
+        const at = targetOf(one.at);
+        if (!at) {
+          notes.push(
+            `shot ${i + 1}: eyes on "${one.at}" left out (not on the map)`,
+          );
+          return;
+        }
+        const to = one.to ? targetOf(one.to) : null;
+        life.push({
+          effect: 'eyes',
+          seed: seedOf(`${ctx.seed}:${i}:eyes:${k}`),
+          amount: 1,
+          at,
+          ...(to ? { to } : {}),
+          ...(one.face && one.face !== 'calm' ? { face: one.face } : {}),
+        });
+      });
 
     built.push({
       shot: {

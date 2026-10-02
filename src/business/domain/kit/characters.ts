@@ -1395,6 +1395,12 @@ export const CHARACTER_KIT: Readonly<Record<string, KitEntry>> = {
         default: '',
         about: 'a person of the list, by name; empty for an unnamed role',
       },
+      looks: {
+        text: 240,
+        default: '',
+        about: 'a named person’s likeness, from the look notes',
+        code: true,
+      },
       expression: EXPRESSION_PARAM,
       prop: PROP_PARAM,
       pose: {

@@ -28,6 +28,7 @@ import type { TimedBeat } from '../scene-timing';
 import type { LearningStage } from '../scene-stage';
 import type { ExplainerSheet } from '../studio/studio';
 import type { EditorWorld } from '../studio/studio-editor';
+import type { KitLook } from '../kit/style';
 import { buildShots } from './shot-build';
 import { checkTimed, mendTimed } from './shot-check-timed';
 import type { ShotMapSet } from './shot-map';
@@ -52,6 +53,8 @@ export interface ShotsInput {
   first: boolean;
   /** The seed of everything seeded in it: the scene's own id. */
   seed: string;
+  /** How the show draws its people (tech §11): silhouettes or characters. Editorial when absent. */
+  look?: KitLook;
 }
 
 /** A shots sheet's make: its plan and the show's world, or null for a sheet of today's storyboard. */
@@ -60,6 +63,7 @@ export function shotsInputOf(
   world: Pick<EditorWorld, 'palette' | 'held' | 'base'> | null | undefined,
   first: boolean,
   seed: string,
+  look?: KitLook | null,
 ): ShotsInput | null {
   if (sheet.engine !== 'shots' || !sheet.shots) return null;
   return {
@@ -78,6 +82,7 @@ export function shotsInputOf(
       : null,
     first,
     seed,
+    ...(look ? { look } : {}),
   };
 }
 
@@ -156,6 +161,7 @@ export function composeShotScene(
     theme: made.theme,
     map: made.map,
     seed: input.seed,
+    ...(input.look ? { look: input.look } : {}),
   });
   const notes = [...built.notes];
   const timed = timeShots(built.shots, beats, durationMs, { notes });

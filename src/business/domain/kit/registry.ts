@@ -39,6 +39,8 @@ export interface KitParam {
   range?: readonly [number, number];
   /** Or words of the board's own, at most this many characters: what someone wears, a person's name (kept as said, trimmed). */
   text?: number;
+  /** Set by code, never named by the board (a named person's likeness from the look notes): left out of its guide. */
+  code?: boolean;
   default: string | number;
   /** A few words for the board: what it sets. */
   about: string;
@@ -211,6 +213,7 @@ export function kitGuide(look: KitLook): string {
     .map((id) => {
       const entry = KIT[id];
       const params = Object.entries(entry.params)
+        .filter(([, param]) => !param.code)
         .map(([name, param]) => paramText(name, param))
         .join('; ');
       return `- ${id}: ${entry.about}${params ? ` Settings: ${params}.` : ''} Moves: ${entry.moves.join(', ')}.`;

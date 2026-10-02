@@ -34,6 +34,15 @@ export interface PlanShot {
   join: ShotJoin;
   /** The target the shot is about; the camera frames it when no move says otherwise. */
   focal?: string;
+  /** Eyes on regions of the map, each glancing at another (an illustrated show's, sparingly). */
+  eyes?: PlanEyes[];
+}
+
+/** A pair of eyes on a region of the map (`at`), glancing toward `to`, with brows for a feeling. */
+export interface PlanEyes {
+  at: string;
+  to?: string;
+  face?: 'calm' | 'angry' | 'worried' | 'surprised';
 }
 
 export type PlanSet =
@@ -170,6 +179,8 @@ export interface RegistryEntry {
   source?: string;
   /** Other names it is known by, for a name the board writes another way ("the North"). */
   aliases?: string[];
+  /** A person's described likeness from the look notes: an illustrated show draws their character from it. */
+  likeness?: string;
 }
 
 /** What the board may name in a scene, built from the research log, the world, the show map and the picture desk. */

@@ -218,7 +218,10 @@ import {
 } from '../../business/domain/studio/studio-host';
 import { ideaStarts } from '../../business/domain/scene-ideas';
 import { writeClipSheet } from '../../business/handlers/studio/studio-clip-writer';
-import { showTheme } from '../../business/domain/studio/studio-look';
+import {
+  showLookStyle,
+  showTheme,
+} from '../../business/domain/studio/studio-look';
 import { studioReading } from '../../business/domain/studio/studio-motion';
 
 /** A kit's spec for a character: a person's, an animal's, or a creature's. */
@@ -387,7 +390,14 @@ export function studioMakeOf(
   // on its sheet, so a remake, a twin and a change of pace make it alike.
   const shots =
     row.sheet?.kind === 'explainer'
-      ? shotsInputOf(row.sheet, world, row.position === 0, row.id)
+      ? shotsInputOf(
+          row.sheet,
+          world,
+          row.position === 0,
+          row.id,
+          // How the show draws its people: characters or silhouettes.
+          showLookStyle(show.brief, world, bible),
+        )
       : null;
   const lesson = {
     teach: episode.outline?.scenes[row.position]?.teach ?? null,

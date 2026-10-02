@@ -1019,7 +1019,11 @@ export interface LlmGatewayPort {
    * shot-check's planOf, held to the rules by checkPlan and mendPlan.
    */
   shotsBoard(
-    input: { parts: string[] } & StudioRevision,
+    input: {
+      parts: string[];
+      /** How the show draws its people: its instructions are the look's (characters or silhouettes). */
+      look?: 'editorial' | 'illustrated';
+    } & StudioRevision,
   ): Promise<LlmResult<Record<string, unknown>>>;
 
   /** Whether text asks for what no one should be made: flagged, with the categories. */

@@ -88,6 +88,7 @@ import {
   planGaps,
   shotStarts,
   spareShots,
+  splitShot,
 } from './shot-pace';
 import { looseKey, splitTarget } from './shot-registry';
 import type {
@@ -2335,17 +2336,57 @@ function mendLines(
     // Room where it lands: a fill moving within its own shot frees its place.
     const held = shots[host].info.length - (late.shot === host ? 1 : 0);
     if (held >= SHOT_LIMITS.info) {
-      const label = shots[host].info.findIndex(
+      const there = shots[host].info;
+      const label = there.findIndex(
         (i) =>
           i !== original &&
           i.recipe === 'label' &&
           i.target === late.region.name,
       );
-      if (label < 0) continue;
-      shots[host] = {
-        ...shots[host],
-        info: shots[host].info.filter((_, i) => i !== label),
-      };
+      const shows = there.findIndex(
+        (i) =>
+          i !== original &&
+          ['draw', 'spotlight', 'mark'].includes(i.recipe) &&
+          i.target === late.region.name,
+      );
+      const without = (list: PlanShot[]) =>
+        original
+          ? list.map((s) => ({
+              ...s,
+              info: s.info.filter((i) => i !== original),
+            }))
+          : list;
+      if (label >= 0)
+        shots[host] = {
+          ...shots[host],
+          info: there.filter((_, i) => i !== label),
+        };
+      else if (shows >= 0) {
+        // What shows it there already becomes its fill, as it is named.
+        shots[host] = {
+          ...shots[host],
+          info: there.map((i, j) => (j === shows ? moved : i)),
+        };
+        shots = without(shots);
+        continue;
+      } else {
+        // Else the shot goes on from its name as its continuation, filled.
+        const next = [...shots];
+        if (
+          !splitShot(
+            next,
+            host,
+            late.at,
+            moved,
+            n,
+            SHOT_LIMITS.info,
+            late.region.name,
+          )
+        )
+          continue;
+        shots = without(next);
+        continue;
+      }
     }
     if (original)
       shots[late.shot] = {

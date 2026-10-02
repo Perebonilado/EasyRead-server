@@ -18,7 +18,13 @@
  * is held to 8: something new every few words, never a long stretch the
  * voice talks through over a still picture.
  */
-import type { PlanCamera, PlanShot, ShotPlan } from './types';
+import type {
+  PlanActor,
+  PlanCamera,
+  PlanInfo,
+  PlanShot,
+  ShotPlan,
+} from './types';
 import { phraseAt, type Narration } from './shot-phrases';
 
 /** The board's pace in words. */
@@ -174,4 +180,68 @@ export function spareShots(
       ? [k]
       : [],
   );
+}
+
+/**
+ * A shot with no room for another change goes on from where the change
+ * lands as its continuation (in place, in `shots`): the same set, framed
+ * on `subject` when given, bringing on what the shot brought on from
+ * there; its people stay where they stand, and those who come on later
+ * come on in it. False, and nothing changed, when the change lands too
+ * near the shot's start or the continuation would hold more than
+ * `most` pieces of information.
+ */
+export function splitShot(
+  shots: PlanShot[],
+  k: number,
+  at: number,
+  change: PlanInfo,
+  n: Narration,
+  most: number,
+  subject?: string,
+): boolean {
+  const shot = shots[k];
+  const from = shotStarts({ shots }, n)[k];
+  if (from < 0 || at - from < PLAN_PACE.nextWords) return false;
+  const before = (on: string) => landingOf(n, on, from) < at;
+  const later = shot.info.filter((i) => !before(i.on));
+  if (later.length >= most) return false;
+  /** An actor with only its moves before the change (early), or from it on. */
+  const keep = (a: PlanActor, early: boolean): PlanActor => {
+    const { moves: all, ...rest } = a;
+    const kept = (all ?? []).filter((m) => before(m.on) === early);
+    return kept.length ? { ...rest, moves: kept } : rest;
+  };
+  const gone = (a: PlanActor) =>
+    (a.moves ?? []).some(
+      (m) => ['exit', 'leave'].includes(m.move) && before(m.on),
+    );
+  const comes = (a: PlanActor) =>
+    (a.moves ?? []).find((m) => m.move === 'enter');
+  const there = (a: PlanActor) => {
+    const enter = comes(a);
+    return !enter || before(enter.on);
+  };
+  shots.splice(
+    k,
+    1,
+    {
+      ...shot,
+      info: shot.info.filter((i) => before(i.on)),
+      camera: shot.camera.filter((c) => before(c.on)),
+      actors: shot.actors.filter(there).map((a) => keep(a, true)),
+      join: 'continue',
+    },
+    {
+      on: change.on,
+      set: shot.set,
+      actors: shot.actors.filter((a) => !gone(a)).map((a) => keep(a, false)),
+      info: [change, ...later],
+      life: [...shot.life],
+      camera: shot.camera.filter((c) => !before(c.on)),
+      join: shot.join,
+      focal: subject ?? shot.focal,
+    },
+  );
+  return true;
 }

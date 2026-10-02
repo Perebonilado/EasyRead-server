@@ -43,10 +43,15 @@ import {
   type Narration,
 } from './shot-phrases';
 import { mentionsOf, type Mention } from './shot-mentions';
-import { PLAN_PACE, landingOf, planGaps, shotStarts } from './shot-pace';
+import {
+  PLAN_PACE,
+  landingOf,
+  planGaps,
+  shotStarts,
+  splitShot,
+} from './shot-pace';
 import { buildRegistry, promptList, splitTarget } from './shot-registry';
 import type {
-  PlanActor,
   PlanInfo,
   PlanShot,
   RegistryEntry,
@@ -95,6 +100,8 @@ export interface BoardShotsResult {
   usage: LlmUsage[];
   /** Whether the board was sent back once. */
   sentBack: boolean;
+  /** The board's own answers, as it gave them: for the log, and to replay its mend. */
+  answers: unknown[];
 }
 
 /** A scene's lines with the claims given for them. */
@@ -139,7 +146,7 @@ function finished(
     .slice(1)
     .map(([a]) => a);
   let out = plan;
-  for (let round = 0; round < 2; round += 1) {
+  for (let round = 0; round < 4; round += 1) {
     const covered = withSafeShots(out, lines, registry, input.world);
     const paced = withPace(covered, lines, registry, input.world);
     out = mendPlan(paced, narration, registry, options);
@@ -541,60 +548,60 @@ export function withPace(
     );
   };
 
-  /**
-   * A shot with no room for another change goes on from where the change
-   * lands as its continuation: the same set, framed on what the voice now
-   * names (on the map), bringing on what the shot brought on from there;
-   * its people stay where they stand, and those who come on later come on
-   * in it. False where the continuation would be full.
-   */
-  const split = (k: number, at: number, change: PlanInfo): boolean => {
-    const shot = shots[k];
-    const from = shotStarts({ shots }, n)[k];
-    if (from < 0 || at - from < PLAN_PACE.nextWords) return false;
-    const before = (on: string) => landingOf(n, on, from) < at;
-    const later = shot.info.filter((i) => !before(i.on));
-    if (later.length >= SHOT_LIMITS.info) return false;
-    const subject =
-      shot.set.kind === 'map' &&
-      change.target &&
-      registry.resolve(change.target)
-        ? change.target
-        : shot.focal;
-    /** An actor with only its moves before the change (early), or from it on. */
-    const keep = (a: PlanActor, early: boolean): PlanActor => {
-      const { moves: all, ...rest } = a;
-      const kept = (all ?? []).filter((m) => before(m.on) === early);
-      return kept.length ? { ...rest, moves: kept } : rest;
-    };
-    const gone = (a: PlanActor) =>
-      (a.moves ?? []).some(
-        (m) => ['exit', 'leave'].includes(m.move) && before(m.on),
-      );
-    const comes = (a: PlanActor) =>
-      (a.moves ?? []).find((m) => m.move === 'enter');
-    const there = (a: PlanActor) => !comes(a) || before(comes(a)!.on);
-    shots.splice(
+  /** A shot too full for a change goes on as its continuation from it, framed on what the map now shows. */
+  const split = (k: number, at: number, change: PlanInfo): boolean =>
+    splitShot(
+      shots,
       k,
-      1,
-      {
-        ...shot,
-        info: shot.info.filter((i) => before(i.on)),
-        camera: shot.camera.filter((c) => before(c.on)),
-        actors: shot.actors.filter(there).map((a) => keep(a, true)),
-        join: 'continue',
-      },
-      {
-        on: change.on,
-        set: shot.set,
-        actors: shot.actors.filter((a) => !gone(a)).map((a) => keep(a, false)),
-        info: [change, ...later],
-        life: [...shot.life],
-        camera: shot.camera.filter((c) => !before(c.on)),
-        join: shot.join,
-        focal: subject,
-      },
+      at,
+      change,
+      n,
+      SHOT_LIMITS.info,
+      shots[k].set.kind === 'map' &&
+        change.target &&
+        registry.resolve(change.target)
+        ? change.target
+        : undefined,
     );
+
+  /**
+   * Where a stretch with nothing new opens a shot that is not a date's own
+   * and the voice says a date in its first words: the date's calendar
+   * holds those words (at most the opening's four), and the shot begins
+   * after them, what it put on them moved to its new first words.
+   */
+  const firstDate = (k: number, from: number, top: number): boolean => {
+    const shot = shots[k];
+    if (shotStarts({ shots }, n)[k] !== from) return false;
+    if (
+      shot.set.kind === 'chart' &&
+      ['timeline', 'calendar'].includes(shot.set.chart.kind)
+    )
+      return false;
+    const date = mentions.find(
+      (m) => m.entry.kind === 'date' && m.at >= from && m.at < from + 2,
+    );
+    if (!date) return false;
+    const at = Math.min(
+      date.at + date.length + 2,
+      from + PLAN_PACE.openingWords,
+      top,
+    );
+    if (at - from < PLAN_PACE.roomWords) return false;
+    const picture = pictureOf(date.entry, shot.on, registry);
+    if (!picture) return false;
+    const on = wordsAt(n, at);
+    const moved = <T extends { on: string }>(x: T): T =>
+      landingOf(n, x.on, from) < at ? { ...x, on } : x;
+    shots.splice(k, 1, picture, {
+      ...shot,
+      on,
+      info: shot.info.map(moved),
+      camera: shot.camera.map(moved),
+      actors: shot.actors.map((a) =>
+        a.moves ? { ...a, moves: a.moves.map(moved) } : a,
+      ),
+    });
     return true;
   };
 
@@ -625,6 +632,9 @@ export function withPace(
     /** Something new between lo and top: whether one came on. */
     const fill = (top: number): boolean => {
       const named = mentions.filter((m) => m.at >= lo && m.at <= top);
+      // 0. A date said as the shot begins: its calendar first, and the
+      // shot from a few words on.
+      if (firstDate(k, gap.from, top)) return true;
       // 1. What the shot on screen shows, named in these words.
       for (const m of named) {
         const on = wordsAt(n, m.at);
@@ -780,12 +790,22 @@ export function withPace(
       )
       .sort((a, b) => landingOf(n, a.on, from) - landingOf(n, b.on, from))
       .pop()?.target;
-    if (
-      shot.set.kind === 'chart' &&
-      current &&
-      shot.camera.length < SHOT_LIMITS.camera
-    )
+    if (shot.set.kind !== 'chart') continue;
+    if (current && shot.camera.length < SHOT_LIMITS.camera)
       shot.camera.push({ move: 'push', target: current, on, amount: 'small' });
+    else {
+      // Else the part the voice is on, marked again.
+      const again = shot.info
+        .filter(
+          (i) => i.target?.startsWith('part:') && landingOf(n, i.on, from) < at,
+        )
+        .sort((a, b) => landingOf(n, a.on, from) - landingOf(n, b.on, from))
+        .pop()?.target;
+      if (!again) continue;
+      const mark: PlanInfo = { recipe: 'mark', target: again, on };
+      if (shot.info.length < SHOT_LIMITS.info) shot.info.push(mark);
+      else split(k, at, mark);
+    }
   }
   return { shots };
 }
@@ -818,6 +838,7 @@ export async function boardShots(
 
   const first = await llm.shotsBoard({ parts });
   usage.push(first.usage);
+  const answers: unknown[] = [first.value];
   let plan = planOf(first.value, narration, options);
   let problems = checkPlan(plan, narration, registry, options);
   const firstProblems = problems;
@@ -831,6 +852,7 @@ export async function boardShots(
       problems: problems.map((p) => p.message).slice(0, 16),
     });
     usage.push(again.usage);
+    answers.push(again.value);
     const next = planOf(again.value, narration, options);
     const left = checkPlan(next, narration, registry, options);
     if (weightOf(left) <= weightOf(problems)) [plan, problems] = [next, left];
@@ -846,5 +868,6 @@ export async function boardShots(
     firstProblems,
     usage,
     sentBack,
+    answers,
   };
 }

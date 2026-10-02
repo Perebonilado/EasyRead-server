@@ -201,6 +201,7 @@ async function main() {
               plan: board.plan,
               problems: board.problems,
               registry: board.registry.entries(),
+              answers: board.answers,
             },
             null,
             2,

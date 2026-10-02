@@ -1079,6 +1079,56 @@ describe('the plan across its lines', () => {
     ]);
   });
 
+  it('fills a region where the shot already shows it, when it has no room', () => {
+    const plan = good();
+    plan.shots[3].info = [
+      {
+        recipe: 'spotlight',
+        target: 'region:East Germany',
+        on: 'Erich Honecker',
+      },
+      { recipe: 'mark', target: 'place:Berlin', on: 'held on' },
+      { recipe: 'mark', target: 'place:Berlin', on: 'Two years later' },
+      { recipe: 'mark', target: 'place:Berlin', on: 'the Wall opened' },
+    ];
+    expect(check(plan)).toContain('-1:fill-late');
+    const mended = mend(plan);
+    expect(mended.shots[3].info[0]).toEqual({
+      recipe: 'fill',
+      target: 'region:East Germany',
+      on: 'East Germany’s leader',
+    });
+    expect(check(mended)).not.toContain('-1:fill-late');
+  });
+
+  it('else goes on from the region’s name as the shot’s continuation, filled', () => {
+    const plan = good();
+    plan.shots[3] = {
+      ...plan.shots[3],
+      on: 'he said',
+      info: [
+        { recipe: 'mark', target: 'place:Berlin', on: 'he said' },
+        { recipe: 'mark', target: 'place:Berlin', on: 'Erich Honecker' },
+        { recipe: 'mark', target: 'place:Berlin', on: 'Two years later' },
+        { recipe: 'mark', target: 'place:Berlin', on: 'the Wall opened' },
+      ],
+    };
+    expect(check(plan)).toContain('-1:fill-late');
+    const mended = mend(plan);
+    expect(mended.shots[3].join).toBe('continue');
+    expect(mended.shots[4]).toMatchObject({
+      on: 'East Germany’s leader',
+      set: { kind: 'map' },
+      focal: 'region:East Germany',
+    });
+    expect(mended.shots[4].info[0]).toEqual({
+      recipe: 'fill',
+      target: 'region:East Germany',
+      on: 'East Germany’s leader',
+    });
+    expect(check(mended)).not.toContain('-1:fill-late');
+  });
+
   it("changes the episode's opening by its third or fourth word", () => {
     const plan = good();
     plan.shots[0].info = [

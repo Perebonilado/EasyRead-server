@@ -859,8 +859,9 @@ export function promptList(registry: TargetRegistry): string {
     'People (a portrait only for one marked [portrait]; their photos are listed with them; a person with no portrait, no photo and no trace is never on screen):',
     of('person').map((e) => {
       const photos = photosOf(e);
+      // As the board's worked example writes it: more photos beside a portrait.
       const theirs = photos.length
-        ? ` · photos of them: ${photos.join(', ')}`
+        ? ` · ${e.picture ? 'more photos' : 'photos'} of them: ${photos.join(', ')}`
         : '';
       return `- ${e.name}${e.picture ? ' [portrait]' : ''}: ${e.about}${
         e.picture || photos.length

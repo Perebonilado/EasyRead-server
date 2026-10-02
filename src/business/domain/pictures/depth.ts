@@ -100,8 +100,9 @@ export function isMono(pixels: PicturePixels): boolean {
   return coloured / n < 0.03;
 }
 
-/** The most of each edge a scan's border is taken to be. */
+/** The most of each edge a scan's border is taken to be, and how far past it its soft inner edge runs. */
 const BORDER_MOST = 0.15;
+const BORDER_SOFT = 0.02;
 
 /**
  * Where a picture's own content is, inside the border its scan may have
@@ -148,10 +149,12 @@ export function contentBox(
   let right = 0;
   while (right < width * BORDER_MOST && border(column(width - 1 - right)))
     right += 1;
-  // A line or two more, past the border's soft inner edge.
-  const pad = (n: number) => (n ? n + 1 : 0);
-  const [x0, y0] = [pad(left), pad(top)];
-  const [x1, y1] = [width - pad(right), height - pad(bottom)];
+  // Past the border's soft inner edge (a scan's black fades into the
+  // print over a few per cent): a border found is taken a little further.
+  const soft = (n: number, side: number) =>
+    n ? n + Math.max(1, Math.round(side * BORDER_SOFT)) : 0;
+  const [x0, y0] = [soft(left, width), soft(top, height)];
+  const [x1, y1] = [width - soft(right, width), height - soft(bottom, height)];
   return [
     x0 / width,
     y0 / height,

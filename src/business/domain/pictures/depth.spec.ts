@@ -60,9 +60,10 @@ describe("a picture's depth", () => {
       return [(x * 7) % 256, (y * 11) % 256, 128];
     });
     const [x, y, w, h] = contentBox(scan);
-    expect(x).toBeCloseTo(5 / 100, 5);
+    // The border, and a little past its soft inner edge (2% of the side, a line at least).
+    expect(x).toBeCloseTo(6 / 100, 5);
     expect(y).toBeCloseTo(5 / 60, 5);
-    expect(x + w).toBeCloseTo(95 / 100, 5);
+    expect(x + w).toBeCloseTo(94 / 100, 5);
     expect(y + h).toBeCloseTo(51 / 60, 5);
     const plain = pixels(40, 30, (i) => [
       (i * 13) % 256,

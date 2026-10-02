@@ -116,6 +116,21 @@ describe('a drawn set built from the plan', () => {
     );
     expect(built.shots[0].actors).toHaveLength(1);
     expect(built.notes.join(' | ')).toMatch(/actor works: brick, temperate, 1900-1945/);
+    // It opens in its set's light: its windows lit at dusk, dark by day.
+    expect(built.shots[0].actors[0].state).toBe('dusk');
+    const byDay = buildShots(
+      {
+        shots: [
+          shot('After the 1945 strikes,', {
+            set: { kind: 'set', set: { land: 'plain', time: 'day', town: 'town', place: 'industry', era: '1900-1945' } },
+            actors: [{ id: 'works', kit: 'building', params: { kind: 'factory' }, place: 'centre' }],
+          }),
+        ],
+      },
+      registry,
+      ctx,
+    );
+    expect(byDay.shots[0].actors[0].state).toBe('day');
   });
 
   it('leaves out a thing of a kind the kit does not draw, and says so, rather than draw another', () => {

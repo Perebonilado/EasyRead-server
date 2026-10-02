@@ -151,6 +151,7 @@ function kitPiece(
   asset: ShotSvgAssetDto;
   family: string;
   moves: string[];
+  states: string[];
   notes: string[];
   box: ShotBox;
   parts: string[];
@@ -173,6 +174,7 @@ function kitPiece(
     asset: toAsset(made.piece),
     family: entry.family,
     moves: made.piece.rig.moves,
+    states: Object.keys(made.piece.rig.states ?? {}),
     notes: made.piece.notes ?? [],
     box: made.piece.box,
     parts: Object.keys(made.piece.parts),
@@ -227,6 +229,7 @@ function kitSet(
       ...(eraOf(set.era) && settings.place !== 'display'
         ? { era: settings.era, climate: climateOf(settings) }
         : {}),
+      ...(settings.place !== 'display' ? { time: settings.time } : {}),
     },
     notes: made.notes,
   };
@@ -240,6 +243,8 @@ interface SetStage {
   air: string;
   era?: string;
   climate?: string;
+  /** The light it opens in: a building on it opens with its windows lit or dark to match. */
+  time?: string;
 }
 
 /**
@@ -258,6 +263,15 @@ export function withSetDefaults(
   if (stage?.climate && takes.climate && out.climate === undefined)
     out.climate = stage.climate;
   return Object.keys(out).length ? out : params;
+}
+
+/** The state a piece opens in on a set in this light, where its rig has one (a building's windows dark by day, lit at dusk and night). */
+function lightState(
+  states: readonly string[],
+  time: string | undefined,
+): string | undefined {
+  const named = time === 'dawn' ? 'dusk' : time;
+  return named && states.includes(named) ? named : undefined;
 }
 
 /**
@@ -957,7 +971,11 @@ export function buildShots(
           ? Math.round((placed.size / setBox[3]) * 1000) / 1000
           : placed.size,
         z: placed.z,
-        ...(firstSeat?.move === 'sit' ? { state: 'standing' } : {}),
+        ...(firstSeat?.move === 'sit'
+          ? { state: 'standing' }
+          : lightState(made.states, shotSet.stage?.time)
+            ? { state: lightState(made.states, shotSet.stage?.time)! }
+            : {}),
         ...(side ? { side } : {}),
         moves,
       });

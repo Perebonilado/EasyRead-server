@@ -941,7 +941,9 @@ function checkStill(
         message: `"${item.text}" covers ${percent(shared / Math.max(1, areaOf(own.box)))} of "${own.id}", the thing it names`,
       });
   }
-  const band: FrameBox | null =
+  // The caption band is reserved in both shapes (rules v2): words a viewer
+  // must read never sit where the captions go, wide or tall.
+  const band: FrameBox =
     report.shape === 'tall'
       ? [
           SAFE.tall.x0 * W,
@@ -949,9 +951,14 @@ function checkStill(
           (SAFE.tall.x1 - SAFE.tall.x0) * W,
           (SAFE.tall.y1 - SAFE.tall.captionY0) * H,
         ]
-      : null;
+      : [
+          SAFE.wide.x0 * W,
+          SAFE.wide.captionY0 * H,
+          (SAFE.wide.x1 - SAFE.wide.x0) * W,
+          (SAFE.wide.y1 - SAFE.wide.captionY0) * H,
+        ];
   for (const item of words) {
-    const hit = [...captions.map((c) => c.box), ...(band ? [band] : [])].some(
+    const hit = [...captions.map((c) => c.box), band].some(
       (box) =>
         overlapOf(item.box, box) > FRAME_CHECKS.overlapShare * areaOf(item.box),
     );

@@ -9,6 +9,7 @@ import {
   APP_SETTINGS_REPOSITORY,
   STUDIO_REPOSITORY,
   STUDIO_EXPORT_REPOSITORY,
+  PICTURE_CACHE_REPOSITORY,
   ASSESSMENT_REPOSITORY,
   ITEM_REPOSITORY,
   ITEM_REVIEW_REPOSITORY,
@@ -45,6 +46,7 @@ import { SequelizePronunciationRepository } from '../repositories/sequelize-pron
 import { SequelizeAppSettingsRepository } from '../repositories/sequelize-settings.repository';
 import { SequelizeStudioRepository } from '../repositories/sequelize-studio.repository';
 import { SequelizeStudioExportRepository } from '../repositories/sequelize-studio-export.repository';
+import { SequelizePictureCacheRepository } from '../repositories/sequelize-picture-cache.repository';
 import { SequelizeStruggleSignalRepository } from '../repositories/sequelize-struggle.repository';
 import {
   SequelizeDocumentLearningStateRepository,
@@ -166,6 +168,10 @@ export const repositoryProviders: Provider[] = [
   {
     provide: STUDIO_EXPORT_REPOSITORY,
     useClass: SequelizeStudioExportRepository,
+  },
+  {
+    provide: PICTURE_CACHE_REPOSITORY,
+    useClass: SequelizePictureCacheRepository,
   },
   { provide: ASSESSMENT_REPOSITORY, useClass: SequelizeAssessmentRepository },
   { provide: ITEM_REPOSITORY, useClass: SequelizeItemRepository },

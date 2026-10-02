@@ -70,11 +70,13 @@ describe('the timed checks', () => {
     );
   });
 
-  it('finds two facts that land too close together, but not a part of one event', () => {
+  it('finds two changes too close together, as the frames checker counts them, but not a part of one event', () => {
+    // 800ms apart: two events, and too close.
+    // The shot's start is an event too: the first change a beat after it.
     const crowded = shot('s1', 0, 6000, {
       info: [
-        info('a', { recipe: 'pin', atMs: 1000 }),
-        info('b', { recipe: 'fill', atMs: 1500 }),
+        info('a', { recipe: 'pin', atMs: 1300 }),
+        info('b', { recipe: 'fill', atMs: 2100 }),
         ...steady(6000).slice(2),
       ],
     });
@@ -82,8 +84,8 @@ describe('the timed checks', () => {
     // A pin's label just after it, on the same place, is the same event.
     const labelled = shot('s1', 0, 6000, {
       info: [
-        info('a', { recipe: 'pin', atMs: 1000 }),
-        info('a', { recipe: 'label', atMs: 1300, durMs: 250, text: 'Kano' }),
+        info('a', { recipe: 'pin', atMs: 1300 }),
+        info('a', { recipe: 'label', atMs: 1600, durMs: 250, text: 'Kano' }),
         ...steady(6000).slice(2),
       ],
     });
@@ -175,28 +177,26 @@ describe('the timed checks', () => {
 });
 
 describe('the timing put right', () => {
-  it('spaces crowded events, the later a little later, the earlier a little earlier', () => {
+  it('spaces crowded changes: the later waits its turn within the next words', () => {
     const shots = [
       shot('s1', 0, 8000, {
         info: [
           info('a', { recipe: 'pin', atMs: 1600 }),
-          info('b', { recipe: 'fill', atMs: 2000 }),
+          info('b', { recipe: 'fill', atMs: 2400 }),
         ],
       }),
     ];
     const { shots: mended, mended: notes } = mendTimed(shots, 8000);
     const [a, b] = mended[0].info;
-    expect(b.atMs + b.durMs - (a.atMs + a.durMs)).toBeGreaterThanOrEqual(
-      PACE.minGapMs,
-    );
-    expect(b.atMs - 2000).toBeLessThanOrEqual(MEND_DELAY_MS);
-    expect(notes.join(' ')).toContain('spaced');
+    expect(b.atMs - a.atMs).toBeGreaterThanOrEqual(PACE.minGapMs);
+    expect(b.atMs - 2400).toBeLessThanOrEqual(MEND_DELAY_MS);
+    expect(notes.join(' ')).toContain('waits');
     expect(checkTimed(mended, 8000).map((p) => p.code)).not.toContain(
       'crowded',
     );
   });
 
-  it('fills a still stretch with slow camera moves on the subject, never with words', () => {
+  it('leaves a long stretch with nothing new to the board: no camera drift fills it, the check names it', () => {
     const shots = [
       shot('s1', 0, 16000, {
         focal: part('group-north-region'),
@@ -205,12 +205,30 @@ describe('the timing put right', () => {
     ];
     const { shots: mended } = mendTimed(shots, 16000);
     expect(mended[0].info).toHaveLength(1);
-    expect(mended[0].camera.length).toBeGreaterThanOrEqual(2);
-    for (const move of mended[0].camera) {
-      expect(['push', 'pull']).toContain(move.move);
-      expect(move.target).toEqual(part('group-north-region'));
-    }
-    expect(checkTimed(mended, 16000).map((p) => p.code)).not.toContain('quiet');
+    expect(mended[0].camera).toEqual([]);
+    expect(checkTimed(mended, 16000).map((p) => p.code)).toContain('quiet');
+  });
+
+  it('counts a move to a new subject as news, as the frames checker does, and a drift on the subject not', () => {
+    const shots = [
+      shot('s1', 0, 12000, {
+        focal: part('group-north-region'),
+        info: [info('a', { recipe: 'pin', atMs: 500 })],
+        camera: [
+          { move: 'travel', atMs: 4000, durMs: 900, target: part('pin-kano') },
+          {
+            move: 'push',
+            atMs: 8000,
+            durMs: 2500,
+            target: part('group-north-region'),
+          },
+        ],
+      }),
+    ];
+    const found = checkTimed(shots, 12000).filter((p) => p.code === 'quiet');
+    // 0 to 4s is news enough; from the travel at 4s, nothing new to 12s.
+    expect(found).toHaveLength(1);
+    expect(found[0].message).toContain('from 4000ms');
   });
 
   it('lets one cue go as the next comes, and holds back a third mover', () => {
@@ -254,14 +272,29 @@ describe('the timing put right', () => {
     );
   });
 
-  it('opens the episode on an establishing move from its first frame', () => {
+  it('opens the episode moving, its first change brought into the first second and a half', () => {
     const shots = [
       shot('s1', 0, 6000, { info: [info('a', { recipe: 'pin', atMs: 2400 })] }),
     ];
     const { shots: mended } = mendTimed(shots, 6000, { first: true });
     expect(mended[0].camera[0]).toMatchObject({ move: 'establish', atMs: 0 });
+    expect(mended[0].info[0].atMs).toBeLessThanOrEqual(PACE.firstChangeMs);
     expect(
       checkTimed(mended, 6000, { first: true }).map((p) => p.code),
+    ).not.toContain('first-change');
+    // A change hidden in the opening's first moment comes as its own.
+    const hidden = [
+      shot('s1', 0, 6000, {
+        info: [
+          info('a', { recipe: 'label', atMs: 100, durMs: 250, text: 'Kano' }),
+          info('b', { recipe: 'pin', atMs: 2700 }),
+        ],
+      }),
+    ];
+    const opened = mendTimed(hidden, 6000, { first: true }).shots;
+    expect(opened[0].info[0].atMs).toBe(PACE.subStepMs + 50);
+    expect(
+      checkTimed(opened, 6000, { first: true }).map((p) => p.code),
     ).not.toContain('first-change');
   });
 

@@ -3098,7 +3098,10 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
    * parts, read leniently and filled as the board's storyboard is.
    */
   async shotsBoard(
-    input: { parts: string[] } & StudioRevision,
+    input: {
+      parts: string[];
+      look?: 'editorial' | 'illustrated';
+    } & StudioRevision,
   ): Promise<LlmResult<Record<string, unknown>>> {
     const started = Date.now();
     const { generateObject } = await this.registry.modules();
@@ -3108,7 +3111,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
       generateObject({
         model,
         schema: lenient(full),
-        system: shotBoardPrompt(),
+        system: shotBoardPrompt(input.look),
         prompt: revisedPrompt(input.parts, input),
         maxRetries: this.maxRetries(),
         ...this.effort(ref, 'EXPLAINER_SHOTS_EFFORT', 'low'),

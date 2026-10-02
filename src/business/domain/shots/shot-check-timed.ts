@@ -3,53 +3,32 @@
  * the plan half, on the board's words, is shot-check.ts): a scene's shots
  * on the voice's clock held to the pace the rules set (research §3.2).
  *
- *  - Information events at least PACE.minGapMs apart, a sub-step (part of
- *    the event before, on the same subject, within PACE.subStepMs) aside.
- *  - No still stretch over PACE.maxGapMs outside a declared hold.
+ * What counts as an event is the frames checker's own (frame-checks'
+ * shotEvents and paceOf): each shot, each piece of information, each
+ * camera move to a new subject, a change within PACE.subStepMs of the one
+ * before being part of it. So the plan, the timing and the frames agree:
+ *
+ *  - Information events at least PACE.minGapMs apart.
+ *  - No stretch over PACE.maxGapMs with nothing new while the voice
+ *    speaks, outside a declared rest (a camera's hold, an ask's quiet, an
+ *    editor's held row).
  *  - One attention cue at a time, and at most two things moving in the
  *    information layer (ATTENTION).
  *  - Text up long enough to read (dwellMs).
  *  - The episode's first change by PACE.firstChangeMs.
  *
- * mendTimed puts right what it can, silently: a crowded event moved a
- * little later (within the next words) or the one before it a little
- * earlier (within the lead the sync rule allows), a label held longer, a
- * still stretch filled with a slow camera move on the shot's subject,
- * never with words. What it cannot put right is left for the log.
+ * mendTimed puts right what it can, silently: a crowded change waits a
+ * little (within the next words) or joins the change before it as a part
+ * of it, a label is held longer, the opening's first change is brought
+ * into its first second and a half. A long stretch with nothing new is
+ * the board's to fill (shot-board's withPace), never camera drift's: the
+ * check names it for the log.
  */
-import type {
-  ShotCameraDto,
-  ShotDto,
-  ShotInfoDto,
-  ShotInfoRecipe,
-  ShotTargetDto,
-} from '../../../contracts';
+import type { ShotDto, ShotInfoDto, ShotInfoRecipe } from '../../../contracts';
 import { ATTENTION, PACE, dwellMs } from '../studio/explainer-rules';
-import {
-  CAMERA_AMOUNT,
-  CAMERA_MS,
-  DRIFT_MS,
-  SETTLE_LEAD_MS,
-} from './shot-time';
+import { paceOf, reframesShot, shotEvents, shotHolds } from './frame-checks';
+import { CAMERA_MS, SETTLE_LEAD_MS } from './shot-time';
 import type { ShotProblem } from './types';
-
-/** Recipes that put a new fact on screen: the information events gaps are counted between. */
-const FACTS: ReadonlySet<ShotInfoRecipe> = new Set<ShotInfoRecipe>([
-  'draw',
-  'label',
-  'pin',
-  'fill',
-  'seam',
-  'count',
-  'grow',
-  'transfer',
-  'morph',
-  'run',
-  'strike',
-  'stamp',
-  'enter',
-  'ask',
-]);
 
 /** Recipes that point at what is there: one at a time. */
 const CUES: ReadonlySet<ShotInfoRecipe> = new Set<ShotInfoRecipe>([
@@ -64,32 +43,14 @@ export const MEND_DELAY_MS = 600;
 /** The most a change may settle before its word (the rules' lead), less the lead it was timed with. */
 const LEAD_ROOM_MS = PACE.settleMaxLeadMs - SETTLE_LEAD_MS;
 
-/** A still stretch is broken every so often: at most the explain passage's median gap. */
-const FILL_EVERY_MS = PACE.explainMedianGapMs[1];
-
 /** What the checks are told beyond the shots. */
 export interface TimedOptions {
   /** The scene opens its episode: its first change comes by PACE.firstChangeMs. */
   first?: boolean;
   /** Stretches the script holds on (an editor's held row): still on purpose. */
   holds?: readonly (readonly [number, number])[];
-}
-
-/** A target as a key, to tell two changes on the same subject. */
-function targetKey(target?: ShotTargetDto): string {
-  if (!target) return '';
-  switch (target.kind) {
-    case 'asset':
-      return `a:${target.asset}:${target.part ?? ''}`;
-    case 'actor':
-      return `r:${target.actor}:${target.part ?? ''}`;
-    case 'feature':
-      return `f:${target.asset}:${target.id}`;
-    case 'geo':
-      return `g:${target.lng.toFixed(3)},${target.lat.toFixed(3)}`;
-    case 'box':
-      return `b:${target.box.map((n) => Math.round(n)).join(',')}`;
-  }
+  /** When the voice speaks, its first word to its last: what the pace is held over (absent, the whole scene). */
+  voice?: readonly [number, number];
 }
 
 /** The words a piece of information puts on screen, for how long it must stay. An entrance's or an exit's text is its way in or out, not words. */
@@ -102,135 +63,6 @@ export function wordsShown(item: ShotInfoDto): number {
     count(item.replace) +
     (item.value !== undefined ? 1 + count(item.unit) : 0)
   );
-}
-
-/** Whether two shots show the same set, carried on. */
-function sameSet(a: ShotDto, b: ShotDto): boolean {
-  return (
-    a.set.kind === b.set.kind &&
-    ('asset' in a.set ? a.set.asset : null) ===
-      ('asset' in b.set ? b.set.asset : null)
-  );
-}
-
-/** A change on the clock: when it lands, and what it is about. */
-interface Landing {
-  shot: number;
-  at: number;
-  target: string;
-  /** A new set cut to: its picture is the event. */
-  cut: boolean;
-  item?: ShotInfoDto;
-}
-
-/** The information events in order: new sets cut to and facts landing, with sub-steps marked off. */
-function landings(shots: readonly ShotDto[]): (Landing & { sub: boolean })[] {
-  const all: Landing[] = [];
-  shots.forEach((shot, i) => {
-    if (i > 0 && !sameSet(shots[i - 1], shot))
-      all.push({ shot: i, at: shot.startMs, target: '', cut: true });
-    for (const item of shot.info)
-      if (FACTS.has(item.recipe))
-        all.push({
-          shot: i,
-          at: item.atMs + item.durMs,
-          target: targetKey(item.target),
-          cut: false,
-          item,
-        });
-  });
-  all.sort((a, b) => a.at - b.at);
-  // A sub-step is part of the event before it: the label of the pin just
-  // dropped, the first fact of a set just cut to, a part brought on by the
-  // change it belongs to (a strike's new words).
-  return all.map((one, k) => {
-    const before = all[k - 1];
-    const sub =
-      !!before &&
-      !one.cut &&
-      one.at - before.at < PACE.subStepMs &&
-      (before.cut
-        ? before.shot === one.shot
-        : before.target === one.target ||
-          (one.item?.recipe === 'enter' && before.shot === one.shot));
-    return { ...one, sub };
-  });
-}
-
-/** Stretches of a scene in which something moves: the stage's changes, its camera and its actors. */
-function busySpans(shots: readonly ShotDto[]): [number, number][] {
-  const spans: [number, number][] = [];
-  shots.forEach((shot, i) => {
-    if (i > 0 && !sameSet(shots[i - 1], shot))
-      spans.push([shot.startMs, shot.startMs + Math.max(1, shot.joinMs)]);
-    for (const item of shot.info)
-      spans.push([item.atMs, item.atMs + Math.max(1, item.durMs)]);
-    for (const move of shot.camera)
-      if (move.move !== 'hold')
-        spans.push([move.atMs, move.atMs + Math.max(1, move.durMs)]);
-    for (const actor of shot.actors)
-      for (const move of actor.moves)
-        spans.push([move.atMs, move.atMs + Math.max(1, move.durMs)]);
-  });
-  return spans.sort((a, b) => a[0] - b[0]);
-}
-
-/** Stretches still on purpose: a camera's hold, the quiet after a question, the script's held rows. */
-function holdSpans(
-  shots: readonly ShotDto[],
-  options: TimedOptions,
-): [number, number][] {
-  const spans: [number, number][] = (options.holds ?? []).map(
-    ([a, b]) => [a, b] as [number, number],
-  );
-  for (const shot of shots) {
-    for (const move of shot.camera)
-      if (move.move === 'hold') spans.push([move.atMs, move.atMs + move.durMs]);
-    for (const item of shot.info)
-      if (item.recipe === 'ask') {
-        const land = item.atMs + item.durMs;
-        spans.push([land, land + PACE.askQuietMs]);
-      }
-  }
-  return spans;
-}
-
-/** How much of [a, b] the spans cover. */
-function covered(a: number, b: number, spans: readonly [number, number][]) {
-  const inside = spans
-    .map(([x, y]) => [Math.max(a, x), Math.min(b, y)] as [number, number])
-    .filter(([x, y]) => y > x)
-    .sort((p, q) => p[0] - q[0]);
-  let total = 0;
-  let reach = a;
-  for (const [x, y] of inside) {
-    const from = Math.max(x, reach);
-    if (y > from) total += y - from;
-    reach = Math.max(reach, y);
-  }
-  return total;
-}
-
-/** The still stretches of a scene longer than the rules allow, holds aside: [from, to]. */
-function quietStretches(
-  shots: readonly ShotDto[],
-  durationMs: number,
-  options: TimedOptions,
-): [number, number][] {
-  const busy = busySpans(shots);
-  const holds = holdSpans(shots, options);
-  const out: [number, number][] = [];
-  let reach = 0;
-  const still = (from: number, to: number) => {
-    if (to - from - covered(from, to, holds) > PACE.maxGapMs)
-      out.push([from, to]);
-  };
-  for (const [a, b] of busy) {
-    if (a > reach) still(reach, a);
-    reach = Math.max(reach, b);
-  }
-  if (durationMs > reach) still(reach, durationMs);
-  return out;
 }
 
 /** How long an attention cue holds the eye: a spotlight's dimming and a mark stay until released; a flow runs its length. */
@@ -267,15 +99,6 @@ const shotAt = (shots: readonly ShotDto[], ms: number) =>
     shots.findIndex((shot) => ms >= shot.startMs && ms < shot.endMs),
   );
 
-/** The first change after the scene opens: any motion, or a cut to a new set. */
-function firstChange(shots: readonly ShotDto[]): number {
-  const starts = busySpans(shots).map(([a]) => a);
-  for (const shot of shots)
-    for (const move of shot.camera)
-      if (move.move === 'hold') starts.push(move.atMs);
-  return starts.length ? Math.min(...starts) : Infinity;
-}
-
 /**
  * What is wrong with a scene's timing, by the rules: each problem with
  * the shot it is in and a plain message, for the log and the critic.
@@ -286,23 +109,22 @@ export function checkTimed(
   options: TimedOptions = {},
 ): ShotProblem[] {
   const problems: ShotProblem[] = [];
-  const events = landings(shots);
-  let last: (typeof events)[number] | null = null;
-  for (const one of events) {
-    if (one.sub) continue;
-    if (last && one.at - last.at < PACE.minGapMs)
-      problems.push({
-        shot: one.shot,
-        code: 'crowded',
-        message: `${one.cut ? 'the cut' : (one.item?.recipe ?? 'a change')} at ${Math.round(one.at)}ms lands ${Math.round(one.at - last.at)}ms after the one before (at least ${PACE.minGapMs}ms)`,
-      });
-    last = one;
-  }
-  for (const [from, to] of quietStretches(shots, durationMs, options))
+  const pace = paceOf(
+    shotEvents(shots),
+    [...shotHolds(shots), ...(options.holds ?? [])],
+    options.voice ?? [0, durationMs],
+  );
+  for (const { at, gap } of pace.short)
+    problems.push({
+      shot: shotAt(shots, at),
+      code: 'crowded',
+      message: `a change at ${Math.round(at)}ms comes ${Math.round(gap)}ms after the one before (at least ${PACE.minGapMs}ms)`,
+    });
+  for (const { from, to } of pace.long)
     problems.push({
       shot: shotAt(shots, from),
       code: 'quiet',
-      message: `nothing changes for ${((to - from) / 1000).toFixed(1)}s from ${Math.round(from)}ms (at most ${PACE.maxGapMs / 1000}s outside a hold)`,
+      message: `nothing new for ${((to - from) / 1000).toFixed(1)}s from ${Math.round(from)}ms (at most ${PACE.maxGapMs / 1000}s outside a declared rest): the board's to fill`,
     });
   shots.forEach((shot, i) => {
     const cues = shot.info
@@ -349,16 +171,56 @@ export function checkTimed(
         });
     }
   });
-  if (options.first && shots.length) {
-    const at = firstChange(shots);
-    if (at > PACE.firstChangeMs)
-      problems.push({
-        shot: 0,
-        code: 'first-change',
-        message: `the first change comes at ${Number.isFinite(at) ? `${Math.round(at)}ms` : 'no time'} (by ${PACE.firstChangeMs}ms)`,
-      });
-  }
+  if (
+    options.first &&
+    shots.length &&
+    (pace.first === null || pace.first > PACE.firstChangeMs)
+  )
+    problems.push({
+      shot: 0,
+      code: 'first-change',
+      message: `the first change comes at ${pace.first === null ? 'no time' : `${Math.round(pace.first)}ms`} (by ${PACE.firstChangeMs}ms)`,
+    });
   return problems;
+}
+
+/** The changes that count as news, grouped as the frames checker groups them: each group's start, how many changes it holds, and the information among them (what may move). */
+function eventGroups(shots: readonly ShotDto[]): {
+  at: number;
+  count: number;
+  items: ShotInfoDto[];
+  shot: number;
+}[] {
+  const changes: { at: number; item?: ShotInfoDto; shot: number }[] = [];
+  shots.forEach((shot, k) => {
+    changes.push({ at: shot.startMs, shot: k });
+    for (const item of shot.info)
+      changes.push({ at: item.atMs, item, shot: k });
+    for (const move of shot.camera)
+      if (reframesShot(move, shot)) changes.push({ at: move.atMs, shot: k });
+  });
+  changes.sort((a, b) => a.at - b.at);
+  const groups: {
+    at: number;
+    count: number;
+    items: ShotInfoDto[];
+    shot: number;
+  }[] = [];
+  for (const change of changes) {
+    const last = groups[groups.length - 1];
+    if (!last || change.at - last.at >= PACE.subStepMs)
+      groups.push({
+        at: change.at,
+        count: 1,
+        items: change.item ? [change.item] : [],
+        shot: change.shot,
+      });
+    else {
+      last.count += 1;
+      if (change.item) last.items.push(change.item);
+    }
+  }
+  return groups;
 }
 
 /** A copy of the shots that can be put right in place. */
@@ -404,28 +266,90 @@ export function mendTimed(
     return step;
   };
 
-  // One attention cue at a time: the one before lets go as the next comes,
-  // or the next waits until the one before has drawn the eye.
-  out.forEach((shot, i) => {
-    const cues = shot.info
-      .filter((item) => CUES.has(item.recipe))
-      .sort((a, b) => a.atMs - b.atMs);
-    for (let k = 1; k < cues.length; k += 1) {
-      const [before, next] = [cues[k - 1], cues[k]];
-      const [, ends] = cueSpan(before, shot);
-      if (ends <= next.atMs) continue;
-      const drawn = before.atMs + before.durMs;
-      const wait = drawn - next.atMs;
-      if (wait > 0 && (wait > MEND_DELAY_MS || roomLater(next) < wait))
-        continue;
-      if (wait > 0) later(next, wait);
-      before.untilMs = next.atMs;
-      mended.push(
-        `shot ${i + 1}: ${before.recipe} lets go as ${next.recipe} comes${wait > 0 ? `, ${Math.round(wait)}ms later` : ''}`,
+  // Events apart, as the frames checker counts them: a change that comes
+  // too soon after the one before waits its turn (within the next words),
+  // or the one before comes a little earlier, or else it joins the change
+  // before it as a part of it.
+  /** Whether items moved by `by` would start where two others are already moving. */
+  const crowds = (items: readonly ShotInfoDto[], by: number) =>
+    items.some((item) => {
+      const at = item.atMs + by;
+      return (
+        out
+          .flatMap((shot) => shot.info)
+          .filter(
+            (other) =>
+              !items.includes(other) &&
+              other.durMs > 0 &&
+              other.atMs <= at &&
+              other.atMs + other.durMs > at,
+          ).length >= ATTENTION.moving
       );
+    });
+  const space = () => {
+    for (let pass = 0; pass < 24; pass += 1) {
+      const groups = eventGroups(out);
+      let moved = false;
+      for (let k = 1; k < groups.length && !moved; k += 1) {
+        const gap = groups[k].at - groups[k - 1].at;
+        if (gap >= PACE.minGapMs) continue;
+        const items = groups[k].items;
+        // A shot's start or a camera move is where it is: only information moves.
+        if (!items.length || items.length < groups[k].count) continue;
+        const need = PACE.minGapMs - gap;
+        if (
+          need <= MEND_DELAY_MS &&
+          items.every((item) => roomLater(item) >= need) &&
+          !crowds(items, need)
+        ) {
+          for (const item of items) later(item, need);
+          mended.push(
+            `shot ${groups[k].shot + 1}: ${items[0].recipe} waits ${Math.round(need)}ms for its turn`,
+          );
+          moved = true;
+          continue;
+        }
+        // Else the change before comes a little earlier, keeping its own
+        // distance from the one before it.
+        const before = groups[k - 1];
+        const prior = groups[k - 2];
+        const room = prior
+          ? before.at - prior.at - PACE.minGapMs
+          : Number.POSITIVE_INFINITY;
+        if (
+          before.items.length &&
+          before.items.length === before.count &&
+          need <= Math.min(LEAD_ROOM_MS, room) &&
+          before.items.every(
+            (item) => item.atMs - need >= shotOf(item).startMs,
+          ) &&
+          !crowds(before.items, -need)
+        ) {
+          for (const item of before.items) earlier(item, need);
+          mended.push(
+            `shot ${before.shot + 1}: ${before.items[0].recipe} comes ${Math.round(need)}ms earlier to keep the next its turn`,
+          );
+          moved = true;
+          continue;
+        }
+        const back = gap - (PACE.subStepMs - 100);
+        if (
+          back <= LEAD_ROOM_MS &&
+          items.every((item) => item.atMs - back >= shotOf(item).startMs) &&
+          !crowds(items, -back)
+        ) {
+          for (const item of items) earlier(item, back);
+          mended.push(
+            `shot ${groups[k].shot + 1}: ${items[0].recipe} joins the change before it`,
+          );
+          moved = true;
+        }
+      }
+      if (!moved) break;
     }
-  });
+  };
 
+  space();
   // At most two moving at once: a third waits for one to finish, within
   // the next words.
   const motions = () =>
@@ -447,40 +371,29 @@ export function mendTimed(
     mended.push(`${item.id}: waits ${Math.round(need)}ms for room to move`);
   }
 
-  // Events apart: the later one a little later, then the earlier one a
-  // little earlier, each within what the sync rule allows and never into
-  // the event before it.
-  const timeOf = (one: Landing) =>
-    one.item ? one.item.atMs + one.item.durMs : one.at;
-  for (let pass = 0; pass < 2; pass += 1) {
-    let last: Landing | null = null;
-    let before = -Infinity;
-    for (const one of landings(out)) {
-      if (one.sub) continue;
-      if (last) {
-        const gap = timeOf(one) - timeOf(last);
-        if (gap < PACE.minGapMs) {
-          let need = PACE.minGapMs - gap;
-          if (one.item) need -= later(one.item, Math.min(need, MEND_DELAY_MS));
-          if (need > 0 && last.item)
-            need -= earlier(
-              last.item,
-              Math.min(
-                need,
-                LEAD_ROOM_MS,
-                Math.max(0, timeOf(last) - (before + PACE.minGapMs)),
-              ),
-            );
-          if (need < PACE.minGapMs - gap)
-            mended.push(
-              `shot ${one.shot + 1}: ${one.item?.recipe ?? 'the cut'} spaced from the change before`,
-            );
-        }
-        before = timeOf(last);
-      }
-      last = one;
+  space();
+
+  // One attention cue at a time: the one before lets go as the next comes,
+  // or the next waits until the one before has drawn the eye.
+  out.forEach((shot, i) => {
+    const cues = shot.info
+      .filter((item) => CUES.has(item.recipe))
+      .sort((a, b) => a.atMs - b.atMs);
+    for (let k = 1; k < cues.length; k += 1) {
+      const [before, next] = [cues[k - 1], cues[k]];
+      const [, ends] = cueSpan(before, shot);
+      if (ends <= next.atMs) continue;
+      const drawn = before.atMs + before.durMs;
+      const wait = drawn - next.atMs;
+      if (wait > 0 && (wait > MEND_DELAY_MS || roomLater(next) < wait))
+        continue;
+      if (wait > 0) later(next, wait);
+      before.untilMs = next.atMs;
+      mended.push(
+        `shot ${i + 1}: ${before.recipe} lets go as ${next.recipe} comes${wait > 0 ? `, ${Math.round(wait)}ms later` : ''}`,
+      );
     }
-  }
+  });
 
   // Text held to be read: kept up longer, or brought in earlier.
   out.forEach((shot, i) => {
@@ -504,49 +417,60 @@ export function mendTimed(
     }
   });
 
-  // Still stretches broken by a slow push or pull on the shot's subject,
-  // never by words.
-  for (const [from, to] of quietStretches(out, durationMs, options)) {
-    const length = to - from;
-    const k = Math.max(1, Math.ceil(length / FILL_EVERY_MS) - 1);
-    for (let j = 1; j <= k; j += 1) {
-      const middle = from + (j * length) / (k + 1);
-      const i = shotAt(out, middle);
-      const shot = out[i];
-      const runs = Math.min(DRIFT_MS, shot.endMs - shot.startMs);
-      if (runs < DRIFT_MS / 2) continue;
-      const atMs = Math.round(
-        Math.max(shot.startMs, Math.min(middle - runs / 2, shot.endMs - runs)),
-      );
-      const move: ShotCameraDto = {
-        move: j % 2 ? 'push' : 'pull',
-        atMs,
-        durMs: Math.round(runs),
-        amount: CAMERA_AMOUNT.small,
-        ...(shot.focal ? { target: shot.focal } : {}),
-      };
-      shot.camera = [...shot.camera, move].sort((a, b) => a.atMs - b.atMs);
-      mended.push(
-        `shot ${i + 1}: a slow ${move.move} at ${atMs}ms breaks ${(length / 1000).toFixed(1)}s of stillness`,
-      );
+  // The episode's first change by a second and a half: a change hidden in
+  // the opening's first moment comes a little after it, as its own; else
+  // the first change after it is brought in earlier, within the lead the
+  // sync rule allows. An establishing move opens it moving either way.
+  if (options.first && out.length) {
+    const firstAt = () =>
+      paceOf(shotEvents(out), shotHolds(out), options.voice ?? [0, durationMs])
+        .first;
+    const late = () => {
+      const at = firstAt();
+      return at === null || at > PACE.firstChangeMs;
+    };
+    const opening = out[0];
+    if (late()) {
+      const hidden = opening.info
+        .filter((item) => item.atMs - opening.startMs < PACE.subStepMs)
+        .sort((a, b) => a.atMs - b.atMs)[0];
+      const after = opening.info
+        .filter((item) => item.atMs > PACE.firstChangeMs)
+        .sort((a, b) => a.atMs - b.atMs)[0];
+      if (hidden) {
+        const to = opening.startMs + PACE.subStepMs + 50;
+        if (
+          to - hidden.atMs <= MEND_DELAY_MS &&
+          roomLater(hidden) >= to - hidden.atMs
+        ) {
+          later(hidden, to - hidden.atMs);
+          mended.push(
+            'shot 1: its first change comes as its own, after the opening',
+          );
+        }
+      }
+      if (late() && after) {
+        earlier(
+          after,
+          Math.min(after.atMs - (PACE.firstChangeMs - 100), LEAD_ROOM_MS),
+        );
+        mended.push('shot 1: its first change brought into the opening');
+      }
     }
-  }
-
-  // The episode opens moving: an establishing move from its first frame.
-  if (options.first && out.length && firstChange(out) > PACE.firstChangeMs) {
-    const shot = out[0];
-    shot.camera = [
-      {
-        move: 'establish',
-        atMs: 0,
-        durMs: Math.round(
-          Math.min(CAMERA_MS.establish, shot.endMs - shot.startMs),
-        ),
-        ...(shot.focal ? { target: shot.focal } : {}),
-      },
-      ...shot.camera,
-    ];
-    mended.push('shot 1: opens on an establishing move');
+    if (!opening.camera.some((m) => m.atMs <= opening.startMs + 50)) {
+      opening.camera = [
+        {
+          move: 'establish',
+          atMs: opening.startMs,
+          durMs: Math.round(
+            Math.min(CAMERA_MS.establish, opening.endMs - opening.startMs),
+          ),
+          ...(opening.focal ? { target: opening.focal } : {}),
+        },
+        ...opening.camera,
+      ];
+      mended.push('shot 1: opens on an establishing move');
+    }
   }
   return { shots: out, mended };
 }

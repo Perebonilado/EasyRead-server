@@ -14,7 +14,9 @@
  */
 import type { KitLook, KitStyle } from './style';
 import { validateRig, type KitPiece } from './rig';
+import { CHARACTER_KIT } from './characters';
 import { PEOPLE_KIT } from './people';
+import { THINGS_KIT } from './things';
 import { VEHICLE_KIT } from './vehicles';
 
 /** The families of the kit (plan §7.2). */
@@ -36,9 +38,17 @@ export interface KitParam {
   values?: readonly string[];
   /** Or the whole numbers it may be, least and most. */
   range?: readonly [number, number];
+  /** Or words of the board's own, at most this many characters: what someone wears, a person's name (kept as said, trimmed). */
+  text?: number;
+  /** Set by code, never named by the board (a named person's likeness from the look notes): left out of its guide. */
+  code?: boolean;
   default: string | number;
   /** A few words for the board: what it sets. */
   about: string;
+  /** Other words people use for its values ("laptop" for a computer). */
+  aliases?: Readonly<Record<string, string>>;
+  /** It says what the piece is (a building's or an object's kind): a word that names none of its values makes no piece, never its default. */
+  strict?: boolean;
 }
 
 export interface KitEntry {
@@ -54,6 +64,8 @@ export interface KitEntry {
   people?: boolean;
   /** It shows a count of people, honest when a number is said (its `count` setting). */
   counts?: boolean;
+  /** It may stand for a named person of the scene's list, labelled with their name (the illustrated look's characters, tech §11). */
+  named?: boolean;
   make(params: KitParams, style: KitStyle, seed: number): KitPiece;
 }
 
@@ -61,6 +73,8 @@ export interface KitEntry {
 const FAMILIES: readonly Readonly<Record<string, KitEntry>>[] = [
   PEOPLE_KIT,
   VEHICLE_KIT,
+  CHARACTER_KIT,
+  THINGS_KIT,
 ];
 
 export const KIT: Readonly<Record<string, KitEntry>> = Object.assign(
@@ -103,9 +117,41 @@ export function paramsOf(
     const value = given.get(wordKey(name));
     out[name] = param.range
       ? numberIn(value, param.range, param.default as number)
-      : wordIn(value, param.values ?? [], param.default as string);
+      : param.text
+        ? textIn(value, param.text, param.default as string)
+        : wordIn(
+            value,
+            param.values ?? [],
+            param.default as string,
+            param.aliases,
+          );
   }
   return out;
+}
+
+/**
+ * The settings that say what a piece is (strict) given in words that name
+ * none of their values: a "padlock" is a lock, but a "power station" is
+ * no building the kit draws, and is never drawn as its default house.
+ */
+export function unknownOf(
+  id: string,
+  raw: Readonly<Record<string, unknown>> = {},
+): string[] {
+  const entry = KIT[id];
+  if (!entry) return [];
+  const given = new Map(
+    Object.entries(raw).map(([k, v]) => [wordKey(k), v] as const),
+  );
+  const none = '\u0000';
+  return Object.entries(entry.params)
+    .filter(([name, param]) => {
+      if (!param.strict || param.range) return false;
+      const value = given.get(wordKey(name));
+      if (value === undefined || value === null || value === '') return false;
+      return wordIn(value, param.values ?? [], none, param.aliases) === none;
+    })
+    .map(([name]) => name);
 }
 
 function numberIn(
@@ -123,19 +169,41 @@ function numberIn(
   return Math.max(lo, Math.min(hi, Math.round(n)));
 }
 
+/** Words of the board's own, made sound: one line, no markup, cut at a word. */
+function textIn(raw: unknown, most: number, fallback: string): string {
+  if (typeof raw !== 'string') return fallback;
+  const line = raw
+    .replace(/[<>{}]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (line.length <= most) return line || fallback;
+  const cut = line.slice(0, most);
+  const space = cut.lastIndexOf(' ');
+  return (space > most * 0.6 ? cut.slice(0, space) : cut).trim();
+}
+
 function wordIn(
   raw: unknown,
   values: readonly string[],
   fallback: string,
+  aliases?: Readonly<Record<string, string>>,
 ): string {
   if (typeof raw !== 'string' && typeof raw !== 'number') return fallback;
   const key = wordKey(String(raw));
   if (!key) return fallback;
-  // The same word; its singular; a word it starts or ends; its stem ("points", "pointing").
+  // The same word; its singular; another word for it; a word it starts or ends; its stem ("points", "pointing").
   const stem = key.replace(/(?:ing|ed|es|s)$/, '');
+  const alias = aliases
+    ? Object.entries(aliases).find(
+        ([word]) =>
+          wordKey(word) === key || wordKey(word) === key.replace(/s$/, ''),
+      )?.[1]
+    : undefined;
   return (
     values.find((v) => wordKey(v) === key) ??
     values.find((v) => wordKey(v) === key.replace(/s$/, '')) ??
+    values.find((v) => wordKey(v) === key.replace(/ies$/, 'y')) ??
+    (alias && values.includes(alias) ? alias : undefined) ??
     values.find(
       (v) => key.startsWith(wordKey(v)) || wordKey(v).startsWith(key),
     ) ??
@@ -161,7 +229,7 @@ export function makeKit(
   colour?: string,
 ): { piece: KitPiece; params: KitParams } | null {
   const entry = KIT[id];
-  if (!entry) return null;
+  if (!entry || unknownOf(id, raw).length) return null;
   const params = paramsOf(id, raw);
   const piece = entry.make(
     colour ? { ...params, colour } : params,
@@ -175,7 +243,9 @@ export function makeKit(
 const paramText = (name: string, param: KitParam): string =>
   param.range
     ? `${name} ${param.range[0]}–${param.range[1]} (${param.about})`
-    : `${name} ${(param.values ?? []).join(' | ')} (${param.about})`;
+    : param.text
+      ? `${name} in words (${param.about})`
+      : `${name} ${(param.values ?? []).join(' | ')} (${param.about})`;
 
 /**
  * The kit for the board's prompt, for a show's look: each id with what it
@@ -188,6 +258,7 @@ export function kitGuide(look: KitLook): string {
     .map((id) => {
       const entry = KIT[id];
       const params = Object.entries(entry.params)
+        .filter(([, param]) => !param.code)
         .map(([name, param]) => paramText(name, param))
         .join('; ');
       return `- ${id}: ${entry.about}${params ? ` Settings: ${params}.` : ''} Moves: ${entry.moves.join(', ')}.`;

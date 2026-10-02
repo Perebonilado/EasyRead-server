@@ -525,6 +525,15 @@ function down(
         used += page.length > 1 ? more : block.h;
       });
       if (page.length) groups.push(page);
+      // As even as the pages allow: the same count on each where they fit.
+      const per = Math.ceil(n / groups.length);
+      const even = groups
+        .map((_, g) =>
+          events.slice(g * per, (g + 1) * per).map((_, i) => g * per + i),
+        )
+        .filter((group) => group.length);
+      if (even.every((group) => fits(group.map((i) => laid.blocks[i]))))
+        groups = even;
     }
   }
   const cols = paged ? 1 : groups.length;
@@ -627,17 +636,20 @@ function down(
         .map((i) => book.parts[ids[i].event].box)
         .map((b) => b[1] + b[3]),
     );
+    // Set where the events' words start, clear of the spine (and, in two
+    // columns, under the first).
+    const indent = r * 2 + floor * 0.35;
     const drawn = sourceSvg(
       book,
       paint,
       frame,
       source,
-      text.x0,
+      text.x0 + indent,
       Math.min(
         text.y1 - frame.size.chip * 0.4,
         firstBottom + frame.size.chip * 1.6,
       ),
-      text.x1 - text.x0,
+      (cols === 2 ? colW : text.x1 - text.x0) - indent,
     );
     out.push(drawn.svg);
   }

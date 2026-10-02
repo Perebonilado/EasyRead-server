@@ -206,11 +206,16 @@ function curved(
   return elbow(points, from, to, label);
 }
 
-/** The steps and links laid out in the frame's units, and how far down they reach. */
+/**
+ * The steps and links laid out in the frame's units, how far down they
+ * reach, and how much larger than the reading floor their words are set
+ * (a branching flow with room to spare is drawn larger, up to a title's
+ * size).
+ */
 function layOut(
   frame: Frame,
   spec: FlowSpec,
-): { nodes: Node[]; edges: Edge[]; bottom: number } {
+): { nodes: Node[]; edges: Edge[]; bottom: number; grow: number } {
   const { text } = frame;
   const tall = frame.shape === 'tall';
   const floor = frame.size.label;
@@ -263,7 +268,7 @@ function layOut(
         e.label,
       );
     });
-    return { nodes, edges, bottom: text.y1 };
+    return { nodes, edges, bottom: text.y1, grow: 1 };
   }
   if (chain) {
     // One row, or two read as lines of text are, the second under the
@@ -331,12 +336,16 @@ function layOut(
           e.label,
         );
       });
-      return { nodes, edges, bottom: top + total };
+      return { nodes, edges, bottom: top + total, grow: 1 };
     }
   }
   // Anything that branches: dagre's layout, fitted to the words' area.
   const laid = layFlow(spec, frame.shape, floor / 1.15);
-  const k = Math.min(1, width / laid.width, (text.y1 - text.y0) / laid.height);
+  const k = Math.min(
+    frame.size.title / frame.size.label,
+    width / laid.width,
+    (text.y1 - text.y0) / laid.height,
+  );
   const ox = text.x0 + (width - laid.width * k) / 2;
   const oy = text.y0 + (text.y1 - text.y0 - laid.height * k) / 2;
   const place = (x: number, y: number): [number, number] => [
@@ -367,7 +376,7 @@ function layOut(
       at: one.at ? place(one.at[0], one.at[1]) : null,
     };
   });
-  return { nodes, edges, bottom: oy + laid.height * k };
+  return { nodes, edges, bottom: oy + laid.height * k, grow: Math.max(1, k) };
 }
 
 export function flowAsset(
@@ -380,9 +389,10 @@ export function flowAsset(
   const frame = frameOf(shape);
   const paint = paintOf(look);
   const book = new PartBook();
-  const floor = frame.size.label;
   const colour = mainColour(paint, extraOf('flow', raw).colour);
-  const { nodes, edges, bottom } = layOut(frame, spec);
+  const { nodes, edges, bottom, grow } = layOut(frame, spec);
+  // The words' size: the reading floor, or larger where the flow was.
+  const floor = frame.size.label * grow;
   const ids = spec.nodes.map((node, i) =>
     book.id(`node-${slugOf(node.label) || String(i + 1)}`),
   );
@@ -458,7 +468,7 @@ export function flowAsset(
       kind === 'decision'
         ? `<path d="M${r1(x)} ${r1(y - h / 2)}L${r1(x + w / 2)} ${r1(y)}L${r1(x)} ${r1(y + h / 2)}L${r1(x - w / 2)} ${r1(y)}Z" fill="${esc(paint.sheet)}" stroke="${esc(colour.colour)}" stroke-width="${r1(stroke * 1.2)}" stroke-linejoin="round"/>`
         : `<rect x="${r1(box[0])}" y="${r1(box[1])}" width="${r1(w)}" height="${r1(h)}" rx="${r1(kind === 'step' ? floor * 0.3 : h / 2)}" fill="${esc(kind === 'step' ? fill : paint.sheet)}" stroke="${esc(kind === 'step' ? mix(paint.paper, colour.colour, 0.55) : paint.ink)}" stroke-width="${r1(stroke)}"/>`;
-    const size = floor * Math.min(1, w / Math.max(1, node.w));
+    const size = floor;
     const top = y - (lines.length * size * 1.15) / 2 + size * ASCENT * 0.98;
     book.add(ids[i], { box, role: colour.role, pivot: [0.5, 0.5] });
     steps.push(

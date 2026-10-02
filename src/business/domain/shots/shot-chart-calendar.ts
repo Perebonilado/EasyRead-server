@@ -48,6 +48,7 @@ import {
   type Colour,
   type Frame,
   type Paint,
+  wordsWithin,
 } from './shot-chart-kit';
 
 const MONTHS = [
@@ -501,7 +502,11 @@ export function calendarAsset(
   shape: FilmShape,
 ): ShotSvgAssetDto | null {
   const extra = extraOf('calendar', raw);
-  const spec = readCalendar(draftOf(raw), extra);
+  // Its words kept whole within the lengths the reader keeps them to.
+  const spec = readCalendar(
+    wordsWithin(draftOf(raw), { label: 32, '*': 32 }),
+    extra,
+  );
   if (!spec) return null;
   const frame = frameOf(shape);
   const paint = paintOf(look);

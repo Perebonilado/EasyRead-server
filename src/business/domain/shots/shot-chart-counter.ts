@@ -39,6 +39,7 @@ import {
   union,
   wordsWidth,
   type Frame,
+  wordsWithin,
 } from './shot-chart-kit';
 
 /** A prefix that is a sign or a currency, set beside the figures; any other ("about") is a word over them. */
@@ -163,8 +164,13 @@ export function counterAsset(
   shape: FilmShape,
 ): ShotSvgAssetDto | null {
   const extra = extraOf('counter', raw);
+  // Its words kept whole within the lengths the reader keeps them to.
   const spec = readCounter(
-    bodyOf('counter', raw) as unknown as CounterDraft,
+    wordsWithin(bodyOf('counter', raw) as unknown as CounterDraft, {
+      unit: 16,
+      prefix: 12,
+      label: 60,
+    }),
     extra,
   );
   if (!spec) return null;

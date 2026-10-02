@@ -7,7 +7,10 @@ import {
   fit,
   frameOf,
   paintOf,
+  said,
   slugOf,
+  wholeWords,
+  wordsWithin,
   wrap,
 } from './shot-chart-kit';
 import { CHART_KINDS, chartAsset, chartPartIds, mapAsset } from './shot-charts';
@@ -320,6 +323,42 @@ describe('chartAsset', () => {
     expect(asset.svg).toContain('Saturday');
   });
 
+  it("names a graph's points apart from each other and off its axes, in either shape", () => {
+    const apart = (a: number[], b: number[]) =>
+      a[0] + a[2] <= b[0] ||
+      b[0] + b[2] <= a[0] ||
+      a[1] + a[3] <= b[1] ||
+      b[1] + b[3] <= a[1];
+    for (const shape of SHAPES) {
+      const asset = chartAsset(
+        'plot',
+        CHART_SPECS.plot.parabola,
+        LIGHT_LOOK,
+        shape,
+      )!;
+      const names = Object.entries(asset.parts).filter(([id]) =>
+        /^label-/.test(id),
+      );
+      expect(names.length).toBeGreaterThanOrEqual(2);
+      names.forEach(([id, { box }], i) => {
+        for (const [other, part] of names.slice(i + 1))
+          expect([id, other, shape, apart(box, part.box)]).toEqual([
+            id,
+            other,
+            shape,
+            true,
+          ]);
+        for (const axis of ['axis-x', 'axis-y'])
+          expect([id, axis, shape, apart(box, asset.parts[axis].box)]).toEqual([
+            id,
+            axis,
+            shape,
+            true,
+          ]);
+      });
+    }
+  });
+
   it('lights a chamber by party, what is left over muted', () => {
     const asset = chartAsset(
       'seats',
@@ -436,6 +475,46 @@ describe('the kit', () => {
     ]);
   });
 
+  it('cuts words it must shorten only between whole words, or with a hyphen', () => {
+    const long = 'The fears of minorities and the means of allaying them';
+    const cut = said(long, 40);
+    expect(cut.length).toBeLessThanOrEqual(40);
+    expect(cut).toBe('The fears of minorities and the means…');
+    expect(said('Constitutionalisation', 10)).toBe('Constitut-');
+    expect(said('  short  words ', 40)).toBe('short words');
+    expect(wholeWords('One two three', 9)).toBe('One two…');
+    expect(
+      wordsWithin(
+        { label: long, groups: [{ name: long }] },
+        { label: 30, name: 20 },
+      ),
+    ).toEqual({
+      label: 'The fears of minorities and…',
+      groups: [{ name: 'The fears of…' }],
+    });
+  });
+
+  it("keeps a reader's own cut out of the middle of a word", () => {
+    const label =
+      'people who lived in the colony when the census was taken that year';
+    const asset = chartAsset(
+      'counter',
+      { counter: { value: 45, unit: 'million', label } },
+      LIGHT_LOOK,
+      'wide',
+    )!;
+    const words = [
+      ...asset.svg.matchAll(/data-part="label"[^>]*>(.*?)<\/text>/g),
+    ]
+      .map((m) => m[1].replace(/<[^>]+>/g, ' '))
+      .join(' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    expect(words.endsWith('…')).toBe(true);
+    for (const word of words.replace('…', '').split(' '))
+      expect(label.split(' ')).toContain(word);
+  });
+
   it('colours several things apart, what is left over muted', () => {
     const paint = paintOf(LIGHT_LOOK);
     const colours = coloursFor(paint, [
@@ -506,6 +585,44 @@ describe('mapAsset', () => {
     );
     expect(asset!.parts['place-kano']).toBeDefined();
     expect(asset!.parts['label-kano']).toBeDefined();
+  });
+
+  it("keeps its names out of the captions' band, and its key and a past map's note inside the words' area", async () => {
+    const past = { ...base, year: 1959 };
+    const europe = {
+      region: 'Europe',
+      highlight: [
+        { name: 'France', label: true, group: 'Founders' },
+        { name: 'Germany', label: true, group: 'Founders' },
+        { name: 'Poland', label: true, group: 'Joined later' },
+      ],
+      places: ['Brussels'],
+      routes: null,
+    };
+    for (const shape of SHAPES) {
+      const { text } = frameOf(shape);
+      const one = await mapAsset(past, LIGHT_LOOK, shape);
+      const two = await mapAsset(europe, LIGHT_LOOK, shape);
+      expect(one!.parts.period).toBeDefined();
+      expect(two!.parts.key).toBeDefined();
+      for (const asset of [one!, two!])
+        for (const [id, part] of Object.entries(asset.parts)) {
+          if (!/^label-|^key$|^period$/.test(id)) continue;
+          const [x, y, w, h] = part.box;
+          expect({ id, shape, clear: y + h <= text.y1 + 1 }).toEqual({
+            id,
+            shape,
+            clear: true,
+          });
+          if (id === 'key' || id === 'period')
+            expect({
+              id,
+              shape,
+              inside:
+                x >= text.x0 - 1 && y >= text.y0 - 1 && x + w <= text.x1 + 1,
+            }).toEqual({ id, shape, inside: true });
+        }
+    }
   });
 
   it('draws nothing for a map of nowhere code knows', async () => {

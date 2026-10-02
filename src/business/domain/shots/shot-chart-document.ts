@@ -34,6 +34,7 @@ import {
   textSvg,
   union,
   wordsWidth,
+  wordsWithin,
 } from './shot-chart-kit';
 
 export function documentAsset(
@@ -42,8 +43,13 @@ export function documentAsset(
   shape: FilmShape,
 ): ShotSvgAssetDto | null {
   const extra = extraOf('document', raw);
+  // Its words kept whole within the lengths the reader keeps them to.
   const spec = readDocument(
-    bodyOf('document', raw) as unknown as DocumentDraft,
+    wordsWithin(bodyOf('document', raw) as unknown as DocumentDraft, {
+      title: 48,
+      headline: 60,
+      stamp: 24,
+    }),
     extra.name,
     extra,
   );

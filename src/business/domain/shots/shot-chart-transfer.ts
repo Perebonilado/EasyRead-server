@@ -36,6 +36,7 @@ import {
   r1,
   textSvg,
   union,
+  wordsWithin,
 } from './shot-chart-kit';
 
 /** How many tokens stand along the arc. */
@@ -70,7 +71,12 @@ export function transferAsset(
   shape: FilmShape,
 ): ShotSvgAssetDto | null {
   const extra = extraOf('transfer', raw);
-  const spec = readTransfer(draftOf(raw), extra.name, extra);
+  // Its words kept whole within the lengths the reader keeps them to.
+  const spec = readTransfer(
+    wordsWithin(draftOf(raw), { from: 32, to: 32, label: 24 }),
+    extra.name,
+    extra,
+  );
   if (!spec) return null;
   const frame = frameOf(shape);
   const paint = paintOf(look);

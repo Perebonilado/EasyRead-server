@@ -37,6 +37,7 @@ import {
   slugOf,
   textSvg,
   union,
+  wordsWithin,
 } from './shot-chart-kit';
 
 export function splitAsset(
@@ -44,7 +45,13 @@ export function splitAsset(
   look: ShotLookDto,
   shape: FilmShape,
 ): ShotSvgAssetDto | null {
-  const spec = readSplit(bodyOf('split', raw) as unknown as SplitDraft);
+  // Its words kept whole within the lengths the reader keeps them to.
+  const spec = readSplit(
+    wordsWithin(bodyOf('split', raw) as unknown as SplitDraft, {
+      label: 28,
+      '*': 32,
+    }),
+  );
   if (!spec) return null;
   const frame = frameOf(shape);
   const paint = paintOf(look);

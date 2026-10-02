@@ -47,6 +47,7 @@ import {
   textSvg,
   union,
   wordsWidth,
+  wordsWithin,
 } from './shot-chart-kit';
 
 /** The most dots a chamber draws: past this, each stands for more members. */
@@ -60,8 +61,12 @@ export function seatsAsset(
   shape: FilmShape,
 ): ShotSvgAssetDto | null {
   const extra = extraOf('seats', raw);
+  // Its words kept whole within the lengths the reader keeps them to.
   const spec = readSeats(
-    bodyOf('seats', raw) as unknown as SeatsDraft,
+    wordsWithin(bodyOf('seats', raw) as unknown as SeatsDraft, {
+      name: 28,
+      label: 60,
+    }),
     extra.name,
     extra,
   );

@@ -1059,6 +1059,8 @@ export interface LlmGatewayPort {
     png: Buffer;
     /** What the desk was told it shows: "Ahmadu Bello, 1960". */
     about: string;
+    /** What a picture of an event or a thing should show, for the model to agree it does ("shows"). */
+    asked?: string;
   }): Promise<LlmResult<Record<string, unknown>>>;
 
   /** Whether text asks for what no one should be made: flagged, with the categories. */

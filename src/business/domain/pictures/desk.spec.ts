@@ -2,6 +2,7 @@ import {
   BELLO,
   commonsFile,
   FAKE_PIXELS,
+  LAGOS,
   FakeDepth,
   FakeFocus,
   FakeSources,
@@ -11,7 +12,14 @@ import {
   ROBERTSON,
   ROBERTSON_NAMESAKE,
 } from './__fixtures__/desk';
-import { DESK_RULES, lookupKey, PictureDesk, PICK_LEAST } from './desk';
+import {
+  DESK_RULES,
+  lookupKey,
+  MOST,
+  PictureDesk,
+  PICK_LEAST,
+  searchWordsOf,
+} from './desk';
 import type { LicenceMode } from './licence';
 import type { PictureQuery } from './types';
 
@@ -438,6 +446,219 @@ describe('the picture desk', () => {
       expect(reason).toBe(
         'Nnamdi Azikiwe matched by name only: no year, role or place agrees',
       );
+    });
+  });
+
+  describe('more pictures for every episode (Richard, 2026-10-02)', () => {
+    const BELLO_FILES = [
+      ...FILES,
+      commonsFile({
+        sourceId:
+          'File:Ahmadu Bello with the Northern delegation at Oak Ridge, 1960.jpg',
+        description: 'Sir Ahmadu Bello and members of his delegation',
+        categories: ['Ahmadu Bello', 'PD US DOE'],
+        depicts: [{ qid: 'Q401032' }],
+        date: '1960',
+      }),
+      commonsFile({
+        sourceId: 'File:Ahmadu Bello greets visitors in Kaduna, 1959.jpg',
+        categories: ['Ahmadu Bello', 'PD US Government'],
+        date: '1959',
+      }),
+      // Of him in bronze, and of a university named after him: never him.
+      commonsFile({
+        sourceId: 'File:Statue of Ahmadu Bello, Kaduna 1965.jpg',
+        categories: ['Ahmadu Bello', 'PD US Government'],
+        date: '1965',
+      }),
+      commonsFile({
+        sourceId: 'File:Ahmadu Bello University gate 1963.jpg',
+        categories: ['Ahmadu Bello', 'PD US Government'],
+        date: '1963',
+      }),
+    ];
+
+    it('brings a person’s portrait and two more photos of them, distinct files, never a likeness or a thing named after them', async () => {
+      const sources = new FakeSources(undefined, undefined, BELLO_FILES);
+      const { desk, cache } = deskWith({ sources, licence: 'off' });
+      const all = await desk.lookupAll(BELLO_Q);
+      expect(all.map((r) => [r.use, r.sourceId])).toEqual([
+        [
+          'portrait',
+          'File:Ahmadu Bello Premier of the Northern Region of Nigeria 1960 Oak Ridge (24578438519).jpg',
+        ],
+        ['photo', 'File:Ahmadu Bello greets visitors in Kaduna, 1959.jpg'],
+        [
+          'photo',
+          'File:Ahmadu Bello with the Northern delegation at Oak Ridge, 1960.jpg',
+        ],
+      ]);
+      expect(all).toHaveLength(MOST.person);
+      expect(new Set(all.map((r) => r.sha1)).size).toBe(3);
+      expect(all[1].chip).toBe(
+        'Ahmadu Bello, 1959 · US Department of Energy · Public domain',
+      );
+      // The answer is kept whole: asked again, the same three, from the cache.
+      const kept = await cache.bySource('lookup', lookupKey(BELLO_Q));
+      expect((kept?.meta as { taken: unknown[] }).taken).toHaveLength(3);
+      const asked = sources.calls.length;
+      expect((await desk.lookupAll(BELLO_Q)).map((r) => r.id)).toEqual(
+        all.map((r) => r.id),
+      );
+      expect(sources.calls.length).toBe(asked);
+      // lookup still answers with the portrait.
+      expect((await desk.lookup(BELLO_Q))?.use).toBe('portrait');
+    });
+
+    it('brings a place’s photos from the research’s years first, else any good photo of it, its year on the chip', async () => {
+      const { desk } = deskWith({ licence: 'off' });
+      const lagos: PictureQuery = {
+        name: 'Lagos',
+        kind: 'place',
+        years: [1900, 1905],
+        place: ['Nigeria'],
+        geo: { lng: 3.38, lat: 6.52 },
+      };
+      const { found } = await desk.find(lagos);
+      // Ranked by the house weights (the 1958 Marina crops to both shapes).
+      expect(found.map((c) => [c.file.sourceId, c.year]).sort()).toEqual([
+        ['File:Lagos Marina, Nigeria, 1958.jpg', 1958],
+        ['File:Lagos skyline 2019.jpg', 2019],
+      ]);
+      const skyline = found.find((c) => c.year === 2019)!;
+      expect(skyline.chip).toMatch(/^Lagos, 2019 · /u);
+      expect(skyline.file.chosen).toBe(true);
+      expect(found.every((c) => c.notes.join(' ').includes('any year'))).toBe(
+        true,
+      );
+      // From its years, when it has some: only those.
+      const { found: era } = await desk.find({ ...lagos, years: [1957] });
+      expect(era.map((c) => c.file.sourceId)).toEqual([
+        'File:Lagos Marina, Nigeria, 1958.jpg',
+      ]);
+      expect(LAGOS.images).toEqual(['Lagos skyline 2019.jpg']);
+    });
+
+    // Nigeria's independence, as the research names it (The Regional Turn).
+    const INDEPENDENCE: PictureQuery = {
+      name: 'Nigeria becomes independent',
+      kind: 'event',
+      years: [1960],
+      place: ['Nigeria'],
+      words: ['Nigeria becomes independent by act and constitutional order'],
+      asked:
+        'an event: Nigeria becomes independent by act and constitutional order (1 October 1960)',
+    };
+    const EVENT_FILES = [
+      commonsFile({
+        sourceId:
+          'File:The Prime Minister, Sir Abubakar Tafawa Balewa on Independence Day, October 1, 1960.jpg',
+        description: 'Nigerian independence celebrations, Lagos',
+        categories: ['1960 in Nigeria', 'PD US Government'],
+        date: '1960-10-01',
+      }),
+      commonsFile({
+        sourceId:
+          'File:Crowd at the racecourse, Nigerian independence, 1960.jpg',
+        categories: ['1960 in Nigeria', 'PD US Government'],
+        date: '1960',
+      }),
+      // A plaque photographed later, a parade fifty years on, and a street that year.
+      commonsFile({
+        sourceId: 'File:Nigeria independence plaque 1960.jpg',
+        categories: ['1960 in Nigeria'],
+        date: '2012',
+      }),
+      commonsFile({
+        sourceId: 'File:Nigeria independence anniversary parade 2010.jpg',
+        categories: ['2010 in Nigeria'],
+        date: '2010',
+      }),
+      commonsFile({
+        sourceId: 'File:A street in Lagos, 1960.jpg',
+        categories: ['1960 in Nigeria'],
+        date: '1960',
+      }),
+    ];
+
+    it('clears an event’s photo only from its year, carrying its words, never a commemoration of it', async () => {
+      const sources = new FakeSources([], [], EVENT_FILES);
+      const { desk } = deskWith({ sources, licence: 'off' });
+      const { found } = await desk.find(INDEPENDENCE);
+      expect(found.map((c) => c.file.sourceId).sort()).toEqual([
+        'File:Crowd at the racecourse, Nigerian independence, 1960.jpg',
+        'File:The Prime Minister, Sir Abubakar Tafawa Balewa on Independence Day, October 1, 1960.jpg',
+      ]);
+      expect(found[0].chip).toMatch(/^Nigeria becomes independent, 1960 · /u);
+      // Searched by its own words and year, and the year's photos of its country.
+      expect(sources.calls).toContain('search-files:Nigeria independent 1960');
+      expect(sources.calls).toContain('category:1960 in Nigeria');
+    });
+
+    it('takes an event’s photo only when the look agrees it shows it, and none with no look to ask', async () => {
+      const sources = new FakeSources([], [], EVENT_FILES);
+      const focus = new FakeFocus(/racecourse/u);
+      const { desk, logs } = deskWith({ sources, focus, licence: 'off' });
+      const all = await desk.lookupAll(INDEPENDENCE);
+      expect(all.map((r) => r.sourceId)).toEqual([
+        'File:The Prime Minister, Sir Abubakar Tafawa Balewa on Independence Day, October 1, 1960.jpg',
+      ]);
+      expect(focus.asked).toContain(INDEPENDENCE.asked);
+      expect(logs.join('\n')).toMatch(
+        /racecourse.*will not do: the look does not see an event: Nigeria becomes independent/u,
+      );
+      const blind = deskWith({
+        sources: new FakeSources([], [], EVENT_FILES),
+        licence: 'off',
+      });
+      expect(await blind.desk.lookupAll(INDEPENDENCE)).toEqual([]);
+      expect(blind.logs.join('\n')).toMatch(
+        /no look has said it shows what was asked/u,
+      );
+    });
+
+    it('clears a thing’s photo only when it names the thing in whole words, and the look agrees', async () => {
+      const files = [
+        commonsFile({
+          sourceId: 'File:Farnsworth Image Dissector tube 1931.jpg',
+          categories: ['Image dissectors', 'PD US Government'],
+          date: '1931',
+        }),
+        commonsFile({
+          sourceId: 'File:Image of a television tube.jpg',
+          categories: ['PD US Government'],
+          date: '1950',
+        }),
+      ];
+      const sources = new FakeSources([], [], files);
+      const focus = new FakeFocus();
+      const { desk } = deskWith({ sources, focus, licence: 'off' });
+      const query: PictureQuery = {
+        name: 'image dissector',
+        kind: 'object',
+        years: [1926, 1939],
+        words: ['image dissector'],
+        asked: 'a thing: image dissector (a long glass camera tube)',
+      };
+      const all = await desk.lookupAll(query);
+      expect(all.map((r) => [r.sourceId, r.year, r.use])).toEqual([
+        ['File:Farnsworth Image Dissector tube 1931.jpg', 1931, 'photo'],
+      ]);
+      expect(all[0].chip).toMatch(/^image dissector, 1931 · /u);
+      expect(focus.asked).toEqual([query.asked]);
+    });
+
+    it('searches an event by its names first, then its other words, the verbs last', () => {
+      expect(
+        searchWordsOf([
+          'Baird demonstrates television to members of the Royal Institution',
+        ]),
+      ).toEqual(['Baird', 'Royal', 'Institution', 'television']);
+      expect(
+        searchWordsOf([
+          'Nigeria becomes independent by act and constitutional order',
+        ]),
+      ).toEqual(['Nigeria', 'independent', 'act', 'constitutional']);
     });
   });
 });

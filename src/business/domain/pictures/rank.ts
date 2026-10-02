@@ -9,11 +9,16 @@
  *           + 0.10·tier + 0.05·sourceRank   (+ 0.10 for a person's own
  *           Wikidata picture, house: the one their editors chose)
  */
-import { nameWords, textWords } from './match';
-import type { PictureKind, PictureQuery, SourceFile } from './types';
+import { nameWords, stems, textWords } from './match';
+import type {
+  PictureKind,
+  PictureQuery,
+  PictureUseOf,
+  SourceFile,
+} from './types';
 
 /** What a picture is for: a person's portrait card, a full photo, a document's page. */
-export type PictureUse = 'portrait' | 'photo' | 'document';
+export type PictureUse = PictureUseOf;
 
 export const useOf = (kind: PictureKind): PictureUse =>
   kind === 'person' ? 'portrait' : kind === 'document' ? 'document' : 'photo';
@@ -115,7 +120,10 @@ export function scoreOf(input: ScoreInput): {
   const era = eraOf(input.year, input.years);
   const tier = input.tier === 'A' ? 1 : 0.8;
   const sourceRank = file.institutional ? 1 : 0.6;
-  const chosen = use === 'portrait' && file.chosen ? CHOSEN : 0;
+  // Their editors' choice: a person's own portrait, or a place's own
+  // picture when any good photo of it will do (no years asked).
+  const chosen =
+    file.chosen && (use === 'portrait' || !input.years?.length) ? CHOSEN : 0;
   const score =
     0.25 * res +
     0.2 * crop +
@@ -265,5 +273,160 @@ export function photoOf(
         reason: `taken in ${year}, ${off} years from the research’s`,
       };
   }
+  return { ok: true };
+}
+
+// ── More photos of a person, and photos of events and things ─────────────
+
+/** Likenesses of a person that are not them as they were: in bronze, in paint on a wall, on a note or a stamp. */
+const LIKENESS =
+  /\b(?:statue|bust|monument|memorial|grave|tomb|mausoleum|mural|plaque|sculpture|banknote|bank note|stamp|coin|waxwork|effigy|signature)\b/iu;
+
+/** "Azikiwe's house": a title about a thing of theirs. */
+const THEIR_THING =
+  /['’]s\s+(?:house|home|residence|birthplace|estate|grave|tomb|car|office|desk|library|statue|bust|signature)\b/iu;
+
+/** What is named after a person rather than of them: "Ahmadu Bello University", "Ahmadu Bello Way". */
+const NAMED_FOR =
+  'university|stadium|way|road|street|avenue|airport|square|bridge|hall|college|school|hospital|library|mosque|house|museum|park|estate|crescent|close|drive|lane|centre|center|foundation|award|prize';
+
+/**
+ * Whether a file can be one more photo of a person (Richard, 2026-10-02:
+ * the board comes back to a person without repeating one image): of them
+ * (their own Wikidata picture, a file that says it depicts them, one that
+ * names them in full, or one of their own category naming them by their
+ * surname), never a likeness of them in bronze or on a note, nor a thing
+ * named after them, nor made after they died, and dated unless it says it
+ * depicts them. Others may stand with them, as they do in a delegation, a
+ * ceremony or a meeting: a photo, unlike a portrait, may be of a group.
+ */
+export function personPhotoOf(
+  file: Pick<
+    SourceFile,
+    'title' | 'description' | 'categories' | 'depicts' | 'chosen'
+  >,
+  person: { qid: string; name: string; died?: number; category?: string },
+  year?: number,
+): { ok: true } | { ok: false; reason: string } {
+  const said = Boolean(file.depicts?.some((d) => d.qid === person.qid));
+  const words = nameWords(person.name);
+  const surname = words.length > 1 ? words[words.length - 1] : '';
+  const category = person.category?.trim().toLowerCase();
+  const filed = Boolean(
+    category &&
+    file.categories.some((c) => c.trim().toLowerCase() === category),
+  );
+  const ofThem =
+    file.chosen ||
+    said ||
+    namesIt(file.title, person.name) ||
+    namesIt(file.description, person.name) ||
+    (filed && surname.length >= 4 && namesIt(file.title, surname));
+  if (!ofThem) return { ok: false, reason: 'it does not say it is of them' };
+  if (
+    LIKENESS.test(file.title) ||
+    LIKENESS.test(file.description) ||
+    THEIR_THING.test(file.title)
+  )
+    return {
+      ok: false,
+      reason: 'it is a likeness or a thing of theirs, not them',
+    };
+  if (
+    surname &&
+    new RegExp(`\\b${surname}\\s+(?:${NAMED_FOR})\\b`, 'iu').test(
+      textWords(file.title).join(' '),
+    )
+  )
+    return { ok: false, reason: 'it is of something named after them' };
+  if (year !== undefined && person.died !== undefined && year > person.died + 1)
+    return {
+      ok: false,
+      reason: `made in ${year}, after they died in ${person.died}`,
+    };
+  if (year === undefined && !file.chosen && !said)
+    return {
+      ok: false,
+      reason: 'it has no date, and nobody says it depicts them',
+    };
+  return { ok: true };
+}
+
+/** A commemoration of an event (a plaque, a memorial) is no photo of the event itself. */
+const COMMEMORATION =
+  /\b(?:plaque|memorial|monument|commemorat\w*|statue|museum|exhibit(?:ion)?|replica|anniversary|re-?enactment|stamp|banknote|coin|postage)\b/iu;
+
+/** A thing's name as whole words, a plural allowed ("cathode-ray tube" in "Cathode ray tubes"). */
+function namesThing(said: string, name: string): boolean {
+  const text = ` ${textWords(said).join(' ')} `;
+  const words = textWords(name);
+  if (!words.length) return false;
+  const pattern = words
+    .map((w) => w.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'))
+    .map((w, i) => (i === words.length - 1 ? `${w}(?:s|es)?` : w))
+    .join(' ');
+  return new RegExp(` ${pattern} `, 'u').test(text);
+}
+
+/**
+ * Whether a file can be a photo of an event (the truth rule: a picture
+ * of an event is of that event): taken in its year, or the next for one
+ * that ran over; carrying its key words, the research's own, in its
+ * title, description or categories (two of them, or one with the place it
+ * happened); and no commemoration of it (a blue plaque photographed last
+ * year says "1926" in its title too). The desk's look must then agree.
+ */
+export function eventPhotoOf(
+  file: Pick<SourceFile, 'title' | 'description' | 'categories'>,
+  query: Pick<PictureQuery, 'name' | 'years' | 'place' | 'words'>,
+  year: number | undefined,
+): { ok: true } | { ok: false; reason: string } {
+  const years = query.years ?? [];
+  if (!years.length)
+    return { ok: false, reason: 'the research gives the event no year' };
+  if (year === undefined)
+    return { ok: false, reason: 'it has no date to match the event’s year' };
+  const off = Math.min(...years.map((y) => Math.abs(y - year)));
+  if (off > EVENT_YEARS)
+    return { ok: false, reason: `taken in ${year}, not in the event’s year` };
+  const said = `${file.title} ${file.description} ${file.categories.join(' ')}`;
+  if (COMMEMORATION.test(`${file.title} ${file.description}`))
+    return { ok: false, reason: 'it commemorates the event; it is not of it' };
+  const seen = stems(said);
+  const placed = [...stems([query.place ?? []].flat().join(' '))];
+  const keys = [...stems((query.words ?? [query.name]).join(' '))].filter(
+    (k) => !placed.includes(k),
+  );
+  const hits = keys.filter((k) => seen.has(k)).length;
+  const there = placed.some((p) => seen.has(p));
+  const enough =
+    keys.length >= 2 ? hits >= 2 || (hits >= 1 && there) : hits >= 1;
+  if (!enough)
+    return {
+      ok: false,
+      reason: `it does not carry the event’s words (${keys.slice(0, 4).join(', ')})`,
+    };
+  return { ok: true };
+}
+
+/**
+ * Whether a file can be a photo of a thing a line names (a televisor, an
+ * iconoscope): it names the thing in whole words, or says it depicts it.
+ * A thing is shown as it is; its year is on the chip, and the research's
+ * years only rank it.
+ */
+export function thingPhotoOf(
+  file: Pick<
+    SourceFile,
+    'title' | 'description' | 'categories' | 'depicts' | 'chosen'
+  >,
+  query: Pick<PictureQuery, 'name' | 'words'>,
+  qid: string | undefined,
+): { ok: true } | { ok: false; reason: string } {
+  const said = `${file.title} ${file.description} ${file.categories.join(' ')}`;
+  const depicted = Boolean(qid && file.depicts?.some((d) => d.qid === qid));
+  const names = query.words?.length ? query.words : [query.name];
+  if (!depicted && !names.some((n) => namesThing(said, n)))
+    return { ok: false, reason: `it does not name ${query.name}` };
   return { ok: true };
 }

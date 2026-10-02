@@ -1,8 +1,10 @@
 import {
+  agreeDoubt,
   boxOfCells,
   CELLS,
   focalFromFocus,
   focusOf,
+  personPhotoDoubt,
   photoDoubt,
   portraitDoubt,
 } from './focus';
@@ -33,13 +35,18 @@ describe("where a picture's subject is, as a model that sees names it", () => {
       subject: [1 / 6, 1 / 6, 2 / 6, 2 / 6],
       people: 30,
       kind: 'photograph',
+      shows: 'unsure',
     });
-    expect(focusOf({ kind: 'a hologram', people: -3 })).toEqual({
-      faces: null,
-      subject: null,
-      people: 0,
-      kind: 'other',
-    });
+    expect(focusOf({ kind: 'a hologram', people: -3, shows: 'maybe' })).toEqual(
+      {
+        faces: null,
+        subject: null,
+        people: 0,
+        kind: 'other',
+        shows: 'unsure',
+      },
+    );
+    expect(focusOf({ shows: 'yes' }).shows).toBe('yes');
     expect(focusOf(null).kind).toBe('other');
   });
 
@@ -81,5 +88,28 @@ describe("where a picture's subject is, as a model that sees names it", () => {
     expect(portraitDoubt(seen({ kind: 'statue' }))).toMatch(/statue/u);
     expect(photoDoubt(seen({ people: 6 }))).toBeNull();
     expect(photoDoubt(seen({ kind: 'screen' }))).toMatch(/screen/u);
+  });
+
+  it('takes a photo of an event or a thing only when the look agrees it shows it', () => {
+    const seen = (over: object) =>
+      focusOf({ subject: ['C2'], people: 3, kind: 'photograph', ...over });
+    const asked = 'an event: Nigeria becomes independent (1 October 1960)';
+    expect(agreeDoubt(seen({ shows: 'yes' }), asked)).toBeNull();
+    expect(agreeDoubt(seen({ shows: 'no' }), asked)).toBe(
+      `the look does not see ${asked} in it (no)`,
+    );
+    expect(agreeDoubt(seen({ shows: 'unsure' }), asked)).toMatch(/unsure/u);
+    // A print of it on a museum wall is no photo of it, whatever it shows.
+    expect(
+      agreeDoubt(seen({ shows: 'yes', kind: 'photograph-of-a-print' }), asked),
+    ).toMatch(/print/u);
+  });
+
+  it('takes a photo of a person among others, never one with nobody in it or a statue', () => {
+    const seen = (over: object) =>
+      focusOf({ faces: ['C2'], people: 6, kind: 'photograph', ...over });
+    expect(personPhotoDoubt(seen({}))).toBeNull();
+    expect(personPhotoDoubt(seen({ people: 0 }))).toBe('no one shows in it');
+    expect(personPhotoDoubt(seen({ kind: 'statue' }))).toMatch(/statue/u);
   });
 });

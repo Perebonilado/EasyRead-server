@@ -1,10 +1,13 @@
 import {
   eraOf,
+  eventPhotoOf,
   fitsCrop,
+  personPhotoOf,
   photoOf,
   portraitOf,
   qualityOf,
   scoreOf,
+  thingPhotoOf,
 } from './rank';
 
 const centre: [number, number, number, number] = [1 / 3, 1 / 3, 1 / 3, 1 / 3];
@@ -296,5 +299,155 @@ describe('whether a picture can serve', () => {
     };
     expect(photoOf(file, event, undefined, 1961).ok).toBe(true);
     expect(photoOf(file, event, undefined, 1963).ok).toBe(false);
+  });
+});
+
+describe('whether a picture can be one more photo of a person, of an event or of a thing', () => {
+  const bello = {
+    qid: 'Q401032',
+    name: 'Ahmadu Bello',
+    died: 1966,
+    category: 'Ahmadu Bello',
+  };
+  const file = (title: string, over: object = {}) => ({
+    title,
+    description: '',
+    categories: [] as string[],
+    ...over,
+  });
+
+  it('takes a photo of a person among others, as a portrait never would be', () => {
+    const group = file(
+      'Premier of Nigeria Sir Ahmadu Bello far right leaving the Atomic Museum',
+    );
+    expect(portraitOf(group, bello, 1960).ok).toBe(false);
+    expect(personPhotoOf(group, bello, 1960)).toEqual({ ok: true });
+    // Named in the description in full, or by surname in a file of their own category.
+    expect(
+      personPhotoOf(
+        file('Independence ceremony, Lagos', {
+          description: 'Sir Ahmadu Bello and the Governor-General',
+        }),
+        bello,
+        1960,
+      ).ok,
+    ).toBe(true);
+    expect(
+      personPhotoOf(
+        file('Bello at Kaduna airport arrival', {
+          categories: ['Ahmadu Bello'],
+        }),
+        bello,
+        1961,
+      ).ok,
+    ).toBe(true);
+    expect(personPhotoOf(file('Bello at Kaduna'), bello, 1961).ok).toBe(false);
+  });
+
+  it('never takes a likeness, a thing named after them, a photo after their death, or an undated one', () => {
+    const no = (title: string, year?: number, over: object = {}) => {
+      const fit = personPhotoOf(file(title, over), bello, year);
+      return fit.ok ? 'ok' : fit.reason;
+    };
+    expect(no('Statue of Ahmadu Bello in Kaduna', 1970)).toMatch(/likeness/u);
+    expect(no('Ahmadu Bello on a Nigerian stamp', 1966)).toMatch(/likeness/u);
+    expect(no('Ahmadu Bello University main gate', 1964)).toMatch(
+      /named after/u,
+    );
+    expect(no('Ahmadu Bello Way, Kaduna', 1964)).toMatch(/named after/u);
+    expect(
+      no('Ahmadu Bello at the opening of Kaduna Polytechnic', 1975),
+    ).toMatch(/after they died/u);
+    expect(no('Ahmadu Bello at a rally')).toMatch(/no date/u);
+    expect(
+      no('Ahmadu Bello at a rally', undefined, {
+        depicts: [{ qid: 'Q401032' }],
+      }),
+    ).toBe('ok');
+  });
+
+  const independence = {
+    name: 'Nigeria becomes independent',
+    years: [1960],
+    place: ['Nigeria'],
+    words: ['Nigeria becomes independent by act and constitutional order'],
+  };
+
+  it('takes an event’s photo of its year carrying its words: two of them, or one with its place', () => {
+    expect(
+      eventPhotoOf(
+        file(
+          'The Prime Minister, Sir Abubakar Tafawa Balewa on Independence Day, October 1, 1960',
+          {
+            categories: ['1960 in Nigeria'],
+          },
+        ),
+        independence,
+        1960,
+      ),
+    ).toEqual({ ok: true });
+    expect(
+      eventPhotoOf(
+        file('Independence constitutional order signed'),
+        independence,
+        1961,
+      ).ok,
+    ).toBe(true);
+  });
+
+  it('refuses an event’s photo of another year, with no date, without its words, or commemorating it', () => {
+    const why = (
+      title: string,
+      year: number | undefined,
+      over: object = {},
+    ) => {
+      const fit = eventPhotoOf(file(title, over), independence, year);
+      return fit.ok ? 'ok' : fit.reason;
+    };
+    expect(why('Nigerian independence parade', 1965)).toMatch(
+      /not in the event’s year/u,
+    );
+    expect(why('Nigerian independence parade', undefined)).toMatch(/no date/u);
+    expect(
+      why('A street in Lagos', 1960, { categories: ['1960 in Nigeria'] }),
+    ).toMatch(/does not carry the event’s words/u);
+    expect(why('Nigerian independence memorial plaque', 1960)).toMatch(
+      /commemorates/u,
+    );
+    expect(
+      eventPhotoOf(
+        file('Independence Day, Lagos'),
+        { ...independence, years: [] },
+        1960,
+      ).ok,
+    ).toBe(false);
+  });
+
+  it('takes a thing’s photo only when it names the thing in whole words, or depicts it', () => {
+    const iconoscope = { name: 'iconoscope', words: ['iconoscope'] };
+    expect(
+      thingPhotoOf(file('Zworykin and iconoscope'), iconoscope, undefined).ok,
+    ).toBe(true);
+    expect(thingPhotoOf(file('Iconoscopes'), iconoscope, undefined).ok).toBe(
+      true,
+    );
+    expect(
+      thingPhotoOf(file('An early camera tube'), iconoscope, undefined).ok,
+    ).toBe(false);
+    expect(
+      thingPhotoOf(
+        file('An early camera tube', { depicts: [{ qid: 'Q1570706' }] }),
+        iconoscope,
+        'Q1570706',
+      ).ok,
+    ).toBe(true);
+    // A televisor is not any television.
+    expect(
+      thingPhotoOf(
+        file('Mechanical television receiver 1927'),
+        { name: 'televisor' },
+        undefined,
+      ).ok,
+    ).toBe(false);
   });
 });

@@ -11,8 +11,12 @@
  *                  pinned), else named in words only.
  *   region:<Name>  a region of the show's one map; seam:<Name> a seam.
  *   person:<Name>  a real person of the research: a verified portrait
- *                  once the picture desk clears one (WP11); until then
+ *                  once the picture desk clears one (WP11), and photos of
+ *                  them (photo: entries that show them); without either,
  *                  only a trace of them (their own words, their place).
+ *   photo:<Name>   a photo the picture desk cleared, saying what it shows
+ *                  (shows: a person's or a place's name here, an event's
+ *                  or a thing's words), offered where the lines name it.
  *   number:<label> a number of the research, with its value and unit.
  *   date:<when>    an event of the research's timeline.
  *   claim:<id>     a claim the scene's lines rest on.
@@ -785,8 +789,9 @@ export function buildRegistry(input: RegistryInput): TargetRegistry {
   }
 
   // Pictures the desk cleared: a portrait on its person, a photo or a
-  // document as its own. A portrait never brings its person in: only a
-  // person these lines are about is on screen.
+  // document as its own (a photo of a person, a place, an event or a
+  // thing says so in `shows`). A portrait never brings its person in: only
+  // a person these lines are about is on screen.
   for (const picture of input.pictures ?? []) {
     const had = entries.find((e) => e.name === picture.name);
     if (had && picture.picture) had.picture = picture.picture;
@@ -809,6 +814,14 @@ export function buildRegistry(input: RegistryInput): TargetRegistry {
 }
 
 // ── The registry in the board's prompt ────────────────────────────────────
+
+/** What a photo shows, as the board's list says it: "(shows person:Ahmadu Bello)", "(shows an event)". */
+export function showsWords(shows: RegistryEntry['shows']): string {
+  if (!shows) return '';
+  if (shows.kind === 'person' || shows.kind === 'place')
+    return ` (shows ${shows.name})`;
+  return ` (shows ${shows.kind === 'event' ? 'an event' : 'a thing'})`;
+}
 
 /** What a scene may name, as the board's prompt lists it: by kind, a line each. */
 export function promptList(registry: TargetRegistry): string {
@@ -836,22 +849,33 @@ export function promptList(registry: TargetRegistry): string {
     'Seams of the show’s map (draw one with "seam"):',
     of('seam').map((e) => `- ${e.name}: ${e.about}`),
   );
+  // The photos that show each person, so the board comes back to them
+  // with another picture rather than the same one again.
+  const photosOf = (person: RegistryEntry) =>
+    of('photo')
+      .filter((p) => p.shows?.kind === 'person' && p.shows.name === person.name)
+      .map((p) => p.name);
   section(
-    'People (a portrait only for one marked [portrait]; a person with neither a portrait nor a trace is never on screen):',
-    of('person').map(
-      (e) =>
-        `- ${e.name}${e.picture ? ' [portrait]' : ''}: ${e.about}${
-          e.picture
-            ? ''
-            : e.trace
-              ? ` · no portrait; show their trace: ${e.trace.kind === 'quote' ? `their own words, ${e.trace.ref}` : `their place, ${e.trace.ref}`}`
-              : ' · no portrait, no trace: never on screen'
-        }`,
-    ),
+    'People (a portrait only for one marked [portrait]; their photos are listed with them; a person with no portrait, no photo and no trace is never on screen):',
+    of('person').map((e) => {
+      const photos = photosOf(e);
+      const theirs = photos.length
+        ? ` · photos of them: ${photos.join(', ')}`
+        : '';
+      return `- ${e.name}${e.picture ? ' [portrait]' : ''}: ${e.about}${
+        e.picture || photos.length
+          ? `${e.picture ? '' : ' · no portrait'}${theirs}`
+          : e.trace
+            ? ` · no portrait; show their trace: ${e.trace.kind === 'quote' ? `their own words, ${e.trace.ref}` : `their place, ${e.trace.ref}`}`
+            : ' · no portrait, no trace: never on screen'
+      }`;
+    }),
   );
   section(
-    'Pictures (archive photos and documents the picture desk cleared):',
-    [...of('photo'), ...of('document')].map((e) => `- ${e.name}: ${e.about}`),
+    'Pictures (real photos and documents the picture desk cleared; each says what it shows):',
+    [...of('photo'), ...of('document')].map(
+      (e) => `- ${e.name}${showsWords(e.shows)}: ${e.about}`,
+    ),
   );
   section(
     'Numbers (count or grow them; code writes the value):',

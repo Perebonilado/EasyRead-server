@@ -144,7 +144,7 @@ export function sameName(a: string, b: string): boolean {
 }
 
 /** The words that say something, each cut to its stem's first six letters ("Nigerian" and "Nigeria" are one). */
-function stems(text: string): Set<string> {
+export function stems(text: string): Set<string> {
   return new Set(
     text
       .normalize('NFD')

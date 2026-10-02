@@ -26,6 +26,7 @@ import { NestFactory } from '@nestjs/core';
 import { CoreModule } from '../src/core.module';
 import type { PictureDesk } from '../src/business/domain/pictures/desk';
 import {
+  countsOf,
   deskPass,
   passQuestions,
 } from '../src/business/domain/pictures/episode';
@@ -154,17 +155,24 @@ async function main(): Promise<void> {
       input = TELEVISION;
       console.log(`The first years of television: ${input.rows.length} lines`);
     }
-    for (const q of passQuestions(input))
-      console.log(`  asks: ${q.for} ${JSON.stringify(q.query)}`);
+    const questions = passQuestions(input);
+    for (const q of questions)
+      console.log(`  asks: ${q.shows.kind} ${JSON.stringify(q.query)}`);
+    const asked = (kind: string) =>
+      questions.filter((q) => q.shows.kind === kind).length;
     const pictures = await deskPass(desk, input, {
       log: (m) => console.log(`  ${m}`),
       onUsage,
     });
     console.log(`\nCleared ${pictures.entries.length}:`);
-    for (const { entry, place: shows } of pictures.entries)
+    for (const { entry, offer } of pictures.entries)
       console.log(
-        `  ${entry.name}${shows ? ` (offered where the lines name ${shows})` : ''}\n    ${entry.picture?.credit}\n    ${entry.picture?.fullCredit}`,
+        `  ${entry.name}${entry.shows ? ` (shows ${entry.shows.kind}: ${entry.shows.name})` : ' (portrait)'}${offer.kind === 'event' ? '' : ` offered where the lines name ${offer.name}`}\n    ${entry.about}\n    ${entry.picture?.credit}\n    ${entry.picture?.fullCredit}`,
       );
+    const counts = countsOf(pictures);
+    console.log(
+      `\nBy kind: people ${counts.portraits} portraits + ${counts.person} more photos (of ${asked('person')} asked); places ${counts.place} (of ${asked('place')}); events ${counts.event} (of ${asked('event')}); things ${counts.thing} (of ${asked('thing')})`,
+    );
     console.log(`\nSpend: ${spend()}`);
     const out = option('--out');
     if (out) {

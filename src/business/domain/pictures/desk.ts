@@ -46,26 +46,33 @@ import {
 } from './credit';
 import { contentBox, isMono } from './depth';
 import {
+  agreeDoubt,
   focalFromFocus,
   focusOf,
   GRID,
+  personPhotoDoubt,
   photoDoubt,
   portraitDoubt,
   type Focus,
+  type Shows,
 } from './focus';
 import { licenceUnder, type LicenceMode } from './licence';
-import { matchPerson, matchPlace, nameWords } from './match';
+import { matchPerson, matchPlace, nameWords, textWords } from './match';
 import {
+  eventPhotoOf,
   LEAST_PX,
+  personPhotoOf,
   photoOf,
   portraitOf,
   qualityOf,
   scoreOf,
+  thingPhotoOf,
   useOf,
   type PictureUse,
 } from './rank';
 import type {
   PictureCandidate,
+  PictureKind,
   PictureQuery,
   PictureRecord,
   PixelBox,
@@ -90,6 +97,8 @@ export interface DeskDeps {
     | ((input: {
         png: Buffer;
         about: string;
+        /** What a picture of an event or a thing should show, for the look to agree it does. */
+        asked?: string;
       }) => Promise<{ value: Record<string, unknown>; usage: LlmUsage }>)
     | null;
   /**
@@ -129,6 +138,125 @@ const FROM_SEARCH = 15;
 
 /** How many of a question's best pictures are tried before none is taken. */
 const TRIES = 3;
+
+/**
+ * How many distinct pictures one question may bring (Richard, 2026-10-02:
+ * "scenes that change often to relatable things"): a person's portrait and
+ * two more photos of them, two of a place or an event, one of a thing.
+ */
+export const MOST: Readonly<Record<PictureKind, number>> = {
+  person: 3,
+  place: 2,
+  event: 2,
+  object: 1,
+  document: 1,
+};
+
+/** What the desk finds for a question. */
+export interface Found {
+  /** A person's portraits; else photos of the place, the event, the thing. Each cleared, the best first. */
+  found: PictureCandidate[];
+  /** A person's photos among others, the best first. */
+  photos?: PictureCandidate[];
+  reason?: string;
+  qid?: string;
+  person?: WikiPerson;
+}
+
+/** Words an event's search leaves out: the small words, and verbs that name no one and nothing. */
+const SEARCH_STOP = new Set([
+  'the',
+  'and',
+  'of',
+  'to',
+  'in',
+  'on',
+  'at',
+  'by',
+  'for',
+  'with',
+  'from',
+  'into',
+  'its',
+  'their',
+  'his',
+  'her',
+  'as',
+  'is',
+  'are',
+  'was',
+  'were',
+  'all',
+  'new',
+  'first',
+  'after',
+  'before',
+  'over',
+  'out',
+  'path',
+  'who',
+  'which',
+  'that',
+  'this',
+]);
+
+/**
+ * The words to search by for an event, from the research's own: its
+ * names first (people, bodies, places: "Baird", "BBC", "Royal
+ * Institution"), then its other words in the research's order, the verbs
+ * ("demonstrates", "opens") last; at most four.
+ */
+export function searchWordsOf(words: readonly string[]): string[] {
+  const all = words
+    .flatMap((w) => w.split(/[^\p{L}\p{N}'’]+/u))
+    .map((w) => w.replace(/^['’]+|['’]+$/gu, ''))
+    .filter(
+      (w) =>
+        w.length >= 3 && !SEARCH_STOP.has(w.toLowerCase()) && !/^\d+$/u.test(w),
+    );
+  const unique = [...new Map(all.map((w) => [w.toLowerCase(), w])).values()];
+  const named = unique.filter((w) => /^\p{Lu}/u.test(w));
+  const verb = (w: string) => /[^s]s$/u.test(w) && !/(?:ss|us|is)$/u.test(w);
+  const rest = unique.filter((w) => !/^\p{Lu}/u.test(w));
+  return [
+    ...named,
+    ...rest.filter((w) => !verb(w)),
+    ...rest.filter(verb),
+  ].slice(0, 4);
+}
+
+/** A name's plain words, as one string. */
+const textWordsOf = (text: string) => textWords(text).join(' ');
+
+/** What the look said a kept copy shows when asked this; undefined when it was never asked. */
+function agreedOf(
+  meta: Record<string, unknown> | null | undefined,
+  asked: string,
+): Shows | undefined {
+  const agrees = meta?.agrees;
+  return agrees && typeof agrees === 'object'
+    ? (agrees as Record<string, Shows>)[asked]
+    : undefined;
+}
+
+/** How many questions' answers a copy keeps. */
+const AGREES_KEPT = 12;
+
+/** A copy's record with what was seen of it now, its answers to earlier questions kept (the newest last). */
+function withSeen(
+  had: Record<string, unknown> | null,
+  seen: Record<string, unknown>,
+): Record<string, unknown> {
+  const agrees = Object.entries({
+    ...((had?.agrees as Record<string, Shows> | undefined) ?? {}),
+    ...((seen.agrees as Record<string, Shows> | undefined) ?? {}),
+  }).slice(-AGREES_KEPT);
+  return {
+    ...(had ?? {}),
+    ...seen,
+    ...(agrees.length ? { agrees: Object.fromEntries(agrees) } : {}),
+  };
+}
 
 /** The least score a picture is used at (house): under it, no picture is better. */
 export const PICK_LEAST = 0.4;
@@ -217,56 +345,108 @@ export class PictureDesk {
 
   // ── Finding ──────────────────────────────────────────────────────────────
 
-  /** Every cleared picture of what is asked, the best first; none when nothing is surely of it. */
-  async find(query: PictureQuery): Promise<{
-    found: PictureCandidate[];
-    reason?: string;
-    qid?: string;
-    person?: WikiPerson;
-  }> {
+  /**
+   * Every cleared picture of what is asked, the best first; none when
+   * nothing is surely of it. For a person, their portraits (`found`) and
+   * the photos of them among others (`photos`); for a place, its photos
+   * from the research's years, else any good photo of it; for an event,
+   * photos taken that year that carry its words; for a thing, photos that
+   * name it.
+   */
+  async find(query: PictureQuery): Promise<Found> {
+    if (query.kind === 'person') return this.findPerson(query);
+    if (query.kind === 'event') return this.findEvent(query);
+    if (query.kind === 'object') return this.findThing(query);
+    const found = await this.findPlace(query);
+    // A place in the research's years first; else any good photo of it,
+    // its year on its chip (Richard, 2026-10-02: places shown by pictures,
+    // not only the map).
+    if (found.found.length || !query.years?.length || query.kind !== 'place')
+      return found;
+    const { years: _years, ...anyYear } = query;
+    void _years;
+    const any = await this.findPlace(anyYear);
+    return any.found.length
+      ? {
+          ...any,
+          found: any.found.map((c) => ({
+            ...c,
+            notes: [...c.notes, 'none from the research’s years: any year'],
+          })),
+        }
+      : found;
+  }
+
+  private async findPerson(query: PictureQuery): Promise<Found> {
+    const ids = await this.ids(query);
+    let people = ids.length ? await this.deps.sources.people(ids) : [];
+    let match = matchPerson(query, people);
+    // Wikidata's name search gives a name's best-known holders first;
+    // the one the research means may not be among them (seven James
+    // Robertsons before Nigeria's last governor-general). When the name
+    // alone found no one surely theirs, it is asked again with a word of
+    // the research's for them: their place, their post.
+    if (match.qid === null || match.facts.length < 2) {
+      const more = await this.textIds(query, new Set(ids));
+      if (more.length) {
+        people = [
+          ...people,
+          ...(await this.safely(() => this.deps.sources.people(more), [])),
+        ];
+        match = matchPerson(query, people);
+      }
+    }
+    if (match.qid === null) return { found: [], reason: match.reason };
+    const person = match.person;
+    const files = await this.filesOf(
+      person.images,
+      match.qid,
+      person.category,
+      FETCH_WIDTH.portrait,
+    );
+    const found = await this.judge(files, query, 'portrait', match.qid, person);
+    // More photos of them (Richard, 2026-10-02: "real people first", and
+    // the board comes back to them without one image again): the same
+    // files as photos, others may stand with them, and the files that
+    // name them with their place.
+    const place = [query.place ?? []].flat().find(Boolean);
+    const named = await this.safely(
+      () =>
+        this.deps.sources.commonsSearch(
+          `${nameWords(person.label).join(' ') || nameWords(query.name).join(' ')}${place ? ` ${place}` : ''}`,
+          FROM_SEARCH,
+          FETCH_WIDTH.photo,
+        ),
+      [],
+    );
+    const photos = await this.widen(
+      await this.judge(
+        this.unique([...files, ...named]),
+        query,
+        'photo',
+        match.qid,
+        person,
+      ),
+    );
+    return {
+      found,
+      photos,
+      qid: match.qid,
+      person,
+      ...(found.length || photos.length
+        ? {}
+        : { reason: `no picture of ${person.label} clears` }),
+    };
+  }
+
+  /** A place's (or a document's) photos, as the desk has always looked for them. */
+  private async findPlace(query: PictureQuery): Promise<Found> {
     const use = useOf(query.kind);
     const width = FETCH_WIDTH[use];
-    if (query.kind === 'person') {
-      const ids = await this.ids(query);
-      let people = ids.length ? await this.deps.sources.people(ids) : [];
-      let match = matchPerson(query, people);
-      // Wikidata's name search gives a name's best-known holders first;
-      // the one the research means may not be among them (seven James
-      // Robertsons before Nigeria's last governor-general). When the name
-      // alone found no one surely theirs, it is asked again with a word of
-      // the research's for them: their place, their post.
-      if (match.qid === null || match.facts.length < 2) {
-        const more = await this.textIds(query, new Set(ids));
-        if (more.length) {
-          people = [
-            ...people,
-            ...(await this.safely(() => this.deps.sources.people(more), [])),
-          ];
-          match = matchPerson(query, people);
-        }
-      }
-      if (match.qid === null) return { found: [], reason: match.reason };
-      const person = match.person;
-      const files = await this.filesOf(
-        person.images,
-        match.qid,
-        person.category,
-        width,
-      );
-      const found = await this.judge(files, query, use, match.qid, person);
-      return {
-        found,
-        qid: match.qid,
-        person,
-        ...(found.length
-          ? {}
-          : { reason: `no picture of ${person.label} clears` }),
-      };
-    }
     let qid: string | undefined;
     let images: readonly string[] = [];
     let category: string | undefined;
-    if (query.kind === 'place' || query.kind === 'object' || query.qid) {
+    if (query.kind === 'place' || query.qid) {
       const ids = await this.ids(query);
       const items = ids.length ? await this.deps.sources.items(ids) : [];
       const match = matchPlace(query, items);
@@ -309,33 +489,164 @@ export class PictureDesk {
         [],
       )),
     );
-    if (query.kind === 'object' || query.kind === 'document') {
-      files.push(
-        ...(await this.safely(
-          () => this.deps.sources.metSearch(query.name, 6),
-          [],
-        )),
-      );
-      const years = query.years?.length
-        ? {
-            yearStart: Math.min(...query.years) - 1,
-            yearEnd: Math.max(...query.years) + 1,
-          }
-        : {};
-      files.push(
-        ...(await this.safely(
-          () =>
-            this.deps.sources.nasaSearch(query.name, { limit: 6, ...years }),
-          [],
-        )),
-      );
-    }
+    if (query.kind === 'document') files.push(...(await this.museums(query)));
     const found = await this.judge(this.unique(files), query, use, qid);
     return {
       found,
       ...(qid ? { qid } : {}),
       ...(found.length ? {} : { reason: `no picture of ${query.name} clears` }),
     };
+  }
+
+  /**
+   * An event's photos: Commons searched by its own words (the names in
+   * them first) with its year, and with its place; and the year's photos
+   * of its country. Only a photo of that year carrying its words clears
+   * (eventPhotoOf), and only one the look agrees shows it is taken.
+   */
+  private async findEvent(query: PictureQuery): Promise<Found> {
+    const width = FETCH_WIDTH.photo;
+    const year = [...(query.years ?? [])].sort((a, b) => a - b)[0];
+    if (year === undefined)
+      return { found: [], reason: `the research gives ${query.name} no year` };
+    const keys = searchWordsOf(query.words ?? [query.name]);
+    const named = keys.filter((w) => /^\p{Lu}/u.test(w));
+    const plain = keys.find((w) => !/^\p{Lu}/u.test(w));
+    // Where it happened, as its first words ("Alexandra Palace" of
+    // "Alexandra Palace, London"): the place a photo of it names.
+    const place = [query.place ?? []]
+      .flat()
+      .find(Boolean)
+      ?.split(',')[0]
+      ?.trim();
+    const asks = [
+      // A name and what happened: "Baird television 1926".
+      [keys[0], plain ?? keys[1], year],
+      // Its names together: "BBC Television Service 1936".
+      ...(named.length >= 2 ? [[...named.slice(0, 3), year]] : []),
+      // Its place and what happened: "Alexandra Palace BBC 1936".
+      ...(place ? [[place, plain ?? named[0], year]] : []),
+    ].map((words) => words.filter(Boolean).join(' '));
+    const files: SourceFile[] = [];
+    for (const words of [...new Set(asks)])
+      files.push(
+        ...(await this.safely(
+          () => this.deps.sources.commonsSearch(words, FROM_SEARCH, width),
+          [],
+        )),
+      );
+    const country = [query.place ?? []].flat().at(-1);
+    if (country)
+      files.push(
+        ...(await this.safely(
+          () =>
+            this.deps.sources.commonsCategory(
+              `${year} in ${country}`,
+              FROM_CATEGORY,
+              width,
+            ),
+          [],
+        )),
+      );
+    const found = await this.judge(this.unique(files), query, 'photo');
+    return {
+      found,
+      ...(found.length ? {} : { reason: `no picture of ${query.name} clears` }),
+    };
+  }
+
+  /**
+   * A thing's photos: its own Wikidata item's picture and Commons
+   * category, Commons searched by its name, and the Met's and NASA's
+   * collections; only a file that names it (thingPhotoOf) clears, ranked
+   * nearest the research's years, and only one the look agrees shows it
+   * is taken.
+   */
+  private async findThing(query: PictureQuery): Promise<Found> {
+    const width = FETCH_WIDTH.photo;
+    const ids = await this.ids(query);
+    const items = ids.length
+      ? await this.safely(() => this.deps.sources.items(ids), [])
+      : [];
+    const item = items.find((i) =>
+      [i.label, ...i.aliases].some(
+        (n) =>
+          nameWords(n).join(' ') === nameWords(query.name).join(' ') ||
+          textWordsOf(n).includes(textWordsOf(query.name)),
+      ),
+    );
+    const files: SourceFile[] = item
+      ? await this.filesOf(item.images, item.qid, item.category, width)
+      : [];
+    files.push(
+      ...(await this.safely(
+        () => this.deps.sources.commonsSearch(query.name, FROM_SEARCH, width),
+        [],
+      )),
+      ...(await this.museums(query)),
+    );
+    const found = await this.judge(
+      this.unique(files),
+      query,
+      'photo',
+      item?.qid,
+    );
+    return {
+      found,
+      ...(item ? { qid: item.qid } : {}),
+      ...(found.length ? {} : { reason: `no picture of ${query.name} clears` }),
+    };
+  }
+
+  /** The Met's and NASA's files for a thing or a document, in the research's years when it gives some. */
+  private async museums(query: PictureQuery): Promise<SourceFile[]> {
+    const years = query.years?.length
+      ? {
+          yearStart: Math.min(...query.years) - 1,
+          yearEnd: Math.max(...query.years) + 1,
+        }
+      : {};
+    return [
+      ...(await this.safely(
+        () => this.deps.sources.metSearch(query.name, 6),
+        [],
+      )),
+      ...(await this.safely(
+        () => this.deps.sources.nasaSearch(query.name, { limit: 6, ...years }),
+        [],
+      )),
+    ];
+  }
+
+  /**
+   * Photos chosen from a portrait's files, at the photo's width: Commons
+   * is asked again for their copies wide enough to fill a frame (one
+   * request for all), so a photo of a person is not a portrait's print.
+   */
+  private async widen(found: PictureCandidate[]): Promise<PictureCandidate[]> {
+    const narrow = found
+      .slice(0, TRIES + MOST.person)
+      .filter(
+        (c) =>
+          c.file.source === 'commons' &&
+          c.file.thumb &&
+          c.file.thumb.width < FETCH_WIDTH.photo &&
+          c.file.thumb.width < c.file.width,
+      );
+    if (!narrow.length) return found;
+    const wide = await this.safely(
+      () =>
+        this.deps.sources.commonsFiles(
+          narrow.map((c) => c.file.sourceId),
+          FETCH_WIDTH.photo,
+        ),
+      [],
+    );
+    const bySource = new Map(wide.map((f) => [f.sourceId, f]));
+    return found.map((c) => {
+      const got = bySource.get(c.file.sourceId);
+      return got?.thumb ? { ...c, file: { ...c.file, thumb: got.thumb } } : c;
+    });
   }
 
   /** The best cleared picture, when it is good enough to show. */
@@ -443,8 +754,10 @@ export class PictureDesk {
 
   /**
    * The files that clear, scored: licence and provenance first (a refusal
-   * is kept), then whether it can serve (a portrait alone, a photo that
-   * names it in its years), then big enough to show.
+   * is kept), then whether it can serve (a portrait of them alone; a photo
+   * of them among others; a photo that names the place in its years; an
+   * event's, of its year and with its words; a thing's, naming it), then
+   * big enough to show.
    */
   private async judge(
     files: readonly SourceFile[],
@@ -465,18 +778,24 @@ export class PictureDesk {
         await this.refused(file, licence.reason, qid);
         continue;
       }
+      const them = person
+        ? {
+            qid: person.qid,
+            name: query.name,
+            ...(person.died !== undefined ? { died: person.died } : {}),
+            ...(person.category ? { category: person.category } : {}),
+          }
+        : null;
       const fit =
-        use === 'portrait' && person
-          ? portraitOf(
-              file,
-              {
-                qid: person.qid,
-                name: query.name,
-                ...(person.died !== undefined ? { died: person.died } : {}),
-              },
-              year,
-            )
-          : photoOf(file, query, qid, year);
+        use === 'portrait' && them
+          ? portraitOf(file, them, year)
+          : them
+            ? personPhotoOf(file, them, year)
+            : query.kind === 'event'
+              ? eventPhotoOf(file, query, year)
+              : query.kind === 'object'
+                ? thingPhotoOf(file, query, qid)
+                : photoOf(file, query, qid, year);
       if (!fit.ok) continue;
       if (Math.max(file.width, file.height) < LEAST_PX[use]) continue;
       const focal = focalOf(file, qid);
@@ -499,6 +818,7 @@ export class PictureDesk {
         file,
         licence,
         kind: query.kind,
+        use,
         subject,
         ...(qid ? { qid } : {}),
         ...(year !== undefined ? { year } : {}),
@@ -571,9 +891,12 @@ export class PictureDesk {
       role?: string;
       /** Each model call the look at it made, for the ledger. */
       onUsage?: (usage: LlmUsage) => void;
+      /** What a picture of an event or a thing must show: taken only when the look agrees. */
+      asked?: string;
     } = {},
   ): Promise<PictureRecord | null> {
     const { file } = candidate;
+    const asked = opts.asked;
     const had = await this.deps.cache.bySource(file.source, file.sourceId);
     // The copy this use wants: the source's sized one where it made one.
     const sized = Boolean(file.thumb && file.thumb.width < file.width);
@@ -585,18 +908,22 @@ export class PictureDesk {
       (await this.stored(had.storageKey))
     ) {
       // Kept, its words as the desk writes them now; looked at again
-      // (its colour, its border, its subject) when the desk's rules changed.
+      // (its colour, its border, its subject) when the desk's rules changed,
+      // or when it is asked of an event or a thing it was never asked of.
       const stale =
         (had.meta as { rules?: number } | null)?.rules !== DESK_RULES;
+      const unasked = Boolean(
+        asked && this.deps.focus && !agreedOf(had.meta, asked),
+      );
       const storage = this.deps.storage as Partial<Pick<StoragePort, 'get'>>;
       const bytes =
-        stale && storage.get
+        (stale || unasked) && storage.get
           ? await this.safely(() => storage.get!(had.storageKey!), null)
           : null;
       const size = bytes ? this.deps.pixels.measure(bytes) : null;
       const seen =
         bytes && size
-          ? await this.seen(candidate, bytes, size, opts.onUsage)
+          ? await this.seen(candidate, bytes, size, opts.onUsage, asked)
           : null;
       const fresh =
         !seen && had.chip === candidate.chip && had.credit === candidate.credit
@@ -610,11 +937,11 @@ export class PictureDesk {
               ...(seen
                 ? {
                     focal: seen.focal,
-                    meta: { ...(had.meta ?? {}), ...seen.meta },
+                    meta: withSeen(had.meta, seen.meta),
                   }
                 : {}),
             });
-      const doubt = this.doubtOf(candidate, fresh.meta);
+      const doubt = this.doubtOf(candidate, fresh.meta, asked);
       if (doubt) {
         this.log(`pictures: ${file.sourceId} will not do: ${doubt}`);
         return null;
@@ -644,7 +971,13 @@ export class PictureDesk {
       });
       storageKey = stored.ref;
     }
-    const seen = await this.seen(candidate, got.bytes, size, opts.onUsage);
+    const seen = await this.seen(
+      candidate,
+      got.bytes,
+      size,
+      opts.onUsage,
+      asked,
+    );
     const row = await this.deps.cache.save({
       ...this.blank(file.source, file.sourceId),
       ...(had ? { id: had.id } : {}),
@@ -663,7 +996,7 @@ export class PictureDesk {
       mime: size.mime,
       storageKey,
       depthKey: twin?.depthKey ?? null,
-      meta: {
+      meta: withSeen(had?.meta ?? null, {
         code: candidate.licence.code,
         tier: candidate.licence.tier,
         flags: candidate.licence.flags,
@@ -675,11 +1008,11 @@ export class PictureDesk {
         artist: file.artist,
         licenceName: file.licenceName,
         categories: file.categories.slice(0, 40),
-      },
+      }),
       refusedReason: null,
     });
     // Kept either way (another use may take it), but not for this one when what was seen says no.
-    const doubt = this.doubtOf(candidate, row.meta);
+    const doubt = this.doubtOf(candidate, row.meta, asked);
     if (doubt) {
       this.log(`pictures: ${file.sourceId} will not do: ${doubt}`);
       return null;
@@ -698,6 +1031,7 @@ export class PictureDesk {
     bytes: Buffer,
     size: { width: number; height: number },
     onUsage?: (usage: LlmUsage) => void,
+    asked?: string,
   ): Promise<{ focal: PixelBox; meta: Record<string, unknown> }> {
     const small = await this.safely(
       () => this.deps.pixels.pixels(bytes, 256),
@@ -717,6 +1051,7 @@ export class PictureDesk {
               this.deps.focus!({
                 png,
                 about: `${candidate.subject}${candidate.year ? `, ${candidate.year}` : ''}: ${candidate.file.title}`,
+                ...(asked ? { asked } : {}),
               }),
             null,
           )
@@ -749,19 +1084,34 @@ export class PictureDesk {
         ...(small ? { mono: isMono(small) } : {}),
         ...(crop ? { crop } : {}),
         ...(focus ? { focus } : {}),
+        // Whether it shows what it was asked to, kept by the question.
+        ...(focus && asked ? { agrees: { [asked]: focus.shows } } : {}),
       },
     };
   }
 
-  /** Why a kept copy cannot serve this use, by what was seen of it; null when it can. */
+  /**
+   * Why a kept copy cannot serve this use, by what was seen of it; null
+   * when it can. A portrait is of one person; a photo of a person shows
+   * someone; a photo of an event or a thing is taken only when the look
+   * agreed it shows it (with no look to ask, none is).
+   */
   private doubtOf(
     candidate: PictureCandidate,
     meta: Record<string, unknown> | null,
+    asked?: string,
   ): string | null {
     const focus = (meta?.focus ?? null) as Focus | null;
+    if (candidate.use === 'portrait')
+      return focus ? portraitDoubt(focus) : null;
+    if (asked) {
+      const agreed = agreedOf(meta, asked);
+      if (!focus || !agreed) return 'no look has said it shows what was asked';
+      return agreeDoubt({ ...focus, shows: agreed }, asked);
+    }
     if (!focus) return null;
     return candidate.kind === 'person'
-      ? portraitDoubt(focus)
+      ? personPhotoDoubt(focus)
       : photoDoubt(focus);
   }
 
@@ -804,9 +1154,12 @@ export class PictureDesk {
   private recordOf(
     row: PictureCacheRow,
     candidate: PictureCandidate | null,
-    opts: { person?: WikiPerson; role?: string } = {},
+    opts: { person?: WikiPerson; role?: string; use?: PictureUse } = {},
   ): PictureRecord {
     const meta = row.meta ?? {};
+    const use = opts.use ?? candidate?.use;
+    const title =
+      typeof meta.title === 'string' ? meta.title : candidate?.file.title;
     const person = opts.person;
     const dates = person
       ? lifeOf(person.born, person.died)
@@ -845,20 +1198,38 @@ export class PictureDesk {
         : {}),
       ...(dates ? { dates } : {}),
       ...(role ? { role } : {}),
+      ...(use ? { use } : {}),
+      ...(title ? { title } : {}),
     };
   }
 
   // ── The question, answered once ──────────────────────────────────────────
 
   /**
-   * The picture for a question, from the cache when it was answered in the
-   * last 30 days; else found, picked and taken, and the answer kept (which
-   * picture, or none and why). Null when nothing clears.
+   * The picture for a question: a person's portrait, else the first photo
+   * of what is asked (lookupAll's answer, from the cache when it was given
+   * in the last 30 days). Null when nothing clears.
    */
   async lookup(
     query: PictureQuery,
     opts: { depth?: boolean; onUsage?: (usage: LlmUsage) => void } = {},
   ): Promise<PictureRecord | null> {
+    const all = await this.lookupAll(query, opts);
+    return all.find((r) => r.use === useOf(query.kind)) ?? null;
+  }
+
+  /**
+   * Every picture a question brings, distinct files and bytes, the best
+   * first: for a person, their portrait and up to two more photos of them;
+   * for a place or an event, two; for a thing, one (MOST). From the cache
+   * when it was answered in the last 30 days under these rules and this
+   * licence switch; else found, picked and taken, and the answer kept
+   * (which pictures, or none and why). Empty when nothing clears.
+   */
+  async lookupAll(
+    query: PictureQuery,
+    opts: { depth?: boolean; onUsage?: (usage: LlmUsage) => void } = {},
+  ): Promise<PictureRecord[]> {
     const key = lookupKey(query);
     const asked = await this.safely(
       () => this.deps.cache.bySource('lookup', key),
@@ -878,87 +1249,117 @@ export class PictureDesk {
       this.now().getTime() - asked.checkedAt.getTime() < LOOKUP_DAYS * DAY_MS;
     if (asked && fresh) {
       const meta = (asked.meta ?? {}) as {
-        picked?: string;
+        picked?: string | null;
+        taken?: { id: string; use: PictureUse }[];
         person?: WikiPerson;
         role?: string;
       };
-      if (!meta.picked) return null;
-      const row = await this.safely(
-        () => this.deps.cache.find(meta.picked!),
-        null,
-      );
-      // The picture as it was seen under these rules, and still kept.
-      if (
-        row?.storageKey &&
-        !row.refusedReason &&
-        (row.meta as { rules?: number } | null)?.rules === DESK_RULES &&
-        (await this.stored(row.storageKey))
-      ) {
+      const taken =
+        meta.taken ??
+        (meta.picked ? [{ id: meta.picked, use: useOf(query.kind) }] : []);
+      const records: PictureRecord[] = [];
+      for (const one of taken) {
+        const row = await this.safely(() => this.deps.cache.find(one.id), null);
+        // The picture as it was seen under these rules, and still kept.
+        if (
+          !row?.storageKey ||
+          row.refusedReason ||
+          (row.meta as { rules?: number } | null)?.rules !== DESK_RULES ||
+          !(await this.stored(row.storageKey))
+        )
+          break;
         const kept = await this.withDepthFromStore(row, opts.depth ?? true);
-        return this.recordOf(kept, null, {
-          ...(meta.person ? { person: meta.person } : {}),
-          ...(meta.role !== undefined ? { role: meta.role } : {}),
-        });
+        records.push(
+          this.recordOf(kept, null, {
+            ...(meta.person ? { person: meta.person } : {}),
+            ...(meta.role !== undefined ? { role: meta.role } : {}),
+            use: one.use,
+          }),
+        );
       }
+      if (records.length === taken.length) return records;
     }
-    const result = await this.safely(() => this.find(query), {
+    const result: Found = await this.safely(() => this.find(query), {
       found: [] as PictureCandidate[],
       reason: 'the sources could not be reached',
     });
-    // The best that will do: each in turn, from the best down, while it scores enough.
-    const best = this.pick(result.found);
-    let record: PictureRecord | null = null;
-    for (const candidate of best
-      ? result.found.filter((c) => c.score >= PICK_LEAST).slice(0, TRIES)
-      : []) {
-      record = await this.safely(
-        () =>
-          this.take(candidate, {
-            depth: opts.depth ?? true,
-            ...('person' in result && result.person
-              ? { person: result.person }
-              : {}),
-            ...(query.role !== undefined ? { role: query.role } : {}),
-            ...(opts.onUsage ? { onUsage: opts.onUsage } : {}),
-          }),
-        null,
-      );
-      if (record) break;
-    }
-    const reason = record
+    const records: PictureRecord[] = [];
+    // The best that will do from a pool, each in turn from the best down
+    // while it scores enough, until there are `upTo` in all: never a file
+    // or the same bytes twice.
+    const takeFrom = async (
+      pool: readonly PictureCandidate[],
+      upTo: number,
+    ): Promise<void> => {
+      let tries = TRIES + Math.max(0, upTo - records.length - 1);
+      for (const candidate of pool) {
+        if (records.length >= upTo || tries <= 0) break;
+        if (candidate.score < PICK_LEAST) break;
+        if (records.some((r) => r.sourceId === candidate.file.sourceId))
+          continue;
+        tries -= 1;
+        const record = await this.safely(
+          () =>
+            this.take(candidate, {
+              depth: opts.depth ?? true,
+              ...(result.person ? { person: result.person } : {}),
+              ...(query.role !== undefined ? { role: query.role } : {}),
+              ...(opts.onUsage ? { onUsage: opts.onUsage } : {}),
+              ...(query.asked ? { asked: query.asked } : {}),
+            }),
+          null,
+        );
+        if (
+          record &&
+          !records.some(
+            (r) => r.id === record.id || (r.sha1 && r.sha1 === record.sha1),
+          )
+        )
+          records.push(record);
+      }
+    };
+    const most = MOST[query.kind];
+    if (query.kind === 'person') {
+      await takeFrom(result.found, 1);
+      await takeFrom(result.photos ?? [], most);
+    } else await takeFrom(result.found, most);
+    const best = this.pick([...result.found, ...(result.photos ?? [])]);
+    const reason = records.length
       ? null
       : (result.reason ??
         (best
-          ? 'it could not be fetched'
+          ? 'it could not be fetched, or the look would not have it'
           : `nothing scored ${PICK_LEAST} or more`));
     await this.safely(
       () =>
         this.deps.cache.save({
           ...this.blank('lookup', key),
           ...(asked ? { id: asked.id } : {}),
-          qid: ('qid' in result && result.qid) || null,
+          qid: result.qid ?? null,
           kind: query.kind,
           subject: query.name.slice(0, 255),
           meta: {
             rules: DESK_RULES,
             licence: this.licence,
-            picked: record?.id ?? null,
-            ...('person' in result && result.person
-              ? { person: result.person }
-              : {}),
+            picked: records[0]?.id ?? null,
+            taken: records.map((r) => ({ id: r.id, use: r.use })),
+            ...(result.person ? { person: result.person } : {}),
             ...(query.role !== undefined ? { role: query.role } : {}),
-            candidates: result.found.slice(0, 5).map((c) => ({
-              file: c.file.sourceId,
-              score: c.score,
-              chip: c.chip,
-            })),
+            candidates: [...result.found, ...(result.photos ?? [])]
+              .slice(0, 6)
+              .map((c) => ({
+                file: c.file.sourceId,
+                use: c.use,
+                score: c.score,
+                chip: c.chip,
+              })),
           },
           refusedReason: reason ? reason.slice(0, 512) : null,
         }),
       null,
     );
     if (reason) this.log(`pictures: ${query.kind} "${query.name}": ${reason}`);
-    return record;
+    return records;
   }
 
   /** A cached picture's depth made when it was taken without it (depth switched on later). */

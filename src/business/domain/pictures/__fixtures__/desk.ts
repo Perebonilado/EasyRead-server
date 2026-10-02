@@ -421,13 +421,23 @@ export const FAKE_PIXELS: PicturePixelsPort = {
 /**
  * A model that sees, answering by the file's name: the tractor print
  * shows six people photographed off a museum wall; anything else is one
- * person's photograph, their face high on the right. Its calls counted.
+ * person's photograph, their face high on the right. Asked whether it
+ * shows an event or a thing, it says yes, but for a file whose name
+ * `disagrees` (a crowd it cannot place, a modern set). Its calls counted.
  */
 export class FakeFocus {
   calls: string[] = [];
-  readonly ask = (input: { png: Buffer; about: string }) => {
+  asked: string[] = [];
+  constructor(private readonly disagrees: RegExp = /(?!)/u) {}
+  readonly ask = (input: { png: Buffer; about: string; asked?: string }) => {
     this.calls.push(input.about);
+    if (input.asked) this.asked.push(input.asked);
     const print = /tractor|museum wall/iu.test(input.about);
+    const shows = !input.asked
+      ? 'unsure'
+      : this.disagrees.test(input.about)
+        ? 'no'
+        : 'yes';
     return Promise.resolve({
       value: print
         ? {
@@ -435,12 +445,14 @@ export class FakeFocus {
             subject: ['A2', 'F5'],
             people: 6,
             kind: 'photograph-of-a-print',
+            shows,
           }
         : {
             faces: ['E2'],
             subject: ['D2', 'F6'],
             people: 1,
             kind: 'photograph',
+            shows,
           },
       usage: { model: 'fake:see', tokensIn: 900, tokensOut: 40, latencyMs: 1 },
     });

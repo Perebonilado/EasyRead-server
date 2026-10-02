@@ -165,7 +165,11 @@ export function composeShotScene(
       ? [[beat.startMs, beats[k + 1]?.startMs ?? durationMs]]
       : [],
   );
-  const options = { first: input.first, holds };
+  // The pace is held over the voice, its first word to its last.
+  const voice: [number, number] = beats.length
+    ? [beats[0].startMs, beats[beats.length - 1].endMs]
+    : [0, durationMs];
+  const options = { first: input.first, holds, voice };
   const mended = mendTimed(timed, durationMs, options);
   notes.push(...mended.mended);
   const shots = mended.shots;

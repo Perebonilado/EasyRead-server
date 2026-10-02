@@ -27,7 +27,14 @@
  * are the word cards' share of the scene's time and the subject's share
  * of the frame. Pure: the stills come in as decoded RGBA pixels.
  */
-import type { FilmShape, SceneDto, SceneThingDto } from '../../../contracts';
+import type {
+  FilmShape,
+  SceneDto,
+  SceneThingDto,
+  ShotCameraDto,
+  ShotDto,
+  ShotTargetDto,
+} from '../../../contracts';
 import { isLesson, wordsIn } from '../scene-reading';
 import { hexRgb, linearRgb, type Rgb } from '../scene-themes';
 import {
@@ -509,36 +516,75 @@ export function subjectAt(scene: SceneDto, ms: number): string | null {
   return step.focus && step.show.includes(step.focus) ? step.focus : null;
 }
 
-/**
- * The scene's information events, on its clock: what puts something new
- * on the screen. Today's engine: each change of the stage, and each part
- * shown or pointed at (not a filler); the shots engine: each shot and each
- * piece of information. A cue within PACE.subStepMs of the one before is
- * part of it, not an event of its own.
- */
-export function eventsOf(scene: SceneDto): number[] {
-  const times: number[] = [];
-  if (scene.engine === 'shots' && scene.shots) {
-    for (const shot of scene.shots.shots) {
-      times.push(shot.startMs);
-      for (const info of shot.info) times.push(info.atMs);
-    }
-  } else {
-    for (const step of scene.steps ?? []) times.push(step.atMs);
-    for (const effect of scene.effects ?? [])
-      if (!effect.filler && (effect.do === 'show' || effect.do === 'point'))
-        times.push(effect.atMs);
-  }
+/** Events within PACE.subStepMs of the one before are one: a sub-step of it. */
+function merged(times: readonly number[]): number[] {
   const out: number[] = [];
-  for (const at of times.sort((a, b) => a - b))
+  for (const at of [...times].sort((a, b) => a - b))
     if (!out.length || at - out[out.length - 1] >= PACE.subStepMs) out.push(at);
   return out;
 }
 
-/** The shots engine's declared rests: a camera's hold, an ask and its quiet. */
-function holdsOf(scene: SceneDto): [number, number][] {
-  if (scene.engine !== 'shots' || !scene.shots) return [];
-  return scene.shots.shots.flatMap((shot) => [
+/** Camera moves that always frame something new: they go somewhere. */
+const GOES = new Set(['travel', 'cut-to', 'zoom-through', 'follow']);
+
+const targetKey = (target?: ShotTargetDto) =>
+  target ? JSON.stringify(target) : '';
+
+/**
+ * Whether a camera move frames a new subject (research §3.2: an
+ * information event is a new fact on screen, a framing of a new subject
+ * among them): one that goes somewhere, or a push in on something other
+ * than its shot's own subject. A slow push or pull on what is already
+ * framed is motion, not news. The board counts the same moves on its
+ * words (shot-pace's reframes).
+ */
+export function reframesShot(move: ShotCameraDto, shot: ShotDto): boolean {
+  if (GOES.has(move.move)) return true;
+  return (
+    move.move === 'push' &&
+    Boolean(move.target) &&
+    targetKey(move.target) !== targetKey(shot.focal)
+  );
+}
+
+/**
+ * A scene of shots' information events, on its clock: each shot, each
+ * piece of information, each camera move to a new subject. The one
+ * definition the frames checker and the timed checks (shot-check-timed)
+ * both count by.
+ */
+export function shotEvents(shots: readonly ShotDto[]): number[] {
+  const times: number[] = [];
+  for (const shot of shots) {
+    times.push(shot.startMs);
+    for (const info of shot.info) times.push(info.atMs);
+    for (const move of shot.camera)
+      if (reframesShot(move, shot)) times.push(move.atMs);
+  }
+  return merged(times);
+}
+
+/**
+ * The scene's information events, on its clock: what puts something new
+ * on the screen. Today's engine: each change of the stage, and each part
+ * shown or pointed at (not a filler); the shots engine: shotEvents. A cue
+ * within PACE.subStepMs of the one before is part of it, not an event of
+ * its own.
+ */
+export function eventsOf(scene: SceneDto): number[] {
+  if (scene.engine === 'shots' && scene.shots)
+    return shotEvents(scene.shots.shots);
+  const times: number[] = [];
+  for (const step of scene.steps ?? []) times.push(step.atMs);
+  for (const effect of scene.effects ?? [])
+    if (!effect.filler && (effect.do === 'show' || effect.do === 'point'))
+      times.push(effect.atMs);
+  return merged(times);
+}
+
+/** A scene of shots' declared rests: a camera's hold, an ask and its quiet. */
+export function shotHolds(shots: readonly ShotDto[]): [number, number][] {
+  return shots.flatMap((shot) => [
     ...shot.camera
       .filter((move) => move.move === 'hold')
       .map((move): [number, number] => [move.atMs, move.atMs + move.durMs]),
@@ -549,6 +595,53 @@ function holdsOf(scene: SceneDto): [number, number][] {
         (info.untilMs ?? info.atMs + info.durMs) + PACE.askQuietMs,
       ]),
   ]);
+}
+
+/** The shots engine's declared rests: a camera's hold, an ask and its quiet. */
+function holdsOf(scene: SceneDto): [number, number][] {
+  if (scene.engine !== 'shots' || !scene.shots) return [];
+  return shotHolds(scene.shots.shots);
+}
+
+/** A scene's pace, found from its events. */
+export interface PaceFound {
+  /** Two events under PACE.minGapMs apart: at the later one, and the gap. */
+  short: { at: number; gap: number }[];
+  /** Stretches over PACE.maxGapMs with nothing new while the voice speaks, a declared rest aside. */
+  long: { from: number; to: number }[];
+  /** The first change after the scene opens (after its first 50 ms); null for none. */
+  first: number | null;
+}
+
+/**
+ * A scene's pace from its events, the voice's span and its declared
+ * rests: the one reading of the rules' PACE the frames checker and the
+ * timed checks share. Before the voice starts the picture may wait; from
+ * its first word to its last, nothing new for longer than the rules allow
+ * is a stall, the last event to the last word included.
+ */
+export function paceOf(
+  events: readonly number[],
+  holds: readonly (readonly [number, number])[],
+  [v0, v1]: readonly [number, number],
+): PaceFound {
+  const within = events.filter((at) => at <= v1);
+  const held = (from: number, to: number) =>
+    holds.some(
+      ([a, b]) => Math.min(b, to) - Math.max(a, from) >= (to - from) / 2,
+    );
+  const marks = [...(within.length ? within : [0]), v1];
+  const short: PaceFound['short'] = [];
+  const long: PaceFound['long'] = [];
+  for (let k = 1; k < marks.length; k += 1) {
+    const gap = marks[k] - marks[k - 1];
+    const closing = k === marks.length - 1;
+    if (!closing && gap < PACE.minGapMs) short.push({ at: marks[k], gap });
+    const from = Math.max(marks[k - 1], v0);
+    if (marks[k] - from > PACE.maxGapMs && !held(from, marks[k]))
+      long.push({ from, to: marks[k] });
+  }
+  return { short, long, first: within.find((at) => at > 50) ?? null };
 }
 
 /** Words that must be read, and how long they are up: a thing's caption, labels and figures, or a shot's text. */
@@ -972,49 +1065,37 @@ function checkPace(
     problems.push({ ...problem, axis: AXIS_OF[problem.code] });
   const [v0, v1] = voicedSpan(scene);
   const events = eventsOf(scene).filter((at) => at <= v1);
-  const holds = holdsOf(scene);
-  const held = (from: number, to: number) =>
-    holds.some(
-      ([a, b]) => Math.min(b, to) - Math.max(a, from) >= (to - from) / 2,
-    );
+  const pace = paceOf(events, holdsOf(scene), [v0, v1]);
   let shortGaps = 0;
   let longMs = 0;
-  // The events, then the voice's last word: nothing new to the end is a gap too; with no event at all, the whole of it.
-  const marks = [...(events.length ? events : [0]), v1];
-  for (let k = 1; k < marks.length; k += 1) {
-    const gap = marks[k] - marks[k - 1];
-    const closing = k === marks.length - 1;
-    if (!closing && gap < PACE.minGapMs) {
-      const severity = round3(1 - gap / PACE.minGapMs);
-      shortGaps += severity;
-      add({
-        code: 'gap-short',
-        ms: marks[k],
-        severity,
-        value: gap,
-        limit: PACE.minGapMs,
-        message: `two cues ${seconds(gap)} apart at ${seconds(marks[k])}: one thing at a time, at least ${seconds(PACE.minGapMs)} apart`,
-      });
-    }
-    // Before the voice starts, the picture may wait; after it, nothing new for this long is a stall.
-    const from = Math.max(marks[k - 1], v0);
-    if (marks[k] - from > PACE.maxGapMs && !held(from, marks[k])) {
-      longMs += marks[k] - from - PACE.maxGapMs;
-      add({
-        code: 'gap-long',
-        ms: from,
-        severity: round3(
-          Math.min(1, (marks[k] - from - PACE.maxGapMs) / PACE.maxGapMs),
-        ),
-        value: marks[k] - from,
-        limit: PACE.maxGapMs,
-        message: `nothing new for ${seconds(marks[k] - from)} from ${seconds(from)} while the voice speaks`,
-      });
-    }
+  for (const { at, gap } of pace.short) {
+    const severity = round3(1 - gap / PACE.minGapMs);
+    shortGaps += severity;
+    add({
+      code: 'gap-short',
+      ms: at,
+      severity,
+      value: gap,
+      limit: PACE.minGapMs,
+      message: `two cues ${seconds(gap)} apart at ${seconds(at)}: one thing at a time, at least ${seconds(PACE.minGapMs)} apart`,
+    });
+  }
+  for (const { from, to } of pace.long) {
+    longMs += to - from - PACE.maxGapMs;
+    add({
+      code: 'gap-long',
+      ms: from,
+      severity: round3(
+        Math.min(1, (to - from - PACE.maxGapMs) / PACE.maxGapMs),
+      ),
+      value: to - from,
+      limit: PACE.maxGapMs,
+      message: `nothing new for ${seconds(to - from)} from ${seconds(from)} while the voice speaks`,
+    });
   }
   let firstLate = 0;
   if (first) {
-    const next = events.find((at) => at > 50);
+    const next = pace.first ?? undefined;
     if (next === undefined || next > PACE.firstChangeMs) {
       firstLate = round3(
         Math.min(

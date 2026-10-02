@@ -609,6 +609,52 @@ describe('pace and dwell, from the scene', () => {
     ).toContain('gap-long');
   });
 
+  it('counts a camera move to a new subject as news, as the board does, and a drift on the subject not', () => {
+    const focal = { kind: 'asset' as const, asset: 'map', part: 'group-north' };
+    const shots = {
+      version: 1,
+      look: {},
+      assets: {},
+      sounds: [],
+      shots: [
+        {
+          id: 's1',
+          startMs: 0,
+          endMs: 12_000,
+          set: { kind: 'plain' },
+          actors: [],
+          life: [],
+          join: 'cut',
+          joinMs: 0,
+          focal,
+          info: [],
+          camera: [
+            {
+              move: 'travel',
+              atMs: 4000,
+              durMs: 900,
+              target: { kind: 'asset', asset: 'map', part: 'pin-kano' },
+            },
+            { move: 'push', atMs: 7000, durMs: 2500, target: focal },
+            { move: 'pull', atMs: 9500, durMs: 2000 },
+          ],
+        } as unknown as ShotDto,
+      ],
+    };
+    const scene = {
+      ...lesson({ durationMs: 12_000, voice: [200, 11_000] }),
+      engine: 'shots',
+      shots,
+    } as unknown as SceneDto;
+    expect(eventsOf(scene)).toEqual([0, 4000]);
+    const long = checkFrames({
+      scene,
+      reports: [],
+      shape: 'wide',
+    }).problems.find((p) => p.code === 'gap-long');
+    expect(long?.ms).toBe(4000);
+  });
+
   it('holds words up long enough to read them, but not one that runs on past the scene', () => {
     const scene = lesson({
       durationMs: 10_000,

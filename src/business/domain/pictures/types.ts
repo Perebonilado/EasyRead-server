@@ -84,8 +84,13 @@ export interface SourceFile {
   quality?: 'featured' | 'quality' | 'valued' | null;
 }
 
-/** A licence the desk may use, with what it allows. */
+/**
+ * A licence the desk may use, with what it allows; 'unchecked' is a file
+ * taken with the licence screen off (PICTURE_LICENCE), under the licence
+ * its source names.
+ */
 export type LicenceCode =
+  | 'unchecked'
   | 'PD'
   | 'PD-old'
   | 'PD-USGov'

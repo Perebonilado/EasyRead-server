@@ -8,17 +8,24 @@ import {
   MemoryCache,
   MemoryStorage,
 } from './__fixtures__/desk';
-import { lookupKey, PictureDesk, PICK_LEAST } from './desk';
+import { DESK_RULES, lookupKey, PictureDesk, PICK_LEAST } from './desk';
+import type { LicenceMode } from './licence';
 import type { PictureQuery } from './types';
 
 const NOW = new Date('2026-10-02T09:00:00Z');
 
+/**
+ * A desk on fakes. The licence screen is on unless a spec says off: most
+ * of these specs are of the screen's rules (PICTURE_LICENCE=on); the
+ * switch's own are at the end.
+ */
 function deskWith(
   over: {
     sources?: FakeSources;
     depth?: FakeDepth | null;
     now?: () => Date;
     focus?: FakeFocus;
+    licence?: LicenceMode;
   } = {},
 ) {
   const sources = over.sources ?? new FakeSources();
@@ -33,6 +40,7 @@ function deskWith(
     pixels: FAKE_PIXELS,
     depth,
     ...(over.focus ? { focus: over.focus.ask } : {}),
+    licence: over.licence ?? 'on',
     now: over.now ?? (() => NOW),
     log: (m) => logs.push(m),
   });
@@ -281,5 +289,123 @@ describe('the picture desk', () => {
     expect(logs.join('\n')).toMatch(
       /on a tractor 1962\.jpg will not do: it is a photograph of a print/u,
     );
+  });
+
+  describe('with the licence screen off (PICTURE_LICENCE, the default)', () => {
+    const AZIKIWE_Q: PictureQuery = {
+      name: 'Nnamdi Azikiwe',
+      kind: 'person',
+      years: [1957],
+      place: ['Nigeria'],
+    };
+    const IN_OFFICE = 'File:Nnamdi Azikiwe in Office, 1937.jpg';
+
+    it('is off when nobody says', () => {
+      const desk = new PictureDesk({
+        sources: new FakeSources(),
+        cache: new MemoryCache(),
+        storage: new MemoryStorage(),
+        pixels: FAKE_PIXELS,
+      });
+      expect(desk.licence).toBe('off');
+    });
+
+    it('clears a file the screen refuses, under the licence its source names, its credit and chip made as ever', async () => {
+      const on = await deskWith().desk.find(AZIKIWE_Q);
+      expect(on.found).toEqual([]);
+      const { found } = await deskWith({ licence: 'off' }).desk.find(AZIKIWE_Q);
+      expect(found.map((c) => c.file.sourceId)).toEqual([IN_OFFICE]);
+      expect(found[0]).toMatchObject({
+        chip: 'Nnamdi Azikiwe, 1937 · Northwestern University · Public domain',
+        licence: { code: 'unchecked', short: 'Public domain' },
+      });
+      expect(found[0].credit).toContain('Public domain');
+      expect(found[0].notes.join(' ')).toMatch(
+        /licence not checked: public domain is claimed with no reason given/u,
+      );
+    });
+
+    it('does not let a refusal kept while the licences were checked block the file: the question is asked again and the file taken', async () => {
+      const { desk, cache } = deskWith({ licence: 'off' });
+      const blank = {
+        qid: null,
+        kind: null,
+        subject: null,
+        url: null,
+        sourceUrl: null,
+        licence: null,
+        credit: null,
+        chip: null,
+        width: null,
+        height: null,
+        focal: null,
+        sha1: null,
+        mime: null,
+        storageKey: null,
+        depthKey: null,
+        checkedAt: NOW,
+      };
+      // The cache as the screen left it: the question answered with none,
+      // under today's rules, and the file refused for its licence.
+      await cache.save({
+        ...blank,
+        source: 'lookup',
+        sourceId: lookupKey(AZIKIWE_Q),
+        meta: { rules: DESK_RULES, picked: null },
+        refusedReason: 'no picture of Nnamdi Azikiwe clears',
+      });
+      await cache.save({
+        ...blank,
+        source: 'commons',
+        sourceId: IN_OFFICE,
+        meta: null,
+        refusedReason: 'public domain is claimed with no reason given',
+      });
+      const record = await desk.lookup(AZIKIWE_Q);
+      expect(record?.sourceId).toBe(IN_OFFICE);
+      expect(record?.licence).toBe('Public domain');
+      // Kept now, and served: the refusal is gone from its row.
+      const row = await desk.record(record!.id);
+      expect(row?.refusedReason).toBeNull();
+      expect(row?.meta).toMatchObject({
+        code: 'unchecked',
+        flags: [
+          'licence not checked: public domain is claimed with no reason given',
+        ],
+      });
+      // The answer is kept under the switch it was given under.
+      expect(
+        (await cache.bySource('lookup', lookupKey(AZIKIWE_Q)))?.meta,
+      ).toMatchObject({ licence: 'off', picked: record!.id });
+    });
+
+    it('asks again with the screen on what was answered with it off, and the screen refuses the file once more', async () => {
+      const { desk: off, cache } = deskWith({ licence: 'off' });
+      expect((await off.lookup(AZIKIWE_Q))?.sourceId).toBe(IN_OFFICE);
+      const on = new PictureDesk({
+        sources: new FakeSources(),
+        cache,
+        storage: new MemoryStorage(),
+        pixels: FAKE_PIXELS,
+        licence: 'on',
+        now: () => NOW,
+      });
+      expect(await on.lookup(AZIKIWE_Q)).toBeNull();
+      expect(
+        (await cache.bySource('lookup', lookupKey(AZIKIWE_Q)))?.meta,
+      ).toMatchObject({ licence: 'on', picked: null });
+    });
+
+    it('still asks who a picture is of: with the right man ruled out by his years, his namesake is no one', async () => {
+      const { desk } = deskWith({ licence: 'off' });
+      const { found, reason } = await desk.find({
+        ...AZIKIWE_Q,
+        years: [1880],
+      });
+      expect(found).toEqual([]);
+      expect(reason).toBe(
+        'Nnamdi Azikiwe matched by name only: no year, role or place agrees',
+      );
+    });
   });
 });

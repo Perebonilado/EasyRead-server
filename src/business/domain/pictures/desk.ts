@@ -1,8 +1,11 @@
 /**
  * The picture desk (explainer-animation-plan §6.3; research §3.4–3.5): it
  * finds a real picture of what a line names, clears its licence and its
- * provenance, makes sure it is of the right person or place, and keeps a
- * copy in our storage with its credit, its chip and where its subject is.
+ * provenance (when the licence switch is on; off, any file its sources
+ * hold, under the licence they name), makes sure it is of the right
+ * person or place, and keeps a copy in our storage with its credit, its
+ * chip and where its subject is. Identity is never switched off: a
+ * picture is of the right person, place, thing or event, or it is none.
  *
  *   find(query)   ranked candidates, every one cleared: for a person, only
  *                 once Wikidata's person is surely the research's (match.ts)
@@ -50,7 +53,7 @@ import {
   portraitDoubt,
   type Focus,
 } from './focus';
-import { licenceOf } from './licence';
+import { licenceUnder, type LicenceMode } from './licence';
 import { matchPerson, matchPlace, nameWords } from './match';
 import {
   LEAST_PX,
@@ -89,6 +92,14 @@ export interface DeskDeps {
         about: string;
       }) => Promise<{ value: Record<string, unknown>; usage: LlmUsage }>)
     | null;
+  /**
+   * Whether the licence and provenance screen runs (PICTURE_LICENCE):
+   * 'off', the default, takes any file its sources hold under the licence
+   * they name; 'on', the screen's rules. An answer given under the other
+   * is asked again, so a refusal kept while it was on never blocks a file
+   * while it is off.
+   */
+  licence?: LicenceMode;
   now?: () => Date;
   log?: (message: string) => void;
 }
@@ -101,7 +112,7 @@ const LOOKUP_DAYS = 30;
  * again (a portrait that is a statue's photograph, once let through, is
  * not handed out for a month after the rule against it).
  */
-export const DESK_RULES = 10;
+export const DESK_RULES = 11;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** The width the desk asks a source for: a full frame's with room for a 12% push; a portrait's print; a page. */
@@ -195,10 +206,13 @@ export function yearsToLook(years: readonly number[]): number[] {
 export class PictureDesk {
   private readonly now: () => Date;
   private readonly log: (message: string) => void;
+  /** The licence switch this desk runs under. */
+  readonly licence: LicenceMode;
 
   constructor(private readonly deps: DeskDeps) {
     this.now = deps.now ?? (() => new Date());
     this.log = deps.log ?? (() => undefined);
+    this.licence = deps.licence ?? 'off';
   }
 
   // ── Finding ──────────────────────────────────────────────────────────────
@@ -394,10 +408,10 @@ export class PictureDesk {
     for (const file of files) {
       if (!/^image\/(?:jpeg|png|tiff|gif|webp)$/u.test(file.mime)) continue;
       const year = yearOf(file);
-      const licence = licenceOf({
-        ...file,
-        ...(year !== undefined ? { year } : {}),
-      });
+      const licence = licenceUnder(
+        { ...file, ...(year !== undefined ? { year } : {}) },
+        this.licence,
+      );
       if (!licence.ok) {
         await this.refused(file, licence.reason, qid);
         continue;
@@ -801,9 +815,17 @@ export class PictureDesk {
       () => this.deps.cache.bySource('lookup', key),
       null,
     );
+    // An answer is kept under these rules and this licence switch only: one
+    // given while the licences were checked (every answer before the
+    // switch was) is asked again with them off, and the other way round.
+    const said = (asked?.meta ?? null) as {
+      rules?: number;
+      licence?: LicenceMode;
+    } | null;
     const fresh =
       asked &&
-      (asked.meta as { rules?: number } | null)?.rules === DESK_RULES &&
+      said?.rules === DESK_RULES &&
+      (said.licence ?? 'on') === this.licence &&
       this.now().getTime() - asked.checkedAt.getTime() < LOOKUP_DAYS * DAY_MS;
     if (asked && fresh) {
       const meta = (asked.meta ?? {}) as {
@@ -870,6 +892,7 @@ export class PictureDesk {
           subject: query.name.slice(0, 255),
           meta: {
             rules: DESK_RULES,
+            licence: this.licence,
             picked: record?.id ?? null,
             ...('person' in result && result.person
               ? { person: result.person }

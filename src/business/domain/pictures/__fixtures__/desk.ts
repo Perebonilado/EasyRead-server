@@ -159,6 +159,19 @@ export const FILES: readonly SourceFile[] = [
     categories: ['Nnamdi Azikiwe', 'Self-published work'],
     structured: { status: ['Q50423863'], licences: ['Q18199165'] },
   }),
+  // Its licence a bare "PD US" on a 1937 photograph: refused with the
+  // screen on, taken with it off (PICTURE_LICENCE).
+  commonsFile({
+    sourceId: 'File:Nnamdi Azikiwe in Office, 1937.jpg',
+    width: 2000,
+    height: 2500,
+    artist: 'Unknown author',
+    credit: 'Northwestern University Library',
+    description: 'Nnamdi Azikiwe in his office, 1937',
+    date: '1937',
+    categories: ['Nnamdi Azikiwe', 'PD US'],
+    structured: null,
+  }),
   commonsFile({
     sourceId: 'File:Lagos skyline 2019.jpg',
     width: 4000,

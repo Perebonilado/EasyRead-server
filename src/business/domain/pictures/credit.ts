@@ -186,13 +186,14 @@ export function creditOf(
       : source;
   const own = file.attribution ? plainText(file.attribution) : '';
   const licenceWords = licence.url
-    ? `${licence.short} (${licence.url})`
+    ? `${licence.short || 'Licence'} (${licence.url})`
     : licence.short;
   const by = own || `${author}`;
   const parts = [
     `“${title}” by ${by}`,
     `via ${SOURCE_NAMES[file.source]} (${file.pageUrl})`,
-    licenceWords,
+    // A file whose source names no licence is credited without one.
+    ...(licenceWords ? [licenceWords] : []),
   ];
   if (licence.attribution) parts.push('cropped');
   return `${parts.join(', ')}.`;

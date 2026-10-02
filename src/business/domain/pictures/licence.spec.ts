@@ -1,5 +1,8 @@
 import {
+  licenceModeOf,
   licenceOf,
+  licenceUnder,
+  licenceWordsOf,
   plainText,
   redFlagOf,
   structuredAgrees,
@@ -434,5 +437,177 @@ describe('the licence screen', () => {
         '<a href="//commons.wikimedia.org/wiki/User:X" title="User:X">Kambai&nbsp;Akau</a> &amp; <b>co</b>',
       ),
     ).toBe('Kambai Akau & co');
+  });
+
+  describe('the switch (PICTURE_LICENCE)', () => {
+    // Files the screen refused for the Nigerian films, as the picture
+    // cache kept them on 2026-10-02.
+    const leiden = file({
+      licenceName: 'CC BY-SA 4.0',
+      licenceCode: 'cc-by-sa-4.0',
+      licenceUrl: 'https://creativecommons.org/licenses/by-sa/4.0',
+      artist: 'H.F.J.M. Crebolder',
+      credit: 'NSAG Crebolder Collection',
+      title:
+        'ASC Leiden - NSAG - Crebolder 2 - 40 - Independence ceremony. Robertson GG, Princess Alexandra, Abubakar Tafawa Balewa, President - Lagos, Nigeria - October 1, 1960',
+      description:
+        'A postcard? "Princess, Governor and Balewa". Royal Pavilion, Racecourse, Lagos, October 1, 1960, First Day Ceremony of the Nigerian Independence.',
+      categories: [
+        'Postcards of Nigeria',
+        'Images from the African Studies Centre (Leiden)',
+        'Abubakar Tafawa Balewa',
+        'Self-published work',
+        'Princess Alexandra of Kent in 1960',
+      ],
+      structured: { status: ['Q50423863'], licences: ['Q18199165'] },
+    });
+    const swearing = file({
+      artist: 'Private Photo Library Eko Adele; Emi Ni Afrika',
+      credit: 'https://www.facebook.com/share/s1s4Fzdu7ZmbPvLv/',
+      title: 'Azikiwe swearing Balewa as prime minister, 1960',
+      description: 'Azikiwe swearing Balewa as prime minister, 1960',
+      categories: ['1960 in Nigeria', 'PD-Nigeria', 'PD Nigeria - Images'],
+      structured: null,
+    });
+    const drum = file({
+      artist: 'Drum Magazine photographer',
+      credit: 'UCLA BAHA Drum Magazine Archive',
+      title: 'Portrait of Ahmadu Bello',
+      description: '',
+      categories: ['Ahmadu Bello', 'PD-Nigeria'],
+      year: undefined,
+    });
+    const apFrame = file({
+      licenceName: 'CC BY-SA 4.0',
+      licenceCode: 'cc-by-sa-4.0',
+      artist: 'Kambai Akau',
+      credit: 'Own work',
+      title: 'Nnamdi Azikiwe 1',
+      description:
+        'Nnamdi Azikiwe during an interview on 4 April 1967. Archive footage screenshot from YouTube video by AP Archive.',
+      categories: ['Nnamdi Azikiwe', 'Self-published work'],
+      year: 1967,
+    });
+    const noReason = file({
+      artist: 'Duckwood, E.H',
+      credit: 'https://dc.library.northwestern.edu/items/937d7fbf',
+      title:
+        'Dr. John A. Hannah, Dr. Nnamdi Azikiwe and Dr. George Johnson on the campus of the University of Nigeria, Nsukka',
+      description: 'Azikiwe in UNN',
+      categories: ['Nnamdi Azikiwe', '1960 in Nigeria'],
+      structured: null,
+    });
+
+    it('is off unless the settings say on', () => {
+      expect(licenceModeOf(undefined)).toBe('off');
+      expect(licenceModeOf('')).toBe('off');
+      expect(licenceModeOf('off')).toBe('off');
+      expect(licenceModeOf(' ON ')).toBe('on');
+      expect(licenceModeOf('true')).toBe('on');
+    });
+
+    it('off: takes share-alike, public domain in its own country, and agency- and magazine-credited files, under the licence their source names', () => {
+      expect(licenceUnder(leiden, 'off')).toMatchObject({
+        ok: true,
+        code: 'unchecked',
+        short: 'CC BY-SA 4.0',
+        tier: 'B',
+        url: 'https://creativecommons.org/licenses/by-sa/4.0',
+        attribution: true,
+        flags: [
+          'licence not checked: ShareAlike (CC BY-SA) is not used until its legal read',
+        ],
+      });
+      expect(licenceUnder(swearing, 'off')).toMatchObject({
+        ok: true,
+        code: 'unchecked',
+        short: 'Public domain',
+        tier: 'A',
+        attribution: false,
+        flags: [
+          'licence not checked: public domain in its own country (PD-Nigeria), with no reason it is in the US',
+        ],
+      });
+      expect(licenceUnder(drum, 'off')).toMatchObject({
+        ok: true,
+        short: 'Public domain',
+        flags: [
+          'licence not checked: its credit or description names Drum magazine',
+        ],
+      });
+      expect(licenceUnder(apFrame, 'off')).toMatchObject({
+        ok: true,
+        short: 'CC BY-SA 4.0',
+        flags: [
+          'licence not checked: its credit or description names the Associated Press',
+        ],
+      });
+      expect(licenceUnder(noReason, 'off')).toMatchObject({
+        ok: true,
+        short: 'Public domain',
+      });
+    });
+
+    it('off: a file the screen clears keeps the screen’s own verdict', () => {
+      expect(licenceUnder(file(), 'off')).toEqual(licenceOf(file()));
+    });
+
+    it('on: keeps today’s verdicts exactly', () => {
+      for (const one of [leiden, swearing, drum, apFrame, noReason, file()])
+        expect(licenceUnder(one, 'on')).toEqual(licenceOf(one));
+      expect(licenceUnder(leiden, 'on')).toMatchObject({ ok: false });
+      expect(licenceUnder(swearing, 'on')).toEqual({
+        ok: false,
+        reason:
+          'public domain in its own country (PD-Nigeria), with no reason it is in the US',
+      });
+      expect(licenceUnder(drum, 'on')).toMatchObject({
+        ok: false,
+        reason: 'its credit or description names Drum magazine',
+      });
+      expect(licenceUnder(noReason, 'on')).toMatchObject({
+        ok: false,
+        reason: 'public domain is claimed with no reason given',
+      });
+    });
+
+    it('off still refuses a picture a machine made and a watermark: they are no licence’s', () => {
+      expect(
+        licenceUnder(
+          file({
+            licenceName: 'CC BY-SA 4.0',
+            licenceCode: 'cc-by-sa-4.0',
+            categories: ['AI-generated images'],
+          }),
+          'off',
+        ),
+      ).toEqual({
+        ok: false,
+        reason: 'it was made by a machine, not taken of the thing',
+      });
+      expect(
+        licenceUnder(
+          file({
+            licenceName: 'CC BY-SA 4.0',
+            licenceCode: 'cc-by-sa-4.0',
+            categories: ['Images with watermarks'],
+          }),
+          'off',
+        ),
+      ).toEqual({ ok: false, reason: 'it carries a watermark' });
+    });
+
+    it('names a licence shortly for the chip', () => {
+      expect(
+        licenceWordsOf({ licenceName: 'CC BY-SA 3.0', licenceCode: '' }),
+      ).toBe('CC BY-SA 3.0');
+      expect(licenceWordsOf({ licenceName: 'PD', licenceCode: 'pd' })).toBe(
+        'Public domain',
+      );
+      expect(
+        licenceWordsOf({ licenceName: 'No restrictions', licenceCode: '' }),
+      ).toBe('No known restrictions');
+      expect(licenceWordsOf({ licenceName: '', licenceCode: '' })).toBe('');
+    });
   });
 });

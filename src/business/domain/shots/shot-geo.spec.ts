@@ -280,6 +280,7 @@ describe('the show’s map as geography the player draws', () => {
     expect(s).toBeGreaterThan(3.5);
     expect(n).toBeLessThan(14.5);
     const reach = geo.boxes.sea;
+    expect(geo.boxes.cover[0]).toBe(-180);
     expect(reach[3] - n).toBeGreaterThan(10);
     // The Sahara north of it is land, not sea.
     const lands = featuresOf(geo.asset)
@@ -288,6 +289,22 @@ describe('the show’s map as geography the player draws', () => {
     expect(lands).toEqual(
       expect.arrayContaining(['Niger', 'Chad', 'Algeria', 'Cameroon', 'Benin']),
     );
+  });
+
+  it('cuts the land out of the sea, so only the land is shaded', () => {
+    const sea = featuresOf(geo.asset).find(
+      (one) => one.properties.id === 'sea',
+    )!;
+    const rings = sea.geometry.coordinates as Position[][];
+    expect(sea.geometry.type).toBe('Polygon');
+    expect(rings.length).toBeGreaterThan(1);
+    const area = (ring: Position[]) =>
+      ring.reduce((sum, [x, y], i) => {
+        const [px, py] = ring[(i + ring.length - 1) % ring.length];
+        return sum + (px * y - x * py);
+      }, 0);
+    for (const hole of rings.slice(1))
+      expect(Math.sign(area(hole))).toBe(-Math.sign(area(rings[0])));
   });
 
   it('says nothing of a past year’s borders it does not draw: today’s borders carry no period', () => {

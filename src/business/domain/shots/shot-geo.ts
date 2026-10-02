@@ -55,6 +55,7 @@ export type GeoBounds = [number, number, number, number];
 
 /** What a feature of the map is: the land, the water, its lines, and what the voice can point at. */
 export type GeoKind =
+  | 'cover'
   | 'sea'
   | 'land'
   | 'lake'
@@ -83,7 +84,7 @@ export interface GeoMap {
 }
 
 export interface GeoMapOptions {
-  /** How far past the show's frame the land reaches, as a share of the frame's larger side: a tilted camera sees far beyond it. */
+  /** How much further past the show's frame the land reaches than it does by default (1): a tilted camera sees far beyond it. */
   margin?: number;
   /** The most the asset may weigh as JSON; past it, outlines are simplified further. */
   maxBytes?: number;
@@ -93,14 +94,24 @@ export interface GeoMapOptions {
 
 /** A scene's map travels with the scene: about this much at most (the brief's 250 KB). */
 export const GEO_MOST_BYTES = 250_000;
-/** Land round the frame, as a share of its larger side: a camera tilted 55° sees about 1.6 frame heights past its middle. */
-const MARGIN = 1.5;
+/**
+ * Land round the frame, as shares of its larger side, west, south, east,
+ * north: a camera tilted 50° with north up looks a long way north of its
+ * middle (in a tall frame, past two frame heights), so the land reaches
+ * furthest that way; a tall frame's foot sees well south of it too.
+ */
+const MARGIN: [number, number, number, number] = [1.5, 1.6, 1.5, 2.5];
 /** Within this share of the frame's size round it, outlines are kept at the finest; past it, coarser. */
 const NEAR = 0.25;
 /** The finest simplification, as a share of the frame's larger side: under a pixel when the frame fills a 1920 px film. */
 const TOLERANCE = 1 / 2400;
-/** How much coarser the land far from the frame is drawn. */
+/** How much coarser the land beyond the frame's neighbours is drawn, and the land further still, which only a tilted camera's far distance shows. */
 const FAR = 3;
+const FARTHEST = 8;
+/** Past this share of the frame's size round it, land is the farthest. */
+const MIDDLE = 1;
+/** How much coarser the lines of the show's own states (and the regions made of them) are drawn. */
+const ADMIN = 1.6;
 /** A country of more areas than this has none of their lines drawn: a web of lines, not a map (scene-map's own limit). */
 const AREA_LINES_MOST = 80;
 /** A route bows to one side by this share of its length: a journey, not a border (as scene-map draws it). */
@@ -527,8 +538,18 @@ export async function mapGeo(
   const region = spec.base ?? spec.region;
   const frame = await regionBounds(region);
   const span = Math.max(frame[2] - frame[0], frame[3] - frame[1], 0.5);
-  const reach = expand(frame, span * (options.margin ?? MARGIN));
-  const near = expand(frame, span * NEAR);
+  const margin = MARGIN.map((share) => share * span * (options.margin ?? 1));
+  const reach: GeoBounds = [
+    Math.max(-180, frame[0] - margin[0]),
+    Math.max(-MAX_LAT, frame[1] - margin[1]),
+    Math.min(180, frame[2] + margin[2]),
+    Math.min(MAX_LAT, frame[3] + margin[3]),
+  ];
+  const rings = {
+    near: expand(frame, span * NEAR),
+    middle: expand(frame, span * MIDDLE),
+    reach,
+  };
   const atlas = atlasOf('50m');
   // A route's ends and a pin's spot: a place's point, else its land's middle.
   const middleOf = (countries: readonly string[]): Position | null => {
@@ -555,20 +576,26 @@ export async function mapGeo(
   });
   const most = options.maxBytes ?? GEO_MOST_BYTES;
   let tolerance = span * (options.tolerance ?? TOLERANCE);
-  let made = build(spec, region, frame, near, reach, tolerance, points);
-  for (let k = 0; k < 6 && made.bytes > most; k += 1) {
-    tolerance *= 1.7;
-    made = build(spec, region, frame, near, reach, tolerance, points);
+  let made = build(spec, region, frame, rings, tolerance, points);
+  for (let k = 0; k < 10 && made.bytes > most; k += 1) {
+    tolerance *= 1.25;
+    made = build(spec, region, frame, rings, tolerance, points);
   }
   return { ...made, tolerance };
+}
+
+/** The land round the frame, in rings: kept finest near it, coarser further out, as far as it reaches. */
+interface Rings {
+  near: GeoBounds;
+  middle: GeoBounds;
+  reach: GeoBounds;
 }
 
 function build(
   spec: MapSpec,
   region: MapRegion,
   frame: GeoBounds,
-  near: GeoBounds,
-  reach: GeoBounds,
+  { near, middle, reach }: Rings,
   tolerance: number,
   points: Points,
 ): Omit<GeoMap, 'tolerance'> {
@@ -587,9 +614,11 @@ function build(
   const toleranceFor = (bounds: GeoBounds) =>
     intersects(bounds, near)
       ? tolerance
-      : intersects(bounds, reach)
+      : intersects(bounds, middle)
         ? tolerance * FAR
-        : Infinity;
+        : intersects(bounds, reach)
+          ? tolerance * FARTHEST
+          : Infinity;
 
   // The countries in reach, and the show's own.
   const inRegion = new Set(
@@ -651,7 +680,8 @@ function build(
   const admin = simplified(
     areas.topology,
     arcsOf({ type: 'GeometryCollection', geometries: wantedUnits }, new Set()),
-    (bounds) => (intersects(bounds, reach) ? tolerance : Infinity),
+    // The states' lines are faint, and the regions made of them are named by colour, not traced: a little coarser.
+    (bounds) => (intersects(bounds, reach) ? tolerance * ADMIN : Infinity),
   );
 
   /** Land as one shape, as scene-map's landShape makes it: countries alone from world-atlas, with areas all from admin-1. */
@@ -720,20 +750,36 @@ function build(
     return true;
   };
 
-  // The sea, under everything: the whole of the land kept.
-  const [rw, rs, re, rn] = reach;
-  add('sea', 'sea', {
+  // The whole world, for the spotlight's veil: a tilted camera sees past
+  // the land kept, and the veil must cover that too.
+  add('cover', 'cover', {
     type: 'Polygon',
     coordinates: [
       [
-        round([rw, rs]),
-        round([re, rs]),
-        round([re, rn]),
-        round([rw, rn]),
-        round([rw, rs]),
-      ],
+        [-180, -MAX_LAT],
+        [180, -MAX_LAT],
+        [180, MAX_LAT],
+        [-180, MAX_LAT],
+        [-180, -MAX_LAT],
+      ].map((p) => round(p)),
     ],
   });
+  const [rw, rs, re, rn] = reach;
+  const box: Position[] = [
+    round([rw, rs]),
+    round([re, rs]),
+    round([re, rn]),
+    round([rw, rn]),
+    round([rw, rs]),
+  ];
+  // The sea: the same with the land cut out of it, so the terrain's
+  // shading of the sea floor stays under it and only the land is shaded.
+  const coast = polygonsIn(merge(world, kept as never), reach, round, speck);
+  const outward = Math.sign(ringArea(box)) || 1;
+  const holes = (coast?.coordinates ?? []).map(([outline]) =>
+    Math.sign(ringArea(outline)) === outward ? [...outline].reverse() : outline,
+  );
+  add('sea', 'sea', { type: 'Polygon', coordinates: [box, ...holes] });
   // The land, a country at a time: the show's own lighter than its neighbours.
   for (const one of kept) {
     const name = nameOf(one);

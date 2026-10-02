@@ -153,7 +153,8 @@ export function personPhotoDoubt(focus: Focus): string | null {
   if (focus.kind === 'statue') return 'it is a statue of them';
   if (focus.kind === 'document' || focus.kind === 'other')
     return `it is no photograph of them (${focus.kind})`;
-  if (focus.people < 1) return 'no one shows in it';
+  // No one: no count and no face seen.
+  if (focus.people < 1 && !focus.faces) return 'no one shows in it';
   return null;
 }
 

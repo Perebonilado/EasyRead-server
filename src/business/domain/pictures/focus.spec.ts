@@ -109,7 +109,11 @@ describe("where a picture's subject is, as a model that sees names it", () => {
     const seen = (over: object) =>
       focusOf({ faces: ['C2'], people: 6, kind: 'photograph', ...over });
     expect(personPhotoDoubt(seen({}))).toBeNull();
-    expect(personPhotoDoubt(seen({ people: 0 }))).toBe('no one shows in it');
+    expect(personPhotoDoubt(seen({ people: 0, faces: [] }))).toBe(
+      'no one shows in it',
+    );
+    // Faces seen, the count lost: someone shows.
+    expect(personPhotoDoubt(seen({ people: 0 }))).toBeNull();
     expect(personPhotoDoubt(seen({ kind: 'statue' }))).toMatch(/statue/u);
   });
 

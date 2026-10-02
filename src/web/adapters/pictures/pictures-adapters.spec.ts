@@ -1,3 +1,5 @@
+import { focusOf } from '../../../business/domain/pictures/focus';
+import { pictureFocusSchema } from '../ai-sdk/picture-schemas';
 import { fileOf, regionOf, structuredOf } from './commons.adapter';
 import { measureImage } from './measure';
 import { PoliteHttp, userAgentOf } from './polite-http';
@@ -129,6 +131,18 @@ describe("the picture desk's adapters", () => {
       ],
     })!;
     expect(jpeg.thumb).toBeUndefined();
+  });
+
+  it('reads the look’s answer leniently: a crowd of forty is thirty people, not none', () => {
+    const said = pictureFocusSchema.parse({
+      faces: ['A2', 'F4'],
+      subject: ['A1', 'F6'],
+      people: 40,
+      kind: 'photograph',
+      shows: 'yes',
+    });
+    expect(focusOf(said)).toMatchObject({ people: 30, shows: 'yes' });
+    expect(pictureFocusSchema.parse({ people: 'many' }).people).toBe(0);
   });
 
   it('reads IIIF regions and files with no structured data', () => {

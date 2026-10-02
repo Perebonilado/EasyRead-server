@@ -302,13 +302,6 @@ import { setInShape } from '../../business/domain/scene-set-shape';
 import { drawingShapeFor } from '../../business/domain/scene-lesson-shape';
 import { partsKeyOf } from '../../business/handlers/studio/studio-twins';
 import { SceneVoiceService } from '../../business/handlers/admin/scene-voice.service';
-import {
-  composeShotScene,
-  type ShotsInput,
-} from '../../business/domain/shots/shot-compose';
-import { shotLook } from '../../business/domain/shots/shot-build';
-import { mapSetAsset } from '../../business/domain/shots/shot-map';
-import { shotsThumbSvg } from '../../business/domain/shots/shot-thumb';
 
 /** The most of a page the writer reads. */
 const MATERIAL_CHARS = 14_000;
@@ -316,12 +309,7 @@ const MATERIAL_CHARS = 14_000;
 const PROFILE_SAMPLE_CHARS = 6_000;
 /** A page with fewer words than this has too little to teach. */
 const THIN_PAGE_WORDS = 40;
-/**
- * What code draws again for a tall film's frame: charts, graphs, maps,
- * flags, flows and molecules, and every infographic kind (each laid out
- * for its frame: a calendar's pages two to a row, a split screen's sides
- * one over the other).
- */
+/** What code draws again for a tall film's frame: charts, graphs, maps, flags, flows and molecules. */
 const DRAWN_FOR_SHAPE: ReadonlySet<string> = new Set([
   'chart',
   'plot',
@@ -329,15 +317,6 @@ const DRAWN_FOR_SHAPE: ReadonlySet<string> = new Set([
   'flag',
   'flow',
   'molecule',
-  'counter',
-  'icons',
-  'namecard',
-  'calendar',
-  'seats',
-  'strike',
-  'transfer',
-  'document',
-  'split',
 ]);
 /** A story page's own text with fewer words than this is too little to write from: its note is used. */
 const STORY_OWN_WORDS = 20;
@@ -501,8 +480,6 @@ interface Composing {
   who: string;
   base: string;
   shape: FilmShape;
-  /** A scene of shots (explainer-animation-tech §9): its picture built from this plan, for this shape, by the shots engine. */
-  shots?: ShotsInput;
 }
 
 @Injectable()
@@ -851,11 +828,6 @@ export class SceneProcessor {
     twin?: { shape: FilmShape; base: string };
     /** Its parts kept beside its film (a Studio scene's), for a twin composed later. */
     parts?: boolean;
-    /**
-     * A scene of shots: its picture is this plan, built for its shape by
-     * the shots engine once it is voiced. Nothing is drawn by the artist.
-     */
-    shots?: ShotsInput;
   }): Promise<
     | { fit: 'poor'; reason: string }
     | {
@@ -925,29 +897,20 @@ export class SceneProcessor {
     // and both branches have settled before the catch below touches the
     // row, so neither writes to it afterwards.
     const stop = new AbortController();
-    // A scene of shots draws nothing here: its sets, charts and map are
-    // built by code as it is composed, on its voice.
-    type Drawn = [
-      Map<string, GatedDrawing | null>,
-      NonNullable<SceneScript['drawn']> | null,
-    ];
     const [drawing, spoken] = await Promise.allSettled([
-      (input.shots
-        ? Promise.resolve<Drawn>([new Map<string, GatedDrawing | null>(), null])
-        : Promise.all([
-            this.drawAll(
-              script,
-              topic.title,
-              documentId,
-              who,
-              stop.signal,
-              story,
-              new Map([...carried.reuse, ...(input.drawn ?? new Map())]),
-              input.shape ?? 'wide',
-            ),
-            this.drawOwn(script, story, documentId, who, stop.signal),
-          ])
-      ).then(async ([made, own]) => {
+      Promise.all([
+        this.drawAll(
+          script,
+          topic.title,
+          documentId,
+          who,
+          stop.signal,
+          story,
+          new Map([...carried.reuse, ...(input.drawn ?? new Map())]),
+          input.shape ?? 'wide',
+        ),
+        this.drawOwn(script, story, documentId, who, stop.signal),
+      ]).then(async ([made, own]) => {
         // The show's own, as drawn: the stage holds and stands them.
         if (own) script = { ...script, drawn: own };
         if (!voiced && !stop.signal.aborted) await input.step?.('voicing');
@@ -1000,7 +963,6 @@ export class SceneProcessor {
       who,
       base,
       shape: input.shape ?? 'wide',
-      ...(input.shots ? { shots: input.shots } : {}),
     };
     const made = await this.composeStored(composing);
     // Its parts kept beside it (a Studio scene's): its twin in the other
@@ -1008,20 +970,17 @@ export class SceneProcessor {
     if (input.parts)
       await this.storeParts(made.sceneKey, script, drawings, voice, who);
     // The same scene in the other shape, from the same drawings and voice:
-    // composed again for its own frame, never drawn or voiced again. A
-    // scene of shots has its assets built again for that frame.
+    // composed again for its own frame, never drawn or voiced again.
     const twin = input.twin
       ? await this.composeStored({
           ...composing,
-          drawings: input.shots
-            ? drawings
-            : await this.framedDrawings(
-                drawings,
-                script,
-                story,
-                input.twin.shape,
-                who,
-              ),
+          drawings: await this.framedDrawings(
+            drawings,
+            script,
+            story,
+            input.twin.shape,
+            who,
+          ),
           keepAs: `${composing.keepAs}-${input.twin.shape}`,
           who: `${who} (${input.twin.shape})`,
           base: input.twin.base,
@@ -1058,9 +1017,6 @@ export class SceneProcessor {
     script: SceneScript;
     filled: number;
   }> {
-    // A scene of shots is the shots engine's to compose.
-    if (input.shots)
-      return this.composeShotsStored({ ...input, shots: input.shots });
     const { drawings, voice, story, who, base } = input;
     let script = input.script;
     // Its text paced to be read (Ask 3 B), by code: keyword cards cut to
@@ -1172,73 +1128,6 @@ export class SceneProcessor {
     const finished = input.finish ? input.finish(scene) : scene;
     const { sceneKey, thumbKey } = await this.store(base, finished, who);
     return { scene: finished, sceneKey, thumbKey, script, filled };
-  }
-
-  /**
-   * A scene of shots composed on its voice and stored (explainer-
-   * animation-tech §9): the show's map drawn for its shape in its look,
-   * the plan built, timed, mended and given its sounds by the shots
-   * engine, with a lesson's beats, music and ideas. What fell back or was
-   * put right is logged for us; nothing here stops the scene.
-   */
-  private async composeShotsStored(
-    input: Composing & { shots: ShotsInput },
-  ): Promise<{
-    scene: SceneDto;
-    sceneKey: string;
-    thumbKey: string;
-    script: SceneScript;
-    filled: number;
-  }> {
-    const { shots, voice, who, base, shape, script } = input;
-    const theme = input.theme ?? 'paper';
-    const look = shotLook({
-      palette: shots.world?.palette ?? [],
-      held: shots.world?.held ?? null,
-      theme,
-    });
-    const map = shots.world?.base
-      ? await mapSetAsset(shots.world.base, look, shape, theme)
-      : null;
-    if (shots.world?.base && !map)
-      this.logger.log(`${who}: shots: the show's map could not be drawn`);
-    const { scene, notes, problems } = composeShotScene(shots, {
-      script,
-      beats: voice.beats,
-      durationMs: voice.durationMs,
-      timing: voice.timing,
-      shape,
-      theme,
-      generator: SCENE_GENERATOR_VERSION,
-      profile: input.profile,
-      map,
-    });
-    const made = scene.shots!;
-    this.logger.log(
-      `${who}: shots: ${made.shots.length} shots (${made.shots.map((s) => s.set.kind).join(', ')}), ${Object.keys(made.assets).length} assets, ${made.shots.reduce((n, s) => n + s.info.length, 0)} pieces of information, ${made.sounds.length} sounds`,
-    );
-    for (const note of notes.slice(0, 12))
-      this.logger.log(`${who}: shots: ${note}`);
-    if (notes.length > 12)
-      this.logger.log(`${who}: shots: and ${notes.length - 12} more`);
-    this.logger.log(
-      `${who}: shots: timing check: ${
-        problems.length
-          ? problems
-              .map((p) => `s${p.shot + 1} ${p.code}: ${p.message}`)
-              .slice(0, 6)
-              .join('; ')
-          : 'every rule held'
-      }`,
-    );
-    // How its words are read, for whom it is made: stored as a lesson's is.
-    if (input.reading)
-      scene.reading = { wpm: input.reading.wpm, motion: input.reading.motion };
-    if (voice.voicePace !== undefined) scene.voicePace = voice.voicePace;
-    if (theme !== 'paper') scene.theme = theme;
-    const finished = input.finish ? input.finish(scene) : scene;
-    const { sceneKey, thumbKey } = await this.store(base, finished, who);
-    return { scene: finished, sceneKey, thumbKey, script, filled: 0 };
   }
 
   /**
@@ -1402,33 +1291,9 @@ export class SceneProcessor {
       notes: string[];
       script: SceneScript | null;
     };
-    /** A scene of shots: its assets built again for this shape from its plan, on its voice. */
-    shots?: ShotsInput;
   }): Promise<{ scene: SceneDto; sceneKey: string; thumbKey: string }> {
     const { parts, story, who } = input;
     const script = parts.script;
-    if (input.shots) {
-      const made = await this.composeStored({
-        script,
-        drawings: new Map(),
-        voice: parts,
-        profile: input.profile,
-        story: null,
-        ...(input.reading ? { reading: input.reading } : {}),
-        ...(input.theme ? { theme: input.theme } : {}),
-        ...(input.finish ? { finish: input.finish } : {}),
-        keepAs: input.keepAs ?? 'page',
-        who,
-        base: input.base,
-        shape: input.shape,
-        shots: input.shots,
-      });
-      return {
-        scene: made.scene,
-        sceneKey: made.sceneKey,
-        thumbKey: made.thumbKey,
-      };
-    }
     const reuse = new Map(parts.drawings);
     // A drawing that did not come through when it was made is a card
     // again: never asked of the artist here.
@@ -1528,8 +1393,7 @@ export class SceneProcessor {
     durationMs: number;
     timing: SceneTiming;
     profile: DocumentProfile;
-    /** A story's scene: its people and places are the show's. Null only for a scene of shots. */
-    story: PageStory | null;
+    story: PageStory;
     base: string;
     who: string;
     keepAs?: string;
@@ -1539,58 +1403,14 @@ export class SceneProcessor {
     };
     /** The film's shape: a tall one's sets built again for its frame. Absent, wide. */
     shape?: FilmShape;
-    /**
-     * A scene of shots: built again from its plan as it is now on the
-     * voice it was made with (a board sent back, a critic's fixes), in its
-     * look, read as its audience reads, its ideas marked as it finishes.
-     */
-    shots?: ShotsInput;
-    reading?: SceneReading | null;
-    theme?: ThemeId;
-    finish?: (scene: SceneDto) => SceneDto;
-    /** The pace its voice was made at, kept on the scene as it was. */
-    voicePace?: number;
   }): Promise<{
     scene: SceneDto;
     sceneKey: string;
     thumbKey: string;
     script: SceneScript;
   }> {
-    const { who } = input;
+    const { story, who } = input;
     const shape = input.shape ?? 'wide';
-    if (input.shots) {
-      const made = await this.composeStored({
-        script: input.script,
-        drawings: new Map(),
-        voice: {
-          beats: input.beats,
-          durationMs: input.durationMs,
-          timing: input.timing,
-          ...(input.voicePace !== undefined
-            ? { voicePace: input.voicePace }
-            : {}),
-        },
-        profile: input.profile,
-        story: null,
-        ...(input.reading ? { reading: input.reading } : {}),
-        ...(input.theme ? { theme: input.theme } : {}),
-        ...(input.finish ? { finish: input.finish } : {}),
-        keepAs: input.keepAs ?? 'page',
-        who,
-        base: input.base,
-        shape,
-        shots: input.shots,
-      });
-      return {
-        scene: made.scene,
-        sceneKey: made.sceneKey,
-        thumbKey: made.thumbKey,
-        script: made.script,
-      };
-    }
-    const story = input.story;
-    if (!story)
-      throw new Error('Only a story’s scene is composed again on its cast');
     const [kept, sets, own] = await Promise.all([
       this.castAt(story.castKey),
       this.setsAt(story.setsKey),
@@ -2281,7 +2101,7 @@ export class SceneProcessor {
         thing.id,
         await drawByCode(thing, shape).catch((error: unknown) => {
           this.logger.warn(
-            `${who}: "${thing.id}" (${thing.kind}) could not be drawn (a book's page sets it as a card, an explainer leaves it out): ${(error as Error).message}`,
+            `${who}: "${thing.id}" (${thing.kind}) is set as a card: ${(error as Error).message}`,
           );
           return null;
         }),
@@ -2304,7 +2124,7 @@ export class SceneProcessor {
           faceRig: true,
         }).catch((error: unknown) => {
           this.logger.warn(
-            `${who}: "${thing.id}" (a person) could not be drawn (a book's page sets it as a card, an explainer leaves it out): ${(error as Error).message}`,
+            `${who}: "${thing.id}" (a person) is set as a card: ${(error as Error).message}`,
           );
           return null;
         }),
@@ -2598,7 +2418,7 @@ export class SceneProcessor {
     }
     if (!best?.drawing)
       this.logger.warn(
-        `${who}: "${thing.name}" could not be drawn (a book's page sets it as a card, an explainer leaves it out): no drawing came through`,
+        `${who}: "${thing.name}" is set as a card: no drawing came through`,
       );
     return best?.drawing ?? null;
   }
@@ -3118,9 +2938,6 @@ export class SceneProcessor {
    * still of its film instead (scene-still).
    */
   private async thumb(scene: Parameters<typeof thumbSvg>[0]): Promise<Buffer> {
-    // A scene of shots: its first drawn set, framed on its subject.
-    if (scene.engine === 'shots')
-      return rasterise(shotsThumbSvg(scene), THUMB_WIDTH);
     // A film's scene: a still of the film at its fullest moment, its set's
     // layers where the camera has them then and its people at their
     // depths (studio-scenery-plan §8.6); as below where that fails.

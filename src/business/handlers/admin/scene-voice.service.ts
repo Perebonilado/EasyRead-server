@@ -18,7 +18,6 @@ import {
   elevenLabsStandIn,
   isElevenLabsModel,
   isListedEngine,
-  isSceneVoiceEngine,
   isVoiceIdOf,
   sceneEngine,
   type ElevenLabsModel,
@@ -172,17 +171,7 @@ export class SceneVoiceService {
     const ready = this.ready();
     const named = this.config.get<string>('SCENE_VOICE_ENGINE');
     const record = await this.record();
-    // A worker may be made to speak in one engine whatever the admin chose
-    // (SCENE_VOICE_FORCE), as a local test worker does while the chosen
-    // engine has no credit; one that is not set up is never forced.
-    const forced = this.config
-      .get<string>('SCENE_VOICE_FORCE')
-      ?.trim()
-      .toLowerCase();
-    let engine =
-      isSceneVoiceEngine(forced) && ready[forced]
-        ? forced
-        : sceneEngine(record.sceneVoice, named, ready);
+    let engine = sceneEngine(record.sceneVoice, named, ready);
     if (engine === 'elevenlabs' && page?.characters) {
       const over = await this.overCap(page, this.modelOf(record));
       if (over) {

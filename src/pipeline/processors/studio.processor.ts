@@ -21,7 +21,6 @@ import {
 import {
   bibleOf,
   explainerSheetOf,
-  isIllustrated,
   outlineOf,
   secondsOf,
   FULLEST,
@@ -94,9 +93,7 @@ import {
   stagedFaults,
   stillThere,
 } from '../../business/domain/studio/studio-staged';
-import type { FilmShape, SceneDto } from '../../contracts';
-import type { SceneReading } from '../../business/domain/scene-reading';
-import type { ThemeId } from '../../business/domain/scene-themes';
+import type { SceneDto } from '../../contracts';
 import {
   onItsVoice,
   paintedAt,
@@ -125,13 +122,7 @@ import type {
   StudioCheckVerdict,
 } from '../../business/ports/llm.port';
 import type { StoragePort } from '../../business/ports/storage.port';
-import {
-  JOB_QUEUE,
-  LLM_GATEWAY,
-  PICTURE_DESK,
-  STORAGE,
-} from '../../business/ports/tokens';
-import type { DeskLike } from '../../business/domain/pictures/episode';
+import { JOB_QUEUE, LLM_GATEWAY, STORAGE } from '../../business/ports/tokens';
 import type {
   JobQueuePort,
   StudioAsk,
@@ -226,19 +217,7 @@ import {
 } from '../../business/domain/studio/studio-host';
 import { ideaStarts } from '../../business/domain/scene-ideas';
 import { writeClipSheet } from '../../business/handlers/studio/studio-clip-writer';
-import {
-  showLookStyle,
-  showTheme,
-} from '../../business/domain/studio/studio-look';
-import { keySecret } from '../../business/domain/studio/studio-export';
-import { Ffmpeg } from '../export/ffmpeg';
-import {
-  PuppeteerFilmCapture,
-  chromePath,
-  exportGl,
-} from '../export/film-capture';
-import { RenderPageEyes } from '../export/scene-eyes';
-import { SceneCritic } from './scene-critic';
+import { showTheme } from '../../business/domain/studio/studio-look';
 import { studioReading } from '../../business/domain/studio/studio-motion';
 
 /** A kit's spec for a character: a person's, an animal's, or a creature's. */
@@ -264,18 +243,6 @@ import {
   TwinNeedsRemake,
 } from '../../business/handlers/studio/studio-twins';
 import { partsFromFilm } from '../../business/domain/scene-film-parts';
-import { StudioEditorProcessor, isEditorJob } from './studio-editor.processor';
-import { usesEditor } from '../../business/domain/studio/studio-editor';
-import {
-  onShowMap,
-  withWorldPlaces,
-  worldColours,
-} from '../../business/domain/studio/studio-editor-world';
-import {
-  namedIn,
-  shotsInputOf,
-  shotsScriptOf,
-} from '../../business/domain/shots/shot-compose';
 
 /** How wide a still the picture check looks at is: enough to tell a bus from an ark, at about 0.4 cents a look. */
 const STILL_PX = 960;
@@ -314,42 +281,8 @@ const FAILED: Record<
 };
 
 /**
- * The critic's eyes on the render page (scene-eyes), from the worker's
- * settings: the web the export renders on (RENDER_WEB_URL), its render
- * keys' secret, Chrome and its GL. None where no render page is named
- * (the critic does not run without one) or EXPLAINER_CRITIC is off.
- */
-export function criticEyes(
-  setting: (name: string) => string | undefined,
-): RenderPageEyes | null {
-  const web = setting('RENDER_WEB_URL')?.trim().replace(/\/+$/u, '');
-  if (
-    !web ||
-    /^(?:off|false|0|no)$/iu.test((setting('EXPLAINER_CRITIC') ?? '').trim())
-  )
-    return null;
-  const capture = new PuppeteerFilmCapture(
-    new Ffmpeg(setting('FFMPEG_PATH') || 'ffmpeg'),
-    {
-      chrome: chromePath(setting('CHROME_PATH')),
-      pages: 1,
-      gl: exportGl(setting('EXPORT_GL')),
-    },
-  );
-  return new RenderPageEyes(capture, {
-    web,
-    secret: keySecret({
-      own: setting('STUDIO_EXPORT_SECRET'),
-      access: setting('JWT_ACCESS_SECRET'),
-    }),
-  });
-}
-
-/**
  * An explainer's scenes as the stage plays them, by position: each sheet
- * put right and checked as it is made. Null where a scene is not written,
- * and for a scene of shots, whose picture is its plan, not a board's
- * things: no continuous build carries anything into or out of it.
+ * put right and checked as it is made. Null where a scene is not written.
  */
 export function explainerScripts(
   show: StudioShowRecord,
@@ -362,21 +295,16 @@ export function explainerScripts(
   return (position) => {
     if (known.has(position)) return known.get(position)!;
     const row = rows.find((r) => r.position === position);
-    const world = show.editor?.world ?? null;
     const lesson = {
       teach: episode.outline?.scenes[position]?.teach ?? null,
       source: show.brief.source,
       stage,
       maths: bible.maths,
       planned: null,
-      ...worldColours(world),
     };
     const script =
-      row?.sheet?.kind === 'explainer' && row.sheet.engine !== 'shots'
-        ? checkExplainer(
-            repairExplainer(onShowMap(row.sheet, world), lesson),
-            lesson,
-          ).script
+      row?.sheet?.kind === 'explainer'
+        ? checkExplainer(repairExplainer(row.sheet, lesson), lesson).script
         : null;
     known.set(position, script);
     return script;
@@ -421,59 +349,25 @@ export function studioMakeOf(
   gestures: ReadonlySet<string> = new Set(),
 ): Omit<Parameters<SceneProcessor['make']>[0], 'base' | 'who'> {
   const story = row.sheet?.kind === 'story';
-  // An editor's illustrated scene (studio-editor-cut): a story's sheet
-  // narrated throughout in the lesson's voice, in one of the world's
-  // places; never a clip, so no freeze and no card after it.
-  const illustrated =
-    story &&
-    show.brief.format === 'explainer' &&
-    isIllustrated(episode.outline?.scenes[row.position]);
   // A story's scene in an explainer is one of its story clips (studio-clip):
   // staged as a story is, with a light narrator in the lesson's voice.
-  const clip = story && show.brief.format === 'explainer' && !illustrated;
+  const clip = story && show.brief.format === 'explainer';
   const stage = stageOf(show.brief);
-  // An editor's show: its lessons in its world's colours, on its one map.
-  const world = show.editor?.world ?? null;
-  // An editor's scene of shots (explainer-animation-tech §9): its picture
-  // is the board's plan, built, timed and composed by the shots engine,
-  // and its voice and beats are a lesson's. Decided at the board and kept
-  // on its sheet, so a remake, a twin and a change of pace make it alike.
-  const shots =
-    row.sheet?.kind === 'explainer'
-      ? shotsInputOf(
-          row.sheet,
-          world,
-          row.position === 0,
-          row.id,
-          // How the show draws its people: characters or silhouettes.
-          showLookStyle(show.brief, world, bible),
-          // A named character is labelled once an episode: not again
-          // when a scene before this one showed them.
-          rows
-            .filter((r) => r.position < row.position)
-            .flatMap((r) =>
-              r.sheet?.kind === 'explainer' && r.sheet.engine === 'shots'
-                ? namedIn(r.sheet.shots)
-                : [],
-            ),
-        )
-      : null;
   const lesson = {
     teach: episode.outline?.scenes[row.position]?.teach ?? null,
     source: show.brief.source,
     stage,
     maths: bible.maths,
     planned: null,
-    ...worldColours(world),
   };
   // Whatever the writer left wrong is put right here, so a scene is
   // always one the stage can play: carrying on from how the scene before
   // left things, on its set with every feature its words name.
   const before = endBefore(rows, row.position, bible);
-  // An illustrated scene's narration is all of it: no narrator's share to keep to.
-  const narrator = illustrated
-    ? null
-    : narratorRuleOf(clip ? clipBrief(show.brief) : show.brief, bible);
+  const narrator = narratorRuleOf(
+    clip ? clipBrief(show.brief) : show.brief,
+    bible,
+  );
   const sheet = story
     ? repairSheet(row.sheet as StorySheet, bible, before, narrator)
     : null;
@@ -497,50 +391,34 @@ export function studioMakeOf(
     ...(energy ? { energy: { cut: energy.cut, push: energy.push } } : {}),
   });
   // A clip's set in the explainer's look; a story's in its style.
-  const look =
-    clip || illustrated
-      ? clipLook(showTheme(show.brief, bible))
-      : story
-        ? setLookOf(show.brief)
-        : null;
+  const look = clip
+    ? clipLook(showTheme(show.brief, bible))
+    : story
+      ? setLookOf(show.brief)
+      : null;
   const staged = sheet
     ? withFound(bible, sheet.set, mendSheet(sheet, bible, before))
     : bible;
   // The lesson after a clip opens on it as a card (studio-clip): the
   // clip's last frame, shrunk onto its stage, the diagram built round it.
-  // A scene of shots opens on its own first shot.
-  const clipBefore =
-    !story && !shots
-      ? rows.find(
-          (r) =>
-            r.position === row.position - 1 &&
-            r.sheet?.kind === 'story' &&
-            !isIllustrated(episode.outline?.scenes[r.position]),
-        )
-      : undefined;
+  const clipBefore = !story
+    ? rows.find(
+        (r) => r.position === row.position - 1 && r.sheet?.kind === 'story',
+      )
+    : undefined;
   // An explainer's scene in a continuous build is laid out on the board
   // the scenes of its section before it left (studio-build).
-  const lessons =
-    sheet || shots ? null : explainerScripts(show, episode, rows, bible);
+  const lessons = sheet ? null : explainerScripts(show, episode, rows, bible);
   const built = lessons
     ? buildScript(episode.outline?.scenes ?? [], row.position, lessons)
     : null;
-  // A scene of shots is voiced from its lines alone: no things to check.
   const lessonScript = sheet
     ? null
-    : shots
-      ? shotsScriptOf(row.sheet as ExplainerSheet, {
-          stage,
-          maths: bible.maths,
-        })
-      : (built?.script ??
-        checkExplainer(
-          repairExplainer(
-            onShowMap(row.sheet as ExplainerSheet, world),
-            lesson,
-          ),
-          lesson,
-        ).script);
+    : (built?.script ??
+      checkExplainer(
+        repairExplainer(row.sheet as ExplainerSheet, lesson),
+        lesson,
+      ).script);
   const script = sheet
     ? styled(stageStory(sheet, staged, { before, painted, gestures }))
     : clipBefore
@@ -626,16 +504,10 @@ export function studioMakeOf(
     profile,
     story: story
       ? {
-          // A clip's places from code's layouts where it has them; an
-          // illustrated scene's from the world's (studio-editor-world).
-          bible: illustrated
-            ? withWorldPlaces(
-                storyBibleFor(bible, sheets, show.title),
-                show.editor?.world,
-              )
-            : clip
-              ? withPresets(storyBibleFor(bible, sheets, show.title))
-              : storyBibleFor(bible, sheets, show.title),
+          // A clip's places from code's layouts where it has them.
+          bible: clip
+            ? withPresets(storyBibleFor(bible, sheets, show.title))
+            : storyBibleFor(bible, sheets, show.title),
           page: row.position + 1,
           castKey: studioCastKey(show.id),
           setsKey: studioSetsKey(show.id),
@@ -647,9 +519,6 @@ export function studioMakeOf(
     script,
     kept: new Map(),
     ...(recheck ? { recheck } : {}),
-    // A scene of shots: its plan, what it may name and the show's world,
-    // composed by the shots engine on the voice its lines are given.
-    ...(shots ? { shots } : {}),
     // An explainer's voice at its audience's rate and the maker's pace.
     ...(story ? {} : { pace: studioPaceBrief(show.brief) }),
     // A clip holds still at its idea, its label set; the lesson after it
@@ -801,40 +670,7 @@ export class StudioProcessor {
     @Optional() private readonly config?: ConfigService,
     /** An explainer made from a document: its pages, as notes or as they are (studio-material). */
     @Optional() private readonly material?: StudioMaterialService,
-    /** Archive photos and portraits for a shots episode (WP11). */
-    @Optional()
-    @Inject(PICTURE_DESK)
-    private readonly pictures?: DeskLike,
-  ) {
-    this.editor = new StudioEditorProcessor({
-      studio: this.studio,
-      llm: this.llm,
-      calls: this.calls,
-      queue: this.queue,
-      setting: (name) => this.config?.get<string>(name) ?? process.env[name],
-      material: this.material ?? null,
-      pictures: this.pictures ?? null,
-      logger: this.logger,
-    });
-    const setting = (name: string) =>
-      this.config?.get<string>(name) ?? process.env[name];
-    this.critic = new SceneCritic({
-      studio: this.studio,
-      llm: this.llm,
-      calls: this.calls,
-      storage: this.storage,
-      scenes: this.scenes,
-      eyes: criticEyes(setting),
-      setting,
-      logger: this.logger,
-    });
-  }
-
-  /** The critic (scene-critic, WP13): a scene of shots looked at, scored and fixed once made. */
-  private readonly critic: SceneCritic;
-
-  /** The editor's desk (studio-editor.processor): an explainer show planned, and its episodes written, as an editor does. */
-  private readonly editor: StudioEditorProcessor;
+  ) {}
 
   /** How a story's script is written and read (studio-script-writer): fast and cheap unless a setting says otherwise. */
   private scriptSettings(): ScriptSettings {
@@ -878,9 +714,6 @@ export class StudioProcessor {
     try {
       if (job.kind === 'bible')
         await this.writeBible(show, episode, job.request, true, key);
-      else if (job.kind === 'outline' && usesEditor(show))
-        // An editor's show is planned by the editor, however it was asked.
-        await this.editor.outlineAsked(show, episode, job.request, key);
       else if (job.kind === 'outline')
         await this.writeOutline(
           show,
@@ -889,18 +722,8 @@ export class StudioProcessor {
           key,
           job.story === true,
         );
-      else if (
-        job.kind === 'script' &&
-        episode.editorial &&
-        episode.outline?.editor
-      )
-        // An editor's episode: each scene boarded on its written rows, and,
-        // made with "Make it", the film made straight after.
-        await this.boardEditorScenes(show, episode, key, job.make === true);
       else if (job.kind === 'script')
         await this.writeScript(show, episode, key);
-      else if (isEditorJob(job.kind))
-        await this.editor.run(job, show, episode, key);
       else if (job.kind === 'scene' && job.sceneId)
         await this.rewriteScene(
           show,
@@ -1039,11 +862,6 @@ export class StudioProcessor {
         return;
       }
       if (!last) throw error;
-      // The editor's desk's own: said in the thread, the episode free.
-      if (isEditorJob(job.kind)) {
-        await this.editor.failed(show, episode, job.kind, failed);
-        return;
-      }
       // The Studio's own try again at a maker's change that could not be
       // written: the film made on the first try stands, and what its check
       // found is what the maker is told. Never a failure of theirs.
@@ -2070,84 +1888,6 @@ export class StudioProcessor {
     await this.scriptWritten(show, episode, rows.length, key);
   }
 
-  /**
-   * An editor's episode boarded (studio-editor.processor boards): every
-   * scene's board on its written rows; said in the thread; and, made with
-   * "Make it", the film made straight after, as making it would.
-   */
-  private async boardEditorScenes(
-    show: StudioShowRecord,
-    episode: StudioEpisodeRecord,
-    key?: string,
-    make = false,
-  ): Promise<void> {
-    const count = await this.editor.boards(show, episode);
-    await this.log(
-      show,
-      episode,
-      { what: 'scenes', step: 'script', line: EVENT_LINES.scenes(count) },
-      key,
-    );
-    if (!make) {
-      await this.studio.updateEpisode(episode.id, { busy: null, error: null });
-      return;
-    }
-    // Made as the make button makes it: what is ready, within the month's
-    // film, the cast drawn first, then every scene at once.
-    const now = (await this.studio.findShow(show.id)) ?? show;
-    const rows = (await this.studio.listScenes(episode.id)).filter(
-      (r) => r.sheet && r.status === 'ready',
-    );
-    const seconds = rows.reduce(
-      (n, r) => n + (r.sheet ? secondsOf(r.sheet) : 0),
-      0,
-    );
-    try {
-      (await this.entitlements.forUser(episode.userId)).assertStudioAvailable(
-        seconds,
-      );
-    } catch (error) {
-      await this.log(
-        now,
-        episode,
-        {
-          what: 'failed',
-          step: 'made',
-          line: (error as Error).message,
-        },
-        key && `${key}:allowance`,
-      );
-      await this.studio.updateEpisode(episode.id, { busy: null, error: null });
-      return;
-    }
-    await this.studio.updateEpisode(episode.id, { busy: 'make', error: null });
-    for (const row of rows)
-      await this.studio.updateScene(row.id, {
-        status: 'making',
-        step: null,
-        error: null,
-      });
-    await this.log(
-      now,
-      episode,
-      {
-        what: 'make',
-        step: 'made',
-        line: EVENT_LINES.make(rows.length, seconds),
-      },
-      key && `${key}:make`,
-    );
-    await this.queue.enqueueStudio([
-      {
-        kind: 'prepare',
-        showId: show.id,
-        episodeId: episode.id,
-        userId: episode.userId,
-        sceneIds: rows.map((r) => r.id),
-      },
-    ]);
-  }
-
   /** The script said written in the thread, and the episode free. */
   private async scriptWritten(
     show: StudioShowRecord,
@@ -2739,9 +2479,6 @@ export class StudioProcessor {
           ? ' This scene starts a diagram the scenes after it add to: give each thing a short name, and link them with arrows.'
           : '';
     const ask = {
-      // Told the explainer's craft: no card in place of a picture, no one
-      // drawn (explainer-animation-plan §10).
-      explainer: true,
       documentTitle: show.title,
       topicTitle: outline.title,
       material: own
@@ -2766,10 +2503,7 @@ export class StudioProcessor {
         scene?.points.length
           ? `The small ideas, each with what to show:\n- ${scene.points.join('\n- ')}`
           : '',
-        // Its subject and pictures, never the cast: the show's people and
-        // places are its story clips' alone, and a lesson draws no one
-        // (explainer-animation-plan §10).
-        describeBible({ ...bible, characters: [], sets: [] }, false),
+        describeBible(bible, false),
       ]
         .filter(Boolean)
         .join('\n\n'),
@@ -2986,15 +2720,8 @@ export class StudioProcessor {
       const look = clips ? clipLook(showTheme(show.brief, bible)) : null;
       await this.scenes.prepareStory(
         {
-          // An editor's illustrated scenes: the world's places built from
-          // their layouts (studio-editor-world), the rest as a clip's.
           bible: clips
-            ? show.editor?.world
-              ? withWorldPlaces(
-                  storyBibleFor(bible, sheets, show.title),
-                  show.editor.world,
-                )
-              : withPresets(storyBibleFor(bible, sheets, show.title))
+            ? withPresets(storyBibleFor(bible, sheets, show.title))
             : storyBibleFor(bible, sheets, show.title),
           page: 1,
           castKey: studioCastKey(show.id),
@@ -3153,54 +2880,6 @@ export class StudioProcessor {
     return gesturingIn(cast);
   }
 
-  /**
-   * A twin's scene composed again on the plan the critic's loop ended on:
-   * the lead's version's voice, the twin's frame. Null when it cannot be
-   * (the twin then fails as one not composed does, and is made again).
-   */
-  private async criticTwin(input: {
-    shots: NonNullable<ReturnType<typeof studioMakeOf>['shots']>;
-    of: ReturnType<typeof studioMakeOf>;
-    scene: SceneDto;
-    base: string;
-    who: string;
-    keepAs: string;
-    shape: FilmShape;
-    theme?: ThemeId;
-    reading?: SceneReading;
-  }): Promise<{ scene: SceneDto; sceneKey: string; thumbKey: string } | null> {
-    const { of, scene } = input;
-    const voiced = of.script ? onItsVoice(of.script, scene) : null;
-    if (!voiced) return null;
-    return this.scenes
-      .recompose({
-        script: voiced,
-        kept: new Map(),
-        beats: scene.beats,
-        durationMs: scene.durationMs,
-        timing: scene.timing,
-        profile: of.profile,
-        story: null,
-        base: input.base,
-        who: `${input.who} (${input.shape}, the critic's plan)`,
-        keepAs: input.keepAs,
-        shape: input.shape,
-        shots: input.shots,
-        ...(input.theme ? { theme: input.theme } : {}),
-        ...(input.reading ? { reading: input.reading } : {}),
-        ...(of.finish ? { finish: of.finish } : {}),
-        ...(scene.voicePace !== undefined
-          ? { voicePace: scene.voicePace }
-          : {}),
-      })
-      .catch((error: Error) => {
-        this.logger.warn(
-          `${input.who}: the ${input.shape} twin not composed on the critic's plan: ${error.message}`,
-        );
-        return null;
-      });
-  }
-
   /** The show's sets as painted: none yet, or none that can be read, is none. */
   private async paintedSets(showId: string): Promise<Sets | null> {
     try {
@@ -3277,24 +2956,12 @@ export class StudioProcessor {
       ? await this.boardDrawings(show.id, shared)
       : new Map<string, GatedDrawing>();
     // The Studio's own try again, its words as voiced: staged again on the
-    // voice it was made with, nothing voiced, nothing spent. A scene of
-    // shots is built again from its plan as it is now, on that voice.
+    // voice it was made with, nothing voiced, nothing spent.
     const voiced =
-      ask?.tries === 2 && row.sceneKey && row.audioKey && (of.story || of.shots)
+      ask?.tries === 2 && row.sceneKey && row.audioKey && of.story
         ? await this.storedScene(row.sceneKey)
         : null;
     const onVoice = voiced && of.script ? onItsVoice(of.script, voiced) : null;
-    const shotsAgain = of.shots
-      ? {
-          shots: of.shots,
-          theme: showTheme(show.brief, bible) ?? undefined,
-          reading: studioReading(show.brief),
-          ...(of.finish ? { finish: of.finish } : {}),
-          ...(voiced?.voicePace !== undefined
-            ? { voicePace: voiced.voicePace }
-            : {}),
-        }
-      : {};
     const made =
       voiced && onVoice && row.audioKey
         ? await this.scenes
@@ -3305,13 +2972,12 @@ export class StudioProcessor {
               durationMs: voiced.durationMs,
               timing: voiced.timing,
               profile: of.profile,
-              story: of.story ?? null,
+              story: of.story!,
               base,
               who,
               keepAs: `studio-${row.id}`,
               ...(of.recheck ? { recheck: of.recheck } : {}),
               ...(shape !== 'wide' ? { shape } : {}),
-              ...shotsAgain,
             })
             .then(async (again) => ({
               fit: 'good' as const,
@@ -3333,13 +2999,12 @@ export class StudioProcessor {
                         durationMs: voiced.durationMs,
                         timing: voiced.timing,
                         profile: of.profile,
-                        story: of.story ?? null,
+                        story: of.story!,
                         base: twinBase,
                         who: `${who} (${twinned.twin.shape})`,
                         keepAs: `studio-${row.id}-${twinned.twin.shape}`,
                         ...(of.recheck ? { recheck: of.recheck } : {}),
                         shape: episodeShape(twinned.twin),
-                        ...shotsAgain,
                       })
                       .catch(() => null)
                   : undefined,
@@ -3384,66 +3049,7 @@ export class StudioProcessor {
       ).catch((error: Error) =>
         this.logger.warn(`${who}: build drawings not kept: ${error.message}`),
       );
-    let { scene, sceneKey, thumbKey } = made;
-    const { voice } = made;
-    // A scene of shots looked at, scored and fixed on its voice before it
-    // is shown (the critic's loop, WP13): it ends on its best version, and
-    // its sheet on the plan that version was built from.
-    let madeHash = fingerprint;
-    let twinScene = 'twin' in made ? (made.twin ?? null) : null;
-    if (of.shots && this.critic.on()) {
-      const looked = await this.critic
-        .loop({
-          show,
-          episode,
-          row,
-          make: {
-            script: of.script!,
-            profile: of.profile,
-            shots: of.shots,
-            ...(of.finish ? { finish: of.finish } : {}),
-            theme: showTheme(show.brief, bible) ?? undefined,
-            reading: studioReading(show.brief),
-          },
-          made: {
-            scene,
-            sceneKey,
-            thumbKey,
-            audioKey: voice.audioKey,
-            durationMs: voice.durationMs,
-          },
-          shape,
-          who,
-        })
-        .catch((error: Error) => {
-          this.logger.warn(`${who}: critic: not looked at: ${error.message}`);
-          return null;
-        });
-      if (looked) {
-        ({ scene, sceneKey, thumbKey } = looked);
-        if (looked.sheet) {
-          madeHash = sceneFingerprint(
-            looked.sheet,
-            bible,
-            show.brief,
-            carriedWears(rows, bible).get(row.position) ?? [],
-          );
-          // Its twin, on the plan it ends on.
-          if (twinned && twinBase)
-            twinScene = await this.criticTwin({
-              shots: { ...of.shots, plan: looked.sheet.shots! },
-              of,
-              scene,
-              base: `${twinBase}c`,
-              who,
-              keepAs: `studio-${row.id}-${twinned.twin.shape}`,
-              shape: episodeShape(twinned.twin),
-              theme: showTheme(show.brief, bible) ?? undefined,
-              reading: studioReading(show.brief),
-            });
-        }
-      }
-    }
+    const { scene, sceneKey, thumbKey, voice } = made;
     await this.studio.updateScene(row.id, {
       status: 'made',
       step: null,
@@ -3451,7 +3057,7 @@ export class StudioProcessor {
       sceneKey,
       audioKey: voice.audioKey,
       thumbKey,
-      madeHash,
+      madeHash: fingerprint,
       durationMs: voice.durationMs,
     });
     // Its twin's scene: made on the same voice, at the same fingerprint.
@@ -3459,21 +3065,12 @@ export class StudioProcessor {
       await this.twinMade(
         show,
         twinned,
-        twinScene,
-        {
-          audioKey: voice.audioKey,
-          durationMs: voice.durationMs,
-          fingerprint: madeHash,
-        },
+        'twin' in made ? (made.twin ?? null) : null,
+        { audioKey: voice.audioKey, durationMs: voice.durationMs, fingerprint },
         who,
       );
     // A clip's still is its last frame: the card the next lesson opens on.
-    // An editor's illustrated scene is no clip: no card follows it.
-    if (
-      row.sheet.kind === 'story' &&
-      show.brief.format === 'explainer' &&
-      !isIllustrated(episode.outline?.scenes[row.position])
-    )
+    if (row.sheet.kind === 'story' && show.brief.format === 'explainer')
       await this.clipStill(scene, thumbKey, who);
     // The files it was made from before are no one's now.
     for (const key of [
@@ -3993,8 +3590,6 @@ export class StudioProcessor {
         who,
         keepAs: `studio-${row.id}`,
         ...finishing,
-        // A scene of shots: its assets built again for the twin's frame.
-        ...(of.shots ? { shots: of.shots } : {}),
       });
     else {
       // Made before its parts were kept: a story's staged again on its
@@ -4140,18 +3735,6 @@ export class StudioProcessor {
         `made:${rows.flatMap((r) => (r.sceneKey ? [r.sceneKey] : [])).join(',')}`,
       );
     await this.studio.updateEpisode(episodeId, { busy: null, ...settled });
-    // An editor's episode made: the plan's next episodes offered.
-    if (made.length && !asked && show.editor && episode.editorial)
-      await this.editor.afterMade(
-        (await this.studio.findShow(show.id)) ?? show,
-        episode,
-        createHash('sha1')
-          .update(
-            rows.flatMap((r) => (r.sceneKey ? [r.sceneKey] : [])).join(','),
-          )
-          .digest('hex')
-          .slice(0, 16),
-      );
   }
 
   /** Something that happened, recorded in the thread, once for its key: never in the way of the work. */

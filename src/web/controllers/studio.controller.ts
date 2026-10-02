@@ -26,9 +26,7 @@ import {
   IsOptional,
   IsString,
   Length,
-  Max,
   Min,
-  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import type {
@@ -137,16 +135,6 @@ class AnyDto {
   @IsOptional()
   @IsObject()
   body?: Record<string, unknown>;
-}
-
-/** The maker's pick among the questions offered: its place, or null to leave it to the Studio. */
-class AngleDto {
-  @IsOptional()
-  @ValidateIf((dto: AngleDto) => dto.pick !== null)
-  @IsInt()
-  @Min(0)
-  @Max(2)
-  pick?: number | null;
 }
 
 /**
@@ -277,16 +265,6 @@ export class StudioController {
     response.setHeader('Content-Length', audio.length);
     response.setHeader('Cache-Control', 'private, max-age=3600');
     response.end(audio);
-  }
-
-  /** The question the show answers, picked from those offered (the editor's desk): its research begins. */
-  @Post('shows/:id/angle')
-  angle(
-    @CurrentUser('id') userId: string,
-    @Param('id') id: string,
-    @Body() body: AngleDto,
-  ): Promise<StudioShowDto> {
-    return this.studio.pickAngle(userId, id, { pick: body.pick ?? null });
   }
 
   /** A new episode of a show, about what the maker says. */

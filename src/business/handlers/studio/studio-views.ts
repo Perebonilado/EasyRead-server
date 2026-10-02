@@ -14,7 +14,6 @@ import type {
   StudioMessageDto,
   StudioOutlineDto,
   StudioSceneDto,
-  StudioSceneFramesDto,
   StudioSheetDto,
   StudioTwinDto,
 } from '../../../contracts';
@@ -37,7 +36,6 @@ import type {
   StudioMessageRecord,
   StudioSceneRecord,
 } from '../../repositories/studio.repository';
-import type { SceneFrames } from '../../domain/shots/critic-loop';
 
 /**
  * A scene's fingerprint: its sheet, and the people and the place it shows
@@ -329,21 +327,6 @@ export function sceneDto(
       new Date(),
       scene.sheetHash,
     ),
-    ...(scene.frames ? { frames: framesDto(scene.frames) } : {}),
-  };
-}
-
-/** The critic's loop on a scene, as the Studio's debug view reads it: its last scores, its rounds, its last code checks. */
-export function framesDto(frames: SceneFrames): StudioSceneFramesDto {
-  const looked = [...frames.rounds].reverse().find((r) => r.checks);
-  return {
-    scores: { ...(frames.scores ?? {}) },
-    pass: frames.pass ?? false,
-    rounds: frames.rounds.filter((r) => r.critic).length,
-    ended: frames.ended,
-    checks: looked?.checks ? { ...looked.checks } : null,
-    costUsd: frames.costUsd,
-    at: frames.at,
   };
 }
 

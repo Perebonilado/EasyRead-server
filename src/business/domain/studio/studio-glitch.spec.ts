@@ -29,11 +29,7 @@ import {
   madeScene,
   type ComposedScene,
 } from './__fixtures__/adolescent-health';
-import {
-  checkExplainer,
-  pictureMismatches,
-  repairExplainer,
-} from './studio-check';
+import { pictureMismatches, repairExplainer } from './studio-check';
 
 jest.setTimeout(120_000);
 
@@ -57,21 +53,6 @@ describe('the film as made (the faults are there)', () => {
     expect(
       wrong.every((w) => w.why === 'comparison' && w.with === 'brake'),
     ).toBe(true);
-    // The writer is asked to leave such a picture out, never to set it as
-    // a card (explainer-animation-plan §10).
-    const asked = checkExplainer(ADOLESCENT_FILM.scenes[2].sheet, {
-      teach: null,
-      stage: null,
-      maths: false,
-      planned: null,
-    }).problems.filter((p) => p.rule === 'picture');
-    expect(asked).toHaveLength(3);
-    for (const one of asked) {
-      expect(one.message).toMatch(
-        /or leave it out: the picture before it holds/,
-      );
-      expect(one.message).not.toMatch(/keyword card/);
-    }
   });
 });
 
@@ -115,23 +96,15 @@ describe('the film composed now', () => {
     ]);
   });
 
-  it('leaves out the three protective factors drawn as brakes, never sets them as cards, and every other picture agrees with its label', () => {
+  it('sets the three protective factors in type rather than as brakes, and every other picture agrees with its label', () => {
     const risks = film[2].scene;
-    // An explainer's picture that is not what its label says is left out
-    // (explainer-animation-plan §10): no brake, and no card of its name.
     for (const id of ['brake1', 'brake2', 'brake3'])
-      expect(risks.things.find((t) => t.id === id)).toBeUndefined();
+      expect(risks.things.find((t) => t.id === id)?.kind).toBe('words');
     expect(
-      risks.things.filter(
-        (t) =>
-          t.kind === 'words' &&
-          ['Parental support', 'Education', 'Positive peer influence'].includes(
-            t.text,
-          ),
-      ),
-    ).toEqual([]);
-    // The stage keeps showing what it had.
-    expect(risks.steps.some((step) => step.show.length > 0)).toBe(true);
+      risks.things
+        .filter((t) => t.id.startsWith('brake'))
+        .map((t) => (t.kind === 'words' ? t.text : '')),
+    ).toEqual(['Parental support', 'Education', 'Positive peer influence']);
     ADOLESCENT_FILM.scenes.forEach((one, n) => {
       const repaired = repairExplainer(one.sheet, {
         teach: null,

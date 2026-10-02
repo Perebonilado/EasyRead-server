@@ -118,10 +118,7 @@ import {
   FACES,
   STORY_MOVES,
   isCodeThing,
-  isInfographicThing,
-  partNames,
   quotedSpans,
-  withoutThings,
   type CharacterThing,
   type SceneCameraAsk,
   type SceneScript,
@@ -190,7 +187,6 @@ import {
   type StageWalk,
 } from './scene-film';
 import type { GatedDrawing } from './scene-svg';
-import { phraseSaidAt, stateCues } from './scene-infographic-cues';
 import {
   fitCheatsToShots,
   keepFacesSeen,
@@ -218,14 +214,7 @@ import { TALL_AREA, withTextOf } from './scene-lesson-shape';
 import { pagedForTall } from './scene-lesson-pages';
 import { describeSpace, spaceFaults } from './scene-space';
 import { describeTallShots, tallShotFaults } from './scene-safe';
-import {
-  INFOGRAPHIC_QUIET_MS,
-  MAX_QUIET_MS,
-  anchorMs,
-  quietGaps,
-  spaced,
-  type TimedBeat,
-} from './scene-timing';
+import { anchorMs, quietGaps, spaced, type TimedBeat } from './scene-timing';
 import { numberWords } from './spoken';
 
 /** How strongly the scene behind the stage shows on its paper: enough to be there, faint enough to read over. */
@@ -374,11 +363,9 @@ function reverseDto(
 
 /**
  * The thing as the client gets it: its drawing, or a card with its name
- * when the drawing failed. A Studio explainer's never comes here without
- * its drawing: it is left out before (explainerFloor), never a card. On a
- * story's page nothing is labelled: no names, no captions, no labels on a
- * drawing's parts. Who someone is, the story says; the only words on its
- * stage are the ones its people speak.
+ * when the drawing failed. On a story's page nothing is labelled: no
+ * names, no captions, no labels on a drawing's parts. Who someone is, the
+ * story says; the only words on its stage are the ones its people speak.
  */
 export function thingDto(
   thing: SceneThing,
@@ -399,15 +386,9 @@ export function thingDto(
       text: thing.text,
       style: thing.style,
     };
-  // What a thing drawn by code is called on a card, if it could not be
-  // drawn: its name, or what it shows (a name card's person, a document's
-  // title), or what it is.
+  // What a thing drawn by code is called on a card, if it could not be drawn.
   const called =
     thing.name ||
-    (thing.kind === 'namecard' ? thing.namecard.name : '') ||
-    (thing.kind === 'document' ? thing.document.title : '') ||
-    (thing.kind === 'seats' ? (thing.seats.label ?? '') : '') ||
-    (thing.kind === 'counter' ? (thing.counter.label ?? '') : '') ||
     (
       {
         math: 'Working',
@@ -419,15 +400,6 @@ export function thingDto(
         flow: 'Steps',
         molecule: 'Molecule',
         map: 'Map',
-        counter: 'Number',
-        icons: 'Count',
-        namecard: 'Who',
-        calendar: 'When',
-        seats: 'Seats',
-        strike: 'Changed',
-        transfer: 'Flow',
-        document: 'Document',
-        split: 'Compared',
       } as Record<string, string>
     )[thing.kind] ||
     thing.id;
@@ -1489,68 +1461,22 @@ function unlabelled(
 }
 
 /**
- * Whether a scene is a Studio explainer's lesson: a film's, and no
- * story's, by its profile and by its cast (no character or place of a
- * story on it). Its floor holds (explainerFloor); a book's page and every
- * story are composed as they always were.
- */
-export function isExplainerScene(
-  input: Pick<ComposeInput, 'script' | 'profile'>,
-): boolean {
-  return (
-    input.profile?.film === true &&
-    input.profile.story !== true &&
-    !input.script.cast.some(
-      (thing) => thing.kind === 'character' || thing.kind === 'place',
-    )
-  );
-}
-
-/**
- * A Studio explainer's scene held to the floor (explainer-animation-plan
- * §10): a thing that could not be drawn is left out, never shown as a
- * card of its name (thingDto's). Its steps go with it and the stage keeps
- * what it had; and when it was what the scene opened on, the scene's next
- * picture opens it in its place (withoutThings), never an empty stage.
- */
-export function explainerFloor(
-  script: SceneScript,
-  drawings: ReadonlyMap<string, GatedDrawing | null>,
-): SceneScript {
-  return withoutThings(
-    script,
-    new Set(
-      script.cast.flatMap((thing) =>
-        thing.kind !== 'stat' &&
-        thing.kind !== 'words' &&
-        !drawings.get(thing.id)
-          ? [thing.id]
-          : [],
-      ),
-    ),
-  );
-}
-
-/**
  * The scene the player plays. Steps are timed on their phrases and kept
  * apart; effects follow their step; a stretch longer than the quiet limit
  * gets a pulse on the thing in focus; every step is placed twice. Its
  * words set at its shape's sizes (scene-lesson-shape), a tall lesson's
- * steps of more than a phone's screen holds paged by code. A Studio
- * explainer's held to the floor first (explainerFloor).
+ * steps of more than a phone's screen holds paged by code.
  */
 export function composeScene(
   input: ComposeInput,
 ): ReturnType<typeof composeShaped> {
   const shape = input.shape ?? 'wide';
-  const script = isExplainerScene(input)
-    ? explainerFloor(input.script, input.drawings)
-    : input.script;
   return withTextOf(shape, () =>
-    composeShaped({
-      ...input,
-      script: shape === 'tall' ? pagedForTall(script) : script,
-    }),
+    composeShaped(
+      shape === 'tall'
+        ? { ...input, script: pagedForTall(input.script) }
+        : input,
+    ),
   );
 }
 
@@ -1868,14 +1794,6 @@ function composeShaped(input: ComposeInput): {
       // there all along: they fade in. Those the words bring walk on, and
       // anyone who comes later.
       const character = (id: string) => castById.get(id)?.kind === 'character';
-      // The show's one map (scene-map's frame) is the world the film is
-      // in: it is there as a scene opens on it, never popped or wiped in,
-      // so the join from the scene before carries it, and fades in where
-      // it comes later.
-      const showsMap = (id: string) => {
-        const thing = castById.get(id);
-        return thing?.kind === 'map' && Boolean(thing.map.base);
-      };
       firstBeat ??= step.at.beat;
       const opening = !charactersSeen && step.at.beat === firstBeat;
       for (const id of newcomers)
@@ -1883,20 +1801,18 @@ function composeShaped(input: ComposeInput): {
           // A build's drawings are drawn on, stroke by stroke (the player's draw).
           script.board && castById.get(id)?.kind === 'drawing'
             ? { how: 'draw' }
-            : showsMap(id)
+            : character(id) &&
+                (cut ||
+                  step.stage.cutIn?.includes(id) ||
+                  (opening && !arriving.has(id)) ||
+                  (cutAway.has(id) && !arriving.has(id)))
               ? { how: 'fade' }
-              : character(id) &&
-                  (cut ||
-                    step.stage.cutIn?.includes(id) ||
-                    (opening && !arriving.has(id)) ||
-                    (cutAway.has(id) && !arriving.has(id)))
-                ? { how: 'fade' }
-                : entranceFor(
-                    id,
-                    { layout: step.stage.layout, arrows },
-                    before,
-                    byId.get(id),
-                  );
+              : entranceFor(
+                  id,
+                  { layout: step.stage.layout, arrows },
+                  before,
+                  byId.get(id),
+                );
       if (step.stage.show.some(character)) charactersSeen = true;
       // Whoever a cut takes off the stage comes back by a cut too, not
       // walking on; whoever walks off is gone.
@@ -2872,59 +2788,6 @@ function composeShaped(input: ComposeInput): {
     });
   }
 
-  // An infographic's later looks come on the words the voice says for
-  // them (a strike's new words, a calendar's next date, a stamp's words),
-  // when the writer never showed them; those that are the point come
-  // anyway, spread through the time it is on the stage.
-  for (const thing of things) {
-    if (thing.kind !== 'drawing' || !thing.source) continue;
-    const source = castById.get(thing.id);
-    if (!source || !isInfographicThing(source)) continue;
-    const cues = stateCues(source).filter((cue) => thing.states[cue.state]);
-    const first = steps.findIndex((step) => step.show.includes(thing.id));
-    if (first < 0 || !cues.length) continue;
-    const leaves = steps.findIndex(
-      (step, i) => i > first && !step.show.includes(thing.id),
-    );
-    const end = leaves < 0 ? durationMs : steps[leaves].atMs;
-    let last = steps[first].atMs + 600;
-    cues.forEach((cue, i) => {
-      const group = thing.states[cue.state];
-      const shown = effects.find(
-        (e) =>
-          e.target === thing.id &&
-          e.do === 'show' &&
-          e.part !== null &&
-          thing.states[e.part] === group,
-      );
-      if (shown) {
-        last = shown.atMs;
-        return;
-      }
-      const heard = [
-        phraseSaidAt(said, cue.words, last + 300, end - 200),
-        ...cue.numbers.map((n) => saysAt(Math.abs(n), last + 300, end - 200)),
-      ].filter((t): t is number => t !== null);
-      const left = cues.length - i + 1;
-      const at = heard.length
-        ? Math.max(last + 400, Math.min(...heard) - 150)
-        : cue.unsaid
-          ? Math.min(
-              end - 300,
-              last + Math.min(3500, Math.max(1500, (end - last) / left)),
-            )
-          : null;
-      if (at === null || at <= steps[first].atMs) return;
-      last = Math.round(at);
-      effects.push({
-        atMs: last,
-        target: thing.id,
-        part: cue.state,
-        do: 'show',
-      });
-    });
-  }
-
   // What stays hidden until an effect shows it: a label pointed at later, and every state.
   for (const effect of effects) {
     const thing = byId.get(effect.target);
@@ -2971,11 +2834,6 @@ function composeShaped(input: ComposeInput): {
   // voice names pointed at, the camera in close on a thing it names, or
   // on the one in focus; a pulse only when there is nothing else. Not on
   // someone who acts: they are never still, and a pulse is no way to move.
-  // An editor's episode is paced as the playbook paces a film: a quiet
-  // past five seconds is filled, a change about every four, and what code
-  // drew is pointed at where the voice names it (a chamber's group, a
-  // split screen's side); what the editor holds on purpose stays still.
-  const paced = script.pace === 'infographic';
   const filled = fillQuiet({
     steps,
     effects,
@@ -2985,8 +2843,6 @@ function composeShaped(input: ComposeInput): {
     parts: (id) => {
       const thing = castById.get(id);
       const dto = byId.get(id);
-      if (paced && thing && isCodeThing(thing) && dto?.kind === 'drawing')
-        return partNames(thing).filter((name) => dto.parts[name]);
       return thing?.kind === 'drawing' && dto?.kind === 'drawing'
         ? thing.parts
             .map((part) => part.name)
@@ -2996,12 +2852,6 @@ function composeShaped(input: ComposeInput): {
     acting: (id) => Boolean(acting[id]),
     // The camera a sheet directs is the whole of it; so is a build's.
     shots: !cameraDirected && !script.board,
-    ...(paced
-      ? {
-          pace: INFOGRAPHIC_FILL,
-          holds: holdSpans(script, beats, timed, durationMs),
-        }
-      : {}),
   });
   effects.sort((a, b) => a.atMs - b.atMs);
 
@@ -5290,22 +5140,6 @@ export function describeStep(step: SceneStep, index: number): string {
 /** A code-made change fills a quiet stretch this often, and keeps this far from any other change. */
 const FILL_EVERY_MS = 6500;
 const FILL_CLEAR_MS = 2500;
-
-/** How quiet stretches are filled: as a lesson's always were. */
-export const LESSON_FILL = {
-  quietMs: MAX_QUIET_MS,
-  everyMs: FILL_EVERY_MS,
-  clearMs: FILL_CLEAR_MS,
-} as const;
-/**
- * And an editor's episode's, at the playbook's pace: a still stretch past
- * five seconds filled, a change about every four, kept two from any other.
- */
-export const INFOGRAPHIC_FILL = {
-  quietMs: INFOGRAPHIC_QUIET_MS,
-  everyMs: 4000,
-  clearMs: 2000,
-} as const;
 /** How long the camera stays in close on a thing, at most, and at least. */
 /** A quiet the voice left this much shorter than asked, or less, was cut short by it: what happens in it is quickened to fit. */
 const QUIET_CUT = 0.9;
@@ -5356,15 +5190,8 @@ export function fillQuiet(input: {
   acting: (id: string) => boolean;
   /** Whether the camera may go in close: not where a sheet directs it. */
   shots?: boolean;
-  /** How quiet is too quiet, and how often a quiet is filled: LESSON_FILL unless an editor's episode's. */
-  pace?: { quietMs: number; everyMs: number; clearMs: number };
-  /** Stretches held on purpose (an editor's "hold"): never filled. */
-  holds?: readonly [number, number][];
 }): number {
   const { steps, effects, beats, durationMs } = input;
-  const pace = input.pace ?? LESSON_FILL;
-  const held = (t: number) =>
-    (input.holds ?? []).some(([from, to]) => t >= from && t <= to);
   // A pulse draws the eye to what is already there: nothing new to see,
   // so a stretch of pulses is still a quiet one.
   const changes = [
@@ -5385,14 +5212,12 @@ export function fillQuiet(input: {
   const pointed = new Set<string>();
   let lastShot: string | null = null;
   let added = 0;
-  for (const [from, to] of quietGaps(changes, durationMs, pace.quietMs)) {
+  for (const [from, to] of quietGaps(changes, durationMs)) {
     const span = to - from;
-    const count = Math.max(1, Math.floor(span / pace.everyMs));
+    const count = Math.max(1, Math.floor(span / FILL_EVERY_MS));
     for (let i = 1; i <= count; i += 1) {
       const at = Math.round(from + (span * i) / (count + 1));
-      if (at - from < pace.clearMs || to - at < pace.clearMs) continue;
-      // A hold the editor asked for stays still.
-      if (held(at)) continue;
+      if (at - from < FILL_CLEAR_MS || to - at < FILL_CLEAR_MS) continue;
       // Clear of a pulse of the writer's, by a second at least, the close
       // up's lead in too.
       if (effects.some((e) => Math.abs(e.atMs - at) < 1200)) continue;
@@ -5456,32 +5281,6 @@ export function fillQuiet(input: {
     }
   }
   return added;
-}
-
-/**
- * The stretches an editor holds on purpose (a "hold" on a sentence or a
- * step): a held sentence from its first word to the next sentence's, a
- * held step from its moment to the next change. Never filled, and never
- * a pacing fault.
- */
-export function holdSpans(
-  script: Pick<SceneScript, 'beats'>,
-  beats: readonly TimedBeat[],
-  timed: readonly { step: { hold?: true }; atMs: number }[],
-  durationMs: number,
-): [number, number][] {
-  const out: [number, number][] = [];
-  script.beats.forEach((beat, k) => {
-    if (!beat.hold || !beats[k]) return;
-    out.push([beats[k].startMs - 300, beats[k + 1]?.startMs ?? durationMs]);
-  });
-  const times = timed.map((t) => t.atMs).sort((a, b) => a - b);
-  for (const t of timed) {
-    if (!t.step.hold) continue;
-    const next = times.find((at) => at > t.atMs + 1) ?? durationMs;
-    out.push([t.atMs, next]);
-  }
-  return out;
 }
 
 /**

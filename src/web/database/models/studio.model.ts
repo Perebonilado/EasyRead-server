@@ -23,10 +23,6 @@ export class StudioShowModel extends BaseModel {
   @Column({ type: DataType.UUID, allowNull: true })
   declare documentId: string | null;
 
-  /** An explainer the editor plans: its angles, research, plan and world, as JSON (studio-editor). */
-  @Column({ type: DataType.TEXT('medium'), allowNull: true })
-  declare editor: string | null;
-
   @Column({ type: DataType.DATE, allowNull: true })
   declare deletedAt: Date | null;
 
@@ -89,10 +85,6 @@ export class StudioEpisodeModel extends BaseModel {
   @Column({ type: DataType.UUID, allowNull: true })
   declare twinOf: string | null;
 
-  /** An episode the editor wrote: its beat sheet, hooks, two-column script and package, as JSON (studio-editorial). */
-  @Column({ type: DataType.TEXT('medium'), allowNull: true })
-  declare editorial: string | null;
-
   declare createdAt: Date;
   declare updatedAt: Date;
 }
@@ -149,10 +141,6 @@ export class StudioSceneModel extends BaseModel {
   /** A twin episode's scene: the scene of the episode it is the twin of that it is the same scene of. */
   @Column({ type: DataType.UUID, allowNull: true })
   declare twinOf: string | null;
-
-  /** What the critic's loop did to a scene of shots, as JSON (shots/critic-loop's SceneFrames; 0067). */
-  @Column({ type: DataType.TEXT('medium'), allowNull: true })
-  declare frames: string | null;
 
   declare createdAt: Date;
   declare updatedAt: Date;

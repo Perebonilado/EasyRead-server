@@ -11,8 +11,6 @@ import {
 } from '../../business/domain/studio/studio';
 import type { SheetProblem } from '../../business/domain/studio/studio-check';
 import { pickOf } from '../../business/domain/studio/studio-document';
-import { editorOf } from '../../business/domain/studio/studio-editor';
-import { editorialOf } from '../../business/domain/studio/studio-editorial';
 import { filmShapeOf } from '../../business/domain/scene-shape';
 import {
   EPISODE_PHASES,
@@ -33,7 +31,6 @@ import {
   StudioShowModel,
 } from '../database/models';
 import { newId } from '../database/uuid';
-import type { SceneFrames } from '../../business/domain/shots/critic-loop';
 
 /** JSON as kept, read back; null for none, or for what cannot be read. */
 function parsed(kept: string | null | undefined): unknown {
@@ -52,14 +49,6 @@ const json = (value: unknown) =>
 function activityOf(kept: string | null | undefined): StudioActivity | null {
   const value = parsed(kept) as StudioActivity | null;
   return value && typeof value === 'object' && typeof value.at === 'string'
-    ? value
-    : null;
-}
-
-/** A scene's frames as kept, read back: null for none, or for what cannot be read. */
-function framesOf(kept: string | null | undefined): SceneFrames | null {
-  const value = parsed(kept) as SceneFrames | null;
-  return value && typeof value === 'object' && Array.isArray(value.rounds)
     ? value
     : null;
 }
@@ -89,7 +78,6 @@ export class SequelizeStudioRepository implements StudioRepository {
       brief: briefOf(parsed(row.brief)),
       bible: bible ? bibleOf(bible) : null,
       documentId: row.documentId ?? null,
-      editor: editorOf(parsed(row.editor)),
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };
@@ -117,7 +105,6 @@ export class SequelizeStudioRepository implements StudioRepository {
       pages: pickOf(parsed(row.pages)),
       shape: filmShapeOf(row.shape),
       twinOf: row.twinOf ?? null,
-      editorial: editorialOf(parsed(row.editorial)),
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };
@@ -145,7 +132,6 @@ export class SequelizeStudioRepository implements StudioRepository {
       durationMs: row.durationMs,
       activity: activityOf(row.activity),
       ...(row.twinOf ? { twinOf: row.twinOf } : {}),
-      frames: framesOf(row.frames),
       updatedAt: row.updatedAt,
     };
   }
@@ -167,7 +153,6 @@ export class SequelizeStudioRepository implements StudioRepository {
     userId: string;
     title: string;
     brief: StudioShowRecord['brief'];
-    editor?: StudioShowRecord['editor'];
   }): Promise<StudioShowRecord> {
     const row = await this.shows.create({
       id: newId(),
@@ -176,7 +161,6 @@ export class SequelizeStudioRepository implements StudioRepository {
       format: input.brief.format,
       brief: JSON.stringify(input.brief),
       bible: null,
-      editor: json(input.editor ?? null),
       deletedAt: null,
     } as never);
     return this.show(row);
@@ -213,7 +197,6 @@ export class SequelizeStudioRepository implements StudioRepository {
         ...(patch.documentId !== undefined
           ? { documentId: patch.documentId }
           : {}),
-        ...(patch.editor !== undefined ? { editor: json(patch.editor) } : {}),
       },
       { where: { id } },
     );
@@ -278,14 +261,13 @@ export class SequelizeStudioRepository implements StudioRepository {
     id: string,
     patch: Parameters<StudioRepository['updateEpisode']>[1],
   ): Promise<void> {
-    const { outline, title, pages, editorial, ...rest } = patch;
+    const { outline, title, pages, ...rest } = patch;
     await this.episodes.update(
       {
         ...rest,
         ...(title !== undefined ? { title: title.slice(0, 120) } : {}),
         ...(outline !== undefined ? { outline: json(outline) } : {}),
         ...(pages !== undefined ? { pages: json(pages) } : {}),
-        ...(editorial !== undefined ? { editorial: json(editorial) } : {}),
       },
       { where: { id } },
     );
@@ -366,7 +348,7 @@ export class SequelizeStudioRepository implements StudioRepository {
     id: string,
     patch: Parameters<StudioRepository['updateScene']>[1],
   ): Promise<void> {
-    const { sheet, previousSheet, problems, frames, ...rest } = patch;
+    const { sheet, previousSheet, problems, ...rest } = patch;
     await this.scenes.update(
       {
         ...rest,
@@ -375,7 +357,6 @@ export class SequelizeStudioRepository implements StudioRepository {
           ? { previousSheet: json(previousSheet) }
           : {}),
         ...(problems !== undefined ? { problems: json(problems) } : {}),
-        ...(frames !== undefined ? { frames: json(frames) } : {}),
       },
       { where: { id } },
     );

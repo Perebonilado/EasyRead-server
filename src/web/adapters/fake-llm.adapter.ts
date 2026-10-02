@@ -33,15 +33,8 @@ import type {
   SketchDraft,
   SketchTemplate,
   StudioCheckVerdict,
-  StudioRevision,
   StudioTurnDraft,
-  EditorFound,
-  EditorSearchStep,
-  EditorWriteStep,
 } from '../../business/ports/llm.port';
-import { fakeEditorAnswer, fakeFound, fakeTopic } from './fake-editor';
-import { fakeCriticAnswer } from './fake-critic';
-import { fakeShotsAnswer } from './fake-shots';
 import type {
   DrawingThing,
   SceneScriptDraft,
@@ -2577,94 +2570,6 @@ export class FakeLlmAdapter implements LlmGatewayPort {
         faults: resolved ? [] : ['other'],
       },
       usage: this.usage(started, 1000, 60),
-    });
-  }
-
-  // The editor's desk (fake-editor): a small, sound show on the brief's topic.
-  async editorWrite(
-    input: { step: EditorWriteStep; parts: string[] } & StudioRevision,
-  ): Promise<LlmResult<Record<string, unknown>>> {
-    const started = Date.now();
-    return {
-      value: fakeEditorAnswer(input.step, input.parts),
-      usage: this.usage(started, 4000, 800),
-    };
-  }
-
-  async editorSearch(input: {
-    step: EditorSearchStep;
-    parts: string[];
-    searches?: number;
-  }): Promise<
-    LlmResult<{ value: Record<string, unknown>; found: EditorFound[] }>
-  > {
-    const started = Date.now();
-    return {
-      value: {
-        value: fakeEditorAnswer(input.step, input.parts),
-        found: fakeFound(fakeTopic(input.parts)),
-      },
-      usage: { ...this.usage(started, 9000, 1500), searches: 3 },
-    };
-  }
-
-  async editorBoard(
-    input: { kind: 'lesson' | 'illustrated'; parts: string[] } & StudioRevision,
-  ): Promise<LlmResult<Record<string, unknown>>> {
-    const started = Date.now();
-    return {
-      value: fakeEditorAnswer(input.kind, input.parts),
-      usage: this.usage(started, 3000, 600),
-    };
-  }
-
-  // The shot board (fake-shots): each line's shot from the scene's own list.
-  async shotsBoard(
-    input: {
-      parts: string[];
-      look?: 'editorial' | 'illustrated';
-    } & StudioRevision,
-  ): Promise<LlmResult<Record<string, unknown>>> {
-    const started = Date.now();
-    return {
-      value: fakeShotsAnswer(input.parts, input.look),
-      usage: this.usage(started, 6000, 900),
-    };
-  }
-
-  /**
-   * The critic (fake-critic): a scene the code checks found nothing wrong
-   * with passes at 8.5 on every axis; one they found problems in scores 6
-   * on motion and asks for a camera move on its first shot.
-   */
-  async shotsCritic(input: {
-    image: Buffer;
-    mediaType?: 'image/png' | 'image/jpeg';
-    parts: string[];
-  }): Promise<LlmResult<Record<string, unknown>>> {
-    const started = Date.now();
-    return Promise.resolve({
-      value: fakeCriticAnswer(input.parts),
-      usage: this.usage(started, 4000, 400),
-    });
-  }
-
-  /** A picture's subject in its middle, one person's face above it: a plain photograph, showing what it was asked to. */
-  async pictureFocus(input: {
-    png: Buffer;
-    about: string;
-    asked?: string;
-  }): Promise<LlmResult<Record<string, unknown>>> {
-    const started = Date.now();
-    return Promise.resolve({
-      value: {
-        faces: ['C2', 'D2'],
-        subject: ['C2', 'D2', 'C3', 'D3', 'C4', 'D4'],
-        people: 1,
-        kind: 'photograph',
-        shows: input.asked ? 'yes' : 'unsure',
-      },
-      usage: this.usage(started, 900, 60),
     });
   }
 

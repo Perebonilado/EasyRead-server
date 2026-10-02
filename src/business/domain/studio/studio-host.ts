@@ -6,37 +6,28 @@
  * the film from a corner and, being one of the show's characters, may act
  * in its story clips (studio-clip).
  *
- * Off for now (explainer-animation-plan §10; Richard, 2026-10-01: "the
- * audience is only chosen to decide the level of simplification"): no one
- * who is not part of the subject is on screen, so an explainer has no host
- * and no mascot, whatever its audience recipe's `mascot` or the brief's
- * `host` say; and a story never had one. The looks are kept for the day
- * a host comes back (EXPLAINER_HOST).
+ * On by default for children (the audience recipe's `mascot`), off for
+ * grown-ups; the brief's `host` says otherwise when the maker does.
  *
  * Pure: no model, no I/O.
  */
 import { createHash } from 'node:crypto';
 import { animalOf, type AnimalSpec, type AnimalSpecies } from '../scene-animal';
 import { figureFor, type FigureFace, type FigureSpec } from '../scene-figure';
+import { recipeOf } from './studio-audience';
 import { animalPreview, figurePreview, figureRigged } from './studio-looks';
 import type { StudioBible, StudioBrief, StudioCharacter } from './studio';
 
 /** The host's id in every show that has one. */
 export const HOST_ID = 'host';
 
-/**
- * Whether an explainer may have a host at all: not now. The audience only
- * sets how simply it is told and is never on screen (explainer-animation-
- * plan §10), so neither the maker's word nor the audience recipe's mascot
- * puts one in front of it.
- */
-export const EXPLAINER_HOST: boolean = false;
-
-/** Whether a show has a host: none while EXPLAINER_HOST is off; never a story's. */
+/** Whether a show has a host: the maker's word, else its audience's recipe; never a story's. */
 export function hostOn(
   brief: Pick<StudioBrief, 'format' | 'audience' | 'who' | 'host'>,
 ): boolean {
-  return brief.format === 'explainer' && EXPLAINER_HOST;
+  if (brief.format !== 'explainer') return false;
+  if (typeof brief.host === 'boolean') return brief.host;
+  return recipeOf(brief)?.mascot ?? false;
 }
 
 /** A show's host, when it has one. */

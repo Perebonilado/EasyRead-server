@@ -15,7 +15,6 @@ import type {
   LectureVoiceJob,
   PipelineJob,
   SimplifyJob,
-  StudioExportJob,
   StudioJob,
   VisualJobState,
   VisualSceneJob,
@@ -34,7 +33,6 @@ import {
   lectureVoiceJobId,
   simplifyJobId,
   stepJobId,
-  studioExportJobId,
   type QueueName,
 } from '../../pipeline/queues';
 
@@ -405,14 +403,6 @@ export class BullmqQueueAdapter implements JobQueuePort, OnModuleDestroy {
         },
       })),
     );
-  }
-
-  /** A film made into a video file: its row's own id, so asking twice for one row never queues it twice. */
-  async enqueueStudioExport(job: StudioExportJob): Promise<void> {
-    await this.queue(QUEUE.studioExport).add('studio-export', job, {
-      ...this.options(QUEUE.studioExport),
-      jobId: studioExportJobId(job.exportId),
-    });
   }
 
   async enqueueLearn(job: PipelineJob): Promise<void> {

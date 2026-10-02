@@ -21,6 +21,7 @@ import {
   PICK_LEAST,
   searchWordsOf,
   titleKey,
+  undatedScan,
 } from './desk';
 import type { LicenceMode } from './licence';
 import { eventPhotoOf } from './rank';
@@ -842,5 +843,43 @@ describe('the picture desk', () => {
       expect(photos).toContain('File:Ahmadu Bello other, Kano 1953.jpg');
       expect(logs.join('\n')).toMatch(/twin.* is .*twin.* again: one picture/u);
     });
+  });
+
+  it('takes a black-and-white print’s year off its chip when that is only when it was scanned', async () => {
+    const tube = commonsFile({
+      sourceId:
+        'File:Cathode-ray tube, 330-ps-7978-usn-708689 16257864287 o.jpg',
+      artist: 'US Navy',
+      credit: 'US Navy',
+      date: '2015-02-24',
+      uploaded: '2020-05-01',
+      categories: ['Cathode ray tubes', 'PD US Navy'],
+      structured: null,
+    });
+    const sources = new FakeSources([], [], [tube]);
+    const focus = new FakeFocus();
+    const { desk } = deskWith({ sources, focus, licence: 'off' });
+    const [record] = await desk.lookupAll({
+      name: 'cathode-ray tube',
+      kind: 'object',
+      words: ['cathode-ray tube'],
+      asked: 'a thing: cathode-ray tube',
+    });
+    expect(record.year).toBeUndefined();
+    expect(record.chip).toBe('cathode-ray tube · US Navy · Public domain');
+    // A print whose title gives the year keeps it; so does one in colour.
+    const titled = { ...tube, title: 'Picture tube test 2015' };
+    const candidate = {
+      file: titled,
+      year: 2015,
+      chip: 'cathode-ray tube, 2015 · US Navy · Public domain',
+      subject: 'cathode-ray tube',
+      source: 'US Navy',
+      notes: [],
+    } as unknown as Parameters<typeof undatedScan>[0];
+    expect(undatedScan(candidate, { monochrome: true }).year).toBe(2015);
+    expect(
+      undatedScan({ ...candidate, file: tube }, { monochrome: false }).year,
+    ).toBe(2015);
   });
 });

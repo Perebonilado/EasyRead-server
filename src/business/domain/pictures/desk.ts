@@ -298,6 +298,50 @@ function agreedOf(
 /** How many questions' answers a copy keeps. */
 const AGREES_KEPT = 12;
 
+/** The year from which a black-and-white print's date may be its scan's, not its own. */
+const SCANNED_FROM = 2004;
+
+/**
+ * A picture without the year its date gave, when that is only when it was
+ * scanned: a black-and-white or toned print dated 2004 or later whose
+ * title does not say the year (a Navy photograph of a picture tube, put on
+ * Flickr in 2015). Its chip is made again without it.
+ */
+export function undatedScan(
+  candidate: PictureCandidate,
+  meta: Record<string, unknown> | null | undefined,
+): PictureCandidate {
+  const year = candidate.year;
+  if (
+    year === undefined ||
+    year < SCANNED_FROM ||
+    meta?.monochrome !== true ||
+    textWords(candidate.file.title).includes(String(year))
+  )
+    return candidate;
+  const { year: _year, ...rest } = candidate;
+  void _year;
+  return {
+    ...rest,
+    chip: chipOf({
+      subject: candidate.subject,
+      source: candidate.source,
+      licence: candidate.licence,
+    }),
+    notes: [...candidate.notes, `${year} is its scan's year, not its own`],
+  };
+}
+
+/** A copy's record with the year its picture is of, or none. */
+function yearKept(
+  meta: Record<string, unknown> | null,
+  year: number | undefined,
+): Record<string, unknown> {
+  const { year: _had, ...rest } = meta ?? {};
+  void _had;
+  return year !== undefined ? { ...rest, year } : rest;
+}
+
 /** How alike two prints must be to be one photograph under two names (two files of one scored 0.99; two photographs, under 0.72). */
 export const SAME_PICTURE = 0.9;
 
@@ -1019,29 +1063,27 @@ export class PictureDesk {
         bytes && size
           ? await this.seen(candidate, bytes, size, opts.onUsage, asked)
           : null;
+      const meta = seen ? withSeen(had.meta, seen.meta) : had.meta;
+      const one = undatedScan(candidate, meta);
       const fresh =
-        !seen && had.chip === candidate.chip && had.credit === candidate.credit
+        !seen && had.chip === one.chip && had.credit === one.credit
           ? had
           : await this.deps.cache.save({
               ...had,
-              chip: candidate.chip.slice(0, 255),
-              credit: candidate.credit,
-              licence: candidate.licence.short,
+              chip: one.chip.slice(0, 255),
+              credit: one.credit,
+              licence: one.licence.short,
               checkedAt: this.now(),
-              ...(seen
-                ? {
-                    focal: seen.focal,
-                    meta: withSeen(had.meta, seen.meta),
-                  }
-                : {}),
+              ...(seen ? { focal: seen.focal } : {}),
+              meta: yearKept(meta, one.year),
             });
-      const doubt = this.doubtOf(candidate, fresh.meta, asked);
+      const doubt = this.doubtOf(one, fresh.meta, asked);
       if (doubt) {
         this.log(`pictures: ${file.sourceId} will not do: ${doubt}`);
         return null;
       }
       const kept = await this.withDepth(fresh, opts.depth ?? true);
-      return this.recordOf(kept, candidate, opts);
+      return this.recordOf(kept, one, opts);
     }
     const from = sized ? file.thumb!.url : file.url;
     const got = await this.safely(() => this.deps.sources.fetch(from), null);
@@ -1072,17 +1114,18 @@ export class PictureDesk {
       opts.onUsage,
       asked,
     );
+    const one = undatedScan(candidate, seen.meta);
     const row = await this.deps.cache.save({
       ...this.blank(file.source, file.sourceId),
       ...(had ? { id: had.id } : {}),
-      qid: candidate.qid ?? null,
-      kind: candidate.kind,
-      subject: candidate.subject.slice(0, 255),
+      qid: one.qid ?? null,
+      kind: one.kind,
+      subject: one.subject.slice(0, 255),
       url: file.url,
       sourceUrl: file.pageUrl,
-      licence: candidate.licence.short,
-      credit: candidate.credit,
-      chip: candidate.chip.slice(0, 255),
+      licence: one.licence.short,
+      credit: one.credit,
+      chip: one.chip.slice(0, 255),
       width: size.width,
       height: size.height,
       focal: seen.focal,
@@ -1090,29 +1133,32 @@ export class PictureDesk {
       mime: size.mime,
       storageKey,
       depthKey: twin?.depthKey ?? null,
-      meta: withSeen(had?.meta ?? null, {
-        code: candidate.licence.code,
-        tier: candidate.licence.tier,
-        flags: candidate.licence.flags,
-        score: candidate.score,
-        notes: candidate.notes,
-        ...(candidate.year !== undefined ? { year: candidate.year } : {}),
-        ...seen.meta,
-        title: file.title,
-        artist: file.artist,
-        licenceName: file.licenceName,
-        categories: file.categories.slice(0, 40),
-      }),
+      meta: yearKept(
+        withSeen(had?.meta ?? null, {
+          code: one.licence.code,
+          tier: one.licence.tier,
+          flags: one.licence.flags,
+          score: one.score,
+          notes: one.notes,
+          ...(one.year !== undefined ? { year: one.year } : {}),
+          ...seen.meta,
+          title: file.title,
+          artist: file.artist,
+          licenceName: file.licenceName,
+          categories: file.categories.slice(0, 40),
+        }),
+        one.year,
+      ),
       refusedReason: null,
     });
     // Kept either way (another use may take it), but not for this one when what was seen says no.
-    const doubt = this.doubtOf(candidate, row.meta, asked);
+    const doubt = this.doubtOf(one, row.meta, asked);
     if (doubt) {
       this.log(`pictures: ${file.sourceId} will not do: ${doubt}`);
       return null;
     }
     const kept = await this.withDepth(row, opts.depth ?? true, got.bytes);
-    return this.recordOf(kept, candidate, opts);
+    return this.recordOf(kept, one, opts);
   }
 
   /**

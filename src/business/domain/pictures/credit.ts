@@ -136,7 +136,17 @@ export function sourceOf(
     ? `${turned[2].trim()} ${turned[1]}`
     : (artist.split(/(?<!\b\p{Lu})\.|[,;(]/u)[0]?.trim() ?? '');
   const person = nameLike(first) ? first : '';
-  if (archive && person && `${person}, ${archive}`.length <= SOURCE_MOST)
+  // An archive named as its own photographer is named once.
+  const same =
+    archive !== undefined &&
+    person.toLowerCase().replace(/\W/gu, '') ===
+      archive.toLowerCase().replace(/\W/gu, '');
+  if (
+    archive &&
+    person &&
+    !same &&
+    `${person}, ${archive}`.length <= SOURCE_MOST
+  )
     return `${person}, ${archive}`;
   if (archive) return archive;
   if (person) return clipWords(person, SOURCE_MOST);

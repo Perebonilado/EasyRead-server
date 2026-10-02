@@ -238,4 +238,16 @@ describe("a picture's words", () => {
       }),
     ).toBe('Philo T. Farnsworth');
   });
+
+  it('names an archive that is its own photographer once', () => {
+    expect(
+      sourceOf({
+        source: 'commons',
+        artist: 'US Navy',
+        credit: 'US Navy',
+        description: '',
+        categories: ['PD US Navy'],
+      }),
+    ).toBe('US Navy');
+  });
 });

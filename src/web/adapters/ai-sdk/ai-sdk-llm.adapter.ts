@@ -2797,7 +2797,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     input: { step: EditorWriteStep; parts: string[] } & StudioRevision,
   ): Promise<LlmResult<Record<string, unknown>>> {
     const started = Date.now();
-    const { generateObject } = await this.registry.modules();
+    const ai = await this.registry.modules();
     const { model, ref } = await this.registry.languageModel('explainer_edit');
     const schema = {
       plan: editorPlanSchema,
@@ -2808,8 +2808,10 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
       read: editorReadSchema,
       package: editorPackageSchema,
     }[input.step];
+    // Streamed: a plan or a script thought through at medium effort runs
+    // three or four minutes, near the HTTP client's five for a first byte.
     const result = await this.againIfMisshapen(() =>
-      generateObject({
+      this.streamedObject(ai, {
         model,
         schema: schema as z.ZodTypeAny,
         system: EDITOR_PROMPTS[input.step],
@@ -2828,7 +2830,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
         `${dump}/${input.step}-${Date.now()}.json`,
         JSON.stringify(
           {
-            object: result.object as unknown,
+            object: result.object,
             finishReason: result.finishReason,
             usage: result.usage,
           },
@@ -2868,7 +2870,13 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     }[input.step] as z.ZodTypeAny;
     const system = EDITOR_PROMPTS[input.step];
     const prompt = input.parts.filter(Boolean).join('\n\n');
-    const effort = this.effort(ref, 'EXPLAINER_RESEARCH_EFFORT', 'low');
+    // The research is thought through (it decides how widely to search);
+    // the angles' look round and the fact check stay quick.
+    const effort = this.effort(
+      ref,
+      'EXPLAINER_RESEARCH_EFFORT',
+      input.step === 'research' ? 'medium' : 'low',
+    );
     const most = Math.max(
       1,
       input.searches ??
@@ -2907,7 +2915,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
       typeof ai.generateText
     >[0]['tools'];
     try {
-      const result = await ai.generateText({
+      const result = await this.streamedSearch(ai, {
         model,
         system,
         prompt,
@@ -2916,15 +2924,14 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
         output: ai.Output.object({ schema }),
         maxRetries: this.maxRetries(),
       });
-      const searched = result as unknown as Parameters<typeof foundOf>[0];
       return {
         value: {
           value: (result.output ?? {}) as Record<string, unknown>,
-          found: foundOf(searched),
+          found: foundOf(result.searched),
         },
         usage: {
-          ...this.usage(ref, result.totalUsage ?? result.usage, started),
-          searches: searchesOf(searched),
+          ...this.usage(ref, result.usage, started),
+          searches: searchesOf(result.searched),
         },
       };
     } catch (error) {
@@ -2933,7 +2940,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
         `the ${input.step} answer did not take its shape beside the search; searched as notes, then shaped${misfit(error)}`,
       );
     }
-    const notes = await ai.generateText({
+    const notes = await this.streamedSearch(ai, {
       model,
       system,
       prompt: `${prompt}\n\nWrite your findings as notes in plain text, each with the address of the page it came from.`,
@@ -2941,7 +2948,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
       providerOptions: options,
       maxRetries: this.maxRetries(),
     });
-    const searched = notes as unknown as Parameters<typeof foundOf>[0];
+    const searched = notes.searched;
     const found = foundOf(searched);
     const shaped = await this.againIfMisshapen(() =>
       ai.generateObject({
@@ -2961,13 +2968,92 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     return {
       value: { value: shaped.object as Record<string, unknown>, found },
       usage: {
-        ...this.usage(
-          ref,
-          usageOf(notes.totalUsage ?? notes.usage, shaped.usage),
-          started,
-        ),
+        ...this.usage(ref, usageOf(notes.usage, shaped.usage), started),
         searches: searchesOf(searched),
       },
+    };
+  }
+
+  /**
+   * An answer in its shape, streamed: it comes as it is written, so a long
+   * one never waits past the HTTP client's five minutes for its first
+   * byte. Read after as a generated object is: the object (a misshapen one
+   * throws as generateObject's does), why it finished, what it cost.
+   */
+  private async streamedObject(
+    ai: typeof import('ai'),
+    request: Record<string, unknown>,
+  ): Promise<{
+    object: unknown;
+    finishReason: string;
+    usage: LanguageModelUsage;
+  }> {
+    const seen: { error?: Error } = {};
+    const result = ai.streamObject({
+      ...request,
+      onError: ({ error }: { error: unknown }) => {
+        seen.error ??=
+          error instanceof Error ? error : new Error(String(error));
+      },
+    } as Parameters<typeof ai.streamObject>[0]);
+    // Its partial objects are not wanted: read through to the end.
+    for await (const part of result.partialObjectStream) void part;
+    if (seen.error) throw seen.error;
+    const [object, finishReason, usage] = await Promise.all([
+      result.object as PromiseLike<unknown>,
+      result.finishReason,
+      result.usage,
+    ]);
+    return { object, finishReason, usage };
+  }
+
+  /**
+   * A search streamed: its answer comes as it is written, so a long search
+   * (a deep research log can take many minutes) never waits past the HTTP
+   * client's five minutes for its first byte, as a generated one did
+   * ("Headers Timeout Error", three times over). What it found, what it
+   * wrote and what it cost, read as a generated result reads them.
+   */
+  private async streamedSearch(
+    ai: typeof import('ai'),
+    request: Record<string, unknown>,
+  ): Promise<{
+    output: unknown;
+    text: string;
+    searched: Parameters<typeof foundOf>[0];
+    usage: LanguageModelUsage;
+  }> {
+    // What went wrong while it streamed, kept for after: the first error.
+    const seen: { error?: Error } = {};
+    const result = ai.streamText({
+      ...(request as Parameters<typeof ai.streamText>[0]),
+      onError: ({ error }: { error: unknown }) => {
+        seen.error ??=
+          error instanceof Error ? error : new Error(String(error));
+      },
+    });
+    await result.consumeStream();
+    if (seen.error) throw seen.error;
+    const [steps, sources, toolCalls, toolResults, text, usage] =
+      await Promise.all([
+        result.steps,
+        result.sources,
+        result.toolCalls,
+        result.toolResults,
+        result.text,
+        result.totalUsage,
+      ]);
+    const output: unknown = request.output ? await result.output : undefined;
+    return {
+      output,
+      text,
+      searched: {
+        steps,
+        sources,
+        toolCalls,
+        toolResults,
+      } as unknown as Parameters<typeof foundOf>[0],
+      usage,
     };
   }
 

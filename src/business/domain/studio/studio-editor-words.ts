@@ -72,7 +72,15 @@ export function describeResearch(
   if (only) return parts.join('\n\n');
   if (research.timeline.length)
     parts.push(
-      `Timeline:\n${research.timeline.map((e) => `- ${e.date}: ${e.event}${e.claims.length ? ` (${e.claims.join(', ')})` : ''}`).join('\n')}`,
+      `Timeline:\n${research.timeline.map((e) => `- ${e.date}${e.place ? `, ${e.place}` : ''}: ${e.event}${e.claims.length ? ` (${e.claims.join(', ')})` : ''}`).join('\n')}`,
+    );
+  if (research.people?.length)
+    parts.push(
+      `People who drive the story:\n${research.people.map((p) => `- ${p.name}${p.role ? `, ${p.role}` : ''}${p.wanted ? `; wanted: ${p.wanted}` : ''}${p.did ? `; did: ${p.did}` : ''}${p.claims.length ? ` (${p.claims.join(', ')})` : ''}`).join('\n')}`,
+    );
+  if (research.moments?.length)
+    parts.push(
+      `Turning points, as scenes:\n${research.moments.map((m) => `- ${[m.when, m.where].filter(Boolean).join(', ')}: ${m.who ? `${m.who}: ` : ''}${m.what}${m.looked ? ` Seen: ${m.looked}` : ''}${m.claims.length ? ` (${m.claims.join(', ')})` : ''}`).join('\n')}`,
     );
   if (research.numbers.length)
     parts.push(

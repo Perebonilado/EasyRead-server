@@ -193,6 +193,30 @@ export interface EditorTimelineEvent {
   date: string;
   event: string;
   claims: string[];
+  /** Where it happened: a city, a building, a region; absent when no source says. */
+  place?: string | null;
+}
+
+/** Someone who drives the story: what they wanted, and one concrete thing they did or said. */
+export interface EditorPersonNote {
+  name: string;
+  /** Who they were, in a few words. */
+  role: string;
+  wanted: string;
+  /** One concrete thing they did or said, from a source. */
+  did: string;
+  claims: string[];
+}
+
+/** A turning point told as a scene: who, where, when, what happened, what it looked like. */
+export interface EditorMoment {
+  when: string;
+  where: string;
+  who: string;
+  what: string;
+  /** What it looked like, from sources: what a film would show. */
+  looked: string;
+  claims: string[];
 }
 
 /** A quantity that could become a chart: checked when its claims have two sources. */
@@ -237,6 +261,10 @@ export interface EditorSaying {
 export interface EditorResearch {
   claims: EditorClaim[];
   timeline: EditorTimelineEvent[];
+  /** The people who drive the story; absent in a log kept before they were asked for. */
+  people?: EditorPersonNote[];
+  /** The turning points told as scenes; absent in a log kept before. */
+  moments?: EditorMoment[];
   numbers: EditorNumber[];
   myths: EditorMyth[];
   perspectives: EditorPerspective[];
@@ -249,7 +277,11 @@ export interface EditorResearch {
 
 export const RESEARCH_LIMITS = {
   claims: 80,
+  /** Claims a log may keep once topped up (a thin log searched again, a maker's request). */
+  kept: 120,
   timeline: 30,
+  people: 12,
+  moments: 10,
   numbers: 24,
   myths: 8,
   perspectives: 8,
@@ -344,6 +376,8 @@ export function researchOf(
   raw: unknown,
   found: ReadonlyMap<string, EditorSource> | null = null,
   searched?: number,
+  /** A top-up's: the claims of the log it adds to, which it may cite by id. */
+  cited: ReadonlySet<string> = new Set(),
 ): EditorResearch {
   const said = record(raw);
   const taken = new Set<string>();
@@ -351,8 +385,9 @@ export function researchOf(
   const byPath = new Map<string, EditorSource>();
   for (const page of found?.values() ?? [])
     if (!byPath.has(pathKey(page.url))) byPath.set(pathKey(page.url), page);
+  // A log read back as kept may hold what a top-up added.
   const claims = list(said.claims)
-    .slice(0, RESEARCH_LIMITS.claims)
+    .slice(0, found ? RESEARCH_LIMITS.claims : RESEARCH_LIMITS.kept)
     .flatMap((one, k): EditorClaim[] => {
       const c = record(one);
       const claimText = plainText(c.text, 400);
@@ -411,7 +446,7 @@ export function researchOf(
         },
       ];
     });
-  const known = new Set(claims.map((c) => c.id));
+  const known = new Set([...cited, ...claims.map((c) => c.id)]);
   const byId = new Map(claims.map((c) => [c.id, c]));
   const ids = (value: unknown) => claimIds(value, known);
   const numbers = list(said.numbers)
@@ -441,7 +476,50 @@ export function researchOf(
         const e = record(one);
         const date = plainText(e.date, 40);
         const event = plainText(e.event, 240);
-        return date && event ? [{ date, event, claims: ids(e.claims) }] : [];
+        const place = plainText(e.place, 120);
+        return date && event
+          ? [
+              {
+                date,
+                event,
+                claims: ids(e.claims),
+                ...(place ? { place } : {}),
+              },
+            ]
+          : [];
+      }),
+    people: list(said.people)
+      .slice(0, RESEARCH_LIMITS.people)
+      .flatMap((one): EditorPersonNote[] => {
+        const p = record(one);
+        const name = plainText(p.name, 80);
+        if (!name) return [];
+        return [
+          {
+            name,
+            role: plainText(p.role, 120),
+            wanted: plainText(p.wanted, 240),
+            did: plainText(p.did, 300),
+            claims: ids(p.claims),
+          },
+        ];
+      }),
+    moments: list(said.moments)
+      .slice(0, RESEARCH_LIMITS.moments)
+      .flatMap((one): EditorMoment[] => {
+        const m = record(one);
+        const what = plainText(m.what, 300);
+        if (!what) return [];
+        return [
+          {
+            when: plainText(m.when, 60),
+            where: plainText(m.where, 120),
+            who: plainText(m.who, 160),
+            what,
+            looked: plainText(m.looked, 300),
+            claims: ids(m.claims),
+          },
+        ];
       }),
     numbers,
     myths: list(said.myths)
@@ -522,17 +600,58 @@ export function mergedResearch(
     renamed.set(c.id, id);
     return [{ ...c, id }];
   });
-  const ids = (claims: readonly string[]) =>
-    claims.flatMap((id) => (renamed.has(id) ? [renamed.get(id)!] : []));
+  // What the top-up cites: its own claims as renamed, or the log's by their ids.
+  const kept = new Set(old.claims.map((c) => c.id));
+  const ids = (claims: readonly string[]) => [
+    ...new Set(
+      claims.flatMap((id) =>
+        renamed.has(id) ? [renamed.get(id)!] : kept.has(id) ? [id] : [],
+      ),
+    ),
+  ];
   const cap = <T>(items: T[], most: number) => items.slice(0, most);
   return {
-    claims: cap([...old.claims, ...added], RESEARCH_LIMITS.claims + 40),
+    claims: cap([...old.claims, ...added], RESEARCH_LIMITS.kept),
     timeline: cap(
       [
         ...old.timeline,
         ...more.timeline.map((e) => ({ ...e, claims: ids(e.claims) })),
       ],
       RESEARCH_LIMITS.timeline,
+    ),
+    // Someone already in the log gains what the top-up found of them.
+    people: cap(
+      [
+        ...(old.people ?? []).map((p) => {
+          const again = more.people?.find(
+            (o) => o.name.toLowerCase() === p.name.toLowerCase(),
+          );
+          return again
+            ? {
+                ...p,
+                wanted: p.wanted || again.wanted,
+                did: p.did || again.did,
+                claims: [...new Set([...p.claims, ...ids(again.claims)])],
+              }
+            : p;
+        }),
+        ...(more.people ?? [])
+          .filter(
+            (p) =>
+              !(old.people ?? []).some(
+                (o) => o.name.toLowerCase() === p.name.toLowerCase(),
+              ),
+          )
+          .map((p) => ({ ...p, claims: ids(p.claims) })),
+      ],
+      RESEARCH_LIMITS.people,
+    ),
+    moments: cap(
+      [
+        ...(old.moments ?? []),
+        ...(more.moments ?? []).map((m) => ({ ...m, claims: ids(m.claims) })),
+      ],
+      RESEARCH_LIMITS.moments,
     ),
     numbers: cap(
       [

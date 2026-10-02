@@ -29,6 +29,8 @@ function mockProvider(): Promise<{
   url: string;
   calls: Recorded[];
   reply: (body: unknown) => void;
+  /** What the next streamed answers say (null: the lecture's line). */
+  replyStreamed: (body: unknown) => void;
   /** Models the stand-in refuses, as a provider out of credit does. */
   refused: Set<string>;
   server: Server;
@@ -36,6 +38,8 @@ function mockProvider(): Promise<{
   const calls: Recorded[] = [];
   const refused = new Set<string>();
   let nextContent = '';
+  /** What a streamed answer says, when a test gives one; else the lecture's line. */
+  let nextStream: string | null = null;
 
   const server = createServer((req, res) => {
     let raw = '';
@@ -81,13 +85,17 @@ function mockProvider(): Promise<{
 
       if (body.stream) {
         res.writeHead(200, { 'Content-Type': 'text/event-stream' });
-        for (const piece of [
-          'Vaso',
-          'pressin ',
-          'raises ',
-          'water ',
-          'reabsorption.',
-        ]) {
+        // A streamed answer in its pieces: the test's own, cut in three.
+        const own = nextStream;
+        const pieces = own
+          ? [0, 1, 2].map((k) =>
+              own.slice(
+                Math.floor((own.length * k) / 3),
+                Math.floor((own.length * (k + 1)) / 3),
+              ),
+            )
+          : ['Vaso', 'pressin ', 'raises ', 'water ', 'reabsorption.'];
+        for (const piece of pieces) {
           res.write(
             `data: ${JSON.stringify({
               id: 'x',
@@ -145,6 +153,14 @@ function mockProvider(): Promise<{
         reply: (value: unknown) => {
           nextContent =
             typeof value === 'string' ? value : JSON.stringify(value);
+        },
+        replyStreamed: (value: unknown) => {
+          nextStream =
+            value === null
+              ? null
+              : typeof value === 'string'
+                ? value
+                : JSON.stringify(value);
         },
         refused,
         server,
@@ -215,6 +231,22 @@ describe('AiSdkLlmAdapter', () => {
     mock.calls.length = 0;
     mock.refused.clear();
     adapter = configure();
+  });
+
+  it("streams the editor's written steps, so a long one never waits past the client's timeout for its first byte", async () => {
+    mock.replyStreamed({ notes: ['Row 3 lectures: say what Bello did.'] });
+    try {
+      const result = await configure({
+        AI_MODEL_EXPLAINER_EDIT: 'openai:gpt-4o-mini',
+      }).editorWrite({ step: 'read', parts: ['The script: …'] });
+      expect(result.value).toEqual({
+        notes: ['Row 3 lectures: say what Bello did.'],
+      });
+      expect(mock.calls[0].body.stream).toBe(true);
+      expect(result.usage).toMatchObject({ tokensIn: 11, tokensOut: 5 });
+    } finally {
+      mock.replyStreamed(null);
+    }
   });
 
   it('summarises and reports token usage', async () => {

@@ -72,9 +72,12 @@ import {
 } from '../src/business/domain/studio/studio-editor';
 import type { StudioEditorial } from '../src/business/domain/studio/studio-editorial';
 import {
+  abstractIn,
   directionIn,
+  episodeCast,
   hookProblems,
   isFactual,
+  nameWords,
   promiseReturns,
   rowSeconds,
   screenWords,
@@ -550,6 +553,14 @@ interface Rubric {
   andThenRows: number;
   /** Rows whose narration is still a stage direction (code's check): none, after the repairs. */
   directions: number;
+  /** The episode's recurring people named in it, of how many. */
+  castNamed: { named: number; of: number };
+  /** Lecture words (code's list) in each act, in order. */
+  abstractPerAct: number[];
+  /** Rows that show a number (a quantity, not a year). */
+  numberRows: number;
+  /** How deep the research went: dated events, people, scenes, numbers. */
+  depth: { dated: number; people: number; moments: number; numbers: number };
   factual: number;
   sourced: number;
   secondsPerPicture: { mean: number; most: number };
@@ -565,6 +576,43 @@ interface Rubric {
   searched: number;
   dollars: number;
   seconds: number;
+}
+
+/** How concrete an episode is, by code's own measures: its people named, its lecture words, its numbers, its research's depth. */
+function concreteMeasures(
+  made: Made,
+): Pick<Rubric, 'castNamed' | 'abstractPerAct' | 'numberRows' | 'depth'> {
+  const { editor, editorial } = made;
+  const rows = editorial.rows;
+  const cast = editor.plan ? episodeCast(editor.plan, editorial.number) : [];
+  const said = rows.map((r) => r.say).join(' ');
+  const acts = [...new Set(rows.map((r) => r.act))].sort((a, b) => a - b);
+  const research = editor.research;
+  return {
+    castNamed: {
+      named: cast.filter((name) =>
+        nameWords(name).some((w) => new RegExp(`\\b${w}\\b`, 'u').test(said)),
+      ).length,
+      of: cast.length,
+    },
+    abstractPerAct: acts.map((act) =>
+      rows
+        .filter((r) => r.act === act)
+        .reduce((n, r) => n + abstractIn(r.say).length, 0),
+    ),
+    numberRows: rows.filter((r) =>
+      [...r.say.matchAll(/\b\d[\d,.]*\b/gu)].some(
+        (m) => !/^(?:1[0-9]{3}|20[0-9]{2})$/u.test(m[0]),
+      ),
+    ).length,
+    depth: {
+      dated:
+        research?.timeline.filter((e) => /\d{3,4}/u.test(e.date)).length ?? 0,
+      people: research?.people?.length ?? 0,
+      moments: research?.moments?.length ?? 0,
+      numbers: research?.numbers.length ?? 0,
+    },
+  };
 }
 
 function rubricOf(made: Made, id = 'show'): Rubric {
@@ -595,6 +643,7 @@ function rubricOf(made: Made, id = 'show'): Rubric {
     },
     andThenRows: rows.filter((r) => /^and then\b/iu.test(r.say)).length,
     directions: rows.filter((r) => directionIn(r, editor.world)).length,
+    ...concreteMeasures(made),
     factual: factual.length,
     sourced: sourced.length,
     secondsPerPicture: {
@@ -631,11 +680,11 @@ function rubricWords(rubrics: Rubric[]): string {
   return [
     '# The editor’s bench: code’s rubric',
     'Each row is a show’s first episode, written by the editor’s desk and checked by code (no film made). Seconds a picture: each row is one sentence, one new thing seen; the playbook asks for three to five. Still rows: past six seconds without a hold.',
-    '| Show | Hook rules | Promise kept | Chain but/therefore/and then | "And then" rows | Direction rows | Factual rows sourced | Seconds a picture (mean, most) | Still rows | Words on screen (most, rows over 8) | Episode min | Plan min | Episodes | Rows | Scenes (illustrated) | Claims | Searches | $ | Time |',
-    '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|',
+    '| Show | Hook rules | Promise kept | Chain but/therefore/and then | "And then" rows | Direction rows | Cast named | Abstract words per act | Number rows | Research: dated events/people/scenes/numbers | Factual rows sourced | Seconds a picture (mean, most) | Still rows | Words on screen (most, rows over 8) | Episode min | Plan min | Episodes | Rows | Scenes (illustrated) | Claims | Searches | $ | Time |',
+    '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|',
     ...rubrics.map(
       (r) =>
-        `| ${r.id} | ${r.hookRules ? 'pass' : 'FAIL'} | ${r.promiseKept ? 'yes' : 'no'} | ${r.chain.but}/${r.chain.therefore}/${r.chain.andThen} | ${r.andThenRows} | ${r.directions} | ${r.sourced}/${r.factual} (${pct(r.sourced, r.factual)}) | ${r.secondsPerPicture.mean}, ${r.secondsPerPicture.most} | ${r.stillRows} | ${r.screenWords.most}, ${r.screenWords.over} | ${r.episodeMinutes} | ${r.planMinutes.join(', ')} | ${r.episodes} | ${r.rows} | ${r.scenes} (${r.illustrated}) | ${r.claims} | ${r.searched} | ${r.dollars.toFixed(2)} | ${Math.round(r.seconds / 60)}m |`,
+        `| ${r.id} | ${r.hookRules ? 'pass' : 'FAIL'} | ${r.promiseKept ? 'yes' : 'no'} | ${r.chain.but}/${r.chain.therefore}/${r.chain.andThen} | ${r.andThenRows} | ${r.directions} | ${r.castNamed.named}/${r.castNamed.of} | ${r.abstractPerAct.join(', ')} | ${r.numberRows} | ${r.depth.dated}/${r.depth.people}/${r.depth.moments}/${r.depth.numbers} | ${r.sourced}/${r.factual} (${pct(r.sourced, r.factual)}) | ${r.secondsPerPicture.mean}, ${r.secondsPerPicture.most} | ${r.stillRows} | ${r.screenWords.most}, ${r.screenWords.over} | ${r.episodeMinutes} | ${r.planMinutes.join(', ')} | ${r.episodes} | ${r.rows} | ${r.scenes} (${r.illustrated}) | ${r.claims} | ${r.searched} | ${r.dollars.toFixed(2)} | ${Math.round(r.seconds / 60)}m |`,
     ),
     '',
     rubrics.length > 1

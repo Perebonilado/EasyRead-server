@@ -82,6 +82,8 @@ import {
   splitLongActs,
   withoutDirections,
   withoutRepeats,
+  researchProblems,
+  concreteContext,
   spokenWords,
   unusedClaims,
   episodeTarget,
@@ -168,6 +170,9 @@ export const isEditorJob = (kind: string): kind is EditorJobKind =>
 export const ANGLE_SEARCHES = 3;
 /** A top-up for something new the maker asks for. */
 export const TOP_UP_SEARCHES = 10;
+
+/** The searches a thin research log is given when it goes back once. */
+export const DEEPER_SEARCHES = 16;
 /** Boards written at once: each its own scene. */
 const BOARDERS = 3;
 
@@ -370,22 +375,51 @@ export class StudioEditorProcessor {
     const editor = show.editor ?? EMPTY_EDITOR;
     progressNow({ says: 'Researching the topic' });
     const document = await this.documentFor(show, episode);
+    const asked = [
+      `The brief:\n${describeEditorBrief(show.brief)}`,
+      describeQuestion(editor),
+      document?.words ?? '',
+    ];
     const answer = await this.llm.editorSearch({
       step: 'research',
-      parts: [
-        `The brief:\n${describeEditorBrief(show.brief)}`,
-        describeQuestion(editor),
-        document?.words ?? '',
-      ],
+      parts: asked,
     });
     await this.record(episode.id, answer.usage, 'explainer_research');
-    const research = researchOf(
+    let research = researchOf(
       answer.value.value,
       foundMap(answer.value.found),
       answer.usage.searches ?? 0,
     );
     if (!research.claims.length)
       throw new Error('The research came back empty');
+    // A thin log (few dated events, no numbers, people with no claim, no
+    // turning point told as a scene) is searched again once, and added to.
+    const thin = researchProblems(research);
+    if (thin.length) {
+      this.deps.logger.log(
+        `studio ${episode.id}: the research goes back: ${thin.join(' ')}`,
+      );
+      progressNow({ says: 'Researching deeper' });
+      const more = await this.llm.editorSearch({
+        step: 'research',
+        parts: [
+          ...asked,
+          `The research log so far (add to it; never repeat it):\n${describeResearch(research)}`,
+          `It is thin. Search for what it lacks and answer with only what is new: number new claims from c${research.claims.length + 1}, and cite the log's own claims by their ids where they hold.\n- ${thin.join('\n- ')}`,
+        ],
+        searches: DEEPER_SEARCHES,
+      });
+      await this.record(episode.id, more.usage, 'explainer_research');
+      research = mergedResearch(
+        research,
+        researchOf(
+          more.value.value,
+          foundMap(more.value.found),
+          more.usage.searches ?? 0,
+          new Set(research.claims.map((c) => c.id)),
+        ),
+      );
+    }
     await this.saveEditor(show.id, (now) => ({
       ...now,
       stage: 'research',
@@ -734,6 +768,8 @@ export class StudioEditorProcessor {
 
     // The length it is written to: its material's, three to five minutes.
     const target = episodeTarget(plan, number, pace.wpm);
+    // What holds it concrete: the episode's people, the names, the places, the numbers.
+    const concrete = concreteContext(research, plan, number, world ?? null);
 
     // The beat sheet: acts, seconds from the material, words by code.
     if (!editorial.beats) {
@@ -783,10 +819,12 @@ export class StudioEditorProcessor {
     // The hooks: five drafted and judged, the best made one.
     if (!editorial.hook) {
       progressNow({ says: 'Drafting the hooks' });
+      // The whole log: its turning points and people are where a hook's
+      // picture comes from.
       const parts = [
         ...base,
         `The beat sheet:\n${describeBeats(beats)}`,
-        `The research's claims:\n${describeResearch(research, known)}`,
+        `The research:\n${describeResearch(research)}`,
         earlier.length
           ? `The episodes before (for the "last time" line):\n${describeEarlierScripts(earlier)}`
           : '',
@@ -794,7 +832,12 @@ export class StudioEditorProcessor {
       const first = await this.llm.editorWrite({ step: 'hooks', parts });
       await this.record(episode.id, first.usage, 'explainer_edit');
       let hooks = hooksOf(first.value, known);
-      const problems = hookProblems(hooks.hook ?? '', hooks.claims, research);
+      const problems = hookProblems(
+        hooks.hook ?? '',
+        hooks.claims,
+        research,
+        concrete.people,
+      );
       if (problems.length) {
         const again = await this.llm.editorWrite({
           step: 'hooks',
@@ -806,8 +849,8 @@ export class StudioEditorProcessor {
         const second = hooksOf(again.value, known);
         if (
           second.hook &&
-          hookProblems(second.hook, second.claims, research).length <=
-            problems.length
+          hookProblems(second.hook, second.claims, research, concrete.people)
+            .length <= problems.length
         )
           hooks = second;
       }
@@ -824,6 +867,9 @@ export class StudioEditorProcessor {
     const perRow = rowWords(pace);
     const scriptParts = [
       ...base,
+      concrete.cast.length
+        ? `The people of this episode, each named where they act, at least once: ${concrete.cast.join(', ')}.`
+        : '',
       `The beat sheet:\n${describeBeats(beats)}`,
       `Its length: about ${Math.round(beats.seconds)} seconds, about ${beats.words} spoken words, so about ${Math.round(beats.words / perRow)} rows of one sentence each (about ${perRow} words a row). Write every act out in full, to its words.`,
       `The hook (open with it, as written):\n${hook}`,
@@ -834,7 +880,7 @@ export class StudioEditorProcessor {
         ? `The episodes before, for exact callbacks and the "last time" line:\n${describeEarlierScripts(earlier)}`
         : '',
     ];
-    const ctx = { research, pace, beats, world: world ?? null };
+    const ctx = { research, pace, beats, world: world ?? null, concrete };
 
     // The whole script, in one pass: two columns at once.
     if (editorial.stage === 'beats' || editorial.stage === 'hooks') {

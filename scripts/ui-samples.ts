@@ -14,7 +14,9 @@
  *  - ui-dashboard: a laptop with a dashboard whose chart grows;
  *  - ui-frost: a sign-in walkthrough in two chapters, a frost between
  *    them, the cursor typing an address;
- *  - ui-before: a before and an after, the same screen in two states.
+ *  - ui-before: a before and an after, the same screen in two states;
+ *  - ui-scroll: a feed scrolled to its next post, then a tap on that
+ *    post's heart where it is now (not where it was drawn).
  *
  *   npx ts-node --transpile-only scripts/ui-samples.ts <client dir>
  *

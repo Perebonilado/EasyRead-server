@@ -129,26 +129,42 @@ export function contentBox(
       values.reduce((n, v) => n + (v - mean) ** 2, 0) /
         Math.max(1, values.length),
     );
-    return spread < 0.07 && (mean < 0.16 || mean > 0.94);
+    return spread < 0.09 && (mean < 0.18 || mean > 0.93);
   };
   const row = (y: number) =>
     Array.from({ length: width }, (_, x) => luma(x, y));
-  let top = 0;
-  while (top < height * BORDER_MOST && border(row(top))) top += 1;
-  let bottom = 0;
-  while (bottom < height * BORDER_MOST && border(row(height - 1 - bottom)))
-    bottom += 1;
+  /**
+   * How deep a border runs in from one edge: line by line while the lines
+   * are border, stepping over a thin lighter line between two runs of it
+   * (a film's rebate between a holder's black and the frame's own edge).
+   */
+  const depth = (line: (k: number) => number[], side: number) => {
+    const most = Math.floor(side * BORDER_MOST);
+    let found = 0;
+    let k = 0;
+    while (k < most) {
+      if (border(line(k))) {
+        k += 1;
+        found = k;
+        continue;
+      }
+      // A line or two that is not border, with border again past it, is part of it.
+      const ahead = [1, 2, 3].find((d) => k + d < most && border(line(k + d)));
+      if (!found || ahead === undefined) break;
+      k += ahead;
+    }
+    return found;
+  };
+  const top = depth((k) => row(k), height);
+  const bottom = depth((k) => row(height - 1 - k), height);
   // A column is read between the top and bottom borders already found: a
   // black edge at the side and a white mount below are each even alone.
   const column = (x: number) =>
     Array.from({ length: Math.max(1, height - top - bottom) }, (_, k) =>
       luma(x, top + k),
     );
-  let left = 0;
-  while (left < width * BORDER_MOST && border(column(left))) left += 1;
-  let right = 0;
-  while (right < width * BORDER_MOST && border(column(width - 1 - right)))
-    right += 1;
+  const left = depth((k) => column(k), width);
+  const right = depth((k) => column(width - 1 - k), width);
   // Past the border's soft inner edge (a scan's black fades into the
   // print over a few per cent): a border found is taken a little further.
   const soft = (n: number, side: number) =>

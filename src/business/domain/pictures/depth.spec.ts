@@ -65,6 +65,15 @@ describe("a picture's depth", () => {
     expect(y).toBeCloseTo(5 / 60, 5);
     expect(x + w).toBeCloseTo(94 / 100, 5);
     expect(y + h).toBeCloseTo(51 / 60, 5);
+    // A film's thin lighter rebate between the holder's black and the frame is stepped over.
+    const film = pixels(100, 60, (i) => {
+      const x = i % 100;
+      if (x < 4 || x >= 96 || x === 6)
+        return x === 4 || x === 95 ? [90, 90, 90] : [12, 12, 12];
+      if (x === 4 || x === 95) return [90, 90, 90];
+      return [(x * 7) % 256, (Math.floor(i / 100) * 11) % 256, 128];
+    });
+    expect(contentBox(film)[0]).toBeGreaterThanOrEqual(7 / 100);
     const plain = pixels(40, 30, (i) => [
       (i * 13) % 256,
       (i * 7) % 256,

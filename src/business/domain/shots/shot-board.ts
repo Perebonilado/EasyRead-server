@@ -1,13 +1,15 @@
 /**
  * A lesson scene boarded as shots (explainer-animation-tech §4.1): its
  * registry built from its lines, the research and the world; the board
- * asked (explainer_shots, GPT-5.4 mini) with that registry and the lines;
- * its answer made sound (planOf) and checked (checkPlan); sent back once,
- * with what is wrong in plain words, when something only the board can
- * put right is wrong; the better of its two answers mended silently
- * (mendPlan); and a safe shot given to every line still left without a
- * picture. The maker never sees a problem: what is stored is a plan every
- * check passes, and never a card of words.
+ * asked (explainer_shots, GPT-5.4 mini) with that registry and the lines,
+ * each photo said with what it shows; its answer made sound (planOf) and
+ * checked (checkPlan); sent back once, with what is wrong in plain words,
+ * when something only the board can put right is wrong; the better of its
+ * two answers mended silently (mendPlan: pictures first, the map only for
+ * where); and a safe shot given to every line still left without a
+ * picture, a new picture where the voice moves on. The maker never sees a
+ * problem: what is stored is a plan every check passes, and never a card
+ * of words.
  */
 import type { FilmShape } from '../../../contracts';
 import type { LlmGatewayPort, LlmUsage } from '../../ports/llm.port';
@@ -32,6 +34,7 @@ import {
   sameSet,
   weightOf,
   type PlanOptions,
+  type SafeAround,
 } from './shot-check';
 import { clip } from './shot-parts';
 import {
@@ -46,12 +49,28 @@ import {
 import { mentionsOf, type Mention } from './shot-mentions';
 import {
   PLAN_PACE,
+  cutIn,
   landingOf,
+  onWords,
   planGaps,
   shotStarts,
   splitShot,
 } from './shot-pace';
-import { buildRegistry, promptList, splitTarget } from './shot-registry';
+import {
+  buildRegistry,
+  promptList,
+  registryOf,
+  splitTarget,
+} from './shot-registry';
+import {
+  mapMentions,
+  namedSubjects,
+  nextPicture,
+  pictureOfSet,
+  pictureShot,
+  photoShows,
+  picturesOf,
+} from './shot-subjects';
 import type {
   PlanInfo,
   PlanShot,
@@ -121,13 +140,24 @@ const registryFor = (input: BoardShotsInput) =>
     pictures: input.pictures,
   });
 
-/** What the checks are told of the scene: its kit, whether the show has its map, its lines, and whether it opens the episode. */
+/** What the checks are told of the scene: its kit, whether the show has its map, its lines, its era, and whether it opens the episode. */
 const optionsFor = (input: BoardShotsInput): PlanOptions => ({
   kit: input.kit ?? kitIdsFor(input.look ?? 'editorial'),
   map: Boolean(readMapBase(input.world?.base)),
   look: input.look ?? 'editorial',
   lines: linesOf(input),
   opening: input.scene?.index === 0,
+  ...(input.world?.era ? { era: input.world.era } : {}),
+});
+
+/** What a safe shot is told of the show by the board: its kit, look, map and era. */
+const showOf = (
+  options: PlanOptions,
+): Pick<SafeAround, 'kit' | 'look' | 'map' | 'era'> => ({
+  kit: options.kit,
+  look: options.look,
+  map: options.map,
+  era: options.era,
 });
 
 /**
@@ -147,14 +177,92 @@ function finished(
   const pauses = lineSpans(lines)
     .slice(1)
     .map(([a]) => a);
+  const show = showOf(options);
   let out = plan;
   for (let round = 0; round < 4; round += 1) {
-    const covered = withSafeShots(out, lines, registry, input.world);
-    const paced = withPace(covered, lines, registry, input.world);
+    const covered = withSafeShots(out, lines, registry, input.world, show);
+    const paced = withPace(covered, lines, registry, input.world, show);
     out = mendPlan(paced, narration, registry, options);
     if (!planGaps(out, n, pauses).length) break;
   }
   return out;
+}
+
+/**
+ * The scene's list as the board reads it (Richard, 2026-10-02: real
+ * pictures first, the map never in a person's stead): each photo says
+ * what it shows; each person and place says which photos show them; a
+ * person with photos and no portrait is shown by them; and a person's
+ * trace is only their own words, never their place on the map. What the
+ * registry's own list (shot-registry's promptList) says already of a
+ * photo or a person is never said twice.
+ */
+export function boardList(registry: TargetRegistry): string {
+  const all = registry.entries();
+  const plain = promptList(registry).split('\n');
+  /** The registry's own line for an entry: its name, then its mark, its "(shows …)" or its colon. */
+  const lineOf = (name: string) =>
+    plain.find(
+      (row) =>
+        row.startsWith(`- ${name}`) &&
+        /^[\s:([]/u.test(row.slice(name.length + 2)),
+    ) ?? '';
+  const photosOf = new Map<string, string[]>();
+  const view = all.map((e): RegistryEntry => {
+    if (e.kind === 'person' && e.trace?.kind === 'place') {
+      const { trace: _t, ...rest } = e;
+      void _t;
+      return rest;
+    }
+    if (e.kind !== 'photo' && e.kind !== 'document') return e;
+    const shown = photoShows(e, registry);
+    const what =
+      shown?.entry?.name ??
+      (e.shows ? `${e.shows.kind} ${splitTarget(e.shows.name).rest}` : null);
+    if (!what) return e;
+    if (shown?.entry)
+      photosOf.set(shown.entry.name, [
+        ...(photosOf.get(shown.entry.name) ?? []),
+        e.name,
+      ]);
+    return /\bshows\b/u.test(lineOf(e.name))
+      ? e
+      : { ...e, about: `shows ${what} · ${e.about}` };
+  });
+  const said = (e: RegistryEntry) =>
+    /\bphotos of (?:them|it)\b/u.test(lineOf(e.name));
+  const named = view.map((e) => {
+    const photos = photosOf.get(e.name);
+    if (
+      !photos?.length ||
+      (e.kind !== 'person' && e.kind !== 'place') ||
+      said(e)
+    )
+      return e;
+    return {
+      ...e,
+      about: `${e.about} · ${e.kind === 'person' && e.picture ? 'more photos of them' : e.kind === 'person' ? 'photos of them' : 'photos of it'}: ${photos.join(', ')}`,
+    };
+  });
+  // A person with photos and no portrait is shown by them: their line says so.
+  const own = new Map(
+    named
+      .filter(
+        (e) =>
+          e.kind === 'person' && !e.picture && photosOf.has(e.name) && !said(e),
+      )
+      .map((e) => [
+        `- ${e.name}:`,
+        `- ${e.name}: ${e.about} · no portrait: show them by their photos`,
+      ]),
+  );
+  return promptList(registryOf(named))
+    .split('\n')
+    .map(
+      (row) =>
+        [...own.entries()].find(([head]) => row.startsWith(head))?.[1] ?? row,
+    )
+    .join('\n');
 }
 
 /** The board's parts: the scene, what it may name, and its lines (the fake reads them too). */
@@ -179,7 +287,8 @@ export function shotParts(
     world?.held
       ? `The colour held back: "held", only for ${world.held.for}.`
       : '',
-    `What you may name (nothing else):\n${promptList(registry)}`,
+    `What you may name (nothing else):\n${boardList(registry)}`,
+    picturesPart(registry),
     kitPart(input),
     [
       "The lines, in order (say: the voice's exact words; about: what the line is about; claims: what it rests on; show: what the editor wants seen, its idea only):",
@@ -196,6 +305,22 @@ export function shotParts(
   ].filter(Boolean);
 }
 
+/**
+ * What the scene's cleared pictures are for, said beside the list (Richard,
+ * 2026-10-02: real pictures first, scenes that change often): none, nothing.
+ */
+function picturesPart(registry: TargetRegistry): string {
+  const all = registry.entries();
+  const portraits = all.filter((e) => e.kind === 'person' && e.picture).length;
+  const photos = all.filter(
+    (e) => (e.kind === 'photo' || e.kind === 'document') && e.picture,
+  ).length;
+  const count = portraits + photos;
+  return count
+    ? `Real pictures first: this scene has ${count} cleared picture${count === 1 ? '' : 's'}. Cut to each where a line names what it shows: a person's photo every time they are the subject (another of theirs the next time, when they have more than one), a place's, a thing's or an event's as the voice comes to it. The map only where a line is about where something is.`
+    : '';
+}
+
 /** The kit the scene may stand on its sets, for its look: each piece with its settings and moves; none, no actors. */
 function kitPart(input: BoardShotsInput): string {
   const ids = input.kit ?? kitIdsFor(input.look ?? 'editorial');
@@ -203,43 +328,45 @@ function kitPart(input: BoardShotsInput): string {
     .split('\n')
     .filter((row) => ids.some((id) => row.startsWith(`- ${id}:`)))
     .join('\n');
-  // An illustrated show draws named people as their characters, whatever the list says of portraits and traces.
+  // An illustrated show draws a named person as their character only when
+  // they have no photo (Richard, 2026-10-02: real people first).
   const named =
     input.look === 'illustrated'
-      ? '\nThis show is illustrated: a person of the list may be drawn as their character, labelled with their name (character.person with name), whether or not they have a portrait or a trace.'
+      ? '\nThis show is illustrated: a person of the list with no photo may be drawn as their character, labelled with their name (character.person with name), whether or not they have a trace; one with a portrait or a photo is shown by it, never drawn.'
       : '';
   return guide
     ? `The kit (pieces that may stand on a set or on the map; settings and moves as written):\n${guide}${named}`
     : 'The kit has nothing for this show: plan no actors.';
 }
 
-/** A shot moved onto other words: its own, and each of its changes that were on its words. */
-function onWords(shot: PlanShot, on: string): PlanShot {
-  const was = shot.on;
-  return {
-    ...shot,
-    on,
-    info: shot.info.map((i) => (i.on === was ? { ...i, on } : i)),
-    camera: shot.camera.map((c) => (c.on === was ? { ...c, on } : c)),
-  };
-}
+/** The pictures the shots before shot `k` show, in order. */
+const picturesBefore = (shots: readonly PlanShot[], k: number): string[] =>
+  shots
+    .slice(0, Math.max(0, k))
+    .map((s) => pictureOfSet(s.set))
+    .filter((p): p is string => Boolean(p));
 
 /**
  * Every line given a picture: a line on which no shot starts and nothing
- * of the shot it is under comes on gets a safe shot on its first words.
- * A safe shot that only carries the shot before on is that shot's camera
- * moving on the line's words, where it has a move to spare, not a new
- * shot; and so is any once the scene has all the shots it may have.
+ * of the shot it is under comes on gets a safe shot on its first words
+ * (shot-check's ladder: a photo of what it names first, the map only on a
+ * place it names). A safe shot that only carries the shot before on is
+ * that shot's camera moving on the line's words, where it has a move to
+ * spare, not a new shot; and so is any once the scene has all the shots it
+ * may have; but the map is never carried on over a line that names no
+ * place it shows.
  */
 export function withSafeShots(
   plan: ShotPlan,
   rows: readonly Pick<EditorialRow, 'say' | 'claims' | 'visual'>[],
   registry: TargetRegistry,
   world: Pick<EditorWorld, 'base' | 'era'> | null,
+  show: Pick<SafeAround, 'kit' | 'look' | 'map' | 'era'> = {},
 ): ShotPlan {
   const n = narrationOf(sceneNarration(rows));
   const spans = lineSpans(rows);
   const most = mostShots(sceneNarration(rows));
+  const geo = mapMentions(n, registry);
   const shots = plan.shots.map((s) => ({ ...s, camera: [...s.camera] }));
   const start = (s: PlanShot) => phraseAt(n, s.on);
   rows.forEach((row, k) => {
@@ -261,12 +388,20 @@ export function withSafeShots(
     const next = shots.find((s) => start(s) >= b) ?? null;
     const on = phraseText(n, a, Math.min(3, b - a));
     const safe = onWords(
-      safeShot(row, registry, world, { previous, next }),
+      safeShot(row, registry, world, {
+        previous,
+        next,
+        used: picturesBefore(before, before.length),
+        ...show,
+      }),
       on,
     );
+    // The map goes on only over a line that names a place it shows.
+    const offMap =
+      previous?.set.kind === 'map' && !geo.some((m) => m.at >= a && m.at < b);
     // The shot before, its camera moving on this line's words.
     const carried = () => {
-      if (!previous || previous.camera.length >= SHOT_LIMITS.camera)
+      if (!previous || offMap || previous.camera.length >= SHOT_LIMITS.camera)
         return false;
       previous.camera.push(carryMove(previous, on));
       return true;
@@ -279,11 +414,9 @@ export function withSafeShots(
     )
       return;
     // A new shot within the scene's budget of shots; past it, the picture
-    // before holds with its camera moving (the timing fills what is left).
-    if (shots.length >= most) {
-      carried();
-      return;
-    }
+    // before holds with its camera moving (the timing fills what is left),
+    // but never the map over a line that names no place.
+    if (shots.length >= most && (carried() || !offMap)) return;
     shots.splice(previous ? shots.indexOf(previous) + 1 : 0, 0, safe);
   });
   return { shots };
@@ -401,8 +534,8 @@ function partWords(shot: PlanShot): string[] {
 /**
  * A picture of what the voice names that the map does not show: a date's
  * calendar sheet, named by what happened (the research's words for it);
- * a person's trace, their own words as a quote or their place pinned on
- * the map. Null when there is none.
+ * a person's trace, their own words as a quote, never their place on the
+ * map in their stead. Null when there is none.
  */
 function pictureOf(
   entry: RegistryEntry,
@@ -437,18 +570,6 @@ function pictureOf(
       camera: [{ move: 'establish', on }],
       life: ['grain'],
       focal: WHOLE_SET,
-    };
-  }
-  if (entry.kind === 'person' && entry.trace?.kind === 'place') {
-    const place = registry.resolve(entry.trace.ref);
-    if (!place?.geo) return null;
-    return {
-      ...base,
-      set: { kind: 'map', tilt: 'flat' },
-      info: [{ recipe: 'pin', target: place.name, on }],
-      camera: [{ move: 'travel', target: place.name, on }],
-      life: ['cloud-shadows'],
-      focal: place.name,
     };
   }
   return null;
@@ -491,7 +612,9 @@ export function onTheirWords(
 }
 
 /**
- * A plan given something new every few words (PLAN_PACE). First, what
+ * A plan given something new every few words (PLAN_PACE), a new picture
+ * where the voice moves on to a new person, place, thing or event (Richard,
+ * 2026-10-02: scenes that change often, to relatable things). First, what
  * the board brings on before its name moves onto the words that name it.
  * Then through each stretch the voice talks over with nothing new, the
  * first thing its words name that the shot on screen can show comes on
@@ -499,26 +622,39 @@ export function onTheirWords(
  * marked, a chart's own part marked as the voice says it; a move to it
  * when the shot has no room for another change, or the shot goes on as
  * its continuation from there, framed on it); where the shot can show
- * none of it, the map cuts in on a place or a region the words name, a
- * date's calendar or a person's trace, or a new shot where the voice
- * moves on to its next line (that line's own: the map on its place, a
- * count of the number it says, its exact words). What lands within a
+ * none of it, a photo of what the words name cuts in as it is named (a
+ * person's first, their next picture), else a date's calendar or a
+ * person's own words, else the map on a place or a region the words name
+ * (only there), else a new shot where the voice moves on to its next
+ * line (that line's own, by the stand-in's ladder). Each cuts in and the
+ * shot on screen goes on after it at its next change. What lands within a
  * few words closes the stretch; failing that, what lands further on at
  * least cuts it in two. Only then, the shot's subject marked again on
- * the map, or a chart's next part. Never words standing in for a
- * picture, and never a still picture the voice talks over for long.
+ * the map (where the line names a place), or a chart's next part. Never
+ * words standing in for a picture, and never a still picture the voice
+ * talks over for long.
  */
 export function withPace(
   plan: ShotPlan,
   rows: readonly Pick<EditorialRow, 'say' | 'claims' | 'visual'>[],
   registry: TargetRegistry,
   world: Pick<EditorWorld, 'base' | 'era'> | null,
+  show: Pick<SafeAround, 'kit' | 'look' | 'map' | 'era'> = {},
 ): ShotPlan {
   const n = narrationOf(sceneNarration(rows));
   const spans = lineSpans(rows);
   const pauses = spans.slice(1).map(([a]) => a);
   const mentions = mentionsOf(n, registry);
-  const map = Boolean(readMapBase(world?.base));
+  const map = show.map ?? Boolean(readMapBase(world?.base));
+  const subjects = namedSubjects(n, registry, spans, mentions);
+  const geo = mapMentions(n, registry, mentions);
+  /** Whether the line the words at `at` are in names a place the map shows. */
+  const placeful = (at: number) => {
+    const span = spans.find(([a, b]) => at >= a && at < b);
+    return (
+      Boolean(span) && geo.some((m) => m.at >= span![0] && m.at < span![1])
+    );
+  };
   const shots: PlanShot[] = onTheirWords(plan, n, mentions).shots.map((s) => ({
     ...s,
     info: [...s.info],
@@ -656,35 +792,34 @@ export function withPace(
           else if (!split(k, at, change)) continue;
           return true;
         }
-      // 2. The map, cut to on a place or a region these words name.
-      const onMap = named.find(
-        (m) =>
-          roomy(m.at) &&
-          ((m.entry.kind === 'place' && m.entry.geo) ||
-            m.entry.kind === 'region'),
+      // 2. A photo of what these words name that is not on screen: a
+      // person's first (their next picture), then a place's, a thing's or
+      // an event's, cut in as it is named.
+      const current = pictureOfSet(shot.set);
+      const pictured = subjects.filter(
+        (s) => s.at >= lo && s.at <= top && roomy(s.at),
       );
-      if (map && onMap && shot.set.kind !== 'map') {
-        const on = wordsAt(n, onMap.at);
-        const change = changeOf(
-          { ...shot, set: { kind: 'map', tilt: 'flat' } },
-          onMap.entry,
-          on,
-          done,
-        )!;
-        shots.splice(k + 1, 0, {
-          on,
-          set: { kind: 'map', tilt: 'flat' },
-          actors: [],
-          info: [change],
-          life: ['cloud-shadows'],
-          camera: [{ move: 'travel', target: onMap.entry.name, on }],
-          join: 'cut',
-          focal: onMap.entry.name,
-        });
-        return true;
+      for (const subject of [
+        ...pictured.filter((s) => s.kind === 'person'),
+        ...pictured.filter((s) => s.kind !== 'person'),
+      ]) {
+        const picture = nextPicture(
+          subject.pictures.filter((p) => p.name !== current),
+          picturesBefore(shots, k + 1),
+        );
+        if (
+          picture &&
+          cutIn(
+            shots,
+            subject.at,
+            pictureShot(picture, wordsAt(n, subject.at)),
+            n,
+          )
+        )
+          return true;
       }
-      // A date the voice says: its calendar sheet; a person it names: their
-      // trace (their own words, or their place on the map).
+      // 3. A date the voice says: its calendar sheet; a person it names:
+      // their own words (never their place on the map in their stead).
       const other = named.find(
         (m) =>
           roomy(m.at) &&
@@ -693,31 +828,54 @@ export function withPace(
               shot.set.kind === 'chart' ? shot.set.chart.kind : '',
             )) ||
             (m.entry.kind === 'person' &&
-              m.entry.trace &&
+              m.entry.trace?.kind === 'quote' &&
               !saysLater(m.entry))),
       );
       if (other) {
         const picture = pictureOf(other.entry, wordsAt(n, other.at), registry);
-        if (picture) {
-          shots.splice(k + 1, 0, picture);
-          return true;
-        }
+        if (picture && cutIn(shots, other.at, picture, n)) return true;
       }
-      // 3. A new shot where the voice moves on: the next line's own picture.
+      // 4. The map, cut to on a place, a region or a seam these words name:
+      // only there.
+      const onMap = geo.find((m) => m.at >= lo && m.at <= top && roomy(m.at));
+      if (map && onMap && shot.set.kind !== 'map') {
+        const on = wordsAt(n, onMap.at);
+        const change = changeOf(
+          { ...shot, set: { kind: 'map', tilt: 'flat' } },
+          onMap.entry,
+          on,
+          done,
+        )!;
+        if (
+          cutIn(
+            shots,
+            onMap.at,
+            {
+              on,
+              set: { kind: 'map', tilt: 'flat' },
+              actors: [],
+              info: [change],
+              life: ['cloud-shadows'],
+              camera: [{ move: 'travel', target: onMap.entry.name, on }],
+              join: 'cut',
+              focal: onMap.entry.name,
+            },
+            n,
+          )
+        )
+          return true;
+      }
+      // 5. A new shot where the voice moves on: the next line's own picture.
       const line = spans.findIndex(([a]) => a >= lo && a <= top && roomy(a));
       if (line >= 0) {
-        const own = safeShot(rows[line], registry, world, { previous: shot });
+        const own = safeShot(rows[line], registry, world, {
+          previous: shot,
+          used: picturesBefore(shots, k + 1),
+          ...show,
+        });
         if (own.join !== 'continue' || !sameSet(own.set, shot.set)) {
           const at = spans[line][0];
-          const on = wordsAt(n, at);
-          const was = own.on;
-          shots.splice(k + 1, 0, {
-            ...own,
-            on,
-            info: own.info.map((i) => (i.on === was ? { ...i, on } : i)),
-            camera: own.camera.map((c) => (c.on === was ? { ...c, on } : c)),
-          });
-          return true;
+          if (cutIn(shots, at, onWords(own, wordsAt(n, at)), n)) return true;
         }
       }
       return false;
@@ -727,10 +885,40 @@ export function withPace(
     if (lo <= reach && fill(reach)) continue;
     if (reach < end && fill(end)) continue;
     if (lo > reach) continue;
-    // 4. Last, the set itself in turn: on the map, the subject the voice
-    // is on marked again; on a chart, its next part.
+    // 6. Last, the set itself in turn: on the map, the subject the voice
+    // is on marked again, while its line names a place (else the map is
+    // off its place, and the mend gives those words the stand-in's
+    // picture); on a chart, its next part; a picture (a photo, a
+    // portrait, a document, a drawn set) has nothing of its own to bring
+    // on, so another picture of what it shows comes in as the voice stays
+    // on it (one not shown yet), else it is held while it sinks in (a
+    // declared hold).
     const at = Math.min(reach, Math.max(lo, gap.from + 5));
+    if (shot.set.kind === 'map' && !placeful(at)) continue;
     const on = wordsAt(n, at);
+    if (!['map', 'chart', 'screen'].includes(shot.set.kind)) {
+      const current = pictureOfSet(shot.set);
+      const entry = current ? registry.resolve(current) : null;
+      const shown =
+        entry?.kind === 'person'
+          ? entry
+          : entry
+            ? (photoShows(entry, registry)?.entry ?? null)
+            : null;
+      // One not shown yet: never two pictures taking turns.
+      const used = picturesBefore(shots, k + 1);
+      const another = shown
+        ? (picturesOf(shown, registry).find((p) => !used.includes(p.name)) ??
+          null)
+        : null;
+      if (another && cutIn(shots, at, pictureShot(another, on), n)) continue;
+      if (
+        shot.camera.length < SHOT_LIMITS.camera &&
+        !shot.camera.some((c) => c.move === 'hold')
+      )
+        shot.camera.push({ move: 'hold', on });
+      continue;
+    }
     // Its subject: the place or the region it pointed at last (brought on,
     // or moved to), else what it is framed on, else the one the voice
     // named last.
@@ -800,9 +988,10 @@ export function withPace(
 
 /**
  * A scene's shots by code alone, when the board cannot be had: every
- * line its safe shot (the show's map on its place, a count of its
- * number, a quote of its words, the picture before it carried on).
- * Never a card of words.
+ * line its safe shot (a photo of what it names, a count of its number, a
+ * quote of its words, its date's calendar, the map only on a place it
+ * names, the moment drawn, the picture before it carried on). Never a
+ * card of words, never the map as a stand-in.
  */
 export function safePlan(input: BoardShotsInput): {
   plan: ShotPlan;

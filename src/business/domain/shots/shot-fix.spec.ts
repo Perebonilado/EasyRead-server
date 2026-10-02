@@ -1,9 +1,10 @@
 import { CHART_SPECS } from './__fixtures__/chart-specs';
 import { WALL_RESEARCH, WALL_ROWS, WALL_WORLD } from './__fixtures__/wall';
+import { WALL_PICTURES } from './__fixtures__/wall-pictures';
 import type { CriticFix } from './shot-critic';
-import { WHOLE_SET, checkPlan, mendPlan } from './shot-check';
+import { WHOLE_SET, checkPlan, mapsOffPlace, mendPlan } from './shot-check';
 import { applyFixes, type BoardAsk, type FixContext } from './shot-fix';
-import { sceneNarration } from './shot-phrases';
+import { narrationOf, sceneNarration } from './shot-phrases';
 import { buildRegistry } from './shot-registry';
 import type { PlanShot, ShotPlan } from './types';
 
@@ -31,7 +32,11 @@ const shot = (
   ...s,
 });
 
-/** The Wall's plan as the board left it: the map, the border's length, Reagan's words, East Germany holding on. */
+/**
+ * The Wall's plan as the board left it: the map, the border's length,
+ * Reagan's words, East Germany holding on, and the year the Wall opened
+ * (the map only while its lines name its places).
+ */
 const plan = (): ShotPlan =>
   mendPlan(
     {
@@ -121,15 +126,29 @@ const plan = (): ShotPlan =>
               text: 'East Germany',
               on: 'held on',
             },
-            { recipe: 'mark', target: 'place:Berlin', on: 'the Wall opened' },
           ],
           focal: 'region:East Germany',
+        }),
+        shot({
+          on: 'Two years later',
+          set: {
+            kind: 'chart',
+            chart: {
+              kind: 'calendar',
+              spec: {
+                calendars: [{ label: 'Wall opens', dates: ['1989'] }],
+                merge: null,
+              },
+            },
+          },
+          camera: [{ move: 'establish', on: 'Two years later' }],
+          focal: WHOLE_SET,
         }),
       ],
     },
     narration,
     registry,
-    { map: true },
+    { map: true, lines: WALL_ROWS },
   );
 
 const fix = (
@@ -253,6 +272,7 @@ describe("the critic's fixes made into plan edits (applyFixes)", () => {
       'map',
       'chart',
       'map',
+      'chart',
     ]);
     expect(
       out.plan.shots[0].info.some((i) => i.target === 'seam:inner border'),
@@ -333,17 +353,19 @@ describe("the critic's fixes made into plan edits (applyFixes)", () => {
       board: () => Promise.resolve<ShotPlan>({ shots: [splitChart] }),
     });
     expect(full.applied[0].outcome).toBe('boarded');
-    expect(full.plan.shots).toHaveLength(5);
+    expect(full.plan.shots).toHaveLength(6);
     // A new shot that shows nothing of its own (the same map again) is
     // mended away: the camera moves at the words instead.
     const idle = await run([fix('split', 1, { to: 'cut in two' })], {
       board: () =>
         Promise.resolve<ShotPlan>({
-          shots: [shot({ on: 'cut in two', set: { kind: 'map', tilt: 'flat' } })],
+          shots: [
+            shot({ on: 'cut in two', set: { kind: 'map', tilt: 'flat' } }),
+          ],
         }),
     });
     expect(idle.applied[0].outcome).toBe('fell-back');
-    expect(idle.plan.shots).toHaveLength(4);
+    expect(idle.plan.shots).toHaveLength(5);
     expect(idle.plan.shots[0].camera).toContainEqual(
       expect.objectContaining({ on: 'cut in two' }),
     );
@@ -380,7 +402,7 @@ describe("the critic's fixes made into plan edits (applyFixes)", () => {
     const undone = await run([fix('merge', 1)]);
     expect(undone.applied[0].outcome).toBe('no-effect');
     expect(undone.applied[0].what).toMatch(/would break the rules/);
-    expect(undone.plan.shots).toHaveLength(4);
+    expect(undone.plan.shots).toHaveLength(5);
   });
 
   it('move-event: an item onto other words in its shot, or onto its nearest words when they are in another set', async () => {
@@ -479,5 +501,61 @@ describe("the critic's fixes made into plan edits (applyFixes)", () => {
     ]);
     expect(out.problems).toEqual([]);
     expect(checkPlan(out.plan, narration, registry, { map: true })).toEqual([]);
+  });
+});
+
+describe('the critic’s fixes follow the stand-in’s ladder (Richard, 2026-10-02)', () => {
+  const pictured = buildRegistry({
+    rows: WALL_ROWS,
+    research: WALL_RESEARCH,
+    world: WALL_WORLD,
+    pictures: WALL_PICTURES,
+  });
+
+  it('safe-shot: a photo of what the line names first, never the map on words that name no place', async () => {
+    // Reagan's lines: his portrait where the desk cleared one.
+    const withPhoto = await applyFixes(plan(), [fix('safe-shot', 3)], {
+      ...ctx,
+      registry: pictured,
+    });
+    expect(withPhoto.plan.shots[2]).toMatchObject({
+      set: { kind: 'portrait', person: 'person:Ronald Reagan' },
+    });
+    // Else his year's calendar: still not the map.
+    const without = await run([fix('safe-shot', 3)]);
+    expect(without.plan.shots[2].set).toMatchObject({
+      kind: 'chart',
+      chart: { kind: 'calendar' },
+    });
+    for (const out of [withPhoto, without])
+      expect(
+        mapsOffPlace(out.plan, narrationOf(narration), registry, WALL_ROWS),
+      ).toEqual([]);
+  });
+
+  it('change-set: a map the board draws over words that name no place gives way to their own pictures', async () => {
+    const out = await run([fix('change-set', 3, { to: 'map' })], {
+      board: () =>
+        Promise.resolve<ShotPlan>({
+          shots: [
+            shot({
+              on: 'In 1987',
+              set: { kind: 'map', tilt: 'flat' },
+              info: [{ recipe: 'mark', target: 'place:Berlin', on: 'Reagan' }],
+              focal: 'place:Berlin',
+            }),
+          ],
+        }),
+    });
+    expect(out.applied[0].outcome).toBe('boarded');
+    expect(
+      mapsOffPlace(out.plan, narrationOf(narration), registry, WALL_ROWS),
+    ).toEqual([]);
+    // Reagan's year, then his own words, where the map was.
+    expect(
+      out.plan.shots.map((s) =>
+        s.set.kind === 'chart' ? s.set.chart.kind : s.set.kind,
+      ),
+    ).toEqual(['map', 'counter', 'calendar', 'quote', 'map', 'calendar']);
   });
 });

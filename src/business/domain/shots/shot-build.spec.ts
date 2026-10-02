@@ -396,10 +396,15 @@ describe('the plan built', () => {
   });
 
   it('seeds the life layer from the scene, the same every time', () => {
-    expect(built.shots[0].life).toHaveLength(1);
+    // The plan's cloud shadows on the map, and the paper's grain at the look's grain.
+    expect(built.shots[0].life).toHaveLength(2);
     expect(built.shots[0].life[0]).toMatchObject({
       effect: 'cloud-shadows',
       amount: 0.5,
+    });
+    expect(built.shots[0].life[1]).toMatchObject({
+      effect: 'grain',
+      amount: built.look.grain,
     });
     expect(Number.isInteger(built.shots[0].life[0].seed)).toBe(true);
     expect(buildShots(PLAN, registry, ctx)).toEqual(built);

@@ -1755,10 +1755,16 @@ function mendShot(
       },
     ];
   });
+  // The same change twice is once.
+  const once = <T>(list: T[]) =>
+    list.filter(
+      (x, k) =>
+        list.findIndex((y) => JSON.stringify(y) === JSON.stringify(x)) === k,
+    );
   out = {
     ...out,
-    info: info.slice(0, SHOT_LIMITS.info),
-    camera: camera.slice(0, SHOT_LIMITS.camera),
+    info: once(info).slice(0, SHOT_LIMITS.info),
+    camera: once(camera).slice(0, SHOT_LIMITS.camera),
   };
   // The stage's words: labels go first (the last first), then the chart's own.
   while (stageWords(out) > TEXT.stageWordsMax) {
@@ -2373,20 +2379,38 @@ function mendLines(
         shots = without(shots);
         continue;
       } else {
-        // Else the shot goes on from its name as its continuation, filled.
+        // Else the shot goes on from its name as its continuation, filled;
+        // or, where what it brings on from there is too much for one, it
+        // goes on from what comes next, and has room for the fill.
         const next = [...shots];
+        const from = shotStarts({ shots: next }, n)[host];
+        const after = there
+          .filter((i) => i !== original)
+          .map((i) => landing(n, i.on, from))
+          .filter((a) => a > late.at + PLAN_PACE.subWords)
+          .sort((a, b) => a - b)[0];
+        const room = (cut: number) =>
+          there.filter((i) => i !== original && landing(n, i.on, from) < cut)
+            .length < SHOT_LIMITS.info;
+        let filled = splitShot(
+          next,
+          host,
+          late.at,
+          moved,
+          n,
+          SHOT_LIMITS.info,
+          late.region.name,
+        );
         if (
-          !splitShot(
-            next,
-            host,
-            late.at,
-            moved,
-            n,
-            SHOT_LIMITS.info,
-            late.region.name,
-          )
-        )
-          continue;
+          !filled &&
+          after !== undefined &&
+          room(after) &&
+          splitShot(next, host, after, null, n, SHOT_LIMITS.info)
+        ) {
+          next[host] = { ...next[host], info: [...next[host].info, moved] };
+          filled = true;
+        }
+        if (!filled) continue;
         shots = without(next);
         continue;
       }

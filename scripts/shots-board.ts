@@ -8,14 +8,17 @@
  * boarded once, so their rows are there).
  *
  *   npx ts-node --transpile-only scripts/shots-board.ts --episode <id>
- *     [--scene <n>] [--save] [--out <dir>]
+ *     [--scene <n>] [--save] [--out <dir>] [--replay <dir>]
  *
  * --scene boards one scene, by its number from 1; --out writes each
- * scene's plan and registry as JSON beside the printout. GPT-5.4 mini, a
- * call or two a scene, about a cent each.
+ * scene's plan and registry as JSON beside the printout, with the board's
+ * own answers. --replay takes the board's answers from an --out of before
+ * instead of asking it again (nothing spent, nothing in the ledger), so a
+ * change to the checks and mends can be seen, and saved, on the same
+ * answers. GPT-5.4 mini, a call or two a scene, about a cent each.
  */
 import 'reflect-metadata';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
@@ -101,6 +104,7 @@ async function main() {
   const only = option('--scene') ? Number(option('--scene')) - 1 : null;
   const save = flag('--save');
   const out = option('--out') ? resolve(option('--out')!) : null;
+  const replay = option('--replay') ? resolve(option('--replay')!) : null;
   const app = await NestFactory.createApplicationContext(ShotsBoardModule, {
     logger: ['warn', 'error'],
   });
@@ -128,6 +132,33 @@ async function main() {
         ? episode.editorial.rows.slice(scene.rows[0], scene.rows[1] + 1)
         : [];
       const started = Date.now();
+      // The board's answers of before, given again in order, when replayed.
+      const answers: Record<string, unknown>[] | null = replay
+        ? ((
+            JSON.parse(
+              readFileSync(join(replay, `scene-${k + 1}.json`), 'utf8'),
+            ) as { answers?: Record<string, unknown>[] }
+          ).answers ?? null)
+        : null;
+      if (replay && !answers?.length) {
+        console.log(`Scene ${k + 1}: no answers kept to replay\n`);
+        continue;
+      }
+      let given = 0;
+      const gateway: Pick<LlmGatewayPort, 'shotsBoard'> = answers
+        ? {
+            shotsBoard: () =>
+              Promise.resolve({
+                value: answers[Math.min(given++, answers.length - 1)],
+                usage: {
+                  model: 'replay',
+                  tokensIn: 0,
+                  tokensOut: 0,
+                  latencyMs: 0,
+                },
+              }),
+          }
+        : llm;
       const board = await boardShots(
         {
           rows,
@@ -142,7 +173,7 @@ async function main() {
           },
           audience: show.brief.audience,
         },
-        llm,
+        gateway,
       );
       const cost = board.usage.reduce(
         (n, u) =>
@@ -242,7 +273,7 @@ async function main() {
           status: 'ready',
           error: null,
         });
-        for (const usage of board.usage)
+        for (const usage of replay ? [] : board.usage)
           await ledger
             .record({
               documentId: episode.id,

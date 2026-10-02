@@ -25,7 +25,12 @@ import type {
   PlanShot,
   ShotPlan,
 } from './types';
-import { phraseAt, type Narration } from './shot-phrases';
+import {
+  phraseAt,
+  phraseText,
+  uniquePhrase,
+  type Narration,
+} from './shot-phrases';
 
 /** The board's pace in words. */
 export const PLAN_PACE = {
@@ -187,15 +192,16 @@ export function spareShots(
  * lands as its continuation (in place, in `shots`): the same set, framed
  * on `subject` when given, bringing on what the shot brought on from
  * there; its people stay where they stand, and those who come on later
- * come on in it. False, and nothing changed, when the change lands too
- * near the shot's start or the continuation would hold more than
- * `most` pieces of information.
+ * come on in it. With no change, the shot goes on from `at` with what it
+ * brings on from there, so the shot before has room. False, and nothing
+ * changed, when `at` is too near the shot's start or the continuation
+ * would hold more than `most` pieces of information (or nothing at all).
  */
 export function splitShot(
   shots: PlanShot[],
   k: number,
   at: number,
-  change: PlanInfo,
+  change: PlanInfo | null,
   n: Narration,
   most: number,
   subject?: string,
@@ -205,7 +211,9 @@ export function splitShot(
   if (from < 0 || at - from < PLAN_PACE.nextWords) return false;
   const before = (on: string) => landingOf(n, on, from) < at;
   const later = shot.info.filter((i) => !before(i.on));
-  if (later.length >= most) return false;
+  if (later.length + (change ? 1 : 0) > most) return false;
+  if (!change && !later.length) return false;
+  const spot = uniquePhrase(n, at, 3);
   /** An actor with only its moves before the change (early), or from it on. */
   const keep = (a: PlanActor, early: boolean): PlanActor => {
     const { moves: all, ...rest } = a;
@@ -233,10 +241,10 @@ export function splitShot(
       join: 'continue',
     },
     {
-      on: change.on,
+      on: change ? change.on : phraseText(n, spot.at, spot.length),
       set: shot.set,
       actors: shot.actors.filter((a) => !gone(a)).map((a) => keep(a, false)),
-      info: [change, ...later],
+      info: change ? [change, ...later] : later,
       life: [...shot.life],
       camera: shot.camera.filter((c) => !before(c.on)),
       join: shot.join,

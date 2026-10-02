@@ -148,6 +148,7 @@ describe('the picture desk in the editor’s boards', () => {
                 chip: 'Lagos, 1958 · USIA · Public domain',
                 // Another picture: the pass uses one picture once, by its bytes.
                 sha1: 'b'.repeat(40),
+                sourceId: 'File:Lagos Marina, Nigeria, 1958.jpg',
               }),
         );
       },

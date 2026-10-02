@@ -131,9 +131,10 @@ export function sourceOf(
     /^([\p{Lu}][\p{L}'’-]+),\s*((?:[\p{Lu}]\.?\s?){1,3}|[\p{Lu}][\p{L}'’-]+)\s*$/u.exec(
       artist,
     );
+  // A full stop after an initial ("Philo T. Farnsworth") does not end it.
   const first = turned
     ? `${turned[2].trim()} ${turned[1]}`
-    : (artist.split(/[.,;(]/u)[0]?.trim() ?? '');
+    : (artist.split(/(?<!\b\p{Lu})\.|[,;(]/u)[0]?.trim() ?? '');
   const person = nameLike(first) ? first : '';
   if (archive && person && `${person}, ${archive}`.length <= SOURCE_MOST)
     return `${person}, ${archive}`;

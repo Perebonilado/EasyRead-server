@@ -35,7 +35,7 @@ export function pictureFocusPrompt(): string {
     '- subject: the cells holding what the picture is of: the people, the building, the scene that matters;',
     '- people: how many people are clearly visible;',
     `- kind: what the picture is, one of ${PICTURE_KINDS.join(', ')}. "photograph-of-a-print" is a photograph of another photograph or a framed print (its edges, glare, a wall behind it); "screen" is a photograph of a screen or a frame of a video.`,
-    `- shows: when you are asked whether it shows something (an event, a thing), ${SHOWS.join(', ')}: yes only when you can see it is that kind of scene or thing (a ceremony, a conference, a demonstration, the object itself), no when it shows something else (a plaque or a memorial of it, a building now, a portrait of one person, a document), unsure when you cannot tell. When nothing is asked, unsure.`,
+    `- shows: when you are asked whether it shows something (a place, an event, a thing), ${SHOWS.join(', ')}: yes only when you can see it is that kind of scene or thing (the place itself: its streets, buildings, skyline or landscape; a ceremony, a conference, a demonstration; the object itself), no when it shows something else (a plaque or a memorial of it, a map, a document, a poster, a close portrait of one person, one detail of no place in particular), unsure when you cannot tell. When nothing is asked, unsure.`,
     `Cells only from: ${CELLS.join(' ')}.`,
   ].join('\n');
 }

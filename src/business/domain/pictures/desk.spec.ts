@@ -14,11 +14,13 @@ import {
 } from './__fixtures__/desk';
 import {
   DESK_RULES,
+  inCountry,
   lookupKey,
   MOST,
   PictureDesk,
   PICK_LEAST,
   searchWordsOf,
+  titleKey,
 } from './desk';
 import type { LicenceMode } from './licence';
 import type { PictureQuery } from './types';
@@ -660,5 +662,26 @@ describe('the picture desk', () => {
         ]),
       ).toEqual(['Nigeria', 'independent', 'act', 'constitutional']);
     });
+  });
+
+  it('knows a file’s crop and its copy for the same picture, never two photos of a person', () => {
+    expect(titleKey('File:Philo T Farnsworth (cropped).jpg')).toBe(
+      titleKey('File:Philo T Farnsworth.jpg'),
+    );
+    expect(titleKey('Ahmadu Bello 1960 (2)')).toBe(
+      titleKey('Ahmadu Bello 1960'),
+    );
+    expect(titleKey('Ahmadu Bello 1960 colorized')).toBe(
+      titleKey('Ahmadu Bello 1960'),
+    );
+    expect(titleKey('Ahmadu Bello 1959')).not.toBe(
+      titleKey('Ahmadu Bello 1960'),
+    );
+  });
+
+  it('names a country as Commons’ year categories do', () => {
+    expect(inCountry('United Kingdom')).toBe('the United Kingdom');
+    expect(inCountry('Netherlands')).toBe('the Netherlands');
+    expect(inCountry('Nigeria')).toBe('Nigeria');
   });
 });

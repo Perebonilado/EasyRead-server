@@ -200,4 +200,16 @@ describe("a picture's words", () => {
     expect(clipWords('one two three four', 9)).toBe('one two');
     expect(clipWords('short', 9)).toBe('short');
   });
+
+  it('keeps a photographer’s initial in their name: “Philo T. Farnsworth”, not “Philo T”', () => {
+    expect(
+      sourceOf({
+        source: 'commons',
+        artist: 'Philo T. Farnsworth',
+        credit: '',
+        description: 'Farnsworth image dissector tube',
+        categories: [],
+      }),
+    ).toBe('Philo T. Farnsworth');
+  });
 });

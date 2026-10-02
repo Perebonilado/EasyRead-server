@@ -238,6 +238,7 @@ describe("an episode's desk pass", () => {
               subject: 'Lagos',
               year: 1958,
               sha1: 'b'.repeat(40),
+              sourceId: 'File:Lagos Marina, Nigeria, 1958.jpg',
             }),
           );
         return Promise.resolve(null);
@@ -316,6 +317,10 @@ describe("an episode's desk pass", () => {
         'San Francisco',
         'New York',
       ]);
+      // The look is asked whether a place's photo shows the place itself.
+      expect(of('place')[0].query.asked).toBe(
+        'a place: London, United Kingdom, itself (its streets, buildings, skyline or landscape)',
+      );
       expect(of('event').map((q) => [q.query.name, q.query.years])).toEqual([
         ['Baird demonstrates television', [1926]],
         ['Farnsworth transmits the first all-electronic television', [1927]],

@@ -121,7 +121,7 @@ const LOOKUP_DAYS = 30;
  * again (a portrait that is a statue's photograph, once let through, is
  * not handed out for a month after the rule against it).
  */
-export const DESK_RULES = 11;
+export const DESK_RULES = 12;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** The width the desk asks a source for: a full frame's with room for a 12% push; a portrait's print; a page. */
@@ -227,6 +227,36 @@ export function searchWordsOf(words: readonly string[]): string[] {
 
 /** A name's plain words, as one string. */
 const textWordsOf = (text: string) => textWords(text).join(' ');
+
+/**
+ * A file's title as one picture is known by: its crop, its retouched or
+ * coloured copy and its numbered twin ("Philo T Farnsworth (cropped)",
+ * "… (2)") are the same picture, never two photos of a person.
+ */
+export function titleKey(title: string): string {
+  return textWords(
+    title
+      .replace(/^File:/u, '')
+      .replace(/\.[A-Za-z0-9]{2,5}$/u, '')
+      .replace(
+        /\((?:\d+|cropped|crop|edit(?:ed)?|retouched|restored|colou?ri[sz]ed|detail|version \d+)\)/giu,
+        ' ',
+      )
+      .replace(
+        /\b(?:cropped|crop|edit(?:ed)?|retouched|restored|colou?ri[sz]ed)\b/giu,
+        ' ',
+      ),
+  ).join(' ');
+}
+
+/** A country as Commons' year categories name it: "1926 in the United Kingdom". */
+export function inCountry(country: string): string {
+  return /^(?:united\b|netherlands|philippines|bahamas|gambia|czech republic|democratic republic|dominican republic|central african republic|maldives|comoros|solomon islands|marshall islands|united arab emirates)/iu.test(
+    country.trim(),
+  )
+    ? `the ${country.trim()}`
+    : country.trim();
+}
 
 /** What the look said a kept copy shows when asked this; undefined when it was never asked. */
 function agreedOf(
@@ -465,23 +495,40 @@ export class PictureDesk {
           width,
         )
       : [];
-    // A place in its years: Commons files each year's pictures of a
-    // country under "<year> in <country>"; those that name the place are
-    // of it, then. Then a search by its words, its country with it.
+    // A place in its years: Commons files each year's pictures of a city
+    // under "<year> in <city>" ("1926 in London"), and of a country under
+    // "<year> in <country>"; those that name the place are of it, then.
+    // Then a search by its words, its country with it.
     const country = [query.place ?? []].flat()[0];
-    if (country && query.years?.length && query.kind !== 'document')
+    if (query.years?.length && query.kind === 'place') {
+      const before = files.length;
       for (const year of yearsToLook(query.years))
         files.push(
           ...(await this.safely(
             () =>
               this.deps.sources.commonsCategory(
-                `${year} in ${country}`,
+                `${year} in ${category ?? query.name}`,
                 FROM_CATEGORY,
                 width,
               ),
             [],
           )),
         );
+      // The country's years only when the city has none of its own.
+      if (country && files.length === before)
+        for (const year of yearsToLook(query.years))
+          files.push(
+            ...(await this.safely(
+              () =>
+                this.deps.sources.commonsCategory(
+                  `${year} in ${inCountry(country)}`,
+                  FROM_CATEGORY,
+                  width,
+                ),
+              [],
+            )),
+          );
+    }
     const words = [query.name, ...(country ? [country] : [])].join(' ');
     files.push(
       ...(await this.safely(
@@ -535,13 +582,15 @@ export class PictureDesk {
           [],
         )),
       );
-    const country = [query.place ?? []].flat().at(-1);
-    if (country)
+    // The year's photos of where it happened: its city ("1926 in
+    // London", from "Frith Street, London"), else its country.
+    const where = [query.place ?? []].flat().at(-1)?.split(',').at(-1)?.trim();
+    if (where)
       files.push(
         ...(await this.safely(
           () =>
             this.deps.sources.commonsCategory(
-              `${year} in ${country}`,
+              `${year} in ${inCountry(where)}`,
               FROM_CATEGORY,
               width,
             ),
@@ -1107,7 +1156,9 @@ export class PictureDesk {
     if (asked) {
       const agreed = agreedOf(meta, asked);
       if (!focus || !agreed) return 'no look has said it shows what was asked';
-      return agreeDoubt({ ...focus, shows: agreed }, asked);
+      return agreeDoubt({ ...focus, shows: agreed }, asked, {
+        photograph: candidate.kind !== 'object',
+      });
     }
     if (!focus) return null;
     return candidate.kind === 'person'
@@ -1295,7 +1346,14 @@ export class PictureDesk {
       for (const candidate of pool) {
         if (records.length >= upTo || tries <= 0) break;
         if (candidate.score < PICK_LEAST) break;
-        if (records.some((r) => r.sourceId === candidate.file.sourceId))
+        const key = titleKey(candidate.file.title);
+        if (
+          records.some(
+            (r) =>
+              r.sourceId === candidate.file.sourceId ||
+              titleKey(r.title ?? r.sourceId) === key,
+          )
+        )
           continue;
         tries -= 1;
         const record = await this.safely(

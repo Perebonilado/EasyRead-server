@@ -112,4 +112,21 @@ describe("where a picture's subject is, as a model that sees names it", () => {
     expect(personPhotoDoubt(seen({ people: 0 }))).toBe('no one shows in it');
     expect(personPhotoDoubt(seen({ kind: 'statue' }))).toMatch(/statue/u);
   });
+
+  it('takes no map, page or drawing for a place or an event; a thing may be drawn', () => {
+    const map = focusOf({
+      subject: ['A1', 'F6'],
+      people: 0,
+      kind: 'document',
+      shows: 'yes',
+    });
+    expect(agreeDoubt(map, 'a place: London', { photograph: true })).toBe(
+      'it is no photograph (document)',
+    );
+    const drawing = focusOf({ subject: ['B2'], kind: 'drawing', shows: 'yes' });
+    expect(agreeDoubt(drawing, 'a thing: iconoscope')).toBeNull();
+    expect(
+      personPhotoDoubt(focusOf({ people: 4, kind: 'document', faces: ['B2'] })),
+    ).toMatch(/no photograph of them/u);
+  });
 });

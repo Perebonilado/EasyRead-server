@@ -151,6 +151,32 @@ export function scoreOf(input: ScoreInput): {
 
 // ── Whether it can serve ──────────────────────────────────────────────────
 
+/**
+ * Work made to mock or to hate (propaganda, caricature, racist or
+ * antisemitic material): never shown as a picture of anyone or anything,
+ * whatever it depicts (a 1940 montage "Kto rządzi USA?" names David
+ * Sarnoff among the men it hates).
+ */
+const CONTEMPT =
+  /\bpropaganda\b|anti-?semiti|\bcaricatur|\bracis[mt]\b|\bhate\b|\bslur|blackface|\bjudenfrage\b|\bstürmer\b/iu;
+
+/** A picture made, not a photograph of the moment: a poster, a cartoon, a collage, an advertisement, a cover. */
+const MADE_PICTURE =
+  /\bposters?\b|\bcartoons?\b|\bcollage\b|\bmontage\b|\bmemes?\b|\badvertis\w*|\bsheet music\b|\b(?:book|magazine|album|record) cover\b|\bleaflets?\b|\bflyers?\b/iu;
+
+/** Why a file is no picture of anyone or anything: hate's or mockery's work; or, but for a thing's, a made picture. */
+export function contemptOf(
+  file: Pick<SourceFile, 'title' | 'description' | 'categories'>,
+  made = true,
+): string | null {
+  const said = `${file.title} ${file.description} ${file.categories.join(' ')}`;
+  if (CONTEMPT.test(said))
+    return 'it is propaganda or caricature, made to mock or to hate';
+  if (made && MADE_PICTURE.test(said))
+    return 'it is a poster, a cartoon or a collage, not a photograph';
+  return null;
+}
+
 /** A title that names more than one subject. */
 const GROUP_TITLE =
   /\b(?:and|with|meets?|meeting|greets?|greeting|together)\b|&/iu;
@@ -185,7 +211,9 @@ const THEIRS = /['’]s\s+\p{L}/u;
  * never cut down to one of its faces.
  */
 export function portraitOf(
-  file: Pick<SourceFile, 'title' | 'description' | 'depicts' | 'chosen'>,
+  file: Pick<SourceFile, 'title' | 'description' | 'depicts' | 'chosen'> & {
+    categories?: readonly string[];
+  },
   person: { qid: string; name: string; died?: number },
   year?: number,
 ): { ok: true } | { ok: false; reason: string } {
@@ -199,6 +227,8 @@ export function portraitOf(
     (nameWords(person.name).length > 1 &&
       namesIt(file.title, nameWords(person.name).slice(-1)[0]));
   if (!ofThem) return { ok: false, reason: 'it does not say it is of them' };
+  const made = contemptOf({ ...file, categories: file.categories ?? [] });
+  if (made) return { ok: false, reason: made };
   if (depicts.length > 1 && depicts.some((d) => d.qid !== person.qid))
     return { ok: false, reason: 'it depicts someone else too' };
   if (GROUP_TITLE.test(file.title) || GROUP_WORDS.test(file.description))
@@ -243,6 +273,8 @@ export function photoOf(
   const depicted = Boolean(qid && file.depicts?.some((d) => d.qid === qid));
   const named = depicted || Boolean(file.chosen) || namesIt(said, query.name);
   if (!named) return { ok: false, reason: `it does not name ${query.name}` };
+  const made = contemptOf(file);
+  if (made) return { ok: false, reason: made };
   const within = [query.place ?? []]
     .flat()
     .filter(
@@ -323,6 +355,8 @@ export function personPhotoOf(
     namesIt(file.description, person.name) ||
     (filed && surname.length >= 4 && namesIt(file.title, surname));
   if (!ofThem) return { ok: false, reason: 'it does not say it is of them' };
+  const made = contemptOf(file);
+  if (made) return { ok: false, reason: made };
   if (
     LIKENESS.test(file.title) ||
     LIKENESS.test(file.description) ||
@@ -392,6 +426,8 @@ export function eventPhotoOf(
   const said = `${file.title} ${file.description} ${file.categories.join(' ')}`;
   if (COMMEMORATION.test(`${file.title} ${file.description}`))
     return { ok: false, reason: 'it commemorates the event; it is not of it' };
+  const made = contemptOf(file);
+  if (made) return { ok: false, reason: made };
   const seen = stems(said);
   const placed = [...stems([query.place ?? []].flat().join(' '))];
   const keys = [...stems((query.words ?? [query.name]).join(' '))].filter(
@@ -428,5 +464,8 @@ export function thingPhotoOf(
   const names = query.words?.length ? query.words : [query.name];
   if (!depicted && !names.some((n) => namesThing(said, n)))
     return { ok: false, reason: `it does not name ${query.name}` };
+  // A thing may be shown by its maker's advertisement or a drawing of it; never by hate's work.
+  const made = contemptOf(file, false);
+  if (made) return { ok: false, reason: made };
   return { ok: true };
 }

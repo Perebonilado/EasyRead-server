@@ -1,4 +1,5 @@
 import {
+  contemptOf,
   eraOf,
   eventPhotoOf,
   fitsCrop,
@@ -449,5 +450,61 @@ describe('whether a picture can be one more photo of a person, of an event or of
         undefined,
       ).ok,
     ).toBe(false);
+  });
+});
+
+describe('what is never a picture of anyone or anything', () => {
+  // A 1940 Polish montage, "Who rules the USA?", that names David Sarnoff
+  // among the men it hates: the desk once took it as a photo of him.
+  const montage = {
+    title:
+      'Kto rządzi USA? Henry Morgenthau, Walter Lippmann, Felix Frankfurter, Bernhard M. Baruch, David Sarnott, Sol Bloom',
+    description: 'Antisemitic propaganda leaflet, 1940',
+    categories: ['Antisemitic propaganda', 'David Sarnoff'],
+    depicts: [{ qid: 'Q360106' }],
+  };
+  const sarnoff = { qid: 'Q360106', name: 'David Sarnoff', died: 1971 };
+
+  it('refuses hate’s and mockery’s work for every use', () => {
+    expect(personPhotoOf(montage, sarnoff, 1940)).toEqual({
+      ok: false,
+      reason: 'it is propaganda or caricature, made to mock or to hate',
+    });
+    expect(portraitOf({ ...montage, chosen: true }, sarnoff, 1940).ok).toBe(
+      false,
+    );
+    expect(
+      thingPhotoOf(
+        { ...montage, title: 'A television set in a propaganda poster' },
+        { name: 'television set' },
+        undefined,
+      ).ok,
+    ).toBe(false);
+  });
+
+  it('refuses a poster, a cartoon or a collage as a photo of a person, a place or an event; a thing may be shown by its advertisement', () => {
+    const poster = {
+      title: '1939 RCA Television Advertisement',
+      description: 'An RCA poster for its television sets',
+      categories: ['Advertisements in the United States'],
+    };
+    expect(contemptOf(poster)).toBe(
+      'it is a poster, a cartoon or a collage, not a photograph',
+    );
+    expect(contemptOf(poster, false)).toBeNull();
+    expect(
+      eventPhotoOf(
+        { ...poster, title: 'RCA television World’s Fair 1939 poster' },
+        {
+          name: 'RCA introduces television',
+          years: [1939],
+          words: ['RCA introduces television at the New York World’s Fair'],
+        },
+        1939,
+      ),
+    ).toEqual({
+      ok: false,
+      reason: 'it is a poster, a cartoon or a collage, not a photograph',
+    });
   });
 });

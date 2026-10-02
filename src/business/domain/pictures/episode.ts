@@ -36,6 +36,7 @@ import type { LlmUsage } from '../../ports/llm.port';
 import { clip, line } from '../shots/shot-parts';
 import type { RegistryEntry } from '../shots/types';
 import { clipWords, roleWords } from './credit';
+import { titleKey } from './desk';
 import { nameWords, stems, textWords } from './match';
 import type { PictureQuery, PictureRecord } from './types';
 
@@ -323,6 +324,9 @@ export function passQuestions(input: PassInput): PassQuestion[] {
         geo: place.geo,
         ...(span.length ? { years: span } : {}),
         ...(place.country ? { place: [place.country] } : {}),
+        // The look is asked whether it shows the place itself: not a map
+        // of it, a page about it, or someone who happens to be there.
+        asked: `a place: ${place.name}${place.country ? `, ${place.country}` : ''}, itself (its streets, buildings, skyline or landscape)`,
       },
     });
   }
@@ -453,8 +457,10 @@ export function entryOf(
       ...(record.qid ? { qid: record.qid } : {}),
       picture,
     };
+  // An event and a person go by the research's names for them; a place
+  // and a thing by the desk's.
   const subject = clipWords(
-    question.shows.kind === 'event'
+    question.shows.kind === 'event' || question.shows.kind === 'person'
       ? question.query.name
       : (record.subject || question.query.name).split(',')[0],
     40,
@@ -519,6 +525,8 @@ export async function deskPass(
   const entries: EpisodePictures['entries'] = [];
   const names = new Set<string>();
   const used = new Set<string>();
+  // A file and its crop, or its copy under another name, are one picture.
+  const titles = new Set<string>();
   for (const question of passQuestions(input)) {
     const ask = {
       depth: opts.depth ?? true,
@@ -530,13 +538,19 @@ export async function deskPass(
           (r): r is PictureRecord => r !== null,
         );
     for (const record of records) {
-      if (used.has(record.id) || (record.sha1 && used.has(record.sha1)))
+      const title = titleKey(record.title ?? record.sourceId);
+      if (
+        used.has(record.id) ||
+        (record.sha1 && used.has(record.sha1)) ||
+        (title && titles.has(title))
+      )
         continue;
       const entry = entryOf(question, record, names);
       if (names.has(entry.name)) continue;
       names.add(entry.name);
       used.add(record.id);
       if (record.sha1) used.add(record.sha1);
+      if (title) titles.add(title);
       entries.push({ entry, offer: question.offer });
       opts.log?.(`pictures: ${entry.name}: ${record.chip}`);
     }

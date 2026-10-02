@@ -151,14 +151,31 @@ export function personPhotoDoubt(focus: Focus): string | null {
   const doubt = photoDoubt(focus);
   if (doubt) return doubt;
   if (focus.kind === 'statue') return 'it is a statue of them';
+  if (focus.kind === 'document' || focus.kind === 'other')
+    return `it is no photograph of them (${focus.kind})`;
   if (focus.people < 1) return 'no one shows in it';
   return null;
 }
 
-/** Why a photo of an event or a thing will not do: the model does not see in it what was asked. */
-export function agreeDoubt(focus: Focus, asked: string): string | null {
+/**
+ * Why a photo of a place, an event or a thing will not do: the model does
+ * not see in it what was asked; or, for a place or an event, it is no
+ * photograph at all (a map, a page, a drawing). A thing may be drawn.
+ */
+export function agreeDoubt(
+  focus: Focus,
+  asked: string,
+  opts: { photograph?: boolean } = {},
+): string | null {
   const doubt = photoDoubt(focus);
   if (doubt) return doubt;
+  if (
+    opts.photograph &&
+    (focus.kind === 'document' ||
+      focus.kind === 'drawing' ||
+      focus.kind === 'other')
+  )
+    return `it is no photograph (${focus.kind})`;
   return focus.shows === 'yes'
     ? null
     : `the look does not see ${asked} in it (${focus.shows})`;

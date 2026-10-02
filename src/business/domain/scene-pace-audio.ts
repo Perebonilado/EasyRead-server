@@ -12,6 +12,7 @@ import type { SceneDto } from '../../contracts';
 import type { Pcm } from './wav';
 import { sentenceWpm, tempoFor } from './scene-pace';
 import { stretchPcm } from './time-stretch';
+import { retimeShots } from './shots/shot-time';
 
 /** One change to the audio: `[from, to)` of the input, in samples, played in `out` samples. */
 export interface PaceEdit {
@@ -413,8 +414,10 @@ export function retimeBeats<
 
 /**
  * A made lesson scene timed again on its audio as edited: its sentences,
- * steps, effects and music cues moved with the voice. Null for a scene
- * with acting, props or a set (a story's), whose timing is more than these.
+ * steps, effects and music cues moved with the voice; a scene of shots
+ * its shots too, each change settling where its word now is, and their
+ * sounds with them. Null for a scene with acting, props or a set (a
+ * story's), whose timing is more than these.
  */
 export function retimeScene(
   scene: SceneDto,
@@ -424,6 +427,18 @@ export function retimeScene(
   if (scene.acting || scene.props?.length || scene.setting?.full) return null;
   return {
     ...scene,
+    ...(scene.shots
+      ? {
+          shots: {
+            ...scene.shots,
+            shots: retimeShots(scene.shots.shots, map, durationMs),
+            sounds: scene.shots.sounds.map((cue) => ({
+              ...cue,
+              atMs: map(cue.atMs),
+            })),
+          },
+        }
+      : {}),
     durationMs,
     ...(scene.settledMs !== undefined
       ? { settledMs: Math.max(durationMs, map(scene.settledMs)) }

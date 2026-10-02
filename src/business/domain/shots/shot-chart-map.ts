@@ -218,6 +218,52 @@ function elementAt(svg: string, start: number): string {
 }
 
 /**
+ * The frame a map asset is drawn into: the show's own frame (or the
+ * region's), scaled and centred to fill the film's, and the box the
+ * show's region takes in it. Shared with the shots builder, which puts a
+ * place's point on the drawing with the same projection.
+ */
+async function fullFrameOf(
+  spec: MapSpec,
+  shape: FilmShape,
+): Promise<{ full: MapFrame; region: ShotBox }> {
+  const { W, H } = frameOf(shape);
+  const own = await frameFor(spec.base ?? spec.region, shape);
+  const k = Math.min(W / own.width, H / own.height) * FILL;
+  const ox = (W - own.width * k) / 2;
+  const oy = (H - own.height * k) / 2;
+  return {
+    full: {
+      ...own,
+      width: W,
+      height: H,
+      projection: {
+        ...own.projection,
+        scale: own.projection.scale * k,
+        translate: [
+          own.projection.translate[0] * k + ox,
+          own.projection.translate[1] * k + oy,
+        ],
+      },
+    },
+    region: [ox, oy, own.width * k, own.height * k],
+  };
+}
+
+/** The frame a map asset of this input is drawn into (mapAsset's own), or null for a map of nowhere code knows. */
+export async function mapAssetFrame(
+  input: MapInput,
+  shape: FilmShape,
+): Promise<MapFrame | null> {
+  try {
+    const spec = specOf(input);
+    return spec ? (await fullFrameOf(spec, shape)).full : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * A map drawn as a full-frame asset, or null for one that names nowhere
  * code knows. Async: the projection library is an ES module, loaded once.
  */
@@ -233,23 +279,7 @@ export async function mapAsset(
     const paint = paintOf(look);
     const { W, H } = frame;
     // The show's frame (or the region's own), scaled to fill the film's.
-    const own = await frameFor(spec.base ?? spec.region, shape);
-    const k = Math.min(W / own.width, H / own.height) * FILL;
-    const ox = (W - own.width * k) / 2;
-    const oy = (H - own.height * k) / 2;
-    const full: MapFrame = {
-      ...own,
-      width: W,
-      height: H,
-      projection: {
-        ...own.projection,
-        scale: own.projection.scale * k,
-        translate: [
-          own.projection.translate[0] * k + ox,
-          own.projection.translate[1] * k + oy,
-        ],
-      },
-    };
+    const { full, region } = await fullFrameOf(spec, shape);
     // Its names at the reading floor: renderMap sets them at 0.9 of its size, the size scaled from its room.
     const room = EXACT_ROOM[shape];
     const scale = 1 / Math.min(room.w / W, room.h / H);
@@ -324,8 +354,7 @@ export async function mapAsset(
     svg = svg.replace(/<g data-part="([^"]+)"/g, (all, id: string) =>
       book.parts[id] ? all : '<g',
     );
-    const focal: ShotBox = [ox, oy, own.width * k, own.height * k];
-    return assetOf(frame, paint, svg, book, focal);
+    return assetOf(frame, paint, svg, book, region);
   } catch {
     return null;
   }

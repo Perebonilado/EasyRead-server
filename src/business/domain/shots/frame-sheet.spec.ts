@@ -1,6 +1,7 @@
 import type { FrameProblem, FrameScores, StillImage } from './frame-checks';
 import {
   codesLine,
+  criticSheetSvg,
   cut,
   escapeXml,
   scoresLine,
@@ -146,5 +147,49 @@ describe('the written summary', () => {
     expect(text).toContain('- `focal-small` (composition): 2');
     expect(text.match(/`focal-small`: /g)).toHaveLength(1);
     expect(text).toContain('- 0.0s `person`: "Student" is on screen');
+  });
+});
+
+describe("the critic's sheet", () => {
+  const tiles = Array.from({ length: 7 }, (_, k) => ({
+    png: 'AAAA',
+    label: `s${k + 1} · ${k}.0s`,
+  }));
+
+  it('tiles the stills five across for a wide film, eight for a tall one, labelled in their corners, with no check codes', () => {
+    const wide = criticSheetSvg({
+      title: '5. Federalism <Takes> Hold',
+      subtitle: 'round 1',
+      tiles,
+      shape: 'wide',
+    });
+    // Five 400 px tiles and four 8 px gaps between 12 px margins; two rows under a 56 px header.
+    expect(wide.width).toBe(12 * 2 + 5 * 400 + 4 * 8);
+    expect(wide.height).toBe(12 * 2 + 56 + 2 * 225 + 8);
+    expect(wide.svg).toContain('s7 · 6.0s');
+    expect(wide.svg).toContain('5. Federalism &lt;Takes&gt; Hold');
+    expect(wide.svg).not.toContain('nothing failed');
+    const tall = criticSheetSvg({
+      title: '',
+      subtitle: '',
+      tiles,
+      shape: 'tall',
+    });
+    expect(tall.width).toBe(12 * 2 + 7 * 225 + 6 * 8);
+    expect(tall.height).toBe(12 * 2 + 400);
+  });
+
+  it('takes another tile size, for the calibration sheets laid out as the references are', () => {
+    const ten = criticSheetSvg({
+      title: '',
+      subtitle: '',
+      tiles: Array.from({ length: 10 }, () => ({ png: 'AAAA', label: '0:03' })),
+      shape: 'wide',
+      tile: { w: 480, h: 270, columns: 5 },
+    });
+    expect([ten.width, ten.height]).toEqual([
+      12 * 2 + 5 * 480 + 4 * 8,
+      12 * 2 + 2 * 270 + 8,
+    ]);
   });
 });

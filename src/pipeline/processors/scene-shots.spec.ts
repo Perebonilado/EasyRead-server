@@ -16,6 +16,7 @@ import {
   shotsScriptOf,
   type ShotsInput,
 } from '../../business/domain/shots/shot-compose';
+import { soundsOf } from '../../business/domain/shots/shot-sound';
 import { partsKeyOf } from '../../business/handlers/studio/studio-twins';
 import type { SceneParts } from '../../business/domain/scene-film-parts';
 import { SceneProcessor } from './scene.processor';
@@ -374,5 +375,7 @@ describe('a scene of shots on the stage a Studio scene is made on', () => {
     expect(after[0].info[0].durMs).toBe(before[0].info[0].durMs);
     expect(after[0].info[0].atMs).toBeLessThanOrEqual(before[0].info[0].atMs);
     expect(paced.shots!.sounds).toHaveLength(scene.shots!.sounds.length);
+    // Its sounds are made again from its moved shots: each still on its motion.
+    expect(paced.shots!.sounds).toEqual(soundsOf(paced.shots!.shots));
   }, 60_000);
 });

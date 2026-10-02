@@ -623,6 +623,26 @@ export async function applyFixes(
       });
       continue;
     }
+    // A fix made by code alone that leaves the plan breaking more of the
+    // rules than it did (a merge leaving the voice over nothing new for too
+    // long) is undone too. A redraw or a safe shot stays: it puts right a
+    // picture the critic saw was wrong, which outweighs the pace.
+    const failing = (shots: ShotPlan) =>
+      checkPlan(shots, narration, ctx.registry, options).length;
+    if (
+      outcome === 'applied' &&
+      fix.kind !== 'safe-shot' &&
+      after !== before &&
+      failing(mended) > failing(JSON.parse(before) as ShotPlan)
+    ) {
+      slots.splice(0, slots.length, ...kept);
+      applied.push({
+        fix,
+        outcome: 'no-effect',
+        what: `${what} (undone: the plan would break the rules)`,
+      });
+      continue;
+    }
     if (after === before && outcome !== 'no-effect') {
       outcome = 'no-effect';
       what = `${what} (undone by the rules)`;

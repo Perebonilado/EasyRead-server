@@ -222,9 +222,18 @@ export function failingAxes(critique: Critique): CriticAxis[] {
 export const judged = (critique: Critique, opening: boolean): boolean =>
   axesFor(opening).every((axis) => critique.scores[axis] !== undefined);
 
-/** Whether a scene passes: judged, and every score at the loop's pass score or over. */
-export const passes = (critique: Critique, opening: boolean): boolean =>
-  judged(critique, opening) && failingAxes(critique).length === 0;
+/**
+ * Whether a scene passes: judged, the mean of the axes it is scored on at
+ * the loop's pass score or over, and none of them under the loop's floor.
+ */
+export function passes(critique: Critique, opening: boolean): boolean {
+  if (!judged(critique, opening)) return false;
+  const scores = axesFor(opening).map(
+    (axis) => critique.scores[axis]?.score ?? 0,
+  );
+  const mean = scores.reduce((a, b) => a + b, 0) / scores.length;
+  return mean >= LOOP.passScore && Math.min(...scores) >= LOOP.floor;
+}
 
 /** The lowest of a critique's scores; null when it gave none. */
 export function lowestScore(critique: Critique): number | null {

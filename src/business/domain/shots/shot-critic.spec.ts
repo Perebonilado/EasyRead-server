@@ -258,10 +258,19 @@ describe('whether a scene passes', () => {
     verdict: '',
   });
 
-  it('passes when every axis it is scored on is at the pass score or over', () => {
+  it('passes at a mean of the pass score over the axes it is scored on, none under the floor', () => {
     expect(passes(all(LOOP.passScore), false)).toBe(true);
     expect(passes(all(LOOP.passScore - 0.1), false)).toBe(false);
     expect(failingAxes(all(7.9))).toHaveLength(axesFor(false).length);
+    // One axis a little low among strong ones passes: the references' own bar.
+    const [first] = axesFor(false);
+    const lowOn = (score: number): Critique => ({
+      ...all(9),
+      scores: { ...all(9).scores, [first]: { score, why: '' } },
+    });
+    expect(passes(lowOn(7), false)).toBe(true);
+    // One under the floor fails, however strong the rest.
+    expect(passes(lowOn(LOOP.floor - 1), false)).toBe(false);
   });
 
   it('is not judged without a score on every axis (the hook only on the opening scene)', () => {

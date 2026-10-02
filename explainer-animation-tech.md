@@ -92,7 +92,7 @@ The contract lives in server `src/contracts/index.ts` and its double-quoted copy
 - safe areas per shape;
 - the life cap;
 - `BANNED`;
-- `LOOP` (3 rounds, a pass score of 8, fix the worst 3);
+- `LOOP` (3 rounds; a scene passes at a mean of 8 over its axes with none under 6, the references' own bar; fix the worst 3);
 - `CRITIC_AXES`;
 - `RULES_PROMPT`.
 
@@ -332,6 +332,12 @@ Richard then left the remaining calls to the lead overnight ("Make the decisions
 |---|---|---|---|---|
 | 17 | `characters` | both | The illustrated look: era-dressed characters built on the figure kit (`scene-figure.ts`, with eras, wardrobe and likeness ported from `ig-illustrated`), restyled flat and clean with a consistent big-head proportion. Groups get varied characters in their side's colour; a named person gets a labelled character (plus their archive portrait when one clears). They stand on maps (geo) and in sets. Also a `say` recipe (a speech bubble of up to 6 words, used sparingly), "eyes" on map regions (personified countries, illustrated look only), and the look switch (the board's kit choice, the stored look). | 9 (rig, registry) |
 | 18 | `ui` | both | Device frames (phone, tablet, laptop, browser, app window); screens from UI parts by code (bars, cards, lists, buttons, inputs, toggles, sliders, small charts, image slots); component states; a cursor actor (move, click with a press ripple, drag, scroll, type); recipes `callout` (numbered dots on leaders) and `swap` (a state change behind a short blur); a `frost` chapter break; before and after. | 7, 9 (rig) |
+
+### Calls made while merging (2026-10-02)
+
+- **The critic's pass.** A scene passes at a mean of 8 over its axes with no axis under 6. The brief's "every axis 8 or more" is stricter than the references themselves: only 6 of their 21 calibration sheets meet it, against 9 for this bar. Under the old rule nearly every scene would use all its rounds and the episode's budget.
+- **A kit setting's `text` limit counts characters**, for every family. The characters and UI kits had given the same field two meanings: characters and words.
+- **A swap's state and a type's words are a device's own small print.** The mend keeps them as written (a type keeps up to four words) and never counts them as words on the stage.
 
 ## 12. To-do: the 3D engine
 

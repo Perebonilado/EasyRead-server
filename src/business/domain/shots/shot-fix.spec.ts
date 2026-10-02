@@ -31,7 +31,7 @@ const shot = (
   ...s,
 });
 
-/** The Wall's plan as the board left it: the map, the border's length, Reagan's words. */
+/** The Wall's plan as the board left it: the map, the border's length, Reagan's words, East Germany holding on. */
 const plan = (): ShotPlan =>
   mendPlan(
     {
@@ -96,10 +96,34 @@ const plan = (): ShotPlan =>
           },
           info: [{ recipe: 'mark', target: 'part:speaker', on: 'Reagan' }],
           camera: [
-            { move: 'push', on: 'Tear down this wall', amount: 'small' },
+            {
+              move: 'push',
+              target: 'part:speaker',
+              on: 'Tear down this wall',
+              amount: 'small',
+            },
           ],
           life: ['grain'],
           focal: WHOLE_SET,
+        }),
+        shot({
+          on: 'East Germany’s leader',
+          set: { kind: 'map', tilt: 'flat' },
+          info: [
+            {
+              recipe: 'fill',
+              target: 'region:East Germany',
+              on: 'East Germany’s leader',
+            },
+            {
+              recipe: 'label',
+              target: 'region:East Germany',
+              text: 'East Germany',
+              on: 'held on',
+            },
+            { recipe: 'mark', target: 'place:Berlin', on: 'the Wall opened' },
+          ],
+          focal: 'region:East Germany',
         }),
       ],
     },
@@ -225,7 +249,11 @@ describe("the critic's fixes made into plan edits (applyFixes)", () => {
     expect(out.boardCalls).toBe(1);
     expect(out.applied[0].outcome).toBe('boarded');
     // The board's map shot, on the shot's own first words: the counter is gone.
-    expect(out.plan.shots.map((s) => s.set.kind)).toEqual(['map', 'chart']);
+    expect(out.plan.shots.map((s) => s.set.kind)).toEqual([
+      'map',
+      'chart',
+      'map',
+    ]);
     expect(
       out.plan.shots[0].info.some((i) => i.target === 'seam:inner border'),
     ).toBe(true);
@@ -288,30 +316,37 @@ describe("the critic's fixes made into plan edits (applyFixes)", () => {
       'chart',
     ]);
     expect(out.plan.shots[1].on).toBe('cut in two');
-    // With no room for another shot, the camera moves at the words instead.
+    // Past eight a minute the board's new picture still stays: the rules
+    // keep what the board puts on screen.
+    const splitChart = shot({
+      on: 'cut in two',
+      set: {
+        kind: 'chart',
+        chart: {
+          kind: 'split',
+          spec: CHART_SPECS.split.before.split as Record<string, unknown>,
+        },
+      },
+      focal: WHOLE_SET,
+    });
     const full = await run([fix('split', 1, { to: 'cut in two' })], {
+      board: () => Promise.resolve<ShotPlan>({ shots: [splitChart] }),
+    });
+    expect(full.applied[0].outcome).toBe('boarded');
+    expect(full.plan.shots).toHaveLength(5);
+    // A new shot that shows nothing of its own (the same map again) is
+    // mended away: the camera moves at the words instead.
+    const idle = await run([fix('split', 1, { to: 'cut in two' })], {
       board: () =>
         Promise.resolve<ShotPlan>({
-          shots: [
-            shot({
-              on: 'cut in two',
-              set: {
-                kind: 'chart',
-                chart: {
-                  kind: 'split',
-                  spec: CHART_SPECS.split.before.split as Record<
-                    string,
-                    unknown
-                  >,
-                },
-              },
-              focal: WHOLE_SET,
-            }),
-          ],
+          shots: [shot({ on: 'cut in two', set: { kind: 'map', tilt: 'flat' } })],
         }),
     });
-    expect(full.applied[0].outcome).toBe('fell-back');
-    expect(full.plan.shots).toHaveLength(3);
+    expect(idle.applied[0].outcome).toBe('fell-back');
+    expect(idle.plan.shots).toHaveLength(4);
+    expect(idle.plan.shots[0].camera).toContainEqual(
+      expect.objectContaining({ on: 'cut in two' }),
+    );
   });
 
   it('split: with no board, something new where it splits: the camera moving there', async () => {
@@ -322,15 +357,30 @@ describe("the critic's fixes made into plan edits (applyFixes)", () => {
     );
   });
 
-  it('merge: the next shot folded into this one, the next shot gone', async () => {
-    const out = await run([fix('merge', 2)]);
+  it('merge: the next shot folded into this one, the next shot gone, where the rules allow it', async () => {
+    // Three shots, the quote carried to the end: folding it into the
+    // counter leaves the plan no worse under the rules.
+    const three = plan();
+    three.shots = three.shots.slice(0, 3);
+    const out = await applyFixes(three, [fix('merge', 2)], ctx);
+    expect(out.applied[0].outcome).toBe('applied');
     expect(out.plan.shots).toHaveLength(2);
     expect(out.plan.shots[1].camera).toContainEqual(
       expect.objectContaining({ on: 'Tear down this wall' }),
     );
     // A later fix on the shot merged away is skipped, not applied elsewhere.
-    const both = await run([fix('merge', 1), fix('enlarge', 2)]);
+    const both = await applyFixes(
+      three,
+      [fix('merge', 2), fix('enlarge', 3)],
+      ctx,
+    );
     expect(both.applied.map((a) => a.outcome)).toEqual(['applied', 'skipped']);
+    // One that would leave the voice over nothing new (the counter folded
+    // into the map, its count lost) is undone.
+    const undone = await run([fix('merge', 1)]);
+    expect(undone.applied[0].outcome).toBe('no-effect');
+    expect(undone.applied[0].what).toMatch(/would break the rules/);
+    expect(undone.plan.shots).toHaveLength(4);
   });
 
   it('move-event: an item onto other words in its shot, or onto its nearest words when they are in another set', async () => {

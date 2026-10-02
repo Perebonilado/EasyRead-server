@@ -190,8 +190,14 @@ export const BANNED = [
 ] as const;
 export type BannedThing = (typeof BANNED)[number];
 
-/** The critic's loop (the video's: score, fix the worst three, again until all pass). */
-export const LOOP = { rounds: 3, passScore: 8, worst: 3 } as const;
+/**
+ * The critic's loop (the video's: score, fix the worst three, again until
+ * it passes). A scene passes at a mean of `passScore` over its axes with
+ * none under `floor`: the references' own bar. Calibration (WP13) found
+ * "every axis at 8" stricter than the references themselves (6 of their
+ * 21 sheets pass it, 9 this).
+ */
+export const LOOP = { rounds: 3, passScore: 8, floor: 6, worst: 3 } as const;
 
 /** What the critic scores, each 1 to 10. */
 export const CRITIC_AXES = [

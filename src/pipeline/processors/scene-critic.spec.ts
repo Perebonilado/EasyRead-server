@@ -238,7 +238,8 @@ function deps(
               'hook',
             ].map((axis) => ({
               axis,
-              score: axis === 'motion' ? score : 9,
+              // The round's score on every axis: the scene judged at that level.
+              score,
               why: 'seen',
             })),
             // A new move each round, so each round changes the plan.

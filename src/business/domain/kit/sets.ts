@@ -1173,13 +1173,13 @@ export function drawSet(
     far.smoke
       .filter(([x, y]) => x >= 0 && x <= W && y >= 0 && y <= H)
       .forEach((p, i) =>
-      canvas.raw(
-        `smoke-far${i ? `-${i + 1}` : ''}`,
-        '',
-        [p[0] - 1, p[1] - 1, 2, 2],
-        { depth: 0.45 },
-      ),
-    );
+        canvas.raw(
+          `smoke-far${i ? `-${i + 1}` : ''}`,
+          '',
+          [p[0] - 1, p[1] - 1, 2, 2],
+          { depth: 0.45 },
+        ),
+      );
   }
 
   // ── The coast: the far shore the place stands on, across the water.
@@ -2386,20 +2386,47 @@ function assemblyHall(
  */
 function display(canvas: SetCanvas, shape: FilmShape): DrawnSet {
   const { W, H, style } = canvas;
-  const wallTop = mixOk(style.paper, '#ffffff', luminance(style.paper) < 0.35 ? 0.04 : 0.35);
+  const wallTop = mixOk(
+    style.paper,
+    '#ffffff',
+    luminance(style.paper) < 0.35 ? 0.04 : 0.35,
+  );
   const wallFoot = mixOk(style.paper, style.muted, 0.12);
   const floor = mixOk(style.paper, style.muted, 0.2);
-  const groundY = H * 0.84;
+  // In a tall frame the thing stands higher, so it sits in the frame's middle with floor below it.
+  const groundY = H * (shape === 'tall' ? 0.64 : 0.84);
   canvas.defs.push(
     `<linearGradient id="wall" x1="0" y1="0" x2="0" y2="${n1(groundY)}" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="${wallTop}"/><stop offset="1" stop-color="${wallFoot}"/></linearGradient>`,
     `<radialGradient id="pool" cx="${n1(W / 2)}" cy="${n1(groundY)}" r="${n1(W * 0.42)}" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#ffffff" stop-opacity="0.28"/><stop offset="1" stop-color="#ffffff" stop-opacity="0"/></radialGradient>`,
   );
-  canvas.raw('wall', `<rect x="${-W * 0.06}" y="${-H * 0.06}" width="${W * 1.12}" height="${n1(groundY + H * 0.06)}" fill="url(#wall)"/>`, [0, 0, W, groundY], { depth: 0.3 });
-  canvas.flat('floor', [box(-W * 0.06, groundY, W * 1.06, H * 1.06)], floor, { depth: 1 });
-  canvas.raw('pool', `<ellipse cx="${n1(W / 2)}" cy="${n1(groundY)}" rx="${n1(W * 0.42)}" ry="${n1(H * 0.1)}" fill="url(#pool)"/>`, [W * 0.08, groundY - H * 0.1, W * 0.84, H * 0.2], { depth: 1 });
+  canvas.raw(
+    'wall',
+    `<rect x="${-W * 0.06}" y="${-H * 0.06}" width="${W * 1.12}" height="${n1(groundY + H * 0.06)}" fill="url(#wall)"/>`,
+    [0, 0, W, groundY],
+    { depth: 0.3 },
+  );
+  canvas.flat('floor', [box(-W * 0.06, groundY, W * 1.06, H * 1.06)], floor, {
+    depth: 1,
+  });
+  canvas.raw(
+    'pool',
+    `<ellipse cx="${n1(W / 2)}" cy="${n1(groundY)}" rx="${n1(W * 0.42)}" ry="${n1(H * 0.1)}" fill="url(#pool)"/>`,
+    [W * 0.08, groundY - H * 0.1, W * 0.84, H * 0.2],
+    { depth: 1 },
+  );
   canvas.raw('ground-line', '', [0, groundY, W, H - groundY]);
-  const focal = fitFocal([W * 0.1, H * 0.12, W * 0.8, groundY - H * 0.08], W, H, shape);
-  return { asset: canvas.asset(focal), ground: groundY, air: wallFoot, notes: ['display backdrop'] };
+  const focal = fitFocal(
+    [W * 0.1, H * 0.12, W * 0.8, groundY - H * 0.08],
+    W,
+    H,
+    shape,
+  );
+  return {
+    asset: canvas.asset(focal),
+    ground: groundY,
+    air: wallFoot,
+    notes: ['display backdrop'],
+  };
 }
 
 // ── Reading settings ──────────────────────────────────────────────────────

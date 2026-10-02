@@ -149,7 +149,17 @@ export function ratiosOf(layout: MachineLayout): Map<string, number> {
 }
 
 /** The machines the kit has ready, by kind. */
-export const MACHINE_KINDS = ['gears', 'pulleys', 'pump', 'steam-engine', 'printing-press', 'loom', 'conveyor', 'wind-turbine', 'water-wheel'] as const;
+export const MACHINE_KINDS = [
+  'gears',
+  'pulleys',
+  'pump',
+  'steam-engine',
+  'printing-press',
+  'loom',
+  'conveyor',
+  'wind-turbine',
+  'water-wheel',
+] as const;
 export type MachineKind = (typeof MACHINE_KINDS)[number];
 
 /** The presets: each about as big as a real one stands. */
@@ -1633,8 +1643,9 @@ export function drawTurbofan(
   // Where the exhaust leaves: the life layer's heat haze or flame starts there.
   d.anchor('exhaust', 'turbofan', [s.plugEnd, cy]);
 
-  const engine: ShotBox = [-4, cy - R - 2, s.plugEnd + 8, 2 * R + 4];
-  const pieceBox: ShotBox = [-10, cy - R - 4, s.plugEnd + 30, 2 * R + 8];
+  // Its box is the engine itself (its flows run a little past it), so framed as a shot's subject it fills seven tenths of the frame.
+  const engine: ShotBox = [-2, cy - R - 1, s.plugEnd + 3, 2 * R + 2];
+  const pieceBox: ShotBox = [-2, cy - R - 1, s.plugEnd + 3, R + 1 - cy];
   return d.piece({
     id: `machine.turbofan:${params.bypass}:${params.lp}-${params.hp}-${params.hpt}-${params.lpt}`,
     box: pieceBox,
@@ -1719,9 +1730,22 @@ export const MACHINE_KIT: Readonly<Record<string, KitEntry>> = {
     about:
       'A jet engine (turbofan) cut open: parts fan, compressor (lp-compressor, hp-compressor), combustor (fuel-nozzle, igniter), turbine (hp-turbine, lp-turbine), nozzle, lp-shaft, hp-shaft, casing, nacelle; paths core-flow and bypass-flow (and core-flow-2, bypass-flow-2 below) for flow (text "compress" squeezes and warms the core flow); run turns its spools. Make it the shot\u2019s subject.',
     params: {
-      bypass: { values: ['high', 'low'], default: 'high', about: 'a big fan (an airliner\u2019s) or a small one (a fighter\u2019s)' },
-      lp: { range: [2, 5], default: 3, about: 'low-pressure compressor stages' },
-      hp: { range: [4, 12], default: 9, about: 'high-pressure compressor stages' },
+      bypass: {
+        values: ['high', 'low'],
+        default: 'high',
+        about:
+          'a big fan (an airliner\u2019s) or a small one (a fighter\u2019s)',
+      },
+      lp: {
+        range: [2, 5],
+        default: 3,
+        about: 'low-pressure compressor stages',
+      },
+      hp: {
+        range: [4, 12],
+        default: 9,
+        about: 'high-pressure compressor stages',
+      },
       hpt: { range: [1, 2], default: 2, about: 'high-pressure turbine stages' },
       lpt: { range: [3, 7], default: 5, about: 'low-pressure turbine stages' },
     },
@@ -1744,10 +1768,14 @@ export const MACHINE_KIT: Readonly<Record<string, KitEntry>> = {
     looks: ['editorial', 'illustrated'],
     about:
       'A machine whose parts move from one shaft (run starts it): kind gears (three meshed, a ratio), pulleys (two on a belt), pump (a beam pump), steam-engine, printing-press, loom, conveyor, wind-turbine, water-wheel.',
-    params: { kind: { values: MACHINE_KINDS, default: 'gears', about: 'which machine' } },
+    params: {
+      kind: { values: MACHINE_KINDS, default: 'gears', about: 'which machine' },
+    },
     moves: ['enter', 'exit'],
     make(params: KitParams, style: KitStyle): KitPiece {
-      const kind = (MACHINE_KINDS as readonly unknown[]).includes(params.kind) ? (params.kind as MachineKind) : 'gears';
+      const kind = (MACHINE_KINDS as readonly unknown[]).includes(params.kind)
+        ? (params.kind as MachineKind)
+        : 'gears';
       if (kind === 'wind-turbine') return windTurbine(style);
       if (kind === 'water-wheel') return waterWheel(style);
       return drawMachine(`machine.${kind}`, MACHINE_LAYOUTS[kind], style);

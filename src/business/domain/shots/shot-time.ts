@@ -442,11 +442,15 @@ export function timeShots(
             );
           else notes.push(`${where}: "${until}" is not said; ${item.id} stays`);
         }
+        // A stream (a machine's air going through it) runs on with its shot, as its machine does.
+        const stream =
+          item.recipe === 'flow' &&
+          /^(compress|stream)$/i.test((item.text ?? '').trim());
         if (untilMs === undefined && LEAVES_WITH_SHOT.has(item.recipe))
           untilMs = Math.round(
             item.recipe === 'mark' || item.recipe === 'spotlight'
               ? Math.min(endMs, timed.atMs + timed.durMs + CUE_HOLD_MS)
-              : item.recipe === 'flow'
+              : item.recipe === 'flow' && !stream
                 ? Math.min(endMs, timed.atMs + timed.durMs + CUE_HOLD_MS / 3)
                 : endMs,
           );
@@ -531,7 +535,9 @@ export function timeShots(
             ...one.shot.set,
             changes: one.shot.changes.map((change) => ({
               state: change.state,
-              atMs: Math.round(clamp(wordMs(change.on) - SETTLE_LEAD_MS, startMs, endMs)),
+              atMs: Math.round(
+                clamp(wordMs(change.on) - SETTLE_LEAD_MS, startMs, endMs),
+              ),
               durMs: Math.round(change.durMs),
             })),
           }
@@ -595,7 +601,10 @@ export function retimeShots(
               ...shot.set,
               changes: shot.set.changes.map((change) => ({
                 ...change,
-                atMs: inside(map(change.atMs + SETTLE_LEAD_MS) - SETTLE_LEAD_MS, 0),
+                atMs: inside(
+                  map(change.atMs + SETTLE_LEAD_MS) - SETTLE_LEAD_MS,
+                  0,
+                ),
               })),
             }
           : shot.set,

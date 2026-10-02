@@ -51,6 +51,7 @@ import { eraOf } from '../kit/eras';
 import { CHANGE_MS, climateOf, drawSet, setSettingsOf } from '../kit/sets';
 import { chartAsset } from './shot-charts';
 import { WHOLE_SET, partKey } from './shot-check';
+import { lottieAssets, shotLife } from './shot-life';
 import { pictureAssetOf, pictureSetOf } from './shot-pictures';
 import { buildUi, deskAsset, isUiActor, newUiCarry, uiCamera } from './shot-ui';
 import type { ShotMapSet } from './shot-map';
@@ -380,10 +381,6 @@ const SUBJECT_MOST = 0.5;
 
 /** A strike's new words come in this long after the line through the old ones has landed. */
 const NEW_WORDS_LAG_MS = 400;
-
-/** The life layer's amount when the plan only names the effect: under the rules' cap either way. */
-const LIFE_AMOUNT = 0.5;
-const LIFE_MOST = 3;
 
 /** A string's FNV-1a hash: the life layer's seeds, the same for the same scene every time. */
 function seedOf(text: string): number {
@@ -1630,21 +1627,24 @@ export function buildShots(
     }
     if (from) lastView = { asset: assetId, box: from };
 
-    // Smoke and steam rise from a piece's own chimney or funnel, where one has it.
-    const chimney = actors.find((a) => {
-      const asset = assets[a.asset];
-      return asset?.kind === 'svg' && Boolean(asset.parts.smoke);
-    });
-    const life: ShotLifeDto[] = [...new Set(planned.life ?? [])]
-      .slice(0, LIFE_MOST)
-      .map((effect) => ({
-        effect,
-        seed: seedOf(`${ctx.seed}:${i}:${effect}`),
-        amount: LIFE_AMOUNT,
-        ...(chimney && (effect === 'smoke' || effect === 'steam')
-          ? { at: { kind: 'actor' as const, actor: chimney.id, part: 'smoke' } }
-          : {}),
-      }));
+    // Its life: what the board named, and what its set and pieces have by themselves (shot-life).
+    const life: ShotLifeDto[] = shotLife(
+      {
+        planned: planned.life ?? [],
+        set: shotSet.set,
+        plan: planned.set,
+        asset,
+        ...(shotSet.change ? { becomes: shotSet.change.state } : {}),
+        actors,
+        assets,
+        look,
+        ...(focal ? { focal } : {}),
+        seed: ctx.seed,
+      },
+      notes,
+      `shot ${i + 1}`,
+    );
+    Object.assign(assets, lottieAssets(life));
 
     // Eyes on the map's regions (an illustrated show's), each glancing at another.
     if (ctx.look === 'illustrated' && onMap)

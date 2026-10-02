@@ -135,6 +135,7 @@ export const RECIPE_SOUND: Readonly<Partial<Record<ShotInfoRecipe, Heard>>> = {
   mark: { sound: 'pencil', gain: 0.55, on: 'span', rank: 3 },
   enter: { sound: 'pop', gain: 0.6, on: 'land', rank: 3 },
   label: { sound: 'tick', gain: 0.7, on: 'land', rank: 2 },
+  say: { sound: 'pop', gain: 0.55, on: 'land', rank: 3 },
 };
 
 /** The camera's moves that move air (more than a drift), and a dive through. The rest are silent. */

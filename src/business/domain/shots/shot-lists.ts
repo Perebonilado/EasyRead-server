@@ -43,6 +43,7 @@ export const RECIPE_USES: Record<ShotInfoRecipe, string> = {
   enter: 'a part comes on',
   exit: 'a part leaves',
   ask: 'a question the voice asks, held over what is still open, then a moment of quiet',
+  say: 'a speech bubble of one to six words from a character (target the actor; its words in text): an illustrated show only, at most one in twenty seconds, for a short line of humour or surprise ("Wait!"), never the voice’s words',
 };
 export const INFO_RECIPES = Object.keys(RECIPE_USES) as ShotInfoRecipe[];
 
@@ -93,6 +94,7 @@ export const LIFE_USES: Record<ShotLifeEffect, string> = {
   fire: 'a real fire the voice speaks of',
   sparks: 'real sparks: welding, a furnace, a spark plug',
   splash: 'a real splash of water',
+  eyes: 'a pair of eyes on a region of the map (at: the region), glancing at another (to: a region or a place): a country made a character, in an illustrated show only, sparingly',
 };
 export const LIFE_EFFECTS = Object.keys(LIFE_USES) as ShotLifeEffect[];
 

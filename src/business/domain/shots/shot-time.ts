@@ -98,6 +98,7 @@ export const RECIPE_MS: Readonly<Record<ShotInfoRecipe, number>> = {
   enter: 500,
   exit: 400,
   ask: 600,
+  say: 350,
 };
 
 /**

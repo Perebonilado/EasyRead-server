@@ -125,10 +125,12 @@ describe('the illustrated characters', () => {
     // The other faces are drawn hidden, each a state that shows it.
     for (const face of FACE_STATES.filter((f) => f !== 'angry')) {
       expect(piece.svg).toContain(`data-part="face-${face}" opacity="0"`);
-      expect(piece.rig.states[face]).toEqual({
+      expect(piece.rig.states[face]).toMatchObject({
         face: { opacity: 0 },
         [`face-${face}`]: { opacity: 1 },
       });
+      // At rest every other face is named hidden, so a change crossfades.
+      expect(piece.rig.states.rest[`face-${face}`]).toEqual({ opacity: 0 });
     }
   });
 

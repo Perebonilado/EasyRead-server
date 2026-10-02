@@ -760,6 +760,8 @@ const RECIPE_TARGETS: Record<
   },
   enter: { needs: true, kinds: ['part', 'actor'] },
   exit: { needs: true, kinds: ['part', 'actor'] },
+  // A speech bubble comes from a character on the stage.
+  say: { needs: true, kinds: ['actor'] },
   ask: {
     needs: false,
     kinds: [

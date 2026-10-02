@@ -1139,20 +1139,27 @@ function pieceBox(drawnBox: ShotBox, margin: number): ShotBox {
   ) as ShotBox;
 }
 
-/** The rig's states for a figure's faces: each shows its face and hides the others. */
+/**
+ * The rig's states for a figure's faces: each shows its face and hides
+ * the others, every face named in every state, so a change of face
+ * crossfades (the stage shows a part drawn hidden at its state's opacity).
+ */
 function faceStates(
   prefix: string,
   worn: Expression,
   faces: readonly Expression[],
 ): ShotRigDto['states'] {
-  const states: ShotRigDto['states'] = { rest: {} };
-  for (const e of faces) {
-    if (e === worn) continue;
+  const hidden = faces.filter((e) => e !== worn);
+  const none = Object.fromEntries(
+    hidden.map((e) => [`${prefix}face-${e}`, { opacity: 0 }]),
+  );
+  const states: ShotRigDto['states'] = { rest: { ...none } };
+  for (const e of hidden)
     states[e] = {
+      ...none,
       [`${prefix}face`]: { opacity: 0 },
       [`${prefix}face-${e}`]: { opacity: 1 },
     };
-  }
   return states;
 }
 

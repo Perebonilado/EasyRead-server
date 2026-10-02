@@ -1,12 +1,15 @@
 import type { ShotSvgAssetDto } from '../../../contracts';
 import { MAP, PALETTE, PLAN, REGISTRY } from './__fixtures__/regional-turn';
 import {
+  MAP_TILT,
   buildShots,
   shotLook,
   travelMs,
   type BuildContext,
+  type BuiltShots,
 } from './shot-build';
 import { chartAsset } from './shot-charts';
+import { mapSetAsset, type ShotMapSet } from './shot-map';
 import { registryOf } from './shot-registry';
 import { CAMERA_AMOUNT } from './shot-time';
 import type { ShotPlan } from './types';
@@ -135,8 +138,12 @@ describe('the plan built', () => {
       's4',
       's5',
     ]);
+    // Every asset is shown: a shot's set or one of its actors.
     const shown = new Set(
-      built.shots.map((s) => ('asset' in s.set ? s.set.asset : '')),
+      built.shots.flatMap((s) => [
+        'asset' in s.set ? s.set.asset : '',
+        ...s.actors.map((a) => a.asset),
+      ]),
     );
     shown.delete('');
     expect(new Set(Object.keys(built.assets))).toEqual(shown);
@@ -272,9 +279,27 @@ describe('the plan built', () => {
     expect(bare.notes.join(' ')).toContain('no picture could be drawn');
   });
 
-  it('leaves actors out until the kit has them, and says so', () => {
-    expect(built.shots[2].actors).toEqual([]);
-    expect(built.notes.join('\n')).toContain(
+  it('stands the kit’s pieces on the set: a crowd on its place on the map, as a marker, counting no one', () => {
+    const [crowd] = built.shots[2].actors;
+    expect(crowd).toMatchObject({ id: 'crowd', asset: 'actor-3-1' });
+    const asset = built.assets['actor-3-1'];
+    expect(asset.kind).toBe('svg');
+    expect(asset.kind === 'svg' && asset.rig?.idle?.length).toBeGreaterThan(0);
+    // On Kano's point, about a fourteenth of the map tall.
+    const [px, py] = MAP.project!(8.52, 12.0)!;
+    expect('x' in crowd.at && Math.abs(crowd.at.x - px)).toBeLessThan(40);
+    expect('y' in crowd.at && Math.abs(crowd.at.y - py)).toBeLessThan(40);
+    expect(crowd.size / 700).toBeCloseTo(0.07, 2);
+    expect(crowd.moves).toEqual([
+      { move: 'enter', on: 'regional fight', durMs: 2000 },
+    ]);
+    expect(built.notes.join('\n')).toContain('no number given, none claimed');
+  });
+
+  it('leaves out a piece the show’s look has not, and says so', () => {
+    const other = buildShots(PLAN, registry, { ...ctx, look: 'illustrated' });
+    expect(other.shots[2].actors).toEqual([]);
+    expect(other.notes.join('\n')).toContain(
       'actor crowd (people.crowd) left out',
     );
   });
@@ -586,16 +611,17 @@ describe('the board’s names, as the build resolves them', () => {
 
 describe('a set’s later state and its own names, brought on by the changes they belong to', () => {
   const entries = registryOf(REGISTRY);
+  const drawn = MAP.asset as ShotSvgAssetDto;
   const labelled = {
     ...MAP,
     asset: {
-      ...MAP.asset,
-      svg: MAP.asset.svg.replace(
+      ...drawn,
+      svg: drawn.svg.replace(
         '</svg>',
         '<g data-part="label-north-region"><text>North Region</text></g></svg>',
       ),
       parts: {
-        ...MAP.asset.parts,
+        ...drawn.parts,
         'label-north-region': { box: [400, 200, 200, 40] },
       },
     },
@@ -1072,5 +1098,181 @@ describe('what a chart writes', () => {
       'Reports by the Resumed Nigeria Constitutional Conference held in London in September and…',
     );
     expect(spec.source.length).toBeLessThanOrEqual(90);
+  });
+});
+
+describe('the plan built on the player’s own map (geography it draws)', () => {
+  /** The show's map as the editor wrote it: Nigeria's three regions and the seam between two. */
+  const BASE = {
+    kind: 'map',
+    region: 'Nigeria',
+    year: 1960,
+    bordersDiffer: true,
+    groups: [
+      {
+        name: 'North Region',
+        colour: 'chart0',
+        members: [
+          'Kano',
+          'Kaduna',
+          'Sokoto',
+          'Borno',
+          'Niger',
+          'Kwara',
+          'Benue',
+          'Plateau',
+          'Bauchi',
+          'Adamawa',
+        ],
+      },
+      {
+        name: 'West Region',
+        colour: 'chart1',
+        members: ['Lagos', 'Ogun', 'Oyo', 'Osun', 'Ondo'],
+      },
+      {
+        name: 'East Region',
+        colour: 'chart2',
+        members: ['Enugu', 'Anambra', 'Imo', 'Abia', 'Rivers'],
+      },
+    ],
+    seams: [
+      { name: 'federal balance', between: ['North Region', 'East Region'] },
+    ],
+  };
+  let geo: BuiltShots;
+  let geoMap: ShotMapSet | null;
+  beforeAll(async () => {
+    geoMap = await mapSetAsset(BASE, shotLook(ctx), 'wide');
+    geo = buildShots(PLAN, registry, { ...ctx, map: geoMap });
+  }, 60_000);
+
+  it('tilts the map the plan asks to tilt, steep enough to read as ground', () => {
+    expect(geo.assets.map.kind).toBe('geo');
+    expect(geo.shots[0].set).toEqual({
+      kind: 'map',
+      asset: 'map',
+      style: 'atlas',
+      tilt: MAP_TILT,
+      bearing: 0,
+      terrain: false,
+    });
+    expect(MAP_TILT).toBeGreaterThanOrEqual(45);
+    expect(MAP_TILT).toBeLessThanOrEqual(55);
+    // A map the plan leaves flat stays flat.
+    expect(geo.shots[2].set).toMatchObject({ kind: 'map', tilt: 0 });
+  });
+
+  it('points at a region or a seam as a feature, and at a place as a point on the earth', () => {
+    const [pin, fill] = geo.shots[0].info;
+    expect(fill.target).toEqual({
+      kind: 'feature',
+      asset: 'map',
+      id: 'group-north-region',
+    });
+    expect(pin.target).toEqual({ kind: 'geo', lng: 3.38, lat: 6.52 });
+    expect(geo.shots[0].focal).toEqual({
+      kind: 'feature',
+      asset: 'map',
+      id: 'group-north-region',
+    });
+    const seam = geo.shots[2].info.find((i) => i.recipe === 'seam');
+    expect(seam?.target).toEqual({
+      kind: 'feature',
+      asset: 'map',
+      id: 'seam-federal-balance',
+    });
+    expect(geo.shots[2].camera[0].target).toEqual({
+      kind: 'feature',
+      asset: 'map',
+      id: 'seam-federal-balance',
+    });
+    // Still nothing for a place with no point, and no words in its place.
+    expect(geo.shots[0].info.map((i) => i.recipe)).toEqual(['pin', 'fill']);
+    // A fill with no colour of its own lands on its region's side colour, as on a drawn map.
+    expect(fill.colour).toBe('North Region');
+  });
+
+  it('times a travel by how far it goes on the earth', () => {
+    const travel = geo.shots[4].camera.find((c) => c.move === 'travel')!;
+    expect(travel.target).toEqual({ kind: 'geo', lng: 3.38, lat: 6.52 });
+    expect(travel.durMs).toBeGreaterThanOrEqual(400);
+    expect(travel.durMs).toBeLessThanOrEqual(1200);
+  });
+
+  it('leaves off a place past the land the map has', () => {
+    const far = registryOf([
+      ...REGISTRY,
+      {
+        name: 'place:Paris',
+        kind: 'place',
+        about: 'far away',
+        geo: { lng: 2.35, lat: 48.85 },
+      },
+    ]);
+    const plan: ShotPlan = {
+      shots: [
+        {
+          ...PLAN.shots[0],
+          info: [
+            { recipe: 'pin', target: 'place:Paris', on: 'colonial Nigeria' },
+            { recipe: 'pin', target: 'place:Kano', on: 'power' },
+          ],
+        },
+      ],
+    };
+    const pins = buildShots(plan, far, { ...ctx, map: geoMap }).shots[0].info;
+    expect(pins.map((i) => i.target)).toEqual([
+      { kind: 'geo', lng: 8.52, lat: 12 },
+    ]);
+  });
+
+  it('stands a crowd on its place on the earth, a marker its share of the frame’s height', () => {
+    const [crowd] = geo.shots[2].actors;
+    expect(crowd).toMatchObject({ id: 'crowd', asset: 'actor-3-1' });
+    if (!('lng' in crowd.at)) throw new Error('a point on the earth');
+    expect(crowd.at.lng).toBeCloseTo(8.52, 2);
+    expect(crowd.at.lat).toBeCloseTo(12, 2);
+    const [, , W, H] = geoMap!.box!;
+    expect(crowd.size).toBeCloseTo((0.07 * Math.min(W, H)) / H, 2);
+    expect(crowd.moves).toEqual([
+      { move: 'enter', on: 'regional fight', durMs: 2000 },
+    ]);
+  });
+
+  it('walks a group across the earth: to a place, and off by a word, both points on it', () => {
+    const plan: ShotPlan = {
+      shots: [
+        {
+          ...PLAN.shots[2],
+          actors: [
+            {
+              id: 'marchers',
+              kit: 'people.group',
+              place: 'place:Kano',
+              moves: [
+                { move: 'march', to: 'place:Lagos', on: 'self-government' },
+                { move: 'walk', to: 'off right', on: 'regional fight' },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const [marchers] = buildShots(plan, registry, { ...ctx, map: geoMap })
+      .shots[0].actors;
+    expect('lng' in marchers.at).toBe(true);
+    const [toLagos, off] = marchers.moves;
+    expect(toLagos).toMatchObject({
+      move: 'walk',
+      to: { kind: 'geo', lng: 3.38, lat: 6.52 },
+    });
+    expect(toLagos.durMs).toBeGreaterThanOrEqual(900);
+    expect(toLagos.durMs).toBeLessThanOrEqual(5000);
+    // Off to the right: east of all the map frames.
+    const [x, , w] = geoMap!.box!;
+    const east = geoMap!.earthAt!(x + w, 0)[0];
+    expect(off.to?.kind).toBe('geo');
+    expect(off.to?.kind === 'geo' && off.to.lng).toBeGreaterThan(east);
   });
 });

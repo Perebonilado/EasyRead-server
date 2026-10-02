@@ -205,7 +205,7 @@ export const FRONT_ORDER: readonly FigurePart[] = [
 export interface Build {
   /** Standing height, in units. */
   height: number;
-  /** How many heads tall (7.5 for a grown-up, about 6 for a child). */
+  /** How many heads tall (about 7 for a grown-up drawn to read small, 6 for a child). */
   heads: number;
   /** Hip height as a share of height (about 0.52). */
   legs: number;
@@ -217,7 +217,7 @@ export interface Build {
 
 export const GROWN_UP: Build = {
   height: 172,
-  heads: 7.5,
+  heads: 7.2,
   legs: 0.52,
   shoulders: 0.25,
   hips: 0.19,
@@ -234,11 +234,13 @@ export function standingJoints(build: Build, view: 'side' | 'front'): Joints {
   const hipY = -build.legs * H;
   const ankleH = 0.085 * build.legs * H;
   const kneeY = -(ankleH + 0.5 * (build.legs * H - ankleH));
-  const shoulderY = -H + 1.32 * head;
-  const neckY = shoulderY - 0.012 * H;
+  // The shoulder joint sits an arm's thickness under the shoulder's top;
+  // the neck's base is above it, between the shoulders.
+  const shoulderY = -H + 1.5 * head;
+  const neckY = shoulderY - 0.05 * H;
   // Arm segments as the hip height says, so a child's reach is a child's.
-  const upper = 0.36 * build.legs * H;
-  const fore = 0.28 * build.legs * H;
+  const upper = 0.34 * build.legs * H;
+  const fore = 0.27 * build.legs * H;
   const hand = 0.2 * build.legs * H;
   const side = (x: number, s: 'l' | 'r'): Partial<Joints> => {
     const out: Partial<Joints> = {};
@@ -366,6 +368,8 @@ export interface RigPart {
   box?: ShotBox;
   /** Where it turns, in the piece's units. */
   pivot: Pt;
+  /** Attributes for its group beyond its data-part (a filter that lights it). */
+  attrs?: string;
 }
 
 /**
@@ -380,20 +384,21 @@ export function assemble(parts: readonly RigPart[]): {
   const children = new Map<string | null, RigPart[]>();
   for (const part of parts)
     children.set(part.parent, [...(children.get(part.parent) ?? []), part]);
-  const boxes = new Map<string, ShotBox>();
-  const boxOfPart = (part: RigPart): ShotBox => {
-    const known = boxes.get(part.id);
+  // How far a part reaches with everything it holds, and its own box: its
+  // drawing's, or for an empty group (a body, a figure) all it holds.
+  const reaches = new Map<string, ShotBox>();
+  const extentOf = (part: RigPart): ShotBox => {
+    const known = reaches.get(part.id);
     if (known) return known;
-    const own = part.markup && part.box ? part.box : null;
-    const box =
-      own ??
-      unionBox([
-        ...(part.box ? [part.box] : []),
-        ...(children.get(part.id) ?? []).map(boxOfPart),
-      ]);
-    boxes.set(part.id, box);
+    const box = unionBox([
+      ...(part.markup && part.box ? [part.box] : []),
+      ...(children.get(part.id) ?? []).map(extentOf),
+    ]);
+    reaches.set(part.id, box);
     return box;
   };
+  const boxOfPart = (part: RigPart): ShotBox =>
+    part.markup && part.box ? part.box : extentOf(part);
   const dto: Record<string, ShotPartDto> = {};
   const draw = (part: RigPart): string => {
     const box = boxOfPart(part);
@@ -405,7 +410,8 @@ export function assemble(parts: readonly RigPart[]): {
       pivot: [Math.round(fx * 1000) / 1000, Math.round(fy * 1000) / 1000],
     };
     const inner = (children.get(part.id) ?? []).map(draw).join('');
-    return `<g data-part="${part.id}">${part.markup}${inner}</g>`;
+    const attrs = part.attrs ? ` ${part.attrs}` : '';
+    return `<g data-part="${part.id}"${attrs}>${part.markup}${inner}</g>`;
   };
   const markup = (children.get(null) ?? []).map(draw).join('');
   return { markup, parts: dto };
@@ -430,8 +436,11 @@ const CHAIN: Readonly<Record<string, readonly FigurePart[]>> = {
  * A figure's parts to the standard, ready for assemble(): the body at
  * the root (under `parent`, a group's own part), each limb a chain of
  * nested parts, painted in the view's order, each turning about its
- * joint as the figure stands drawn. `extras` (a sign in the near hand, a
- * seat) go in after, each under the part it names.
+ * joint as the figure stands drawn. `extras` (a skirt, a lectern, a sign
+ * in the near hand) go in under the part each names; `order`, when
+ * given, is the body's children back to front, the view's parts by
+ * their top part's name and extras by their ids among them (a skirt
+ * between the near leg and the near arm). Extras it leaves out go last.
  */
 export function figureParts(
   prefix: string,
@@ -440,6 +449,7 @@ export function figureParts(
   view: 'side' | 'front',
   parent: string | null = null,
   extras: readonly RigPart[] = [],
+  order: readonly string[] = view === 'front' ? FRONT_ORDER : PROFILE_ORDER,
 ): RigPart[] {
   const own = (part: FigurePart): RigPart => ({
     id: `${prefix}${part}`,
@@ -449,11 +459,19 @@ export function figureParts(
     ...(drawing[part]?.box ? { box: drawing[part].box } : {}),
     pivot: joints[FIGURE_PIVOT[part]],
   });
-  const order = view === 'front' ? FRONT_ORDER : PROFILE_ORDER;
+  const byId = new Map(extras.map((extra) => [extra.id, extra]));
+  const placed = new Set<string>();
+  const body = order.flatMap((top): RigPart[] => {
+    if (CHAIN[top]) return CHAIN[top].map(own);
+    const extra = byId.get(top) ?? byId.get(`${prefix}${top}`);
+    if (!extra) return [];
+    placed.add(extra.id);
+    return [extra];
+  });
   return [
     own('body'),
-    ...order.flatMap((top) => CHAIN[top].map(own)),
-    ...extras,
+    ...body,
+    ...extras.filter((extra) => !placed.has(extra.id)),
   ];
 }
 
@@ -527,9 +545,11 @@ export function validateRig(piece: KitPiece): string[] {
       y + h > piece.box[1] + H + reach
     )
       say(`part "${id}" lies far outside the piece`);
+    // A pivot on its box's edge may sit a hair outside it (a foot's line
+    // under a rounded outline); one well outside is a broken part.
     if (part.pivot) {
       const [fx, fy] = part.pivot;
-      if (!(fx >= -1e-6 && fx <= 1 + 1e-6 && fy >= -1e-6 && fy <= 1 + 1e-6))
+      if (!(fx >= -0.05 && fx <= 1.05 && fy >= -0.05 && fy <= 1.05))
         say(`part "${id}" turns about a point outside its box`);
     }
   }

@@ -11,6 +11,7 @@ import {
   capsule,
   circle,
   ellipse,
+  join,
   litShape,
   mapShape,
   rect,
@@ -100,6 +101,26 @@ describe('the kit’s shapes', () => {
     expect(Math.abs(inked(back).count - inked(shape).count)).toBeLessThan(
       inked(shape).count * 0.02,
     );
+  });
+
+  it('winds every shape the same way, so shapes joined into one path fill where they overlap', () => {
+    const joined = join(
+      circle([0, 0], 20),
+      capsule([0, 0], 8, [40, 0], 6),
+      blob([
+        [-10, -30],
+        [10, -30],
+        [10, 30],
+        [-10, 30],
+      ]),
+    );
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="-30 -40 80 80" width="80" height="80"><path d="${joined.d}" fill="#000"/></svg>`;
+    const png = new Resvg(svg).render();
+    const alpha = (x: number, y: number) =>
+      png.pixels[((y + 40) * 80 + (x + 30)) * 4 + 3];
+    expect(alpha(0, 0)).toBe(255); // all three overlap here
+    expect(alpha(10, 0)).toBe(255);
+    expect(alpha(0, 25)).toBe(255);
   });
 
   it('boxes the points it is given', () => {

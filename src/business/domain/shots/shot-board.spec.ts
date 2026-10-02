@@ -213,3 +213,43 @@ describe("a lesson scene's shots boarded", () => {
     ]);
   });
 });
+
+describe('the kit on the board', () => {
+  const registry = buildRegistry({
+    rows: WALL_ROWS,
+    research: WALL_RESEARCH,
+    world: WALL_WORLD,
+  });
+
+  it('offers the kit for the show’s look, each piece with its settings and moves', () => {
+    const parts = shotParts(input, registry).join('\n\n');
+    expect(parts).toContain('The kit (pieces that may stand');
+    expect(parts).toMatch(/- people\.crowd: .*Settings: .*count/);
+    expect(parts).toMatch(/- vehicle\.train: /);
+    // A look with no pieces of its own: no actors.
+    const other = shotParts({ ...input, look: 'illustrated' }, registry).join(
+      '\n\n',
+    );
+    expect(other).toContain('plan no actors');
+    expect(other).not.toContain('- people.crowd:');
+  });
+
+  it('stands a counted crowd where the line says people gathered, its count the line’s own', async () => {
+    const rows = [
+      { ...WALL_ROWS[0], say: 'In 1961, 300 people gathered in Berlin.' },
+      ...WALL_ROWS.slice(1),
+    ];
+    const { llm } = board();
+    const made = await boardShots({ ...input, rows }, llm);
+    const crowd = made.plan.shots
+      .flatMap((s) => s.actors)
+      .find((a) => a.kit === 'people.crowd');
+    expect(crowd).toMatchObject({
+      place: 'place:Berlin',
+      params: { count: 300 },
+    });
+    expect(
+      made.problems.filter((p) => /count|silhouette|audience/.test(p.code)),
+    ).toEqual([]);
+  });
+});

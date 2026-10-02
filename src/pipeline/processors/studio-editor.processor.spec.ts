@@ -188,6 +188,10 @@ function desk(
       asked.push(`board:${input.kind}`);
       return fake.editorBoard(input);
     },
+    shotsBoard: (input: Parameters<LlmGatewayPort['shotsBoard']>[0]) => {
+      asked.push('board:shots');
+      return fake.shotsBoard(input);
+    },
   } as unknown as LlmGatewayPort;
   const queued: StudioJobData[] = [];
   const ledger: AiCallLogInput[] = [];
@@ -1154,5 +1158,70 @@ describe("a lesson board's moments (drawnMoments)", () => {
     ]);
     // With no map, a moment brings on nothing: the picture before holds.
     expect(drawnMoments(draft, lines, null)).toEqual(draft);
+  });
+});
+
+describe('with lesson scenes boarded as shots (EXPLAINER_SHOTS)', () => {
+  it("writes each lesson scene's sheet as a plan of shots: its beats the lines, no things, the registry and each line's claims kept", async () => {
+    const d = await planned({ EXPLAINER_SHOTS: 'on' });
+    const outline = d.ep().outline!;
+    const rows = d.ep().editorial!.rows;
+    await d.processor.boards(d.show(), d.ep());
+    expect(d.asked).toContain('board:shots');
+    expect(d.asked).not.toContain('board:lesson');
+    for (const scene of d.scenes.values()) {
+      const planned = outline.scenes[scene.position];
+      const lines = rows.slice(planned.rows![0], planned.rows![1] + 1);
+      expect(scene.status).toBe('ready');
+      const sheet = scene.sheet as Extract<
+        typeof scene.sheet,
+        { kind: 'explainer' }
+      >;
+      expect(sheet.engine).toBe('shots');
+      expect(sheet.draft.beats.map((b) => b.say)).toEqual(
+        lines.map((l) => l.say),
+      );
+      expect(sheet.draft.cast).toEqual([]);
+      expect(sheet.draft.steps).toEqual([]);
+      expect(sheet.shots!.shots.length).toBeGreaterThan(0);
+      expect(sheet.rowClaims).toEqual(lines.map((l) => l.claims));
+      expect(Array.isArray(sheet.registry)).toBe(true);
+      // Never a card of words, and nothing named that the registry lacks.
+      expect(JSON.stringify(sheet.shots)).not.toMatch(
+        /"kind":"(?:words|plain)"/u,
+      );
+    }
+    expect(d.ledger.some((call) => call.task === 'explainer_shots')).toBe(true);
+  });
+
+  it('boards today’s storyboard with the switch off, the sheet as it was', async () => {
+    const d = await planned({});
+    await d.processor.boards(d.show(), d.ep());
+    expect(d.asked).not.toContain('board:shots');
+    for (const scene of d.scenes.values()) {
+      const sheet = scene.sheet as Extract<
+        typeof scene.sheet,
+        { kind: 'explainer' }
+      >;
+      expect(sheet.engine).toBeUndefined();
+      expect(sheet.shots).toBeUndefined();
+    }
+  });
+
+  it('boards a shots scene by code alone when its board cannot be had: safe shots, never keyword cards', async () => {
+    const d = await planned({ EXPLAINER_SHOTS: 'on' });
+    (d.llm as unknown as { shotsBoard: () => Promise<never> }).shotsBoard =
+      () => Promise.reject(new Error('the board fell over'));
+    await d.processor.boards(d.show(), d.ep());
+    for (const scene of d.scenes.values()) {
+      const sheet = scene.sheet as Extract<
+        typeof scene.sheet,
+        { kind: 'explainer' }
+      >;
+      expect(scene.status).toBe('ready');
+      expect(sheet.engine).toBe('shots');
+      expect(sheet.draft.cast).toEqual([]);
+      expect(sheet.shots!.shots.length).toBeGreaterThan(0);
+    }
   });
 });

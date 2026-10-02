@@ -56,6 +56,17 @@ export function illustratedSwitchOn(setting: string | undefined | null) {
   return /^(?:on|true|1|yes)$/iu.test((setting ?? '').trim());
 }
 
+/**
+ * Whether an editor's lesson scenes are boarded as shots (EXPLAINER_SHOTS,
+ * explainer-animation-tech §1; off unless set on): on, each lesson scene's
+ * board is a plan of shots (shots/shot-board), stored on its sheet with
+ * engine 'shots', so its make, twin, repace and recompose follow the sheet,
+ * never the switch at that moment; off, today's storyboard.
+ */
+export function shotsSwitchOn(setting: string | undefined | null) {
+  return /^(?:on|true|1|yes)$/iu.test((setting ?? '').trim());
+}
+
 /** A run of rows that will be one scene: from `first` to `last`, of one act and family. */
 interface Run {
   first: number;

@@ -95,7 +95,13 @@ import {
 import {
   editorOutline,
   illustratedSwitchOn,
+  shotsSwitchOn,
 } from '../../business/domain/studio/studio-editor-cut';
+import { boardShots, safePlan } from '../../business/domain/shots/shot-board';
+import type {
+  RegistryEntry,
+  ShotPlan,
+} from '../../business/domain/shots/types';
 import {
   onShowMap,
   pinOnShowMap,
@@ -1203,6 +1209,9 @@ export class StudioEditorProcessor {
       episode.id,
       outline.scenes.length,
     );
+    // Lesson scenes boarded as shots (EXPLAINER_SHOTS): decided here, once,
+    // and kept on each sheet, so the make follows the sheet, not the switch.
+    const shots = shotsSwitchOn(this.deps.setting('EXPLAINER_SHOTS'));
     let k = 0;
     const lanes = Array.from(
       { length: Math.min(BOARDERS, rows.length) },
@@ -1214,6 +1223,8 @@ export class StudioEditorProcessor {
           try {
             if (isIllustrated(scene))
               await this.illustratedBoard(show, episode, bible, rows[at], at);
+            else if (shots)
+              await this.shotsBoard(show, episode, bible, rows[at], at);
             else await this.lessonBoard(show, episode, bible, rows[at], at);
           } catch (error) {
             // A board that cannot be had is a plain one, never a hole in
@@ -1221,7 +1232,7 @@ export class StudioEditorProcessor {
             this.deps.logger.warn(
               `studio ${episode.id} s${at + 1}: boarded plainly: ${(error as Error).message}`,
             );
-            await this.plainBoard(show, episode, bible, rows[at], at);
+            await this.plainBoard(show, episode, bible, rows[at], at, shots);
           }
           progressNow({ scene: at, done: true });
         }
@@ -1244,9 +1255,33 @@ export class StudioEditorProcessor {
     bible: StudioBible,
     row: StudioSceneRecord,
     k: number,
+    /** Lesson scenes are boarded as shots (EXPLAINER_SHOTS). */
+    shots = false,
   ): Promise<void> {
     const scene = episode.outline!.scenes[k];
     const lines = this.rowsOf(episode, scene);
+    // A shots scene by code alone: every line its safe shot, never a card.
+    if (shots && !isIllustrated(scene)) {
+      const safe = safePlan({
+        rows: lines,
+        research: show.editor?.research ?? null,
+        world: show.editor?.world ?? null,
+      });
+      const sheet = shotsSheet(
+        scene,
+        lines,
+        safe.plan,
+        safe.registry.entries(),
+      );
+      await this.studio.updateScene(row.id, {
+        sheet,
+        sheetHash: sceneFingerprint(sheet, bible, show.brief),
+        problems: [],
+        status: 'ready',
+        error: null,
+      });
+      return;
+    }
     const sheet = isIllustrated(scene)
       ? plainShots(scene, lines, bible)
       : plainLesson(scene, lines, show.editor);
@@ -1349,6 +1384,64 @@ export class StudioEditorProcessor {
       sheet,
       sheetHash: sceneFingerprint(sheet, bible, show.brief),
       problems,
+      status: 'ready',
+      error: null,
+    });
+    return sheet;
+  }
+
+  /**
+   * A lesson scene boarded as shots (EXPLAINER_SHOTS; explainer-animation-
+   * tech §4.1): the plan of shots on its written lines, named from closed
+   * lists and the scene's registry, checked, sent back once and mended
+   * (shots/shot-board); its sheet keeps the beats word for word, the plan,
+   * the registry and each line's claims, with no things and no steps.
+   */
+  async shotsBoard(
+    show: StudioShowRecord,
+    episode: StudioEpisodeRecord,
+    bible: StudioBible,
+    row: StudioSceneRecord,
+    k: number,
+  ): Promise<ExplainerSheet> {
+    const outline = episode.outline!;
+    const scene = outline.scenes[k];
+    const lines = this.rowsOf(episode, scene);
+    const board = await boardShots(
+      {
+        rows: lines,
+        research: show.editor?.research ?? null,
+        world: show.editor?.world ?? null,
+        scene: {
+          index: k,
+          of: outline.scenes.length,
+          title: scene.title,
+          seconds: scene.seconds,
+          episode: outline.title,
+        },
+        audience: show.brief.audience,
+      },
+      this.llm,
+    );
+    for (const usage of board.usage)
+      await this.record(episode.id, usage, 'explainer_shots');
+    if (board.problems.length)
+      this.deps.logger.log(
+        `studio ${episode.id} s${k + 1}: shots mended: ${board.problems
+          .slice(0, 6)
+          .map((p) => p.code)
+          .join(', ')}${board.sentBack ? ' (sent back once)' : ''}`,
+      );
+    const sheet = shotsSheet(
+      scene,
+      lines,
+      board.plan,
+      board.registry.entries(),
+    );
+    await this.studio.updateScene(row.id, {
+      sheet,
+      sheetHash: sceneFingerprint(sheet, bible, show.brief),
+      problems: [],
       status: 'ready',
       error: null,
     });
@@ -1754,6 +1847,29 @@ export function onTheLines(
       phrase: Number(step.beat) > last ? '' : step.phrase,
     })),
   };
+}
+
+/**
+ * A lesson scene's sheet as the shots engine makes it: its beats the
+ * lines, one each, word for word (onTheLines), with no things and no
+ * steps; the plan of shots, what it may name, and each line's claims.
+ */
+export function shotsSheet(
+  scene: Pick<OutlineScene, 'title'>,
+  lines: readonly EditorialRow[],
+  plan: ShotPlan,
+  registry: readonly RegistryEntry[],
+): ExplainerSheet {
+  return explainerSheetOf({
+    kind: 'explainer',
+    title: scene.title,
+    transition: 'cut',
+    draft: onTheLines({ title: scene.title, cast: [], steps: [] }, lines),
+    engine: 'shots',
+    shots: plan,
+    registry,
+    rowClaims: lines.map((line) => [...line.claims]),
+  });
 }
 
 /** A narration beat of a written line. */

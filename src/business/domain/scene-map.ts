@@ -1130,7 +1130,7 @@ const polygonsOf = (f: { geometry: Polygon | MultiPolygon }): Position[][][] =>
  * region's the same way: the West of the United States is framed by its
  * states on the continent, not by Alaska and Hawaii.
  */
-function mainlandOf(
+export function mainlandOf(
   g: D3Geo,
   f: { geometry: Polygon | MultiPolygon },
 ): Feature<MultiPolygon> {

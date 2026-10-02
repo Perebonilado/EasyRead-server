@@ -1,6 +1,7 @@
 import { WALL_RESEARCH, WALL_ROWS, WALL_WORLD } from './__fixtures__/wall';
 import { shotLook } from './shot-build';
-import { MAP_ASSET, mapSetAsset } from './shot-map';
+import { mercator } from './shot-geo';
+import { MAP_ASSET, drawnMapSet, mapSetAsset } from './shot-map';
 import { buildRegistry } from './shot-registry';
 
 describe('the show’s map as a shot’s set', () => {
@@ -47,8 +48,54 @@ describe('the show’s map as a shot’s set', () => {
     theme: 'paper',
   });
 
-  it('draws the regions and seam full frame as measured parts, with their names, and points places on it', async () => {
+  it('is geography the player draws: its regions and seam features, its frame in Web Mercator, tiltable', async () => {
     const set = (await mapSetAsset(base, look, 'wide'))!;
+    expect(set.id).toBe(MAP_ASSET);
+    expect(set.flat).toBe(false);
+    expect(set.project).toBeUndefined();
+    if (set.asset.kind !== 'geo') throw new Error('a geo map');
+    const ids = (
+      set.asset.features.features as { properties: { id: string } }[]
+    ).map((one) => one.properties.id);
+    expect(ids).toEqual(
+      expect.arrayContaining([
+        'group-north-region',
+        'group-west-region',
+        'seam-the-line',
+      ]),
+    );
+    expect(set.parts['West Region']).toBe('group-west-region');
+    // Kano is inside the North's box; its point is a point on the earth.
+    const north = set.boxOf!({
+      kind: 'feature',
+      asset: MAP_ASSET,
+      id: 'group-north-region',
+    })!;
+    const [kx, ky] = mercator(8.52, 12.0);
+    expect(kx).toBeGreaterThan(north[0]);
+    expect(kx).toBeLessThan(north[0] + north[2]);
+    expect(ky).toBeGreaterThan(north[1]);
+    expect(ky).toBeLessThan(north[1] + north[3]);
+    expect(set.boxOf!({ kind: 'geo', lng: 8.52, lat: 12 })).toEqual([
+      kx,
+      ky,
+      0,
+      0,
+    ]);
+    expect(set.boxOf!({ kind: 'asset', asset: MAP_ASSET })).toEqual(set.box);
+    // A spot in those units is back on the earth where it was.
+    const [lng, lat] = set.earthAt!(kx, ky);
+    expect(lng).toBeCloseTo(8.52, 3);
+    expect(lat).toBeCloseTo(12, 3);
+    // It writes no note of its own, so its chip says whose borders they are.
+    expect(set.chip?.text).toContain('Natural Earth');
+    // Made once, for every shape and theme.
+    expect(await mapSetAsset(base, look, 'tall', 'nightsky')).toBe(set);
+  }, 30_000);
+
+  it('is drawn full frame by the charts for whatever cannot draw geography: the regions and seam as measured parts, with their names, places pointed at on it', async () => {
+    const set = (await drawnMapSet(base, look, 'wide'))!;
+    if (set.asset.kind !== 'svg') throw new Error('a drawn map');
     expect(set.id).toBe(MAP_ASSET);
     expect(set.flat).toBe(true);
     expect(set.asset.box).toEqual([0, 0, 1600, 900]);
@@ -78,8 +125,9 @@ describe('the show’s map as a shot’s set', () => {
     expect(set.asset.parts.period).toBeDefined();
     expect(set.chip).toBeUndefined();
     expect(set.asset.svg).not.toContain('animation');
-    // Drawn once and kept.
-    expect(await mapSetAsset(base, look, 'wide')).toBe(set);
+    // Drawn once and kept, and the same asked of mapSetAsset by name.
+    expect(await drawnMapSet(base, look, 'wide')).toBe(set);
+    expect(await mapSetAsset(base, look, 'wide', 'paper', 'drawn')).toBe(set);
   }, 30_000);
 
   it('is nothing for a show with no map code can draw', async () => {
@@ -87,11 +135,12 @@ describe('the show’s map as a shot’s set', () => {
     expect(
       await mapSetAsset({ kind: 'map', region: 'Nowhere Land' }, look, 'wide'),
     ).toBeNull();
+    expect(await drawnMapSet(null, look, 'wide')).toBeNull();
   });
 });
 
 describe('the show’s map, as the board names it', () => {
-  it('draws every region and seam of the show map that the registry names, under the same ids', async () => {
+  it('draws every region and seam of the show map that the registry names, under the same ids, drawn or as geography', async () => {
     const registry = buildRegistry({
       rows: WALL_ROWS,
       research: WALL_RESEARCH,
@@ -108,12 +157,22 @@ describe('the show’s map, as the board names it', () => {
       theme: 'paper',
     });
     for (const shape of ['wide', 'tall'] as const) {
-      const set = (await mapSetAsset(WALL_WORLD.base, look, shape))!;
+      const set = (await drawnMapSet(WALL_WORLD.base, look, shape))!;
+      if (set.asset.kind !== 'svg') throw new Error('a drawn map');
       for (const feature of features) {
         expect(feature?.asset).toBe(set.id);
         expect(set.asset.parts[feature!.id]).toBeDefined();
         expect(set.asset.svg).toContain(`data-part="${feature!.id}"`);
       }
+    }
+    const geo = (await mapSetAsset(WALL_WORLD.base, look, 'wide'))!;
+    if (geo.asset.kind !== 'geo') throw new Error('a geo map');
+    const ids = (
+      geo.asset.features.features as { properties: { id: string } }[]
+    ).map((one) => one.properties.id);
+    for (const feature of features) {
+      expect(feature?.asset).toBe(geo.id);
+      expect(ids).toContain(feature!.id);
     }
   }, 30_000);
 });

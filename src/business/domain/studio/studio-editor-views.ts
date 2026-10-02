@@ -15,6 +15,8 @@ import type { OutlineScene } from './studio';
 import { ERA_WORDS, type StudioEditor } from './studio-editor';
 import type { StudioEditorial } from './studio-editorial';
 import { sceneOfRow } from './studio-editor-cut';
+import { readMapBase } from '../scene-map';
+import { mapCredits, withCredits } from '../shots/terrain-tiles';
 
 /** The show's planning as the maker sees it; null for a show the editor has not begun (or never plans). */
 export function editorDto(
@@ -126,11 +128,16 @@ function startsOf(
   return starts;
 }
 
-/** An editor's package as the app sees it: its chapters at the acts, its thumbnail's frame. */
+/**
+ * An editor's package as the app sees it: its chapters at the acts, its
+ * thumbnail's frame, and its description with the credits the film owes
+ * after it (the map's sources: terrain-tiles' mapCredits).
+ */
 export function packageDto(
   editorial: StudioEditorial,
   outline: readonly Pick<OutlineScene, 'seconds' | 'rows'>[],
   film: readonly FilmScene[],
+  credits: readonly string[] = [],
 ): StudioPackageDto | null {
   const pack = editorial.package;
   if (!pack) return null;
@@ -162,7 +169,7 @@ export function packageDto(
   return {
     title: pack.title,
     titles: pack.titles.map((t) => t.text),
-    description: pack.description,
+    description: withCredits(pack.description, credits),
     chapters,
     thumbnail: {
       words: pack.thumbnail.words,
@@ -182,6 +189,7 @@ export function editorialDto(
   editorial: StudioEditorial,
   outline: readonly Pick<OutlineScene, 'seconds' | 'rows'>[] = [],
   film: readonly FilmScene[] = [],
+  credits: readonly string[] = [],
 ): StudioEditorialDto {
   const facts = editorial.facts;
   return {
@@ -207,7 +215,7 @@ export function editorialDto(
           cut: facts.filter((f) => f.verdict === 'cut').length,
         }
       : null,
-    package: packageDto(editorial, outline, film),
+    package: packageDto(editorial, outline, film, credits),
   };
 }
 
@@ -220,16 +228,29 @@ export function planNext(editor: StudioEditor | null | undefined): string[] {
     .slice(0, 4);
 }
 
+/**
+ * The credits an editor's episode owes for its map: none for a show with
+ * no map; the borders' source; and the terrain's lines when a scene of it
+ * is drawn by the shots engine, whose map is shaded from the terrain.
+ */
+export function editorCredits(
+  editor: StudioEditor | null | undefined,
+  shots: boolean,
+): string[] {
+  return mapCredits(Boolean(readMapBase(editor?.world?.base)), shots);
+}
+
 /** What an editor's episode adds to its player: the planned questions next, and its package. */
 export function editorPlay(
   editor: StudioEditor | null | undefined,
   editorial: StudioEditorial | null | undefined,
   outline: readonly Pick<OutlineScene, 'seconds' | 'rows'>[],
   film: readonly FilmScene[],
+  credits: readonly string[] = [],
 ): Pick<StudioPlayDto, 'next' | 'package'> {
   if (!editor || !editorial) return {};
   const next = planNext(editor);
-  const pack = packageDto(editorial, outline, film);
+  const pack = packageDto(editorial, outline, film, credits);
   return {
     ...(next.length ? { next } : {}),
     ...(pack ? { package: pack } : {}),

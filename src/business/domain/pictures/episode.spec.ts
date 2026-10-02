@@ -340,6 +340,11 @@ describe("an episode's desk pass", () => {
         asked:
           'an event: Baird demonstrates television to members of the Royal Institution (26 January 1926, Frith Street, London)',
       });
+      // Its people among its names: a photo naming Baird is of his event.
+      expect(of('event')[0].query).toMatchObject({
+        names: ['baird', 'Royal Institution'],
+        persons: ['baird'],
+      });
       expect(of('event')[0].offer).toMatchObject({
         kind: 'event',
         claims: ['c1'],

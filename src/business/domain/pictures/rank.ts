@@ -483,7 +483,10 @@ function namesThing(said: string, name: string): boolean {
  */
 export function eventPhotoOf(
   file: Pick<SourceFile, 'title' | 'description' | 'categories'>,
-  query: Pick<PictureQuery, 'name' | 'years' | 'place' | 'words' | 'names'>,
+  query: Pick<
+    PictureQuery,
+    'name' | 'years' | 'place' | 'words' | 'names' | 'persons'
+  >,
   year: number | undefined,
 ): { ok: true } | { ok: false; reason: string } {
   const years = query.years ?? [];
@@ -548,6 +551,27 @@ export function eventPhotoOf(
     return {
       ok: false,
       reason: `it names none of the event’s own (${names.slice(0, 3).join(', ')})`,
+    };
+  // Its setting, when it names one in several words (the New York World's
+  // Fair, the Royal Institution, the BBC Television Service): a photo of it
+  // names that setting, or one of its people. A body alone will not do:
+  // RCA's antenna on the Empire State Building is no photo of RCA at the
+  // fair.
+  const settings = (query.names ?? [])
+    .filter((n) => n.trim().split(/\s+/u).length >= 2)
+    .map((n) => [...keysIn(n)].filter((k) => !placed.includes(k)))
+    .filter((k) => k.length);
+  const persons = [...keysIn((query.persons ?? []).join(' '))];
+  if (
+    settings.length &&
+    !persons.some((p) => seen.has(p)) &&
+    !settings.some(
+      (set) => set.filter((k) => seen.has(k)).length >= Math.min(2, set.length),
+    )
+  )
+    return {
+      ok: false,
+      reason: `it names neither where it was (${settings.map((s) => s.join(' ')).join('; ')}) nor its people`,
     };
   const hits = keys.filter((k) => seen.has(k)).length;
   const there = placed.some((p) => seen.has(p));

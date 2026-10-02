@@ -42,6 +42,8 @@ export interface PictureQuery {
    * photo of a 1926 demonstration of aircraft is no photo of Baird's.
    */
   names?: readonly string[];
+  /** Of those names, the research's people (surnames): a photo naming one of them is of their event though it names no setting. */
+  persons?: readonly string[];
   /**
    * What the desk's look at a picture is asked it shows, in the research's
    * words ("an event: Nigeria becomes independent, 1 October 1960, Lagos"):

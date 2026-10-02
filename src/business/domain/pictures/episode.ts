@@ -389,6 +389,11 @@ export function passQuestions(input: PassInput): PassQuestion[] {
     const where = line(event.place ?? '', 80);
     const text = line(event.event, 200);
     const named = eventNames(text, names);
+    // Its people, by surname, among those names.
+    const persons = names
+      .filter((person) => namesPerson(text, person))
+      .map((person) => nameWords(person).at(-1) ?? '')
+      .filter(Boolean);
     out.push({
       for: 'photo',
       shows: { kind: 'event', name: text },
@@ -407,6 +412,7 @@ export function passQuestions(input: PassInput): PassQuestion[] {
           : {}),
         words: [text, ...(where ? [where] : [])],
         ...(named.length ? { names: named } : {}),
+        ...(persons.length ? { persons } : {}),
         asked: `an event: ${text} (${line(event.date, 40)}${where ? `, ${where}` : ''})`,
       },
     });

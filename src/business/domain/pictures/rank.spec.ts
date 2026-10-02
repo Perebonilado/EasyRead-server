@@ -535,6 +535,7 @@ describe('an event is of its own people, bodies and things, not of its verbs', (
       'Frith Street, London',
     ],
     names: ['baird', 'Royal Institution'],
+    persons: ['baird'],
   };
 
   it('refuses a Dutch 1926 demonstration of aircraft for Baird’s of television', () => {
@@ -553,6 +554,20 @@ describe('an event is of its own people, bodies and things, not of its verbs', (
       ok: false,
       reason: 'it names none of the event’s own (baird, royal, instit)',
     });
+  });
+
+  it('takes a photo naming its person though not its setting (Baird, not the Royal Institution)', () => {
+    expect(
+      eventPhotoOf(
+        {
+          title: 'John Logie Baird with his apparatus, 1926',
+          description: 'Baird and his television transmitter',
+          categories: [],
+        },
+        baird,
+        1926,
+      ),
+    ).toEqual({ ok: true });
   });
 
   it('takes a photo naming Baird and his television that year', () => {
@@ -597,6 +612,24 @@ describe('an event is where it happened', () => {
     ).toEqual({
       ok: false,
       reason: 'its words place it in Washington, D.C., not New York',
+    });
+  });
+
+  it('refuses a photo naming its body but not its setting: RCA’s antenna is no photo of RCA at the fair', () => {
+    expect(
+      eventPhotoOf(
+        {
+          title: 'Empire State Building television antenna 1939',
+          description:
+            'The RCA-NBC television antenna atop the Empire State Building',
+          categories: [],
+        },
+        fair,
+        1939,
+      ),
+    ).toEqual({
+      ok: false,
+      reason: 'it names neither where it was (world fair) nor its people',
     });
   });
 

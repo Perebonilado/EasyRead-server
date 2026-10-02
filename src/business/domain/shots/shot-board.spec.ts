@@ -224,11 +224,14 @@ describe('the kit on the board', () => {
     expect(parts).toContain('The kit (pieces that may stand');
     expect(parts).toMatch(/- people\.crowd: .*Settings: .*count/);
     expect(parts).toMatch(/- vehicle\.train: /);
-    // A look with no pieces of its own: no actors.
+    // The illustrated look: its own characters, never the silhouettes.
     const other = shotParts({ ...input, look: 'illustrated' }, registry).join(
       '\n\n',
     );
-    expect(other).toContain('plan no actors');
+    expect(other).toMatch(/- character\.person: .*Settings: .*dress in words/);
+    expect(other).toMatch(/- character\.group: /);
+    expect(other).not.toMatch(/- people\./);
+    expect(parts).not.toMatch(/- character\./);
     expect(other).not.toContain('- people.crowd:');
   });
 

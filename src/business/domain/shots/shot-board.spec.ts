@@ -1,7 +1,13 @@
 import { FakeLlmAdapter } from '../../../web/adapters/fake-llm.adapter';
 import type { LlmGatewayPort, StudioRevision } from '../../ports/llm.port';
 import { WALL_RESEARCH, WALL_ROWS, WALL_WORLD } from './__fixtures__/wall';
-import { boardShots, safePlan, shotParts, withSafeShots } from './shot-board';
+import {
+  boardShots,
+  safePlan,
+  shotParts,
+  withPace,
+  withSafeShots,
+} from './shot-board';
 import { checkPlan, WHOLE_SET } from './shot-check';
 import {
   lineSpans,
@@ -96,18 +102,27 @@ describe("a lesson scene's shots boarded", () => {
     const sets = made.plan.shots.map((s) =>
       s.set.kind === 'chart' ? s.set.chart.kind : s.set.kind,
     );
-    expect(sets).toEqual(['map', 'counter', 'quote']);
+    // The last line, about when, its date's calendar as the voice moves on to it.
+    expect(sets).toEqual([
+      'map',
+      'counter',
+      'calendar',
+      'quote',
+      'map',
+      'calendar',
+    ]);
+    // The episode's opening: the pin lands as Berlin is named, by the third word.
     expect(made.plan.shots[0].info[0]).toEqual({
       recipe: 'pin',
       target: 'place:Berlin',
-      on: 'In 1961, Berlin',
+      on: 'Berlin was cut',
     });
     expect(made.plan.shots[1].info[0]).toMatchObject({
       recipe: 'count',
       value: 1393,
       unit: 'km',
     });
-    expect(made.plan.shots[2].set).toMatchObject({
+    expect(made.plan.shots[3].set).toMatchObject({
       chart: { spec: { text: 'Mr. Gorbachev, tear down this wall!' } },
     });
     expect(JSON.stringify(made.plan)).not.toMatch(/"kind":"(?:words|plain)"/u);
@@ -138,8 +153,9 @@ describe("a lesson scene's shots boarded", () => {
     expect(calls[1].problems!.join(' ')).toContain(
       '"place:Checkpoint Charlie" is not in the list of what you may name',
     );
-    // The fake's second answer was better: its problems are none.
-    expect(made.problems).toEqual([]);
+    // The fake's second answer named only what the list gives; what it
+    // left to the pace and the opening, code gave it.
+    expect(made.problems.map((p) => p.code)).not.toContain('unknown-target');
     expect(made.plan.shots[0].info[0].target).toBe('place:Berlin');
   });
 
@@ -171,7 +187,8 @@ describe("a lesson scene's shots boarded", () => {
       research: WALL_RESEARCH,
       world: null,
     });
-    const rows = [WALL_ROWS[1], WALL_ROWS[5]];
+    // The last line resting on nothing: no picture of its own.
+    const rows = [WALL_ROWS[1], { ...WALL_ROWS[5], claims: [] }];
     const counter: ShotPlan = {
       shots: [
         {
@@ -250,5 +267,128 @@ describe('the kit on the board', () => {
     expect(
       made.problems.filter((p) => /count|silhouette|audience/.test(p.code)),
     ).toEqual([]);
+  });
+});
+
+describe('something new every few words (withPace)', () => {
+  const registry = buildRegistry({
+    rows: WALL_ROWS,
+    research: WALL_RESEARCH,
+    world: WALL_WORLD,
+  });
+  const still = (on: string, set: ShotPlan['shots'][number]['set']) => ({
+    on,
+    set,
+    actors: [],
+    info: [],
+    life: [],
+    camera: [],
+    join: 'cut' as const,
+    focal: WHOLE_SET,
+  });
+
+  it('goes on from a full shot as its continuation, framed on what the voice now names', () => {
+    const rows = [WALL_ROWS[0], WALL_ROWS[4]];
+    const full: ShotPlan = {
+      shots: [
+        {
+          ...still('In 1961, Berlin', { kind: 'map', tilt: 'flat' }),
+          info: [
+            { recipe: 'pin', target: 'place:Berlin', on: 'Berlin was cut' },
+            { recipe: 'label', target: 'place:Berlin', on: 'Berlin was cut' },
+            { recipe: 'seam', target: 'seam:inner border', on: 'cut in two' },
+            { recipe: 'mark', target: 'place:Berlin', on: 'two overnight' },
+          ],
+          camera: [
+            { move: 'establish', on: 'In 1961, Berlin' },
+            { move: 'push', target: 'place:Berlin', on: 'Berlin was cut' },
+          ],
+          focal: 'place:Berlin',
+        },
+      ],
+    };
+    const paced = withPace(full, rows, registry, WALL_WORLD);
+    expect(paced.shots).toHaveLength(2);
+    expect(paced.shots[0].join).toBe('continue');
+    expect(paced.shots[0].info).toHaveLength(4);
+    expect(paced.shots[1]).toMatchObject({
+      on: 'East Germany’s leader',
+      set: { kind: 'map' },
+      info: [
+        {
+          recipe: 'fill',
+          target: 'region:East Germany',
+          on: 'East Germany’s leader',
+        },
+      ],
+      focal: 'region:East Germany',
+    });
+  });
+
+  it('shows a date said as a shot begins on its calendar first, the shot after it', () => {
+    const rows = [WALL_ROWS[0], WALL_ROWS[1]];
+    const counter: ShotPlan = {
+      shots: [
+        {
+          ...still('In 1961, Berlin', {
+            kind: 'chart',
+            chart: {
+              kind: 'counter',
+              spec: {
+                value: 1393,
+                unit: 'km',
+                prefix: null,
+                label: null,
+                then: null,
+              },
+            },
+          }),
+          info: [
+            {
+              recipe: 'count',
+              target: 'number:Length of the inner border',
+              on: '1,393 kilometres',
+            },
+          ],
+        },
+      ],
+    };
+    const paced = withPace(counter, rows, registry, WALL_WORLD);
+    expect(paced.shots[0]).toMatchObject({
+      on: 'In 1961, Berlin',
+      set: {
+        kind: 'chart',
+        chart: { kind: 'calendar', spec: { calendars: [{ dates: ['1961'] }] } },
+      },
+    });
+    // The calendar holds the opening's first words; the counter comes on the fourth.
+    expect(paced.shots[1]).toMatchObject({
+      on: 'was cut in',
+      set: { kind: 'chart', chart: { kind: 'counter' } },
+    });
+  });
+
+  it('brings on what the board put before its name as the voice first names it', () => {
+    const rows = [WALL_ROWS[3], WALL_ROWS[4]];
+    const early: ShotPlan = {
+      shots: [
+        {
+          ...still('Tear down this', { kind: 'map', tilt: 'flat' }),
+          info: [
+            {
+              recipe: 'fill',
+              target: 'region:East Germany',
+              on: 'Tear down this',
+            },
+          ],
+        },
+      ],
+    };
+    const paced = withPace(early, rows, registry, WALL_WORLD);
+    expect(paced.shots[0].info[0]).toEqual({
+      recipe: 'fill',
+      target: 'region:East Germany',
+      on: 'East Germany’s leader',
+    });
   });
 });

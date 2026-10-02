@@ -67,6 +67,8 @@ export interface FrameItem {
   text?: string;
   /** In the frame's pixels. */
   fontPx?: number;
+  /** Its font weight (400 regular, 700 bold), when the page says: bold text is large from TEXT.largeBold. */
+  weight?: number;
   /** CSS colours: the text's, and what it sits on when the page knows it. */
   fg?: string;
   bg?: string;
@@ -634,6 +636,34 @@ export function sizeFloor(
   return TEXT.mustRead * base;
 }
 
+/** Large text in WCAG's sense (TEXT.large, or TEXT.largeBold when bold), as shares of the frame's short side: read against CONTRAST.large. */
+export function isLargeText(
+  item: Pick<FrameItem, 'fontPx' | 'weight'>,
+  report: Pick<FrameReport, 'width' | 'height'>,
+): boolean {
+  if (item.fontPx === undefined) return false;
+  const base = Math.min(report.width, report.height);
+  return (
+    item.fontPx >= TEXT.large * base - 0.5 ||
+    ((item.weight ?? 400) >= 700 && item.fontPx >= TEXT.largeBold * base - 0.5)
+  );
+}
+
+/** Small print: a chip or a tag, which a caption may cover and which may sit at the frame's edge. */
+const smallPrint = (item: Pick<FrameItem, 'role'>) =>
+  item.role === 'chip' || item.role === 'tag';
+
+/**
+ * Where a text's glyphs are: its box, which runs from the font's ascent to
+ * its descent, in by FRAME_CHECKS.glyphInset of its size at the top and the
+ * bottom (its box as it is, when its size is not known).
+ */
+export function glyphBox(item: Pick<FrameItem, 'box' | 'fontPx'>): FrameBox {
+  const inset = (item.fontPx ?? 0) * FRAME_CHECKS.glyphInset;
+  const [x, y, w, h] = item.box;
+  return h - 2 * inset > 1 ? [x, y + inset, w, h - 2 * inset] : item.box;
+}
+
 /** The box a subject is judged by: the named thing's drawing, else its figure (a stat), else its card; else the frame's own focal. */
 function subjectItem(
   items: FrameItem[],
@@ -801,7 +831,11 @@ function checkStill(
       behind,
     );
     const ratio = round1(contrastOf(shown, behind));
-    const floor = item.text ? CONTRAST.text : CONTRAST.marks;
+    const floor = !item.text
+      ? CONTRAST.marks
+      : isLargeText(item, report)
+        ? CONTRAST.large
+        : CONTRAST.text;
     if (ratio < floor)
       add({
         code: 'contrast-low',
@@ -819,10 +853,15 @@ function checkStill(
     for (let j = i + 1; j < words.length; j += 1) {
       const a = words[i];
       const b = words[j];
-      const shared = overlapOf(a.box, b.box);
+      // Two words one drawing sets (stacked lines, a figure and its label)
+      // are judged where their glyphs are; words of two drawings, or a
+      // callout on a drawing's word, by their whole boxes.
+      const same = Boolean(a.of) && a.of === b.of;
+      const [boxA, boxB] = same ? [glyphBox(a), glyphBox(b)] : [a.box, b.box];
+      const shared = overlapOf(boxA, boxB);
       if (
         shared >
-        FRAME_CHECKS.overlapShare * Math.min(areaOf(a.box), areaOf(b.box))
+        FRAME_CHECKS.overlapShare * Math.min(areaOf(boxA), areaOf(boxB))
       )
         add({
           code: 'words-overlap',
@@ -865,6 +904,8 @@ function checkStill(
           (SAFE.wide.y1 - SAFE.wide.captionY0) * H,
         ];
   for (const item of words) {
+    // Small print (a credit, a source) may lie under a caption.
+    if (smallPrint(item)) continue;
     const hit = [...captions.map((c) => c.box), band].some(
       (box) =>
         overlapOf(item.box, box) > FRAME_CHECKS.overlapShare * areaOf(item.box),
@@ -885,13 +926,21 @@ function checkStill(
     safe.x1 * W + 2,
     safe.y1 * H + 2,
   ];
+  // Small print may sit at the frame's edge: it is judged only as cut by it.
+  const edge = FRAME_CHECKS.chipEdge * Math.min(W, H);
   for (const item of judged) {
     const [x, y, w, h] = item.box;
-    if (x >= sx0 && y >= sy0 && x + w <= sx1 && y + h <= sy1) continue;
+    const small = smallPrint(item);
+    const [x0, y0, x1, y1] = small
+      ? [edge, edge, W - edge, H - edge]
+      : [sx0, sy0, sx1, sy1];
+    if (x >= x0 && y >= y0 && x + w <= x1 && y + h <= y1) continue;
     add({
       code: 'outside-safe',
       ids: [item.id],
-      message: `"${item.text}" runs outside the ${report.shape} frame's safe area`,
+      message: small
+        ? `"${item.text}" is cut by the frame's edge`
+        : `"${item.text}" runs outside the ${report.shape} frame's safe area`,
     });
   }
 

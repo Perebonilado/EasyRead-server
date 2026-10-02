@@ -14,6 +14,8 @@ import {
   contrastOf,
   episodeScores,
   eventsOf,
+  glyphBox,
+  isLargeText,
   personBan,
   personShareOf,
   ringColour,
@@ -422,6 +424,113 @@ describe('readable words', () => {
         .filter((p) => p.code === 'outside-safe')
         .map((p) => p.ids),
     ).toEqual([['edge']]);
+  });
+
+  it('lets small print lie where the captions go and sit at the frame’s edge, but not be cut by it', () => {
+    const chip = (
+      id: string,
+      box: FrameBox,
+      role: FrameItem['role'] = 'chip',
+    ): FrameItem => ({
+      id,
+      role,
+      box,
+      text: id,
+      fontPx: 30,
+      fg: 'rgb(20, 20, 20)',
+      opacity: 1,
+    });
+    const result = checkFrames({
+      scene: lesson(),
+      reports: [
+        report([
+          engine([0, 0, 1920, 1080]),
+          // "Today's borders" in the map's foot corner: in the band, past the text safe area, on the frame.
+          chip("Today's borders", [40, 960, 260, 32]),
+          chip('Illustration', [1500, 990, 200, 30], 'tag'),
+          chip('cut', [0, 300, 200, 30]),
+          // A word a viewer must read in the band is still the captions'.
+          label('East Region', [700, 900, 300, 70]),
+          label('edge', [40, 500, 200, 70]),
+        ]),
+      ],
+      shape: 'wide',
+    });
+    const ids = (code: string) =>
+      result.problems.filter((p) => p.code === code).map((p) => p.ids?.[0]);
+    expect(ids('on-caption')).toEqual(['East Region']);
+    expect(ids('outside-safe').sort()).toEqual(['cut', 'edge']);
+    expect(
+      result.problems.find(
+        (p) => p.code === 'outside-safe' && p.ids?.[0] === 'cut',
+      )?.message,
+    ).toContain("cut by the frame's edge");
+  });
+
+  it('holds large text to WCAG’s 3:1 and the rest to 4.5:1, large measured on the short side', () => {
+    const wide = report([]);
+    expect(isLargeText({ fontPx: TEXT.large * 1080 }, wide)).toBe(true);
+    expect(isLargeText({ fontPx: 23 }, wide)).toBe(false);
+    expect(isLargeText({ fontPx: 19, weight: 700 }, wide)).toBe(true);
+    expect(isLargeText({ fontPx: 19, weight: 400 }, wide)).toBe(false);
+    expect(isLargeText({ fontPx: 24 }, report([], 0, 'tall'))).toBe(true);
+    // A grey at about 3.5:1 on white: a large year passes, small words do not.
+    const grey = 'rgb(137, 137, 137)';
+    const result = checkFrames({
+      scene: lesson(),
+      reports: [
+        report([
+          engine([100, 100, 800, 800]),
+          label('1951', [1000, 200, 200, 106], { fontPx: 84, fg: grey }),
+          label('small', [1000, 400, 200, 30], { fontPx: 20, fg: grey }),
+          label('bold', [1000, 500, 200, 30], {
+            fontPx: 20,
+            fg: grey,
+            weight: 700,
+          }),
+        ]),
+      ],
+      pixels: [still(WHITE)],
+      shape: 'wide',
+    });
+    const low = result.problems.filter((p) => p.code === 'contrast-low');
+    expect(low.map((p) => p.ids?.[0])).toEqual(['small']);
+    expect(low[0].limit).toBe(CONTRAST.text);
+    expect(low[0].value).toBeGreaterThan(CONTRAST.large);
+  });
+
+  it('judges two words of one drawing where their glyphs are, and words of two drawings by their boxes', () => {
+    // A year over its label: their boxes meet by 12 px, from the year's descent to the label's ascent.
+    const year = label('1951', [400, 300, 200, 106], {
+      fontPx: 84,
+      of: 'timeline',
+    });
+    const below = label('Regional legislatures', [380, 394, 500, 60], {
+      fontPx: 48,
+      of: 'timeline',
+    });
+    expect(glyphBox(year)[3]).toBeCloseTo(
+      106 - 2 * 84 * FRAME_CHECKS.glyphInset,
+      5,
+    );
+    const overlaps = (items: FrameItem[]) =>
+      checkFrames({
+        scene: lesson(),
+        reports: [report([engine([0, 0, 1920, 1080]), ...items])],
+        shape: 'wide',
+      }).problems.filter((p) => p.code === 'words-overlap');
+    expect(overlaps([year, below])).toEqual([]);
+    // A callout landing on a map's word is words over words.
+    const callout = label('Kaduna', [380, 394, 500, 60], { fontPx: 48 });
+    expect(overlaps([year, callout]).map((p) => p.ids)).toEqual([
+      ['1951', 'Kaduna'],
+    ]);
+    // Two of one drawing's words set on each other still are.
+    const onTop = label('1952', [420, 320, 200, 106], {
+      fontPx: 84,
+      of: 'timeline',
+    });
+    expect(overlaps([year, onTop])).toHaveLength(1);
   });
 });
 

@@ -55,6 +55,12 @@ export const TEXT = {
   mustRead: 60 / 1080,
   chip: 28 / 1080,
   caption: 64 / 1080,
+  /**
+   * WCAG's large text, read against CONTRAST.large: 18 pt (24 px) and over,
+   * or 14 pt (18.66 px) bold, here as shares of the short side at 1080.
+   */
+  large: 24 / 1080,
+  largeBold: 18.66 / 1080,
   /** Words on the stage at once, not counting the chip, the tag and the captions. */
   stageWordsMax: 8,
   labelWordsMax: 3,
@@ -71,8 +77,8 @@ export const FOCAL = {
   wideMinArea: 0.12,
 } as const;
 
-/** Contrast floors against what sits behind (WCAG 2.2: 1.4.3 and 1.4.11). */
-export const CONTRAST = { text: 4.5, marks: 3 } as const;
+/** Contrast floors against what sits behind (WCAG 2.2: 1.4.3 and 1.4.11); large text (TEXT.large) at WCAG's 3:1. */
+export const CONTRAST = { text: 4.5, marks: 3, large: 3 } as const;
 
 /** No more than three flashes a second; flicker under 10% of luminance (WCAG 2.3.1). */
 export const SAFETY = { flashesPerSecond: 3, flicker: 0.1 } as const;
@@ -128,6 +134,15 @@ export const FRAME_CHECKS = {
   flashWithinMs: 1000,
   /** Text fainter than this is coming or going: its size, contrast and place are judged once it is up. */
   judgedOpacity: 0.6,
+  /**
+   * Where a text's glyphs are inside its box, which runs from the font's
+   * ascent to its descent: this share of its font size in from the top and
+   * the bottom. Stacked lines of one drawing are judged by it, so boxes that
+   * overlap where no glyph is are not words over words.
+   */
+  glyphInset: 0.17,
+  /** Small print (a chip, a tag) may sit at the frame's edge, but this close to it (a share of the short side) it is cut. */
+  chipEdge: 2 / 1080,
   /** How far past its first and last word the voice's span reaches, for a frame that must show something. */
   voicedPadMs: 500,
   /**

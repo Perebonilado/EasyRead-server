@@ -372,6 +372,59 @@ export function ringColour(
   }) as Rgb;
 }
 
+/**
+ * Whether a box's ink reaches the frame's edge where the box meets it (within
+ * `edge` frame pixels): words whose glyphs run off the frame are cut; words
+ * whose box only runs past it (to the font's descent, below its glyphs) are
+ * not. Read along the frame's outermost 2 px across the box, against the
+ * colour around the box; a few stray marks of the picture under it are not ink.
+ */
+export function inkAtEdge(
+  image: StillImage,
+  box: FrameBox,
+  frame: { width: number; height: number },
+  edge: number,
+): boolean {
+  const ground = ringColour(image, box, frame);
+  if (!ground) return true;
+  const sx = image.width / frame.width;
+  const sy = image.height / frame.height;
+  const [x, y, w, h] = box;
+  const across = [
+    Math.max(0, Math.floor(x * sx)),
+    Math.min(image.width, Math.ceil((x + w) * sx)),
+  ];
+  const down = [
+    Math.max(0, Math.floor(y * sy)),
+    Math.min(image.height, Math.ceil((y + h) * sy)),
+  ];
+  const band = Math.max(1, Math.round(2 * Math.min(sx, sy)));
+  const groundLuma =
+    0.2126 * ground[0] + 0.7152 * ground[1] + 0.0722 * ground[2];
+  const far = FRAME_CHECKS.inkLuma * 255;
+  let ink = 0;
+  let seen = 0;
+  const read = (x0: number, x1: number, y0: number, y1: number) => {
+    for (let py = y0; py < y1; py += 1)
+      for (let px = x0; px < x1; px += 1) {
+        const at = (py * image.width + px) * 4;
+        const luma =
+          0.2126 * image.data[at] +
+          0.7152 * image.data[at + 1] +
+          0.0722 * image.data[at + 2];
+        if (Math.abs(luma - groundLuma) > far) ink += 1;
+        seen += 1;
+      }
+  };
+  if (x <= edge) read(0, band, down[0], down[1]);
+  if (y <= edge) read(across[0], across[1], 0, band);
+  if (x + w >= frame.width - edge)
+    read(image.width - band, image.width, down[0], down[1]);
+  if (y + h >= frame.height - edge)
+    read(across[0], across[1], image.height - band, image.height);
+  return seen > 0 && ink / seen > FRAME_CHECKS.edgeInk;
+}
+
 // ── The scene's data ───────────────────────────────────────────────────────
 
 /** When the voice speaks: its first word to its last. */
@@ -935,6 +988,8 @@ function checkStill(
       ? [edge, edge, W - edge, H - edge]
       : [sx0, sy0, sx1, sy1];
     if (x >= x0 && y >= y0 && x + w <= x1 && y + h <= y1) continue;
+    // Small print whose box meets the edge is cut only where its ink does.
+    if (small && image && !inkAtEdge(image, item.box, report, edge)) continue;
     add({
       code: 'outside-safe',
       ids: [item.id],

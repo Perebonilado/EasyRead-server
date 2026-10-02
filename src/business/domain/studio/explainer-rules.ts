@@ -143,6 +143,8 @@ export const FRAME_CHECKS = {
   glyphInset: 0.17,
   /** Small print (a chip, a tag) may sit at the frame's edge, but this close to it (a share of the short side) it is cut. */
   chipEdge: 2 / 1080,
+  /** More than this share of the frame's outermost pixels under a word being ink: its glyphs run off the frame. */
+  edgeInk: 0.08,
   /** How far past its first and last word the voice's span reaches, for a frame that must show something. */
   voicedPadMs: 500,
   /**

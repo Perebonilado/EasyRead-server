@@ -15,6 +15,7 @@ import {
   episodeScores,
   eventsOf,
   glyphBox,
+  inkAtEdge,
   isLargeText,
   personBan,
   personShareOf,
@@ -465,6 +466,33 @@ describe('readable words', () => {
         (p) => p.code === 'outside-safe' && p.ids?.[0] === 'cut',
       )?.message,
     ).toContain("cut by the frame's edge");
+  });
+
+  it('calls small print cut only where its glyphs run off the frame, not its box', () => {
+    // "Today's borders" at the foot: its box runs to the font's descent, past the frame.
+    const chip: FrameItem = {
+      id: 'period',
+      role: 'chip',
+      box: [40, 1030, 280, 50],
+      text: "Today's borders",
+      fontPx: 38,
+      fg: 'rgb(0, 0, 0)',
+      opacity: 1,
+    };
+    const whole = still(WHITE, [{ box: [40, 1040, 260, 28], rgb: BLACK }]);
+    const cut = still(WHITE, [{ box: [40, 1050, 260, 30], rgb: BLACK }]);
+    const frame = { width: 1920, height: 1080 };
+    expect(inkAtEdge(whole, chip.box, frame, 2)).toBe(false);
+    expect(inkAtEdge(cut, chip.box, frame, 2)).toBe(true);
+    const outside = (image: StillImage) =>
+      checkFrames({
+        scene: lesson(),
+        reports: [report([engine([0, 0, 1920, 1000]), chip])],
+        pixels: [image],
+        shape: 'wide',
+      }).problems.filter((p) => p.code === 'outside-safe');
+    expect(outside(whole)).toEqual([]);
+    expect(outside(cut).map((p) => p.ids)).toEqual([['period']]);
   });
 
   it('holds large text to WCAG’s 3:1 and the rest to 4.5:1, large measured on the short side', () => {

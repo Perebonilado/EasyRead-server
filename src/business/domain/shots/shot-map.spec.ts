@@ -1,5 +1,7 @@
+import { WALL_RESEARCH, WALL_ROWS, WALL_WORLD } from './__fixtures__/wall';
 import { shotLook } from './shot-build';
 import { MAP_ASSET, mapSetAsset, stillMap } from './shot-map';
+import { buildRegistry } from './shot-registry';
 
 describe('today’s map made a still asset', () => {
   const drawn =
@@ -113,4 +115,32 @@ describe('the show’s map as a shot’s set', () => {
       await mapSetAsset({ kind: 'map', region: 'Nowhere Land' }, look, 'wide'),
     ).toBeNull();
   });
+});
+
+describe('the show’s map, as the board names it', () => {
+  it('draws every region and seam of the show map that the registry names, under the same ids', async () => {
+    const registry = buildRegistry({
+      rows: WALL_ROWS,
+      research: WALL_RESEARCH,
+      world: WALL_WORLD,
+    });
+    const features = registry
+      .entries()
+      .filter((e) => e.kind === 'region' || e.kind === 'seam')
+      .map((e) => e.feature);
+    expect(features.length).toBeGreaterThanOrEqual(3);
+    const look = shotLook({
+      palette: WALL_WORLD.palette,
+      held: null,
+      theme: 'paper',
+    });
+    for (const shape of ['wide', 'tall'] as const) {
+      const set = (await mapSetAsset(WALL_WORLD.base, look, shape))!;
+      for (const feature of features) {
+        expect(feature?.asset).toBe(set.id);
+        expect(set.asset.parts[feature!.id]).toBeDefined();
+        expect(set.asset.svg).toContain(`data-part="${feature!.id}"`);
+      }
+    }
+  }, 30_000);
 });

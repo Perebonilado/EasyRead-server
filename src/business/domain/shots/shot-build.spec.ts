@@ -2,28 +2,54 @@ import type { ShotSvgAssetDto } from '../../../contracts';
 import { MAP, PALETTE, PLAN, REGISTRY } from './__fixtures__/regional-turn';
 import {
   buildShots,
-  registryFrom,
   shotLook,
   travelMs,
   type BuildContext,
 } from './shot-build';
+import { registryOf } from './shot-registry';
 import { CAMERA_AMOUNT } from './shot-time';
 import type { ShotPlan } from './types';
 
-// The chart kinds are the charts work package's; here a counter is drawn
-// and every other kind is not, so both paths are seen.
-jest.mock('./shot-charts', () => ({
-  chartAsset: (kind: string): ShotSvgAssetDto | null =>
-    kind === 'counter'
-      ? {
-          kind: 'svg',
-          svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900"><text data-part="number">3</text></svg>',
-          box: [0, 0, 1600, 900],
-          parts: { number: { box: [600, 300, 400, 300], value: 3 } },
-          focal: [600, 300, 400, 300],
-        }
-      : null,
-}));
+// The chart kinds are the charts work package's; here a counter, a
+// timeline, a strike and a quotation are drawn, and every other kind is
+// not, so both paths are seen.
+jest.mock('./shot-charts', () => {
+  const asset = (
+    parts: Record<
+      string,
+      { box: [number, number, number, number]; value?: number }
+    >,
+  ): ShotSvgAssetDto => ({
+    kind: 'svg',
+    svg:
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900">' +
+      Object.keys(parts)
+        .map((id) => `<g data-part="${id}"/>`)
+        .join('') +
+      '</svg>',
+    box: [0, 0, 1600, 900],
+    parts,
+    focal: [200, 200, 1200, 500],
+  });
+  const kinds: Record<string, ShotSvgAssetDto> = {
+    counter: asset({ number: { box: [600, 300, 400, 300], value: 3 } }),
+    timeline: asset({
+      'event-1951': { box: [300, 400, 100, 100] },
+      'event-1954': { box: [800, 400, 100, 100] },
+    }),
+    strike: asset({
+      old: { box: [300, 300, 600, 200] },
+      new: { box: [300, 520, 600, 200] },
+    }),
+    quote: asset({
+      'quote-line-1': { box: [200, 300, 1200, 120] },
+      speaker: { box: [200, 600, 500, 80] },
+    }),
+  };
+  return {
+    chartAsset: (kind: string): ShotSvgAssetDto | null => kinds[kind] ?? null,
+  };
+});
 
 const ctx: BuildContext = {
   shape: 'wide',
@@ -33,7 +59,7 @@ const ctx: BuildContext = {
   map: MAP,
   seed: 'scene-1',
 };
-const registry = registryFrom(REGISTRY);
+const registry = registryOf(REGISTRY);
 const built = buildShots(PLAN, registry, ctx);
 
 describe('the look', () => {
@@ -57,8 +83,13 @@ describe('the look', () => {
     expect(shotLook({ ...ctx, theme: 'nightsky' }).palette.paper).not.toBe(
       look.palette.paper,
     );
-    expect(shotLook({ ...ctx, theme: 'nightsky' }).fonts.display).toContain(
-      'serif',
+    // Faces by name, as the stage takes them.
+    expect(look.fonts).toEqual({
+      display: 'Plus Jakarta Sans',
+      text: 'Plus Jakarta Sans',
+    });
+    expect(shotLook({ ...ctx, theme: 'nightsky' }).fonts.display).toBe(
+      'Georgia',
     );
   });
 });
@@ -296,5 +327,192 @@ describe('the plan built', () => {
       buildShots(PLAN, registry, { ...ctx, seed: 'other' }).shots[0].life[0]
         .seed,
     ).not.toBe(built.shots[0].life[0].seed);
+  });
+});
+
+describe('the board’s names, as the build resolves them', () => {
+  const entries = registryOf([
+    ...REGISTRY,
+    { name: 'date:1951', kind: 'date', about: 'regional legislatures' },
+    { name: 'date:1954', kind: 'date', about: 'federalism' },
+    {
+      name: 'person:Herbert Macaulay',
+      kind: 'person',
+      about: 'an engineer',
+      trace: { kind: 'place', ref: 'place:Lagos' },
+    },
+    {
+      name: 'person:Obafemi Awolowo',
+      kind: 'person',
+      about: 'the Western leader',
+      trace: { kind: 'quote', ref: 'claim:c1' },
+    },
+  ]);
+  const plan: ShotPlan = {
+    shots: [
+      {
+        on: 'After the 1945 strikes',
+        set: {
+          kind: 'chart',
+          chart: {
+            kind: 'timeline',
+            spec: {
+              events: [
+                { when: '1951', name: 'Regional legislatures' },
+                { when: '1954', name: 'Federalism' },
+              ],
+            },
+          },
+        },
+        actors: [],
+        info: [
+          {
+            recipe: 'label',
+            target: 'part:1951',
+            text: '1951',
+            on: 'colonial Nigeria',
+          },
+          { recipe: 'mark', target: 'date:1954', on: 'regional legislatures' },
+        ],
+        life: [],
+        camera: [],
+        join: 'cut',
+        focal: 'set',
+      },
+      {
+        on: 'Then the fight changed',
+        set: { kind: 'map' },
+        actors: [],
+        info: [
+          {
+            recipe: 'pin',
+            target: 'person:Herbert Macaulay',
+            on: 'independence',
+          },
+        ],
+        life: [],
+        camera: [],
+        join: 'cut',
+      },
+      {
+        on: 'Why did self-government',
+        set: {
+          kind: 'chart',
+          chart: {
+            kind: 'strike',
+            spec: { old: 'one deadline', new: 'three' },
+          },
+        },
+        actors: [],
+        info: [{ recipe: 'strike', on: 'become a regional fight' }],
+        life: [],
+        camera: [],
+        join: 'cut',
+        focal: 'set',
+      },
+      {
+        on: 'Those strikes made',
+        set: {
+          kind: 'chart',
+          chart: {
+            kind: 'quote',
+            spec: { text: 'Regions first', speaker: 'Obafemi Awolowo' },
+          },
+        },
+        actors: [],
+        info: [
+          {
+            recipe: 'mark',
+            target: 'person:Obafemi Awolowo',
+            on: 'the old order',
+          },
+          {
+            recipe: 'spotlight',
+            target: 'claim:c1',
+            on: 'pressure for change',
+          },
+        ],
+        life: [],
+        camera: [],
+        join: 'cut',
+      },
+    ],
+  };
+  const named = buildShots(plan, entries, ctx);
+  const [timeline, map, strike, quote] = named.shots;
+
+  it('takes "set" as the set’s own subject', () => {
+    expect(timeline.focal).toEqual({ kind: 'asset', asset: 'chart-1' });
+    expect(strike.focal).toEqual({ kind: 'asset', asset: 'chart-2' });
+  });
+
+  it('finds a part by the words it shows, and a date as its event', () => {
+    expect(timeline.info[0].target).toEqual({
+      kind: 'asset',
+      asset: 'chart-1',
+      part: 'event-1951',
+    });
+    expect(timeline.info[1].target).toEqual({
+      kind: 'asset',
+      asset: 'chart-1',
+      part: 'event-1954',
+    });
+  });
+
+  it('shows a person with no portrait by their trace: their place on the map, their words on a quotation', () => {
+    expect(map.info[0].target?.kind).toBe('box');
+    const [x, y, w, h] = (map.info[0].target as { box: number[] }).box;
+    const [px, py] = MAP.project!(3.38, 6.52)!;
+    expect(x + w / 2).toBeCloseTo(px, 0);
+    expect(y + h / 2).toBeCloseTo(py, 0);
+    expect(quote.info[0].target).toEqual({
+      kind: 'asset',
+      asset: 'chart-3',
+      part: 'speaker',
+    });
+    // A claim is the quotation that shows it.
+    expect(quote.info[1].target).toEqual({ kind: 'asset', asset: 'chart-3' });
+  });
+
+  it('strikes a strike’s old words when the plan names nothing', () => {
+    expect(strike.info[0]).toMatchObject({
+      recipe: 'strike',
+      target: { kind: 'asset', asset: 'chart-2', part: 'old' },
+    });
+  });
+
+  it('drops a part the chart does not have, and a date with no timeline to show it', () => {
+    const missing = buildShots(
+      {
+        shots: [
+          {
+            ...plan.shots[0],
+            info: [
+              {
+                recipe: 'label',
+                target: 'part:1999',
+                text: '1999',
+                on: 'colonial Nigeria',
+              },
+              {
+                recipe: 'mark',
+                target: 'date:1954',
+                on: 'regional legislatures',
+              },
+            ],
+          },
+          {
+            ...plan.shots[1],
+            info: [{ recipe: 'mark', target: 'date:1951', on: 'independence' }],
+          },
+        ],
+      },
+      entries,
+      ctx,
+    );
+    expect(missing.shots[0].info.map((i) => i.target)).toEqual([
+      { kind: 'asset', asset: 'chart-1', part: 'event-1954' },
+    ]);
+    expect(missing.shots[1].info).toEqual([]);
   });
 });

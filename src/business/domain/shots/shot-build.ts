@@ -41,7 +41,10 @@ import {
   type ThemeId,
 } from '../scene-themes';
 import { chartAsset } from './shot-charts';
+import { WHOLE_SET } from './shot-check';
 import type { ShotMapSet } from './shot-map';
+import { chartPartIds } from './shot-parts';
+import { splitTarget } from './shot-registry';
 import {
   CAMERA_AMOUNT,
   type UntimedActor,
@@ -62,16 +65,17 @@ import type {
 // ── The look ──────────────────────────────────────────────────────────────
 
 /**
- * The faces the player loads, as its stage sets them (the client's
- * lib/scene/theme.ts STAGE_FONT and TITLE_FONTS): the reading face for
- * every word, and the theme's display face for numbers and titles.
+ * The faces, by name, as the stage takes them: it sets each as a family
+ * and puts the app's reading face (Plus Jakarta Sans, which the page loads
+ * under next/font's own name) behind it. The reading face for every word;
+ * the theme's display face for numbers and titles, as the client's
+ * TITLE_FONTS has it (a face the page lacks falls back to the reading one).
  */
-const TEXT_FACE =
-  'var(--font-jakarta), "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif';
+const TEXT_FACE = 'Plus Jakarta Sans';
 const DISPLAY_FACE: Record<ExplainerTheme['font'], string> = {
   jakarta: TEXT_FACE,
-  rounded: `ui-rounded, "SF Pro Rounded", "Nunito", ${TEXT_FACE}`,
-  'serif-display': 'ui-serif, "New York", Georgia, "Times New Roman", serif',
+  rounded: 'Nunito',
+  'serif-display': 'Georgia',
 };
 
 /** Paper grain over every shot (the house's editorial texture). */
@@ -112,38 +116,6 @@ export function shotLook(
     fonts: { display: DISPLAY_FACE[theme.font], text: TEXT_FACE },
     grain: GRAIN,
     motion: 'springy',
-  };
-}
-
-// ── The registry, as the build reads it ──────────────────────────────────
-
-/**
- * A scene's stored registry entries as a TargetRegistry: a name as the
- * board wrote it ("place:Kano"), the same in other case or accents, or
- * without its kind ("Kano") where only one entry has that name.
- */
-export function registryFrom(
-  entries: readonly RegistryEntry[],
-): TargetRegistry {
-  const list = [...entries];
-  const exact = new Map(list.map((e) => [e.name, e]));
-  const keyed = new Map<string, RegistryEntry>();
-  const bare = new Map<string, RegistryEntry[]>();
-  for (const entry of list) {
-    const key = nameKey(entry.name);
-    if (!keyed.has(key)) keyed.set(key, entry);
-    const own = nameKey(entry.name.replace(/^[a-z]+:/i, ''));
-    bare.set(own, [...(bare.get(own) ?? []), entry]);
-  }
-  return {
-    entries: () => list,
-    resolve: (name) => {
-      if (!name) return null;
-      const found = exact.get(name) ?? keyed.get(nameKey(name));
-      if (found) return found;
-      const only = bare.get(nameKey(name.replace(/^[a-z]+:/i, '')));
-      return only?.length === 1 ? only[0] : null;
-    },
   };
 }
 
@@ -421,6 +393,15 @@ export function buildShots(
     const svg = asset?.kind === 'svg' ? asset : null;
     const onMap = shotSet.set.kind === 'map' && ctx.map ? ctx.map : null;
     const assetId = assetOf(shotSet.set);
+    // The chart the plan asked for, when it is the one drawn: its parts are
+    // named by what they show ("part:1951"), as the board names them.
+    const chart =
+      own[i] && planned.set.kind === 'chart' && shotSet.set.kind === 'chart'
+        ? planned.set.chart
+        : null;
+    const whole: ShotTargetDto | null = assetId
+      ? { kind: 'asset', asset: assetId }
+      : null;
 
     // Actors: the kit's pieces on the set. None until the kit (WP9).
     const actors: UntimedActor[] = [];
@@ -529,24 +510,44 @@ export function buildShots(
       return found ? onMap.parts[found] : null;
     }
 
+    /** A part of this shot's set: by its own id, else the first of the ids the board's words may have in its chart. */
+    function partOf(words: string): string | null {
+      if (!svg) return null;
+      if (svg.parts[words]) return words;
+      return chart
+        ? (chartPartIds(chart, words).find((p) => svg.parts[p]) ?? null)
+        : null;
+    }
+
     /**
-     * What a name points at in this shot: a part of its set, one of its
-     * actors, or what the registry says it is, on this set. A place is
-     * only ever on the map; a person, a photo or a document is a set of
-     * its own (WP11), never something pointed at in words; a claim is
-     * what a shot rests on, not what it shows.
+     * What a name points at in this shot: its whole set ("set"), a part of
+     * its set, one of its actors, or what the registry says it is, on this
+     * set. A place is only ever on the map; a date is a timeline's event or
+     * a calendar's day; a person is their trace (their place on the map, or
+     * their words on a quotation) until the picture desk has their portrait;
+     * a claim is the quotation or document that shows it.
      */
     function targetOf(name: string | undefined): ShotTargetDto | null {
-      if (!name) return null;
-      const bare = name.replace(/^(?:part|actor):/i, '').trim();
-      if (svg && assetId && svg.parts[bare])
-        return { kind: 'asset', asset: assetId, part: bare };
-      if (actorIds.has(bare)) return { kind: 'actor', actor: bare };
+      if (!name?.trim()) return null;
+      if (name.trim().toLowerCase() === WHOLE_SET) return whole;
+      const { prefix, rest } = splitTarget(name);
+      if ((prefix === 'part' || !prefix) && assetId) {
+        const part = partOf(rest);
+        if (part) return { kind: 'asset', asset: assetId, part };
+        if (prefix === 'part') return null;
+      }
+      if (prefix === 'actor' || !prefix) {
+        if (actorIds.has(rest)) return { kind: 'actor', actor: rest };
+        if (prefix === 'actor') return null;
+      }
       const entry = registry.resolve(name);
       if (!entry) {
         const part = partNamed(name);
         return part && onMap ? { kind: 'asset', asset: onMap.id, part } : null;
       }
+      const words = splitTarget(entry.name).rest;
+      const onAsset = (part: string | null): ShotTargetDto | null =>
+        part && assetId ? { kind: 'asset', asset: assetId, part } : null;
       switch (entry.kind) {
         case 'place':
           return placeOnMap(entry);
@@ -561,27 +562,64 @@ export function buildShots(
           return part ? { kind: 'asset', asset: onMap.id, part } : null;
         }
         case 'number': {
-          if (!svg || !assetId) return null;
-          const part =
+          if (!svg) return null;
+          return onAsset(
             Object.keys(svg.parts).find(
               (p) =>
                 entry.value !== undefined && svg.parts[p].value === entry.value,
-            ) ?? (svg.parts.number ? 'number' : null);
-          return part ? { kind: 'asset', asset: assetId, part } : null;
+            ) ??
+              (svg.parts.number ? 'number' : null) ??
+              partOf(words),
+          );
         }
+        case 'date':
+          return chart ? onAsset(partOf(words)) : null;
+        case 'person': {
+          const trace = entry.trace;
+          if (trace?.kind === 'place') {
+            const place = registry.resolve(trace.ref);
+            return place?.kind === 'place' ? placeOnMap(place) : null;
+          }
+          if (trace?.kind === 'quote' && chart?.kind === 'quote')
+            return (
+              onAsset(
+                partOf(words) ?? (svg?.parts.speaker ? 'speaker' : null),
+              ) ?? whole
+            );
+          return null;
+        }
+        case 'claim':
+          return chart && ['quote', 'document'].includes(chart.kind)
+            ? whole
+            : null;
         case 'part':
         case 'actor':
-          return targetOf(entry.name.replace(/^[a-z]+:/i, ''));
+          return targetOf(words);
         default:
           return null;
       }
+    }
+
+    /**
+     * What a recipe that needs no target acts on when the plan names none:
+     * a strike's old words, a stamp's mark, a flow along its chart. A
+     * question needs nothing; anything else with nothing to act on goes.
+     */
+    function ownTarget(recipe: PlanInfo['recipe']): ShotTargetDto | null {
+      if (!svg || !assetId || !chart) return null;
+      const part = (id: string): ShotTargetDto | null =>
+        svg.parts[id] ? { kind: 'asset', asset: assetId, part: id } : null;
+      if (recipe === 'strike') return part('old') ?? whole;
+      if (recipe === 'stamp') return part('stamp') ?? whole;
+      if (recipe === 'flow') return whole;
+      return null;
     }
 
     // The information layer: each piece on a target that resolves, its
     // words from the plan or, for a label, the name the research gives it.
     const info: UntimedInfo[] = [];
     (planned.info ?? []).forEach((one: PlanInfo, k) => {
-      const target = targetOf(one.target);
+      const target = one.target ? targetOf(one.target) : ownTarget(one.recipe);
       if (one.recipe !== 'ask' && !target) {
         notes.push(
           `shot ${i + 1}: ${one.recipe} on "${one.target ?? ''}" dropped (nothing on this set to point at)`,

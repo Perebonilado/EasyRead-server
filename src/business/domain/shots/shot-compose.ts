@@ -28,9 +28,10 @@ import type { TimedBeat } from '../scene-timing';
 import type { LearningStage } from '../scene-stage';
 import type { ExplainerSheet } from '../studio/studio';
 import type { EditorWorld } from '../studio/studio-editor';
-import { buildShots, registryFrom } from './shot-build';
+import { buildShots } from './shot-build';
 import { checkTimed, mendTimed } from './shot-check-timed';
 import type { ShotMapSet } from './shot-map';
+import { registryOf } from './shot-registry';
 import { soundsOf } from './shot-sound';
 import { timeShots } from './shot-time';
 import type { RegistryEntry, ShotPlan, ShotProblem } from './types';
@@ -148,7 +149,7 @@ export function composeShotScene(
   made: ShotsMade,
 ): { scene: SceneDto; notes: string[]; problems: ShotProblem[] } {
   const { script, beats, durationMs, shape } = made;
-  const built = buildShots(input.plan, registryFrom(input.registry), {
+  const built = buildShots(input.plan, registryOf(input.registry), {
     shape,
     palette: input.world?.palette ?? [],
     held: input.world?.held ?? null,

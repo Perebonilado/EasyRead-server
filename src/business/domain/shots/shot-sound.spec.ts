@@ -152,11 +152,11 @@ describe('the sounds of a scene’s motion', () => {
     const crowded = soundsOf([
       shot({
         info: [
-          item('seam', 'seam', 1000, 900),
-          item('label', 'label', 1100, 250),
+          item('seam', 'seam', 1100, 900),
           item('stamp', 'stamp', 1000, 400),
-          item('enter', 'enter', 1200, 500),
-          item('count', 'count', 1500, 1500, { value: 9 }),
+          item('count', 'count', 1650, 1500, { value: 9 }),
+          item('enter', 'enter', 1500, 400),
+          item('label', 'label', 1800, 250),
         ],
       }),
     ]);
@@ -167,6 +167,59 @@ describe('the sounds of a scene’s motion', () => {
           (t) => t.atMs >= s.atMs && t.atMs < s.atMs + DENSITY.windowMs,
         ).length,
       ).toBeLessThanOrEqual(DENSITY.count);
+  });
+
+  it('hears two sounds that would blur into one as one: a pin and its own label, a dive and its join, two beds begun together, two strokes at once', () => {
+    const pinned = soundsOf([
+      shot({
+        info: [
+          item('pin', 'pin', 0, 350),
+          item('label', 'label', 0, 250),
+          // Far enough apart, a sharp sound and a soft one both stay.
+          item('flow', 'flow', 3000, 2500),
+          item('pin2', 'pin', 2700, 350),
+        ],
+      }),
+    ]);
+    expect(pinned.map((s) => s.of)).toEqual(['pin', 'flow', 'pin2']);
+    const beds = soundsOf([
+      shot({
+        info: [item('flow', 'flow', 2000, 2500)],
+        camera: [{ move: 'pull', atMs: 2000, durMs: 800, amount: 0.12 }],
+      }),
+    ]);
+    expect(beds.map((s) => s.sound)).toEqual(['swell']);
+    const strokes = soundsOf([
+      shot({
+        info: [
+          item('a', 'draw', 1000, 800),
+          item('b', 'draw', 1500, 800),
+          item('c', 'draw', 2400, 800),
+        ],
+      }),
+    ]);
+    expect(strokes.map((s) => s.of)).toEqual(['a', 'c']);
+    const dive = soundsOf([
+      shot({
+        endMs: 3400,
+        join: 'zoom-through',
+        joinMs: 700,
+        camera: [
+          { move: 'zoom-through', atMs: 2200, durMs: 1200, target: box },
+        ],
+      }),
+      shot({
+        id: 's2',
+        startMs: 3400,
+        endMs: 9000,
+        set: { kind: 'document', asset: 'letter' },
+      }),
+    ]);
+    // The join's whoosh, loudest on the cut, stands for the dive; the letter's paper comes in after it.
+    expect(dive.map((s) => [s.of, s.sound])).toEqual([
+      ['s1:join', 'whoosh'],
+      ['s2:set', 'paper'],
+    ]);
   });
 
   it('leaves a question’s quiet quiet: only its rise is heard in it', () => {

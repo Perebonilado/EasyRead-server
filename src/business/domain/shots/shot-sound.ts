@@ -21,8 +21,10 @@
  *
  * Everything else is silent: a fill, a spotlight, a machine running, an
  * exit, a slow drift, a cut, a dissolve. A label ticks only when it is the
- * first in a while, and no more than two cues start in any second: where
- * more would, the most important are kept. An ask's quiet is left quiet.
+ * first in a while; two sounds that would blur into one are one (a pin and
+ * its own label landing together, a dive and the join it ends in); and no
+ * more than two cues start in any second: where more would, the most
+ * important are kept. An ask's quiet is left quiet.
  *
  * The cues are on the voice's clock, each on its motion. Snapping to the
  * music's beat is the player's, because only the player knows where the
@@ -62,8 +64,24 @@ export type ShotSound = (typeof SHOT_SOUNDS)[number];
 /** The quietest and loudest a cue is, against the library's level. */
 const GAIN = { least: 0.25, most: 1 } as const;
 
-/** Two cues of one sound closer than this are one event, heard once. */
-const SAME_EVENT_MS = 80;
+/**
+ * Two sounds that would blur into one are one: two with a sharp start
+ * (a tick, a pop, a thump, a pencil, paper) closer than `sharpMs` are heard
+ * as a stumble (a pin and its own label landing together), two soft beds
+ * starting closer than `softMs` as mud, and one sound twice over itself
+ * as one. The more important is kept.
+ */
+export const CLASH = { sharpMs: 200, softMs: 300 } as const;
+const SHARP: ReadonlySet<ShotSound> = new Set<ShotSound>([
+  'tick',
+  'ticks',
+  'pop',
+  'thump',
+  'pencil',
+  'paper',
+]);
+/** How long a sound with no length of its own is taken to last, for telling whether two overlap. */
+const SHORT_MS = 150;
 
 /** At most this many cues start inside any window this long: the voice comes first. */
 export const DENSITY = { count: 2, windowMs: 1000 } as const;
@@ -349,11 +367,23 @@ const crowds = (starts: readonly number[], at: number): boolean => {
   );
 };
 
+/** Whether two cues would blur into one (CLASH): a stumble of sharp starts, two beds begun together, or one sound over itself. */
+const clashes = (a: ShotSoundDto, b: ShotSoundDto): boolean => {
+  const apart = Math.abs(a.atMs - b.atMs);
+  if (a.sound === b.sound) {
+    const end = (cue: ShotSoundDto) => cue.atMs + (cue.durMs ?? SHORT_MS);
+    return a.atMs < end(b) && b.atMs < end(a);
+  }
+  const sharp = SHARP.has(a.sound as ShotSound);
+  if (sharp !== SHARP.has(b.sound as ShotSound)) return false;
+  return apart < (sharp ? CLASH.sharpMs : CLASH.softMs);
+};
+
 /**
- * The cues kept: the most important first, each kept if it is not the same
- * sound as a kept one at the same moment, does not start in an ask's
- * quiet (unless it is the ask's own), and leaves no second with more than
- * DENSITY's cues starting in it. In time order.
+ * The cues kept: the most important first, each kept if it does not blur
+ * into one kept already (CLASH), does not start in an ask's quiet (unless
+ * it is the ask's own), and leaves no second with more than DENSITY's cues
+ * starting in it. In time order.
  */
 function thinned(
   planned: readonly Planned[],
@@ -364,13 +394,7 @@ function thinned(
   );
   const kept: ShotSoundDto[] = [];
   for (const { cue } of order) {
-    if (
-      kept.some(
-        (k) =>
-          k.sound === cue.sound && Math.abs(k.atMs - cue.atMs) < SAME_EVENT_MS,
-      )
-    )
-      continue;
+    if (kept.some((k) => clashes(k, cue))) continue;
     // The quiet after a question: the viewer thinks.
     if (
       cue.sound !== 'rise' &&

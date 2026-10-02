@@ -15,6 +15,7 @@
 import type { KitLook, KitStyle } from './style';
 import { validateRig, type KitPiece } from './rig';
 import { PEOPLE_KIT } from './people';
+import { THINGS_KIT } from './things';
 import { VEHICLE_KIT } from './vehicles';
 
 /** The families of the kit (plan §7.2). */
@@ -61,6 +62,7 @@ export interface KitEntry {
 const FAMILIES: readonly Readonly<Record<string, KitEntry>>[] = [
   PEOPLE_KIT,
   VEHICLE_KIT,
+  THINGS_KIT,
 ];
 
 export const KIT: Readonly<Record<string, KitEntry>> = Object.assign(

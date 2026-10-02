@@ -129,11 +129,11 @@ export const RECIPE_SOUND: Readonly<Partial<Record<ShotInfoRecipe, Heard>>> = {
   strike: { sound: 'pencil', gain: 0.75, on: 'span', rank: 6 },
   draw: { sound: 'pencil', gain: 0.8, on: 'span', rank: 5 },
   flow: { sound: 'swell', gain: 0.8, on: 'span', rank: 5 },
-  grow: { sound: 'pop', gain: 0.55, on: 'land', rank: 4 },
+  grow: { sound: 'pop', gain: 0.65, on: 'land', rank: 4 },
   transfer: { sound: 'whoosh', gain: 0.45, on: 'span', rank: 4 },
   seam: { sound: 'pencil', gain: 0.6, on: 'span', rank: 3 },
   mark: { sound: 'pencil', gain: 0.55, on: 'span', rank: 3 },
-  enter: { sound: 'pop', gain: 0.45, on: 'land', rank: 3 },
+  enter: { sound: 'pop', gain: 0.6, on: 'land', rank: 3 },
   label: { sound: 'tick', gain: 0.7, on: 'land', rank: 2 },
 };
 

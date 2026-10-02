@@ -17,7 +17,14 @@ import {
   type StudioSet,
 } from './studio';
 import type { StoryBible, StoryPlace, StoryWorld } from '../scene-story';
-import { withShowMap } from '../scene-map';
+import { withShowMap, type MapDraft } from '../scene-map';
+import {
+  countryOfPart,
+  placeKey,
+  placeNamed,
+  placesIn,
+  readRegion,
+} from '../scene-map-places';
 import type { PaletteEntry, PaletteToken } from '../scene-palette';
 import { packOfWorld, plainPack } from '../scene-style-packs';
 import { withPresets } from './studio-clip';
@@ -300,4 +307,75 @@ export function onShowMap(
   if (!world) return sheet;
   const draft = withShowMap(sheet.draft, world.base ?? null, world.palette);
   return draft === sheet.draft ? sheet : { ...sheet, draft };
+}
+
+/** A name found as a key, as the words wrote it ("kano" in "In Kano, he fell ill": "Kano"); else in title case. */
+function asWritten(words: string, key: string): string {
+  const pattern = key
+    .split(' ')
+    .map((word) => word.replace(/[^a-z0-9]/gu, ''))
+    .filter(Boolean)
+    .join('[^\\p{L}\\p{N}]+');
+  const found = pattern
+    ? new RegExp(`\\b${pattern}\\b`, 'iu').exec(words)?.[0]
+    : undefined;
+  return (
+    found ??
+    key.replace(/\b(\p{L})(\p{L}*)/gu, (_, first: string, rest: string) =>
+      ['of', 'and', 'the'].includes(first + rest)
+        ? first + rest
+        : first.toUpperCase() + rest,
+    )
+  );
+}
+
+/**
+ * The show's map with one real place pinned on it: how a lesson shows a
+ * moment that happens somewhere (explainer-animation-plan §4: a named real
+ * place appears only as the map or a verified photo of it), never a
+ * drawing of the place and never a card of its name. The place is the
+ * first the words name that code knows (a city, a landmark, an area of a
+ * country) and that is on the show's map; null when the show has no map,
+ * or the words name no place on it.
+ */
+export function pinOnShowMap(
+  words: string,
+  world: Pick<EditorWorld, 'base'> | null | undefined,
+): { place: string; map: MapDraft } | null {
+  const base = world?.base;
+  if (!base) return null;
+  const region = readRegion(base.region).region;
+  if (!region) return null;
+  const inView = (country: string | null) =>
+    region.kind === 'world' ||
+    (country !== null &&
+      (region.kind === 'countries'
+        ? region.countries
+        : region.entry.members
+      ).includes(country));
+  for (const found of placesIn(words)) {
+    const place =
+      found.kind === 'place'
+        ? placeNamed(found.name)
+        : found.kind === 'part'
+          ? {
+              name: asWritten(words, found.name),
+              country: countryOfPart(found.name),
+            }
+          : null;
+    if (!place || !inView(place.country)) continue;
+    // Never the show's whole region pinned on itself.
+    if (placeKey(place.name) === placeKey(base.region)) continue;
+    return {
+      place: place.name,
+      map: {
+        region: base.region,
+        highlight: null,
+        places: null,
+        routes: null,
+        pins: [{ place: place.name, label: null }],
+      },
+    };
+  }
+  return null;
 }

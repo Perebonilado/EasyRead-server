@@ -13,8 +13,22 @@ import {
   urlKey,
   usesEditor,
   worldOf,
+  type EditorClaim,
   type EditorSource,
 } from './studio-editor';
+
+/** A claim of the research, by its id. */
+const claim = (id: string): EditorClaim => ({
+  id,
+  text: `What ${id} says.`,
+  kind: 'event',
+  sources: [{ url: `https://example.org/${id}`, title: `Source ${id}` }],
+  confidence: 'high',
+  visual: '',
+  contested: false,
+  who: null,
+  status: null,
+});
 
 describe("the editor's angles", () => {
   it('are summed and ranked by code, whatever the writer said of them', () => {
@@ -297,13 +311,14 @@ describe("the editor's plan and world, made sound", () => {
       ],
       held: { token: 'chart0', for: 'independence' },
       places: [
-        { name: 'The chamber', kind: 'hall', time: 'night' },
-        { name: 'Somewhere', kind: 'castle' },
+        { name: 'The chamber', kind: 'hall', time: 'night', claims: ['c1'] },
+        { name: 'Somewhere', kind: 'castle', claims: ['c2'] },
       ],
       people: [
         {
           name: 'A leader',
           figure: { age: 'elder', top: 'robe', headwear: 'kufi' },
+          claims: ['c3'],
         },
       ],
     });
@@ -320,6 +335,46 @@ describe("the editor's plan and world, made sound", () => {
       top: 'robe',
       headwear: 'kufi',
     });
+  });
+
+  it('keeps only real places and people: each with a claim the research has', () => {
+    const raw = {
+      places: [
+        { name: 'Kano', kind: 'market', claims: ['c1'] },
+        // An everyday place made up for the story: no claim names it.
+        { name: 'A market on a feast day', kind: 'market', claims: [] },
+        { name: 'A village', kind: 'countryside' },
+        { name: 'Lagos', kind: 'harbour', claims: ['c9'] },
+      ],
+      people: [
+        { name: 'Herbert Macaulay', claims: ['c2', 'c9'] },
+        // Ordinary people made up for the story, and a stand-in.
+        { name: 'A farmer', claims: [] },
+        { name: 'A student' },
+      ],
+    };
+    // Read alone (no research to hold its claims to), a claim is a claim.
+    const alone = worldOf(raw);
+    expect(alone.places.map((p) => p.name)).toEqual(['Kano', 'Lagos']);
+    expect(alone.people.map((p) => p.name)).toEqual(['Herbert Macaulay']);
+    // Held to the research: a claim it has not got is no claim.
+    const held = worldOf(raw, { claims: [claim('c1'), claim('c2')] });
+    expect(held.places.map((p) => [p.name, p.claims])).toEqual([
+      ['Kano', ['c1']],
+    ]);
+    expect(held.people.map((p) => [p.name, p.claims])).toEqual([
+      ['Herbert Macaulay', ['c2']],
+    ]);
+    // So the world a show keeps is read back the same: no place or person
+    // with no claim of its research comes back.
+    const kept = editorOf({
+      research: { claims: [claim('c1'), claim('c2')] },
+      world: raw,
+    });
+    expect(kept?.world?.places.map((p) => p.name)).toEqual(['Kano']);
+    expect(kept?.world?.people.map((p) => p.name)).toEqual([
+      'Herbert Macaulay',
+    ]);
   });
 
   it("keeps the show's one map as code knows it, and its picture in words", () => {

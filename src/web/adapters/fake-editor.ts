@@ -258,18 +258,30 @@ export function fakeEditorAnswer(
         legend: 'a small key in the corner while the timeline is up',
         picture: 'a timeline of the years',
         map: null,
+        // Real places and people with the claims that name them; an
+        // everyday place or an ordinary person made up for the story has
+        // none, and is left out (worldOf).
         places: [
           {
             name: 'The council hall',
             kind: 'hall',
             look: 'benches and tall windows',
             time: 'day',
+            claims: ['c3'],
+          },
+          {
+            name: 'Rome',
+            kind: 'street',
+            look: 'stone streets and churches',
+            time: 'day',
+            claims: ['c1'],
           },
           {
             name: 'The town square',
             kind: 'square',
             look: 'a market square',
             time: 'day',
+            claims: [],
           },
         ],
         people: [
@@ -286,6 +298,7 @@ export function fakeEditorAnswer(
               top: 'robe',
               topColour: 'black',
             },
+            claims: ['c4'],
           },
           {
             name: 'A council member',
@@ -294,6 +307,7 @@ export function fakeEditorAnswer(
             recurring: false,
             voice: 'woman',
             figure: { age: 'adult', top: 'robe' },
+            claims: [],
           },
         ],
         things: [{ name: 'The calendar', look: 'a printed sheet of months' }],

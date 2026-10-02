@@ -98,9 +98,15 @@ import {
 } from '../../business/domain/studio/studio-editor-cut';
 import {
   onShowMap,
+  pinOnShowMap,
   worldBible,
   worldColours,
 } from '../../business/domain/studio/studio-editor-world';
+import {
+  numberOf,
+  type CounterDraft,
+} from '../../business/domain/scene-counter';
+import { quotedSpans } from '../../business/domain/scene-script';
 import {
   describeBeats,
   describeEarlierScripts,
@@ -556,12 +562,13 @@ export class StudioEditorProcessor {
         `The brief:\n${describeEditorBrief(show.brief)}`,
         describeQuestion(editor),
         `The plan:\n${describePlan(editor.plan)}`,
-        `The research's look notes and people:\n${describeResearch({
+        // Its timeline too: where each dated event happened, with the
+        // claims that say so, so every place of the world is a real one.
+        `The research's look notes, people and places:\n${describeResearch({
           ...editor.research,
           claims: editor.research.claims.filter((c) =>
             ['name', 'event', 'date'].includes(c.kind),
           ),
-          timeline: [],
           numbers: [],
           myths: [],
           perspectives: [],
@@ -570,7 +577,8 @@ export class StudioEditorProcessor {
       ],
     });
     await this.record(episode.id, answer.usage, 'explainer_edit');
-    const world = worldOf(answer.value);
+    // Its places and people real ones, each with a claim of the research.
+    const world = worldOf(answer.value, editor.research);
     const value = answer.value;
     const subject =
       (typeof value.subject === 'string' && value.subject.trim()) ||
@@ -1225,8 +1233,10 @@ export class StudioEditorProcessor {
 
   /**
    * A scene boarded by code alone, when its board cannot be had: a
-   * lesson's lines each over a keyword card of what it shows; an
-   * illustrated scene's narration in its place, its people there.
+   * lesson's lines over what the research can show truthfully of them
+   * (plainLesson: a number, a place on the show's map, exact words), never
+   * a keyword card; an illustrated scene's narration in its place, its
+   * people there.
    */
   private async plainBoard(
     show: StudioShowRecord,
@@ -1239,7 +1249,7 @@ export class StudioEditorProcessor {
     const lines = this.rowsOf(episode, scene);
     const sheet = isIllustrated(scene)
       ? plainShots(scene, lines, bible)
-      : plainLesson(scene, lines);
+      : plainLesson(scene, lines, show.editor);
     await this.studio.updateScene(row.id, {
       sheet,
       sheetHash: sceneFingerprint(sheet, bible, show.brief, []),
@@ -1278,7 +1288,10 @@ export class StudioEditorProcessor {
       // Whom it is for: the narration is written, so no word budget.
       `Whom it teaches: ${show.brief.audience ?? 'adults'}${recipe ? `. ${recipe.pictures}` : ''}`,
       `This is scene ${k + 1} of ${outline.scenes.length} of "${outline.title}", about ${scene.seconds} seconds.${k === 0 ? ' It opens the episode.' : ''}`,
-      `The lines, one beat each, word for word, with what the editor wants seen:\n${lines.map((r, i) => `${i + 1}. SAY: ${r.say}\n   SHOW: ${r.show || '(your choice)'} [${r.visual}]${r.visual === 'scene' ? ' (a moment of people in a place: draw it as one drawing, kind "drawing", the people and the place as the world describes them; never a keyword card)' : ''}`).join('\n')}`,
+      // A moment of people in a place is shown by what is real in it,
+      // never a drawing of them or of the place (explainer-animation-plan
+      // §10).
+      `The lines, one beat each, word for word, with what the editor wants seen:\n${lines.map((r, i) => `${i + 1}. SAY: ${r.say}\n   SHOW: ${r.show || '(your choice)'} [${r.visual}]${r.visual === 'scene' ? ' (a moment of the story: show what is real in it, where it happened as the show’s map with the place pinned, a document, a number, exact words as a quote; never a drawing of people or of a place, never a keyword card)' : ''}`).join('\n')}`,
       world ? `The show's world and colours:\n${describeWorld(world)}` : '',
       `The page:\n${scene.teach ?? ''}`,
     ];
@@ -1293,9 +1306,10 @@ export class StudioEditorProcessor {
     };
     const first = await this.llm.editorBoard({ kind: 'lesson', parts });
     await this.record(episode.id, first.usage, 'explainer_board');
-    // On its written lines and the playbook's pace, every moment of people
-    // in a place a drawing of it (never a word card), and every map on the
-    // show's one map, in its colours.
+    // On its written lines and the playbook's pace, every moment at a real
+    // place the show's map with the place pinned (never a drawing of it,
+    // never a word card), and every map on the show's one map, in its
+    // colours.
     const sheetOf = (draft: unknown) =>
       onShowMap(
         explainerSheetOf({
@@ -1320,9 +1334,15 @@ export class StudioEditorProcessor {
       const left = checkExplainer(next, options).problems;
       if (worse(left, problems) <= 0) [sheet, problems] = [next, left];
     }
-    // What the board still got wrong is set in type, never handed back.
+    // What the board still got wrong is left out, never handed back.
     if (errorsIn(problems).length) {
       sheet = repairExplainer(sheet, options);
+      problems = checkExplainer(sheet, options).problems;
+    }
+    // A board left showing nothing at all is the plain one: what the
+    // research can show of its lines, never an empty stage or a card.
+    if (!checkExplainer(sheet, options).script.steps.some((s) => s.stage)) {
+      sheet = plainLesson(scene, lines, show.editor);
       problems = checkExplainer(sheet, options).problems;
     }
     await this.studio.updateScene(row.id, {
@@ -1847,67 +1867,247 @@ function EMPTY_BIBLE_FOR(show: StudioShowRecord): StudioBible {
   };
 }
 
-/** The words a row's picture names, for a plain keyword card: what it quotes, else its first few words. */
-function cardWords(row: EditorialRow): string {
-  const quoted = /["“]([^"”]{1,40})["”]/u.exec(row.show)?.[1];
-  if (quoted) return quoted;
-  const words = (row.show || row.say).replace(/[.,;:!?]+$/u, '').split(/\s+/u);
-  return words.slice(0, 4).join(' ');
+/** A whole number from 1000 to 2100 with nothing after it: a year, never a quantity. */
+const YEAR_ALONE = /^(?:1\d{3}|20\d{2}|2100)$/u;
+
+/** Whether a line says a figure itself: its number, as digits, apart from other digits. */
+function saysFigure(say: string, figure: string): boolean {
+  const read = numberOf(figure);
+  if (!read) return false;
+  const digits = String(read.value).replace('.', '\\.');
+  return new RegExp(`(?:^|[^\\d.,])${digits}(?:[^\\d]|$)`, 'u').test(
+    say.replace(/(\d),(?=\d{3})/gu, '$1'),
+  );
 }
 
-/** A lesson scene boarded by code alone: each line over a keyword card of what it shows. */
+/** What a figure is in, when the words after it run on: its scale. */
+const SCALE = /^(?:%|million|billion|thousand|trillion|per ?cent|percent)\b/iu;
+/** The words a counter writes before its number: a currency, a hedge. */
+const QUALIFIER =
+  /^(?:about|around|almost|nearly|over|under|roughly|some|up to|more than|less than|fewer than|at least|us\$|[$£€¥₹₦])$/iu;
+/** Little words that are never what a figure counts. */
+const LITTLE = new Set(
+  'of in on at to the a an and by for from with was were is are had has have than that who which'.split(
+    ' ',
+  ),
+);
+
+/**
+ * A figure as a counter reads it: a currency or a hedge before its number
+ * ("$", "about"), the number, and what it is in ("million", "%"; a short
+ * unit kept whole, "10 days"; else the word that names what it counts,
+ * "174 seats"); with what it counts. Null for no number, or a year.
+ */
+function counterOf(said: string, label: string | null): CounterDraft | null {
+  const m = /^(.*?)(-?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)\s*(.*)$/su.exec(
+    said.trim(),
+  );
+  if (!m || !numberOf(m[2])) return null;
+  const words = m[1].trim().split(/\s+/u).filter(Boolean);
+  const prefix = [words.slice(-2).join(' '), words.slice(-1).join(' ')].find(
+    (one) => one && QUALIFIER.test(one),
+  );
+  const after = m[3].trim().replace(/[.,;:!?]+$/u, '');
+  const first = after.split(/\s+/u)[0]?.replace(/[^\p{L}%]/gu, '') ?? '';
+  const unit =
+    after.length <= 16
+      ? after
+      : (SCALE.exec(after)?.[0] ??
+        (first.length <= 12 && !LITTLE.has(first.toLowerCase()) ? first : ''));
+  if (
+    YEAR_ALONE.test(m[2]) &&
+    (!unit || LITTLE.has(unit.split(/\s+/u)[0].toLowerCase()))
+  )
+    return null;
+  return {
+    value: m[2],
+    unit: unit || null,
+    prefix: prefix ?? null,
+    label,
+    then: null,
+  };
+}
+
+/** Where claims come from, written small under what shows them: the first source's title. */
+function sourceOf(
+  ids: readonly string[],
+  research: Pick<EditorResearch, 'claims'>,
+): string | null {
+  for (const claim of research.claims)
+    if (ids.includes(claim.id) && claim.sources[0]?.title)
+      return claim.sources[0].title.slice(0, 90);
+  return null;
+}
+
+/**
+ * A line's number from the research, as a counter: a number of its
+ * claims (one two sources agree on first, else one the line says itself),
+ * else the figure a number claim of it gives, said in the line. With
+ * what it counts and its source, so the counter is held to the research,
+ * not to the scene's words. Null when its claims give none.
+ */
+function rowNumber(
+  row: EditorialRow,
+  research: Pick<EditorResearch, 'claims' | 'numbers'>,
+): { counter: CounterDraft; source: string | null } | null {
+  const cited = (ids: readonly string[]) =>
+    ids.some((id) => row.claims.includes(id));
+  const numbers = research.numbers
+    .filter(
+      (n) => cited(n.claims) && (n.checked || saysFigure(row.say, n.value)),
+    )
+    .sort((a, b) => Number(b.checked) - Number(a.checked));
+  for (const n of numbers) {
+    const counter = counterOf(n.value, n.label || null);
+    if (counter) return { counter, source: sourceOf(n.claims, research) };
+  }
+  // A number claim's figures, in its own words: the words before each (a
+  // hedge, a currency) and after it (what it counts).
+  for (const claim of research.claims) {
+    if (claim.kind !== 'number' || !row.claims.includes(claim.id)) continue;
+    for (const m of claim.text.matchAll(/\d[\d,]*(?:\.\d+)?/gu)) {
+      const at = m.index ?? 0;
+      const counter = counterOf(
+        `${claim.text.slice(0, at).trim().split(/\s+/u).slice(-2).join(' ')} ${claim.text.slice(at)}`,
+        null,
+      );
+      if (counter && saysFigure(row.say, m[0]))
+        return { counter, source: sourceOf([claim.id], research) };
+    }
+  }
+  return null;
+}
+
+/**
+ * A line's exact words from the research, as a quote: the words of a
+ * quote claim of it as the line says them (so they are the scene's own,
+ * word for word), else the words the line itself puts in quotes. With who
+ * said them, its caption. Null when no quote claim of it is said.
+ */
+function rowQuote(
+  row: EditorialRow,
+  research: Pick<EditorResearch, 'claims'>,
+): { text: string; who: string } | null {
+  const claims = research.claims.filter(
+    (c) => c.kind === 'quote' && row.claims.includes(c.id),
+  );
+  if (!claims.length) return null;
+  const said = row.say.toLowerCase();
+  for (const claim of claims)
+    for (const words of [
+      ...quotedSpans(claim.text).map(([a, b]) => claim.text.slice(a, b)),
+      claim.text.replace(/[.]+$/u, ''),
+    ]) {
+      const at = said.indexOf(words.toLowerCase());
+      if (at >= 0 && words.split(/\s+/u).length >= 2)
+        return {
+          text: row.say.slice(at, at + words.length),
+          who: claim.who ?? '',
+        };
+    }
+  const own = quotedSpans(row.say).map(([a, b]) => row.say.slice(a, b))[0];
+  return own && own.split(/\s+/u).length >= 2
+    ? { text: own, who: claims[0].who ?? '' }
+    : null;
+}
+
+/**
+ * What a line can show truthfully when no board could be had, from the
+ * research alone (explainer-animation-plan §10): a number of its claims as
+ * a counter; a real place it names on the show's map, pinned; its exact
+ * words as a quote. Its kind of picture first (a place line's place, a
+ * number line's number), then the rest. Nothing for a line with none of
+ * them: the picture before it holds.
+ */
+function plainPicture(
+  row: EditorialRow,
+  k: number,
+  editor: Pick<StudioEditor, 'world' | 'research'> | null,
+): SceneScriptDraft['cast'][number] | null {
+  const research = editor?.research ?? null;
+  const number = () => {
+    const found = research ? rowNumber(row, research) : null;
+    return found
+      ? castThing(`number-${k + 1}`, 'counter', found.counter.label ?? '', {
+          counter: found.counter,
+          source: found.source,
+        })
+      : null;
+  };
+  const place = () => {
+    const pinned =
+      row.visual === 'place' || row.visual === 'scene'
+        ? pinOnShowMap(`${row.show} ${row.say}`, editor?.world)
+        : null;
+    return pinned
+      ? castThing(`map-${k + 1}`, 'map', pinned.place, { map: pinned.map })
+      : null;
+  };
+  const quote = () => {
+    const found = research ? rowQuote(row, research) : null;
+    return found
+      ? castThing(`quote-${k + 1}`, 'quote', found.who, {
+          quote: found.text,
+          phrases: [],
+        })
+      : null;
+  };
+  const order =
+    row.visual === 'place' || row.visual === 'scene'
+      ? [place, number, quote]
+      : row.visual === 'exact-words' || row.visual === 'who'
+        ? [quote, number, place]
+        : [number, place, quote];
+  for (const one of order) {
+    const thing = one();
+    if (thing) return thing;
+  }
+  return null;
+}
+
+/**
+ * A lesson scene boarded by code alone, when its board cannot be had:
+ * each line over what the research can show truthfully of it (a number,
+ * a real place on the show's map, its exact words), and the picture
+ * before it held where it can show nothing; the first line over the
+ * show's map, or its title, where it has none of its own. Never a keyword
+ * card standing in for a picture (explainer-animation-plan §10).
+ */
 export function plainLesson(
   scene: Pick<OutlineScene, 'title'>,
   lines: readonly EditorialRow[],
+  editor: Pick<StudioEditor, 'world' | 'research'> | null = null,
 ): ExplainerSheet {
   const draft = onTheLines({ title: scene.title, cast: [], steps: [] }, lines);
-  const cards = lines.map((line, k) =>
-    line.visual === 'scene'
-      ? momentDrawing(`moment-${k + 1}`, cardWords(line), line.show || line.say)
-      : {
-          id: `card-${k + 1}`,
-          kind: 'words' as const,
-          name: cardWords(line),
-          brief: null,
-          motion: null,
-          parts: null,
-          states: null,
-          shape: null,
-          value: null,
-          style: 'keyword' as const,
-          sound: null,
-          lines: null,
-          plot: null,
-          quote: null,
-          phrases: null,
-          ref: null,
-          state: null,
-          figure: null,
-          count: null,
-          pose: null,
-          signs: null,
-          holding: null,
-          timeline: null,
-          chart: null,
-        },
+  const pictures = lines.map((line, k) => plainPicture(line, k, editor));
+  const base = editor?.world?.base;
+  if (lines.length && !pictures[0])
+    pictures[0] = base
+      ? castThing('show-map', 'map', base.region, {
+          map: {
+            region: base.region,
+            highlight: null,
+            places: null,
+            routes: null,
+          },
+        })
+      : castThing('title', 'words', scene.title, { style: 'title' });
+  const shown = pictures.flatMap((thing, k) => (thing ? [{ thing, k }] : []));
+  return onShowMap(
+    explainerSheetOf({
+      kind: 'explainer',
+      title: scene.title,
+      transition: 'cut',
+      draft: {
+        ...draft,
+        cast: shown.map((one) => one.thing),
+        steps: shown.map(({ thing, k }) =>
+          onItsLine(k, lines[k].say, thing.id),
+        ),
+      },
+    }),
+    editor?.world ?? null,
   );
-  return explainerSheetOf({
-    kind: 'explainer',
-    title: scene.title,
-    transition: 'cut',
-    draft: {
-      ...draft,
-      cast: cards,
-      steps: cards.map((card, k) => ({
-        beat: k,
-        phrase: '',
-        layout: null,
-        show: [card.id],
-        arrows: null,
-        effects: null,
-      })),
-    },
-  });
 }
 
 /** An illustrated scene boarded by code alone: its narration in its place, its people there. */
@@ -1935,17 +2135,22 @@ export function plainShots(
   );
 }
 
-/** A thing of a lesson's cast, every field present: a drawing the artist makes of a moment. */
-function momentDrawing(id: string, name: string, brief: string) {
+/** A thing of a lesson's cast, every field present: its own given, the rest null. */
+function castThing(
+  id: string,
+  kind: SceneScriptDraft['cast'][number]['kind'],
+  name: string,
+  own: Partial<SceneScriptDraft['cast'][number]> = {},
+): SceneScriptDraft['cast'][number] {
   return {
     id,
-    kind: 'drawing' as const,
+    kind,
     name,
-    brief,
+    brief: null,
     motion: null,
     parts: null,
     states: null,
-    shape: 'wide' as const,
+    shape: null,
     value: null,
     style: null,
     sound: null,
@@ -1962,20 +2167,38 @@ function momentDrawing(id: string, name: string, brief: string) {
     holding: null,
     timeline: null,
     chart: null,
+    ...own,
   };
 }
 
+/** A step bringing one thing on as its line starts (on its first words), alone on the stage. */
+const onItsLine = (
+  beat: number,
+  say: string,
+  id: string,
+): SceneScriptDraft['steps'][number] => ({
+  beat,
+  phrase: say.split(/\s+/u).filter(Boolean).slice(0, 3).join(' '),
+  layout: 'one',
+  show: [id],
+  arrows: null,
+  effects: null,
+});
+
 /**
  * A lesson board's moments of people in a place (rows the script marked
- * "scene", made the lesson's while illustrated scenes are switched off)
- * each shown as a drawing of the moment: where its line brings on nothing
- * but words, a drawing of what it shows comes on with it, the people and
- * the place as the world describes them. Never a word card for a moment.
+ * "scene", made the lesson's while illustrated scenes are switched off):
+ * where its line brings on nothing but words, a moment at a real place on
+ * the show's map is that map with the place pinned. Never a drawing of
+ * the place or of its people (no invented place, no stock figure, no
+ * likeness: explainer-animation-plan §10), and never a word card; a
+ * moment at no place on the map brings on nothing, and the picture before
+ * it holds.
  */
 export function drawnMoments(
   draft: SceneScriptDraft,
   lines: readonly EditorialRow[],
-  world: Pick<EditorWorld, 'places' | 'people' | 'era'> | null,
+  world: Pick<EditorWorld, 'base'> | null,
 ): SceneScriptDraft {
   const byId = new Map(draft.cast.map((t) => [t.id, t]));
   const cast = [...draft.cast];
@@ -1983,44 +2206,15 @@ export function drawnMoments(
   lines.forEach((line, k) => {
     if (line.visual !== 'scene') return;
     const shown = steps
-      .filter((st) => st.beat === k)
+      .filter((st) => st.beat === k && st.layout)
       .flatMap((st) => st.show ?? []);
     if (shown.some((id) => byId.get(id) && byId.get(id)!.kind !== 'words'))
       return;
-    const said = `${line.show} ${line.say}`.toLowerCase();
-    const place = world?.places.find((p) =>
-      said.includes(p.name.toLowerCase()),
-    );
-    const people = (world?.people ?? []).filter((p) =>
-      said.includes(p.name.toLowerCase()),
-    );
+    const pinned = pinOnShowMap(`${line.show} ${line.say}`, world);
+    if (!pinned) return;
     const id = `moment-${k + 1}`;
-    const brief = [
-      line.show || line.say,
-      place ? `The place: ${place.name}, ${place.look}` : '',
-      people.length
-        ? `The people: ${people.map((p) => `${p.name}, ${p.likeness}`).join('; ')}`
-        : '',
-      world
-        ? `In ${world.era === 'today' ? 'the present day' : world.era}.`
-        : '',
-    ]
-      .filter(Boolean)
-      .join(' ');
-    const name = (line.show || line.say)
-      .replace(/[.,;:!?]+$/u, '')
-      .split(/\s+/u)
-      .slice(0, 5)
-      .join(' ');
-    cast.push(momentDrawing(id, name, brief));
-    steps.push({
-      beat: k,
-      phrase: '',
-      layout: null,
-      show: [id],
-      arrows: null,
-      effects: null,
-    });
+    cast.push(castThing(id, 'map', pinned.place, { map: pinned.map }));
+    steps.push(onItsLine(k, line.say, id));
   });
   return {
     ...draft,

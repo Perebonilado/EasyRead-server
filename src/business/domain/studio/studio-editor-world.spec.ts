@@ -2,6 +2,7 @@ import { bibleOf, type StorySheet } from './studio';
 import { worldOf } from './studio-editor';
 import {
   onShowMap,
+  pinOnShowMap,
   storyWorldOf,
   withWorldPlaces,
   worldBible,
@@ -11,7 +12,10 @@ import {
 import { explainerSheetOf } from './studio';
 import { storyBibleFor } from './studio-stage';
 import { illustratedJoin, joinFor } from './studio-edit';
+import { readMap } from '../scene-map';
 
+// Each place and person with a claim of the research, as every world's
+// are (worldOf leaves out one with none).
 const world = worldOf({
   era: '1950s',
   places: [
@@ -20,9 +24,15 @@ const world = worldOf({
       kind: 'hall',
       time: 'day',
       look: 'tiered benches',
+      claims: ['c1'],
     },
-    { name: 'The race course', kind: 'field', time: 'night' },
-    { name: 'A village school', kind: 'classroom' },
+    {
+      name: 'The race course',
+      kind: 'field',
+      time: 'night',
+      claims: ['c2'],
+    },
+    { name: 'A village school', kind: 'classroom', claims: ['c3'] },
   ],
   people: [
     {
@@ -36,8 +46,14 @@ const world = worldOf({
         headwear: 'kufi',
         topColour: 'white',
       },
+      claims: ['c4'],
     },
-    { name: 'A student', role: 'sketches the flag', figure: { age: 'teen' } },
+    {
+      name: 'A student',
+      role: 'sketches the flag',
+      figure: { age: 'teen' },
+      claims: ['c5'],
+    },
   ],
   things: [{ name: 'The flag', look: 'green and white stripes' }],
 });
@@ -259,5 +275,47 @@ describe("a lesson in the show's colours, on its one map", () => {
     // No world, no map: the sheet as it was.
     expect(onShowMap(sheet, null)).toBe(sheet);
     expect(onShowMap(sheet, worldOf({}))).toBe(sheet);
+  });
+});
+
+describe("a moment at a real place, on the show's map (pinOnShowMap)", () => {
+  const nigeria = worldOf({ map: { region: 'Nigeria' } });
+
+  it('pins the first place the words name that is on the map', () => {
+    const pinned = pinOnShowMap(
+      'In Kano, he fell ill on the way north from Lagos.',
+      nigeria,
+    );
+    expect(pinned).toEqual({
+      place: 'Kano',
+      map: {
+        region: 'Nigeria',
+        highlight: null,
+        places: null,
+        routes: null,
+        pins: [{ place: 'Kano', label: null }],
+      },
+    });
+    // The map draws it: the pin is the place's.
+    expect(readMap(pinned!.map).spec?.pins?.map((p) => p.name)).toEqual([
+      'Kano',
+    ]);
+  });
+
+  it('never pins a place off the map, the region itself, or nowhere', () => {
+    // London is no place on a map of Nigeria.
+    expect(pinOnShowMap('The talks moved to London.', nigeria)).toBeNull();
+    expect(pinOnShowMap('All of Nigeria waited.', nigeria)).toBeNull();
+    expect(pinOnShowMap('A crowd gathers round a notice.', nigeria)).toBeNull();
+    // A show with no map has no place to pin.
+    expect(pinOnShowMap('In Kano, he fell ill.', worldOf({}))).toBeNull();
+    expect(pinOnShowMap('In Kano, he fell ill.', null)).toBeNull();
+  });
+
+  it('pins anywhere on a map of the world', () => {
+    const world = worldOf({ map: { region: 'world' } });
+    expect(pinOnShowMap('Talks opened in Geneva.', world)?.place).toBe(
+      'Geneva',
+    );
   });
 });

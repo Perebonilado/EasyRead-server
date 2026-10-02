@@ -20,15 +20,25 @@ import { FakeLlmAdapter } from '../../web/adapters/fake-llm.adapter';
 import type { StudioJobData } from '../queues';
 import {
   StudioEditorProcessor,
+  drawnMoments,
   joinedPlan,
   narratedSheet,
   onTheLines,
+  plainLesson,
 } from './studio-editor.processor';
 import { StudioProcessor } from './studio.processor';
 import type { SceneProcessor } from './scene.processor';
-import { rowsOf } from '../../business/domain/studio/studio-editorial';
+import {
+  rowsOf,
+  type EditorialRow,
+} from '../../business/domain/studio/studio-editorial';
+import { checkExplainer } from '../../business/domain/studio/studio-check';
 import { storySheetOf } from '../../business/domain/studio/studio';
-import { planOf, researchOf } from '../../business/domain/studio/studio-editor';
+import {
+  planOf,
+  researchOf,
+  worldOf,
+} from '../../business/domain/studio/studio-editor';
 
 /**
  * The editor's desk on the worker, against the fake model: a show planned
@@ -292,15 +302,15 @@ describe("the editor's desk on the worker", () => {
       [2, null],
     ]);
     expect(editor.plan!.leftOut).toContain('Part 11 of Why we have leap years');
-    // The world is the show's cast and sets: its people and places.
+    // The world is the show's cast and sets: its people and places, the
+    // research's own; an everyday place and an ordinary person made up
+    // for the story (no claim names them) are left out.
     const bible = d.show().bible!;
-    expect(bible.sets.map((s) => s.id)).toEqual([
-      'the-council-hall',
-      'the-town-square',
-    ]);
-    expect(bible.characters.map((c) => c.id)).toEqual([
-      'clavius',
-      'a-council-member',
+    expect(bible.sets.map((s) => s.id)).toEqual(['the-council-hall', 'rome']);
+    expect(bible.characters.map((c) => c.id)).toEqual(['clavius']);
+    expect(editor.world!.places.map((p) => [p.name, p.claims])).toEqual([
+      ['The council hall', ['c3']],
+      ['Rome', ['c1']],
     ]);
     // Episode 1: written, cut into lesson and illustrated scenes, ready to make.
     const episode = d.ep();
@@ -836,7 +846,7 @@ describe('the Studio processor hands the editor its work', () => {
 });
 
 describe('a board that cannot be had', () => {
-  it('is a plain one, never a hole in the film', async () => {
+  it('is a plain one, never a hole in the film and never a keyword card', async () => {
     const d = await planned();
     (d.llm as unknown as { editorBoard: () => Promise<never> }).editorBoard =
       () => Promise.reject(new Error('the board fell over'));
@@ -844,6 +854,7 @@ describe('a board that cannot be had', () => {
     const outline = d.ep().outline!;
     const rows = d.ep().editorial!.rows;
     expect(count).toBe(outline.scenes.length);
+    const shown: string[] = [];
     for (const scene of d.scenes.values()) {
       const planned = outline.scenes[scene.position];
       const said = rows
@@ -852,9 +863,25 @@ describe('a board that cannot be had', () => {
       expect(scene.status).toBe('ready');
       if (scene.sheet?.kind === 'explainer') {
         expect(scene.sheet.draft.beats.map((b) => b.say)).toEqual(said);
-        expect(scene.sheet.draft.cast.every((t) => t.kind === 'words')).toBe(
-          true,
-        );
+        // What the research can show of its lines (a counter, the show's
+        // map, exact words), or its title as it opens: never a card.
+        for (const thing of scene.sheet.draft.cast) {
+          expect(thing.id).not.toMatch(/^card-/);
+          expect(
+            ['counter', 'map', 'quote'].includes(thing.kind) ||
+              (thing.kind === 'words' && thing.style === 'title'),
+          ).toBe(true);
+          shown.push(thing.kind);
+        }
+        // And the stage shows it from the first line: never an empty stage.
+        const { script } = checkExplainer(scene.sheet, {
+          teach: planned.teach,
+          stage: null,
+          maths: false,
+          planned: null,
+        });
+        expect(script.steps[0]?.stage).toBeTruthy();
+        expect(script.steps[0]?.at.beat).toBe(0);
       } else
         expect(
           scene.sheet?.beats
@@ -862,18 +889,48 @@ describe('a board that cannot be had', () => {
             .map((b) => b.say),
         ).toEqual(said);
     }
+    // The line with a number of the research counts it up.
+    expect(shown).toContain('counter');
+    const counter = [...d.scenes.values()]
+      .flatMap((s) => (s.sheet?.kind === 'explainer' ? s.sheet.draft.cast : []))
+      .find((t) => t.kind === 'counter');
+    expect(counter?.counter).toMatchObject({
+      value: '4',
+      unit: 'million',
+      label: 'People affected',
+    });
+    expect(counter?.source).toBeTruthy();
   });
 });
 
 describe('with illustrated scenes switched off (STUDIO_ILLUSTRATED)', () => {
-  it('cuts no illustrated scene, and boards each moment of people as a drawing of it, never a word card', async () => {
+  it("cuts no illustrated scene, and never draws a moment of people: one at a real place is the show's map with it pinned", async () => {
     const d = await planned({});
     const outline = d.ep().outline!;
     expect(outline.scenes.some((s) => s.kind === 'illustrated')).toBe(false);
-    const rows = d.ep().editorial!.rows;
+    // The show on its map, and one of its moments in a real place on it.
+    const show = d.show();
+    d.shows.set('s1', {
+      ...show,
+      editor: {
+        ...show.editor!,
+        world: {
+          ...show.editor!.world!,
+          base: { kind: 'map', region: 'Italy' },
+        },
+      },
+    });
+    const ep = d.ep();
+    const rows = ep.editorial!.rows.map((r) =>
+      r.say === 'A council met to settle it.'
+        ? { ...r, show: 'The council hall in Rome: members argue' }
+        : r,
+    );
+    d.episodes.set('e1', { ...ep, editorial: { ...ep.editorial!, rows } });
     // The script still says where its moments of people are.
     expect(rows.some((r) => r.visual === 'scene')).toBe(true);
     await d.processor.boards(d.show(), d.ep());
+    let pinned = 0;
     for (const scene of d.scenes.values()) {
       expect(scene.sheet?.kind).toBe('explainer');
       const planned = outline.scenes[scene.position];
@@ -881,18 +938,221 @@ describe('with illustrated scenes switched off (STUDIO_ILLUSTRATED)', () => {
         typeof scene.sheet,
         { kind: 'explainer' }
       >;
+      // No one drawn, no place drawn: no drawing, no person, no card.
+      for (const thing of sheet.draft.cast) {
+        expect(['drawing', 'person', 'place']).not.toContain(thing.kind);
+        expect(thing.style).not.toBe('card');
+      }
       rows.slice(planned.rows![0], planned.rows![1] + 1).forEach((row, k) => {
-        if (row.visual !== 'scene') return;
-        const shown = sheet.draft.steps
-          .filter((st) => st.beat === k)
-          .flatMap((st) => st.show ?? []);
-        expect(
-          shown.some(
-            (id) =>
-              sheet.draft.cast.find((t) => t.id === id)?.kind === 'drawing',
-          ),
-        ).toBe(true);
+        const moment = sheet.draft.cast.find((t) => t.id === `moment-${k + 1}`);
+        if (row.visual === 'scene' && /Rome/.test(row.show)) {
+          pinned += 1;
+          expect(moment?.kind).toBe('map');
+          expect(moment?.map?.pins).toEqual([{ place: 'Rome', label: null }]);
+          expect(moment?.map?.base).toMatchObject({ region: 'Italy' });
+        } else expect(moment).toBeUndefined();
       });
     }
+    expect(pinned).toBe(1);
+  });
+});
+
+/** An editor's row as the script writes it. */
+const rowOf = (
+  say: string,
+  visual: EditorialRow['visual'],
+  show = '',
+  claims: string[] = [],
+): EditorialRow => ({
+  say,
+  visual,
+  show,
+  claims,
+  act: 1,
+  plant: null,
+  payoff: null,
+  delivery: 'explain',
+  music: null,
+  hold: false,
+});
+
+/** The research's claims and numbers, enough for a plain board. */
+const RESEARCH = researchOf({
+  claims: [
+    {
+      id: 'c1',
+      kind: 'number',
+      text: 'About 45 million people lived there in 1960.',
+      sources: [{ url: 'https://example.org/un', title: 'UN, 1960' }],
+    },
+    {
+      id: 'c2',
+      kind: 'quote',
+      text: 'He said we must "build a nation of equals".',
+      sources: [{ url: 'https://example.org/speech', title: 'The speech' }],
+    },
+    {
+      id: 'c3',
+      kind: 'number',
+      text: 'The vote was won by 174 seats.',
+      sources: [{ url: 'https://example.org/vote', title: 'The vote' }],
+    },
+  ],
+  numbers: [
+    {
+      label: 'People in 1960',
+      value: '45 million',
+      claims: ['c1'],
+      checked: true,
+    },
+  ],
+});
+
+describe('a lesson boarded by code alone (plainLesson)', () => {
+  const world = worldOf({ map: { region: 'Nigeria' } });
+  const editor = { world, research: RESEARCH };
+  const lines = [
+    rowOf('By 1960, 45 million people lived here.', 'how-many', '', ['c1']),
+    rowOf('In Kano, the north gathered.', 'place', 'A pin on Kano'),
+    rowOf('He wanted to "build a nation of equals".', 'exact-words', '', [
+      'c2',
+    ]),
+    rowOf('Nobody knew what would come next.', 'why', 'Two arrows'),
+    rowOf('The vote was won by 174 seats.', 'how-many', '', ['c3']),
+  ];
+  const sheet = plainLesson({ title: 'Independence' }, lines, editor);
+  const cast = sheet.draft.cast;
+
+  it('shows each line what the research can show of it, never a keyword card', () => {
+    expect(cast.map((t) => [t.id, t.kind])).toEqual([
+      ['number-1', 'counter'],
+      ['map-2', 'map'],
+      ['quote-3', 'quote'],
+      ['number-5', 'counter'],
+    ]);
+    expect(cast[0].counter).toMatchObject({
+      value: '45',
+      unit: 'million',
+      label: 'People in 1960',
+    });
+    expect(cast[0].source).toBe('UN, 1960');
+    // A real place on the show's map, pinned, on the show's map.
+    expect(cast[1].map).toMatchObject({
+      region: 'Nigeria',
+      pins: [{ place: 'Kano', label: null }],
+      base: { region: 'Nigeria' },
+    });
+    // Its exact words as the line says them; who said them the voice says.
+    expect(cast[2]).toMatchObject({ quote: 'build a nation of equals' });
+    // A number claim's own figure, said in the line.
+    expect(cast[3].counter).toMatchObject({ value: '174', unit: 'seats' });
+  });
+
+  it('holds the picture before on a line it can show nothing of, and stages each on its own line', () => {
+    expect(sheet.draft.steps.map((s) => [s.beat, s.layout, s.show])).toEqual([
+      [0, 'one', ['number-1']],
+      [1, 'one', ['map-2']],
+      [2, 'one', ['quote-3']],
+      [4, 'one', ['number-5']],
+    ]);
+    const { script, problems } = checkExplainer(sheet, {
+      teach: lines.map((l) => l.say).join(' '),
+      stage: null,
+      maths: false,
+      planned: null,
+    });
+    expect(script.steps.map((s) => [s.at.beat, s.stage?.show])).toEqual([
+      [0, ['number-1']],
+      [1, ['map-2']],
+      [2, ['quote-3']],
+      [4, ['number-5']],
+    ]);
+    expect(problems.filter((p) => p.level === 'error')).toEqual([]);
+  });
+
+  it("opens on the show's map, or its title, when its first line shows nothing", () => {
+    const quiet = [rowOf('Nobody knew what would come next.', 'why')];
+    const mapped = plainLesson({ title: 'Independence' }, quiet, editor);
+    expect(mapped.draft.cast).toMatchObject([
+      { id: 'show-map', kind: 'map', map: { region: 'Nigeria' } },
+    ]);
+    const titled = plainLesson({ title: 'Independence' }, quiet, null);
+    expect(titled.draft.cast).toMatchObject([
+      { id: 'title', kind: 'words', style: 'title', name: 'Independence' },
+    ]);
+    expect(titled.draft.steps).toEqual([
+      {
+        beat: 0,
+        phrase: 'Nobody knew what',
+        layout: 'one',
+        show: ['title'],
+        arrows: null,
+        effects: null,
+      },
+    ]);
+  });
+
+  it('never counts a number it cannot stand behind: unsaid and unchecked, or a year', () => {
+    const unsaid = plainLesson(
+      { title: 'x' },
+      [rowOf('The vote was close.', 'how-many', '', ['c3'])],
+      { world: null, research: RESEARCH },
+    );
+    expect(unsaid.draft.cast.map((t) => t.kind)).toEqual(['words']);
+    const year = plainLesson(
+      { title: 'x' },
+      [rowOf('It began in 1960.', 'how-many', '', ['c4'])],
+      {
+        world: null,
+        research: researchOf({
+          claims: [{ id: 'c4', kind: 'number', text: 'It began in 1960.' }],
+        }),
+      },
+    );
+    expect(year.draft.cast.map((t) => t.kind)).toEqual(['words']);
+  });
+});
+
+describe("a lesson board's moments (drawnMoments)", () => {
+  const draft = onTheLines(
+    {
+      title: 'x',
+      cast: [
+        {
+          id: 'idea',
+          kind: 'words',
+          name: 'The idea',
+          style: 'keyword',
+        },
+      ],
+      steps: [{ beat: 0, phrase: '', layout: 'one', show: ['idea'] }],
+    },
+    [
+      rowOf('He fell ill in Kano.', 'scene', 'In Kano, he falls ill'),
+      rowOf('A crowd gathered.', 'scene', 'A crowd in a square'),
+    ],
+  );
+
+  it("pins a moment at a real place on the show's map, and draws no one and no place", () => {
+    const lines = [
+      rowOf('He fell ill in Kano.', 'scene', 'In Kano, he falls ill'),
+      rowOf('A crowd gathered.', 'scene', 'A crowd in a square'),
+    ];
+    const moments = drawnMoments(
+      draft,
+      lines,
+      worldOf({ map: { region: 'Nigeria' } }),
+    );
+    expect(moments.cast.map((t) => [t.id, t.kind])).toEqual([
+      ['idea', 'words'],
+      ['moment-1', 'map'],
+    ]);
+    expect(moments.cast[1].map?.pins).toEqual([{ place: 'Kano', label: null }]);
+    expect(moments.steps.map((s) => [s.beat, s.show])).toEqual([
+      [0, ['idea']],
+      [0, ['moment-1']],
+    ]);
+    // With no map, a moment brings on nothing: the picture before holds.
+    expect(drawnMoments(draft, lines, null)).toEqual(draft);
   });
 });

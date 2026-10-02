@@ -138,8 +138,12 @@ describe('the plan built', () => {
       's4',
       's5',
     ]);
+    // Every asset is shown: a shot's set or one of its actors.
     const shown = new Set(
-      built.shots.map((s) => ('asset' in s.set ? s.set.asset : '')),
+      built.shots.flatMap((s) => [
+        'asset' in s.set ? s.set.asset : '',
+        ...s.actors.map((a) => a.asset),
+      ]),
     );
     shown.delete('');
     expect(new Set(Object.keys(built.assets))).toEqual(shown);
@@ -275,9 +279,27 @@ describe('the plan built', () => {
     expect(bare.notes.join(' ')).toContain('no picture could be drawn');
   });
 
-  it('leaves actors out until the kit has them, and says so', () => {
-    expect(built.shots[2].actors).toEqual([]);
-    expect(built.notes.join('\n')).toContain(
+  it('stands the kit’s pieces on the set: a crowd on its place on the map, as a marker, counting no one', () => {
+    const [crowd] = built.shots[2].actors;
+    expect(crowd).toMatchObject({ id: 'crowd', asset: 'actor-3-1' });
+    const asset = built.assets['actor-3-1'];
+    expect(asset.kind).toBe('svg');
+    expect(asset.kind === 'svg' && asset.rig?.idle?.length).toBeGreaterThan(0);
+    // On Kano's point, about a fourteenth of the map tall.
+    const [px, py] = MAP.project!(8.52, 12.0)!;
+    expect('x' in crowd.at && Math.abs(crowd.at.x - px)).toBeLessThan(40);
+    expect('y' in crowd.at && Math.abs(crowd.at.y - py)).toBeLessThan(40);
+    expect(crowd.size / 700).toBeCloseTo(0.07, 2);
+    expect(crowd.moves).toEqual([
+      { move: 'enter', on: 'regional fight', durMs: 2000 },
+    ]);
+    expect(built.notes.join('\n')).toContain('no number given, none claimed');
+  });
+
+  it('leaves out a piece the show’s look has not, and says so', () => {
+    const other = buildShots(PLAN, registry, { ...ctx, look: 'illustrated' });
+    expect(other.shots[2].actors).toEqual([]);
+    expect(other.notes.join('\n')).toContain(
       'actor crowd (people.crowd) left out',
     );
   });
@@ -1203,5 +1225,54 @@ describe('the plan built on the player’s own map (geography it draws)', () => 
     expect(pins.map((i) => i.target)).toEqual([
       { kind: 'geo', lng: 8.52, lat: 12 },
     ]);
+  });
+
+  it('stands a crowd on its place on the earth, a marker its share of the frame’s height', () => {
+    const [crowd] = geo.shots[2].actors;
+    expect(crowd).toMatchObject({ id: 'crowd', asset: 'actor-3-1' });
+    if (!('lng' in crowd.at)) throw new Error('a point on the earth');
+    expect(crowd.at.lng).toBeCloseTo(8.52, 2);
+    expect(crowd.at.lat).toBeCloseTo(12, 2);
+    const [, , W, H] = geoMap!.box!;
+    expect(crowd.size).toBeCloseTo((0.07 * Math.min(W, H)) / H, 2);
+    expect(crowd.moves).toEqual([
+      { move: 'enter', on: 'regional fight', durMs: 2000 },
+    ]);
+  });
+
+  it('walks a group across the earth: to a place, and off by a word, both points on it', () => {
+    const plan: ShotPlan = {
+      shots: [
+        {
+          ...PLAN.shots[2],
+          actors: [
+            {
+              id: 'marchers',
+              kit: 'people.group',
+              place: 'place:Kano',
+              moves: [
+                { move: 'march', to: 'place:Lagos', on: 'self-government' },
+                { move: 'walk', to: 'off right', on: 'regional fight' },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const [marchers] = buildShots(plan, registry, { ...ctx, map: geoMap })
+      .shots[0].actors;
+    expect('lng' in marchers.at).toBe(true);
+    const [toLagos, off] = marchers.moves;
+    expect(toLagos).toMatchObject({
+      move: 'walk',
+      to: { kind: 'geo', lng: 3.38, lat: 6.52 },
+    });
+    expect(toLagos.durMs).toBeGreaterThanOrEqual(900);
+    expect(toLagos.durMs).toBeLessThanOrEqual(5000);
+    // Off to the right: east of all the map frames.
+    const [x, , w] = geoMap!.box!;
+    const east = geoMap!.earthAt!(x + w, 0)[0];
+    expect(off.to?.kind).toBe('geo');
+    expect(off.to?.kind === 'geo' && off.to.lng).toBeGreaterThan(east);
   });
 });

@@ -10,8 +10,9 @@
  *    camera moving, or the show's map. Never words in place of a picture.
  *  - A target that cannot be resolved drops its piece of information; it
  *    never becomes text on the screen.
- *  - Actors wait for the kit (WP9): each is left out with a note, its path
- *    here kept so the kit only has to answer kitPiece().
+ *  - Actors are the kit's pieces (kit/registry) in the show's look, each
+ *    placed by the kit's rule (kit/place); a piece the look has not, or
+ *    a move it cannot make, is left out with a note.
  *
  * Pure but for the map, which is drawn before (shot-map) and handed in.
  */
@@ -42,9 +43,13 @@ import {
   type ThemeId,
 } from '../scene-themes';
 import { mix, paintOf } from './shot-chart-kit';
+import { placeActor } from '../kit/place';
+import { KIT, actorMove, makeKit } from '../kit/registry';
+import { toAsset } from '../kit/rig';
+import { kitStyle, type KitLook } from '../kit/style';
 import { chartAsset } from './shot-charts';
 import { WHOLE_SET } from './shot-check';
-import { featureCentre, type ShotMapSet } from './shot-map';
+import type { ShotMapSet } from './shot-map';
 import { chartPartIds, partSlug } from './shot-parts';
 import { splitTarget } from './shot-registry';
 import {
@@ -52,6 +57,7 @@ import {
   type UntimedActor,
   type UntimedCamera,
   type UntimedInfo,
+  type UntimedMove,
   type UntimedShot,
 } from './shot-time';
 import type {
@@ -95,6 +101,8 @@ export interface BuildContext {
   map: ShotMapSet | null;
   /** Everything seeded (the life layer) starts from this: the scene's own. */
   seed: string;
+  /** The show's look (tech §11): editorial silhouettes, or illustrated characters. Editorial when absent. */
+  look?: KitLook;
 }
 
 /** The show's look as the shots draw it: its theme's paper and ink, its accent, its held colour and each side's colour. */
@@ -123,14 +131,67 @@ export function shotLook(
 
 // ── Pieces that come later ────────────────────────────────────────────────
 
-/** A kit piece for an actor (WP9's kit/registry). None yet: every actor is left out with a note. */
+/**
+ * A kit piece for an actor (kit/registry), drawn in the show's look and
+ * the actor's colour, its settings made sound; null for an id the kit
+ * does not have or a piece that fails its own checks.
+ */
 function kitPiece(
   kit: string,
   params: PlanActor['params'],
-): ShotSvgAssetDto | null {
-  void kit;
-  void params;
-  return null;
+  look: ShotLookDto,
+  ctx: Pick<BuildContext, 'shape' | 'look'>,
+  colour: string,
+  seed: number,
+): {
+  asset: ShotSvgAssetDto;
+  family: string;
+  moves: string[];
+  notes: string[];
+  box: ShotBox;
+  parts: string[];
+} | null {
+  const entry = KIT[kit];
+  if (!entry || !entry.looks.includes(ctx.look ?? 'editorial')) return null;
+  const made = makeKit(
+    kit,
+    params ?? {},
+    kitStyle(look, { look: ctx.look ?? 'editorial', shape: ctx.shape }),
+    seed,
+    colour,
+  );
+  if (!made) return null;
+  return {
+    asset: toAsset(made.piece),
+    family: entry.family,
+    moves: made.piece.rig.moves,
+    notes: made.piece.notes ?? [],
+    box: made.piece.box,
+    parts: Object.keys(made.piece.parts),
+  };
+}
+
+/** How long a move takes when it goes somewhere: by how far, a walk slower than a drive. */
+function moveMs(
+  move: string,
+  distance: number,
+  width: number,
+  scale: number,
+): number | undefined {
+  if (move === 'walk' && scale > 0)
+    return Math.round(
+      Math.max(900, Math.min(5000, (distance / (scale * 1.35)) * 1000)),
+    );
+  if (move === 'travel-to')
+    return Math.round(
+      Math.max(
+        1200,
+        Math.min(5000, 1200 + 2600 * (distance / Math.max(1, width))),
+      ),
+    );
+  if (move === 'enter') return 2000;
+  if (move === 'leave') return 1800;
+  return undefined;
 }
 
 /** A code-drawn set (WP10's kit/sets): a kind of place, never a named one. None yet. */
@@ -237,15 +298,6 @@ const NEW_WORDS_LAG_MS = 400;
 /** The life layer's amount when the plan only names the effect: under the rules' cap either way. */
 const LIFE_AMOUNT = 0.5;
 const LIFE_MOST = 3;
-
-/** Where an actor stands for a position word, as shares of its set. */
-const POSITIONS: Record<string, [number, number]> = {
-  left: [0.25, 0.78],
-  centre: [0.5, 0.78],
-  center: [0.5, 0.78],
-  middle: [0.5, 0.78],
-  right: [0.75, 0.78],
-};
 
 /** A string's FNV-1a hash: the life layer's seeds, the same for the same scene every time. */
 function seedOf(text: string): number {
@@ -700,60 +752,142 @@ export function buildShots(
       ? { kind: 'asset', asset: assetId }
       : null;
 
-    // Actors: the kit's pieces on the set. None until the kit (WP9).
+    // Actors: the kit's pieces on the set, in the show's look and their
+    // side's colour, each standing where the plan says by the placement
+    // rule (kit/place): on a place, at a word, or apart from the shot's
+    // subject and what its labels sit on; one scale for the whole shot.
     const actors: UntimedActor[] = [];
     const actorIds = new Set<string>();
-    for (const one of planned.actors ?? []) {
-      const piece = kitPiece(one.kit, one.params);
-      if (!piece) {
+    const boxNamed = (name?: string): ShotBox | null => {
+      const target = name ? targetOf(name) : null;
+      return target ? boxOf(target) : null;
+    };
+    const subjectBox = planned.focal ? boxNamed(planned.focal) : null;
+    const labelled = (planned.info ?? [])
+      .map((one) => boxNamed(one.target))
+      .filter((b): b is ShotBox => b !== null);
+    let scale: number | undefined;
+    const planned_actors = planned.actors ?? [];
+    planned_actors.forEach((one, k) => {
+      const side = one.side ? sideOf(one.side) : null;
+      const made = kitPiece(
+        one.kit,
+        one.params,
+        look,
+        ctx,
+        side ?? 'ink',
+        seedOf(`${ctx.seed}:${i}:${one.id}`),
+      );
+      if (!made) {
         notes.push(
-          `shot ${i + 1}: actor ${one.id} (${one.kit}) left out: no kit piece yet`,
+          `shot ${i + 1}: actor ${one.id} (${one.kit}) left out: no such piece in this look`,
         );
-        continue;
+        return;
       }
-      const at = actorAt(one.place);
-      if (!at) {
+      if (!setBox) {
         notes.push(`shot ${i + 1}: actor ${one.id} has nowhere to stand`);
-        continue;
+        return;
       }
+      const on = one.place ? boxNamed(one.place) : null;
+      const word = one.place && !on ? one.place : undefined;
+      const isSubject =
+        Boolean(planned.focal) &&
+        planned.focal!.replace(/^actor:/i, '') === one.id;
+      const placed = placeActor({
+        set: setBox,
+        map: Boolean(onMap),
+        piece: { box: made.box, family: made.family, id: one.kit },
+        on,
+        ...(word ? { word } : {}),
+        subject: isSubject ? null : subjectBox,
+        avoid: labelled,
+        isSubject: isSubject || planned_actors.length === 1,
+        index: k,
+        count: planned_actors.length,
+        ...(scale !== undefined ? { scale } : {}),
+      });
+      if (!onMap) scale = placed.scale;
       const pieceId = `actor-${i + 1}-${actors.length + 1}`;
-      assets[pieceId] = piece;
+      assets[pieceId] = made.asset;
+      for (const note of made.notes)
+        notes.push(`shot ${i + 1}: actor ${one.id}: ${note}`);
+      // Its moves as the stage plays them, those it can make; a sit
+      // starts from standing, a walk is as long as its way.
+      const moves: UntimedMove[] = [];
+      for (const move of one.moves ?? []) {
+        const name = actorMove(move.move);
+        if (!made.moves.includes(name)) {
+          notes.push(
+            `shot ${i + 1}: actor ${one.id} cannot ${move.move}; left out`,
+          );
+          continue;
+        }
+        const to = move.to
+          ? (targetOf(move.to) ?? wordTarget(move.to, placed.at.y))
+          : null;
+        const toBox = to ? boxOf(to) : null;
+        const distance = toBox
+          ? Math.hypot(
+              centre(toBox)[0] - placed.at.x,
+              toBox[1] + toBox[3] - placed.at.y,
+            )
+          : 0;
+        const durMs = moveMs(name, distance, setBox[2], placed.scale);
+        const state =
+          name === 'sit' ? 'seated' : name === 'stand' ? 'standing' : undefined;
+        moves.push({
+          move: name,
+          on: move.on,
+          ...(to ? { to } : {}),
+          ...(state ? { state } : {}),
+          ...(durMs !== undefined ? { durMs } : {}),
+        });
+      }
+      const firstSeat = moves.find(
+        (m) => m.move === 'sit' || m.move === 'stand',
+      );
+      // On a geo map a piece stands on the earth, a marker of its place
+      // whose height is its share of the frame's (the contract's map form).
+      const earth = geoMap?.earthAt?.(placed.at.x, placed.at.y);
       actors.push({
         id: one.id,
         asset: pieceId,
-        at,
-        size: svg ? svg.box[3] * 0.4 : 0.3,
-        z: actors.length + 1,
-        ...(one.side && sideOf(one.side) ? { side: sideOf(one.side)! } : {}),
-        moves: (one.moves ?? []).map((move) => {
-          const to = move.to ? targetOf(move.to) : null;
-          return { move: move.move, on: move.on, ...(to ? { to } : {}) };
-        }),
+        at: earth ? { lng: earth[0], lat: earth[1] } : placed.at,
+        size: earth
+          ? Math.round((placed.size / setBox[3]) * 1000) / 1000
+          : placed.size,
+        z: placed.z,
+        ...(firstSeat?.move === 'sit' ? { state: 'standing' } : {}),
+        ...(side ? { side } : {}),
+        moves,
       });
       actorIds.add(one.id);
-    }
+    });
 
-    /** Where an actor stands: a place or a part named, or a position word on the set. */
-    function actorAt(place?: string): UntimedActor['at'] | null {
-      const target = place ? targetOf(place) : null;
-      if (target?.kind === 'geo') return { lng: target.lng, lat: target.lat };
-      if (target?.kind === 'feature' && geoMap) {
-        const middle = featureCentre(geoMap, target.id);
-        if (middle) return { lng: middle[0], lat: middle[1] };
-      }
-      const box = target ? boxOf(target) : null;
-      if (box) {
-        // On its feet: at the middle of what it stands on, at its foot.
-        const [x] = centre(box);
-        return { x, y: box[1] + box[3] };
-      }
-      const word =
-        POSITIONS[(place ?? 'centre').toLowerCase()] ?? POSITIONS.centre;
-      if (!svg) return null;
-      return {
-        x: svg.box[0] + svg.box[2] * word[0],
-        y: svg.box[1] + svg.box[3] * word[1],
-      };
+    /**
+     * A word for where a move goes (left, right, off), as a point on the
+     * ground of the set; on a geo map, that point on the earth.
+     */
+    function wordTarget(word: string, y: number): ShotTargetDto | null {
+      if (!setBox) return null;
+      const [sx, , W] = setBox;
+      const w = word.toLowerCase();
+      const x = /off.*left|left.*off/.test(w)
+        ? sx - W * 0.2
+        : /off.*right|right.*off|off/.test(w)
+          ? sx + W * 1.2
+          : /left/.test(w)
+            ? sx + W / 3
+            : /right/.test(w)
+              ? sx + (2 * W) / 3
+              : /cent|middle/.test(w)
+                ? sx + W / 2
+                : null;
+      if (x === null) return null;
+      const earth = geoMap?.earthAt?.(x, y);
+      return earth
+        ? { kind: 'geo', lng: earth[0], lat: earth[1] }
+        : { kind: 'box', box: [Math.round(x), Math.round(y) - 1, 1, 1] };
     }
 
     /** A colour role a piece of information may take: the look's own, or a side's by its name. */
@@ -1250,12 +1384,20 @@ export function buildShots(
     }
     if (from) lastView = { asset: assetId, box: from };
 
+    // Smoke and steam rise from a piece's own chimney or funnel, where one has it.
+    const chimney = actors.find((a) => {
+      const asset = assets[a.asset];
+      return asset?.kind === 'svg' && Boolean(asset.parts.smoke);
+    });
     const life: ShotLifeDto[] = [...new Set(planned.life ?? [])]
       .slice(0, LIFE_MOST)
       .map((effect) => ({
         effect,
         seed: seedOf(`${ctx.seed}:${i}:${effect}`),
         amount: LIFE_AMOUNT,
+        ...(chimney && (effect === 'smoke' || effect === 'steam')
+          ? { at: { kind: 'actor' as const, actor: chimney.id, part: 'smoke' } }
+          : {}),
       }));
 
     built.push({

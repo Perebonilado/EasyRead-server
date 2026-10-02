@@ -1,3 +1,4 @@
+import { KIT_IDS } from '../kit/registry';
 import { WALL_RESEARCH, WALL_ROWS, WALL_WORLD } from './__fixtures__/wall';
 import {
   checkPlan,
@@ -830,5 +831,139 @@ describe('a safe shot for a line with none', () => {
         checkPlan(plan, words, registry).map((p) => `${k}:${p.code}`),
       ).toEqual([]);
     });
+  });
+});
+
+describe('people and vehicles on the stage (the kit)', () => {
+  const kit = KIT_IDS;
+  const withActors = (actors: PlanShot['actors'], on = 'In 1961'): ShotPlan => {
+    const plan = good();
+    const at = plan.shots.findIndex((s) => s.on === on);
+    plan.shots[at] = { ...plan.shots[at], actors };
+    return plan;
+  };
+  const faults = (plan: ShotPlan) =>
+    checkPlan(plan, narration, registry, { kit }).map(
+      (p) => `${p.shot}:${p.code}`,
+    );
+
+  it('reads an actor’s settings from its own fields, an era in words as the kit names it', () => {
+    const plan = planOf(
+      {
+        shots: [
+          {
+            on: 'In 1961',
+            set: { kind: 'map' },
+            actors: [
+              {
+                id: 'crowd',
+                kit: 'people.crowd',
+                place: 'place:Berlin',
+                pose: 'protest',
+                count: '1,393',
+                era: 'the 1960s',
+                facing: null,
+                moves: [{ move: 'enter', on: 'Berlin' }],
+              },
+            ],
+            info: [],
+            camera: [],
+            life: [],
+            join: 'cut',
+          },
+        ],
+      },
+      narration,
+      { kit },
+    );
+    expect(plan.shots[0].actors[0]).toMatchObject({
+      id: 'crowd',
+      kit: 'people.crowd',
+      place: 'place:Berlin',
+      params: { pose: 'protest', count: 1393, era: '1945-1975' },
+      moves: [{ move: 'enter', on: 'Berlin' }],
+    });
+  });
+
+  it('lets a crowd count only people the line or the list counts: never a year, a length or a number of its own', () => {
+    const rows = [
+      { ...WALL_ROWS[0], say: 'In 1961, 300 people gathered in Berlin.' },
+      ...WALL_ROWS.slice(1),
+    ];
+    const said = sceneNarration(rows);
+    const reg = buildRegistry({
+      rows,
+      research: WALL_RESEARCH,
+      world: WALL_WORLD,
+    });
+    const crowd = (count: number): ShotPlan => ({
+      shots: [
+        shot({
+          on: 'In 1961',
+          set: { kind: 'map', tilt: 'flat' },
+          actors: [
+            {
+              id: 'crowd',
+              kit: 'people.crowd',
+              place: 'place:Berlin',
+              params: { count },
+            },
+          ],
+        }),
+      ],
+    });
+    const codesOf = (plan: ShotPlan) =>
+      checkPlan(plan, said, reg, { kit }).map((p) => p.code);
+    expect(codesOf(crowd(300))).not.toContain('untrue-count');
+    for (const wrong of [1961, 1393, 5000])
+      expect(codesOf(crowd(wrong))).toContain('untrue-count');
+    const mended = mendPlan(crowd(5000), said, reg, { kit });
+    expect(mended.shots[0].actors[0].params?.count).toBeUndefined();
+    expect(mended.shots[0].actors[0].kit).toBe('people.crowd');
+  });
+
+  it('never draws a named person as a silhouette: the figure goes, the board is asked again', () => {
+    const plan = withActors(
+      [{ id: 'speaker', kit: 'people.person', params: { pose: 'lectern' } }],
+      'In 1987',
+    );
+    expect(faults(plan)).toContain('2:silhouette-person');
+    expect(
+      mendPlan(plan, narration, registry, { kit }).shots[2].actors,
+    ).toEqual([]);
+    // On a person's own name too, whatever the piece.
+    const named = withActors([
+      { id: 'crowd', kit: 'people.crowd', place: 'person:Ronald Reagan' },
+    ]);
+    expect(faults(named)).toContain('0:silhouette-person');
+  });
+
+  it('never puts the audience on screen', () => {
+    const plan = withActors([
+      { id: 'viewers', kit: 'people.group', params: { count: 3 } },
+    ]);
+    expect(faults(plan)).toContain('0:audience');
+    expect(
+      mendPlan(plan, narration, registry, { kit }).shots[0].actors,
+    ).toEqual([]);
+  });
+
+  it('keeps only the moves a piece can make, each on words inside its shot', () => {
+    const plan = withActors([
+      {
+        id: 'crowd',
+        kit: 'people.crowd',
+        place: 'place:Berlin',
+        moves: [
+          { move: 'fly', on: 'Berlin' },
+          { move: 'enter', on: 'cut in two' },
+        ],
+      },
+    ]);
+    expect(faults(plan)).toContain('0:unknown-move');
+    const mended = mendPlan(plan, narration, registry, { kit });
+    expect(mended.shots[0].actors[0].moves).toEqual([
+      { move: 'enter', on: 'cut in two' },
+    ]);
   });
 });

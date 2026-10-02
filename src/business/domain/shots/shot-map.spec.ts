@@ -1,7 +1,7 @@
 import { WALL_RESEARCH, WALL_ROWS, WALL_WORLD } from './__fixtures__/wall';
 import { shotLook } from './shot-build';
 import { mercator } from './shot-geo';
-import { MAP_ASSET, drawnMapSet, featureCentre, mapSetAsset } from './shot-map';
+import { MAP_ASSET, drawnMapSet, mapSetAsset } from './shot-map';
 import { buildRegistry } from './shot-registry';
 
 describe('the show’s map as a shot’s set', () => {
@@ -83,8 +83,10 @@ describe('the show’s map as a shot’s set', () => {
       0,
     ]);
     expect(set.boxOf!({ kind: 'asset', asset: MAP_ASSET })).toEqual(set.box);
-    const middle = featureCentre(set, 'group-north-region')!;
-    expect(middle[1]).toBeGreaterThan(8);
+    // A spot in those units is back on the earth where it was.
+    const [lng, lat] = set.earthAt!(kx, ky);
+    expect(lng).toBeCloseTo(8.52, 3);
+    expect(lat).toBeCloseTo(12, 3);
     // It writes no note of its own, so its chip says whose borders they are.
     expect(set.chip?.text).toContain('Natural Earth');
     // Made once, for every shape and theme.

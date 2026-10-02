@@ -133,6 +133,14 @@ export function mercator(lng: number, lat: number): [number, number] {
   return [x * WORLD_PX, y * WORLD_PX];
 }
 
+/** A spot in Web Mercator pixels at zoom 8 back on the earth (lng, lat): mercator's inverse. */
+export function unmercator(x: number, y: number): [number, number] {
+  const lng = (x / WORLD_PX) * 360 - 180;
+  const phi =
+    2 * Math.atan(Math.exp(Math.PI * (1 - (2 * y) / WORLD_PX))) - Math.PI / 2;
+  return [lng, (phi * 180) / Math.PI];
+}
+
 /** Bounds on the earth as a box in Web Mercator pixels (x, y, w, h): what a camera frames on a geo map. */
 export function mercatorBox([w, s, e, n]: GeoBounds): ShotBox {
   const [x0, y0] = mercator(w, n);

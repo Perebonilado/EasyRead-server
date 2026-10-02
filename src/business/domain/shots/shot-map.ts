@@ -35,7 +35,13 @@ import {
 } from '../scene-map';
 import type { ThemeId } from '../scene-themes';
 import { mapAsset, mapAssetFrame } from './shot-charts';
-import { mapGeo, mercator, mercatorBox, type GeoBounds } from './shot-geo';
+import {
+  mapGeo,
+  mercator,
+  mercatorBox,
+  unmercator,
+  type GeoBounds,
+} from './shot-geo';
 import { mapPartId } from './shot-registry';
 
 /** The map's id among a scene's assets: the registry's features are of it. */
@@ -58,6 +64,8 @@ export interface ShotMapSet {
   box?: ShotBox;
   /** On a geo map, what a target covers in those units: a point, a feature's bounds, the whole frame. */
   boxOf?: (target: ShotTargetDto) => ShotBox | null;
+  /** On a geo map, the point on the earth (lng, lat) at a spot in those units: where a piece placed in them stands. */
+  earthAt?: (x: number, y: number) => [number, number];
   /** On a geo map, each feature's bounds on the earth (west, south, east, north), by id. */
   geoBoxes?: Record<string, GeoBounds>;
   /** What the map says of itself beside the picture; absent when the drawing says it (its "Today's borders" note). */
@@ -75,6 +83,8 @@ const BORDERS_CHIP: ShotCreditDto = {
 };
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
+/** Four places of a degree: about ten metres, finer than any marker. */
+const round4 = (n: number) => Math.round(n * 1e4) / 1e4;
 
 const made = new Map<string, Promise<ShotMapSet | null>>();
 const MADE_KEPT = 16;
@@ -148,12 +158,6 @@ function draftOf(base: unknown): MapDraft | null {
   };
 }
 
-/** A target's centre on the earth, on a geo map: a point's own, a feature's middle. */
-const centreOf = ([w, s, e, n]: GeoBounds): [number, number] => [
-  (w + e) / 2,
-  (s + n) / 2,
-];
-
 async function geoMapSet(base: unknown): Promise<ShotMapSet | null> {
   const draft = draftOf(base);
   const spec = draft ? readMap(draft).spec : null;
@@ -184,20 +188,15 @@ async function geoMapSet(base: unknown): Promise<ShotMapSet | null> {
     parts: geo.parts,
     box,
     boxOf,
+    earthAt: (x, y) => {
+      const [lng, lat] = unmercator(x, y);
+      return [round4(lng), round4(lat)];
+    },
     geoBoxes: geo.boxes,
     // Natural Earth's borders are today's; a map of a year whose borders differed says so on its chip.
     ...(spec.period ? { chip: BORDERS_CHIP } : {}),
     flat: false,
   };
-}
-
-/** A geo feature's middle on the earth, by id; null for one the map has not. */
-export function featureCentre(
-  map: ShotMapSet,
-  id: string,
-): [number, number] | null {
-  const bounds = map.geoBoxes?.[id];
-  return bounds ? centreOf(bounds) : null;
 }
 
 async function drawMapSet(

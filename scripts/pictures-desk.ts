@@ -33,7 +33,10 @@ import {
   eventNames,
   passQuestions,
 } from '../src/business/domain/pictures/episode';
-import type { PictureQuery } from '../src/business/domain/pictures/types';
+import type {
+  PictureCandidate,
+  PictureQuery,
+} from '../src/business/domain/pictures/types';
 import { TELEVISION } from '../src/business/domain/pictures/__fixtures__/television';
 import { costOf } from '../src/business/domain/cost';
 import type { LlmUsage } from '../src/business/ports/llm.port';
@@ -86,12 +89,20 @@ async function one(desk: PictureDesk, query: PictureQuery): Promise<void> {
     console.log(
       `Wikidata: ${result.qid}${result.person ? ` (${result.person.label}, ${result.person.description})` : ''}`,
     );
-  if (!result.found.length)
+  const list = (title: string, found: readonly PictureCandidate[]) => {
+    if (!found.length) return;
+    console.log(title);
+    for (const [i, c] of found.slice(0, 8).entries())
+      console.log(
+        `  ${i + 1}. ${c.score.toFixed(3)}  ${c.file.sourceId}\n      ${c.chip}\n      ${c.licence.code} (tier ${c.licence.tier}) · ${c.file.width}×${c.file.height} · focal ${c.focal.from} · ${c.notes.join(' · ')}\n      ${c.file.pageUrl}`,
+      );
+  };
+  if (!result.found.length && !result.photos?.length)
     console.log(`Nothing clears: ${result.reason ?? ''}`);
-  for (const [i, c] of result.found.entries())
-    console.log(
-      `  ${i + 1}. ${c.score.toFixed(3)}  ${c.file.sourceId}\n      ${c.chip}\n      ${c.licence.code} (tier ${c.licence.tier}) · ${c.file.width}×${c.file.height} · focal ${c.focal.from} · ${c.notes.join(' · ')}\n      ${c.file.pageUrl}`,
-    );
+  else if (!result.found.length && query.kind === 'person')
+    console.log('No portrait of them alone clears; photos of them do.');
+  list(query.kind === 'person' ? 'Portraits:' : 'Cleared:', result.found);
+  list('Photos of them among others:', result.photos ?? []);
   const taken = await desk.lookupAll(query, { onUsage });
   if (!taken.length) console.log('Taken: none');
   for (const picked of taken)

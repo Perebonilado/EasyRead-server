@@ -496,6 +496,7 @@ export function criticParts(input: CriticSceneInput): string[] {
         ].join('\n')
       : '',
     `The contact sheet: ${input.stills} stills of this scene in order, each labelled with its shot and its moment in seconds.`,
+    `Score every one of these axes, each with its line why: ${axesFor(opening).join(', ')}.`,
   ].filter(Boolean);
 }
 

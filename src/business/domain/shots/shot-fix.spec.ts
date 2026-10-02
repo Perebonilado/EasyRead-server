@@ -139,11 +139,44 @@ describe("the critic's fixes made into plan edits (applyFixes)", () => {
     );
   });
 
+  it('enlarge and reframe: what comes on later in the shot is pushed in on or cut to as it comes, never framed before', async () => {
+    // The seam is drawn on "cut in two", after the shot's first words.
+    const big = await run([fix('enlarge', 1, { target: 'seam:inner border' })]);
+    expect(big.plan.shots[0].focal).toBe('place:Berlin');
+    expect(big.plan.shots[0].camera).toContainEqual(
+      expect.objectContaining({
+        move: 'push',
+        target: 'seam:inner border',
+        on: 'cut in two',
+      }),
+    );
+    const framed = await run([
+      fix('reframe', 1, { target: 'seam:inner border' }),
+    ]);
+    expect(framed.plan.shots[0].focal).toBe('place:Berlin');
+    expect(framed.plan.shots[0].camera).toContainEqual(
+      expect.objectContaining({
+        move: 'cut-to',
+        target: 'seam:inner border',
+        on: 'cut in two',
+      }),
+    );
+  });
+
   it('reframe: frames the target named, dropping moves that frame another', async () => {
-    const out = await run([fix('reframe', 1, { target: 'inner border' })]);
-    expect(out.plan.shots[0].focal).toBe('seam:inner border');
+    // Berlin is pinned on its own name, the shot's third word: there from
+    // the start. A move that frames something else goes.
+    const elsewhere = plan();
+    elsewhere.shots[0].focal = 'seam:inner border';
+    elsewhere.shots[0].camera[1].target = 'seam:inner border';
+    const out = await applyFixes(
+      elsewhere,
+      [fix('reframe', 1, { target: 'place:Berlin' })],
+      ctx,
+    );
+    expect(out.plan.shots[0].focal).toBe('place:Berlin');
     expect(
-      out.plan.shots[0].camera.some((c) => c.target === 'place:Berlin'),
+      out.plan.shots[0].camera.some((c) => c.target === 'seam:inner border'),
     ).toBe(false);
     // No target: the whole set.
     const whole = await run([fix('reframe', 1)]);

@@ -241,11 +241,12 @@ function deps(
               score: axis === 'motion' ? score : 9,
               why: 'seen',
             })),
+            // A new move each round, so each round changes the plan.
             fixes: [
               {
                 kind: 'add-camera',
                 shot: 2,
-                to: 'push',
+                to: ['push', 'pull', 'hold', 'travel'][(said.critics - 1) % 4],
                 note: 'nothing moves',
               },
             ],
@@ -346,6 +347,27 @@ describe('the critic as the make runs it', () => {
       'studio/k1-thumb.png',
       'studio/k1-parts.json',
     ]);
+  });
+
+  it('goes back to the scene as first made when every version after it scored worse', async () => {
+    const { d, said } = deps([7, 5, 5, 5]);
+    const out = await new SceneCritic(d).loop(input());
+    expect(out.frames?.ended).toBe('rounds');
+    expect(out.frames?.kept).toBe('studio/k1-scene.json');
+    expect(out.sceneKey).toBe('studio/k1-scene.json');
+    expect(out.sheet).toBeNull();
+    // The row set back on it, with its own sheet; the versions after it deleted.
+    expect(said.updates.at(-1)).toEqual(
+      expect.objectContaining({
+        sceneKey: 'studio/k1-scene.json',
+        thumbKey: 'studio/k1-thumb.png',
+        sheet,
+      }),
+    );
+    expect(said.deleted.filter((k) => k.endsWith('-scene.json'))).toHaveLength(
+      3,
+    );
+    expect(said.deleted).not.toContain('studio/k1-scene.json');
   });
 
   it('does nothing with the switch off, or with no eyes', async () => {

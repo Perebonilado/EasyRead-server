@@ -74,7 +74,7 @@ export function criticPrompt(): string {
         ([kind, when]) => `- ${kind}: ${when}`,
       ),
       'Each fix gives: kind; shot, the number of the shot it is on (3 for s3); target, what it acts on, named as the shot list names it (a place:, region:, number: or part: name, or an item as its recipe and target, "pin place:Lagos"); to, what it becomes (a set or chart kind, a camera move, a recipe, or the voice’s exact words it moves to); and note, what should be seen instead, in plain words.',
-      'Fix only what the stills show is wrong with the picture; the voice’s words are not yours to change. Give no fixes when every score is 8 or more.',
+      'Fix only what the stills show is wrong with the picture; the voice’s words are not yours to change. Ask only for what the shot list can name (its places, regions, people, numbers and parts, and the show’s map): never a place, person, photo or number it does not give. Give no fixes when every score is 8 or more.',
     ].join('\n'),
     'Answer with: scores, each axis you are asked for (the hook only for the opening scene) with its score and why; fixes; and a one-line verdict.',
   ].join('\n\n');

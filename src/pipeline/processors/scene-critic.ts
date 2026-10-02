@@ -214,6 +214,8 @@ export class SceneCritic {
     const title = sheet.title || planned?.title || `Scene ${row.position + 1}`;
     const scenes = episode.outline?.scenes.length ?? 1;
     const thumbs = new Map([[made.sceneKey, made.thumbKey]]);
+    /** The sheet each version was built from. */
+    const sheets = new Map<string, ExplainerSheet>([[made.sceneKey, sheet]]);
     let current: ExplainerSheet = sheet;
     const boardInput: BoardShotsInput = {
       rows: lines,
@@ -287,22 +289,29 @@ export class SceneCritic {
           );
         }
       },
-      critic: async (version, looked) => {
+      critic: async (version, looked, missing) => {
         const answer = await this.deps.llm.shotsCritic({
           image: looked.png,
-          parts: criticParts({
-            title,
-            index: row.position,
-            of: scenes,
-            episode: episode.outline?.title ?? episode.title,
-            rows: lines,
-            scene: version.scene,
-            plan: version.plan,
-            checks: looked.checks,
-            look,
-            audience: show.brief.audience,
-            stills: looked.stills,
-          }),
+          parts: [
+            ...criticParts({
+              title,
+              index: row.position,
+              of: scenes,
+              episode: episode.outline?.title ?? episode.title,
+              rows: lines,
+              scene: version.scene,
+              plan: version.plan,
+              checks: looked.checks,
+              look,
+              audience: show.brief.audience,
+              stills: looked.stills,
+            }),
+            ...(missing?.length
+              ? [
+                  `Your last answer left these axes unscored: ${missing.join(', ')}. Score every axis asked, each with its line why.`,
+                ]
+              : []),
+          ],
         });
         return {
           critique: critiqueOf(answer.value, {
@@ -384,8 +393,7 @@ export class SceneCritic {
         }
         current = next;
         thumbs.set(again.sceneKey, again.thumbKey);
-        // The version before is no one's now.
-        await this.drop(from.sceneKey, thumbs.get(from.sceneKey) ?? null);
+        sheets.set(again.sceneKey, next);
         return { scene: again.scene, plan, sceneKey: again.sceneKey };
       },
       record: (frames) => studio.updateScene(row.id, { frames }),
@@ -412,11 +420,31 @@ export class SceneCritic {
       `${who}: critic: ${result.frames.ended} after ${result.frames.rounds.filter((r) => r.critic).length} rounds, $${result.frames.costUsd.toFixed(3)}${result.frames.error ? ` (${result.frames.error})` : ''}`,
     );
     const { version } = result;
+    const kept = sheets.get(version.sceneKey) ?? sheet;
+    const thumbKey = thumbs.get(version.sceneKey) ?? made.thumbKey;
+    // The row on the version kept, with the sheet it was built from (the
+    // loop left it on the last one made); the others are no one's now.
+    if (version.sceneKey !== result.versions.at(-1)?.sceneKey)
+      await studio
+        .updateScene(row.id, {
+          sceneKey: version.sceneKey,
+          thumbKey,
+          sheet: kept,
+          sheetHash: sceneFingerprint(kept, show.bible, show.brief),
+        })
+        .catch((error: Error) =>
+          logger.warn(
+            `${who}: critic: the version kept not set: ${error.message}`,
+          ),
+        );
+    for (const other of result.versions)
+      if (other.sceneKey !== version.sceneKey)
+        await this.drop(other.sceneKey, thumbs.get(other.sceneKey) ?? null);
     return {
       scene: version.scene,
       sceneKey: version.sceneKey,
-      thumbKey: thumbs.get(version.sceneKey) ?? made.thumbKey,
-      sheet: result.changed ? current : null,
+      thumbKey,
+      sheet: result.changed ? kept : null,
       frames: result.frames,
     };
   }

@@ -152,24 +152,94 @@ describe("the critic's loop", () => {
     expect(out.frames.rounds[0].applied).toHaveLength(2);
   });
 
-  it('stops after the most rounds, its last failing pictures made safe, and looks once more by code', async () => {
+  it('stops after the most rounds, its last failing pictures made safe, and judges the version it ends on', async () => {
     const { p, said } = ports([5]);
     const out = await runCriticLoop(
       { first: version(1), opening: false, budgetUsd: 0.6 },
       p,
     );
     expect(out.frames.ended).toBe('rounds');
-    expect(said.critics).toHaveLength(LOOP.rounds);
+    // Each round's critic, and one more for the last version.
+    expect(said.critics).toHaveLength(LOOP.rounds + 1);
     // The last round: the shot whose set was wrong becomes its safe shot; the other fix stands.
     expect(said.fixes.at(-1)!.map((f) => f.kind)).toEqual([
       'enlarge',
       'safe-shot',
     ]);
+    expect(said.fixes).toHaveLength(LOOP.rounds);
     expect(out.frames.safe).toEqual([2]);
-    // A last look at the version it ends on, with no critic.
     expect(said.looks.at(-1)).toBe(`key-${LOOP.rounds + 1}@${LOOP.rounds + 1}`);
-    expect(out.frames.rounds.at(-1)!.critic).toBeNull();
+    expect(out.frames.rounds.at(-1)!.critic).not.toBeNull();
+    // As good as the others: the later is kept.
     expect(out.version.sceneKey).toBe(`key-${LOOP.rounds + 1}`);
+    expect(out.versions.map((v) => v.sceneKey)).toEqual([
+      'key-1',
+      'key-2',
+      'key-3',
+      'key-4',
+    ]);
+  });
+
+  it('keeps the best version the critic judged, undoing rounds that made it worse', async () => {
+    const { p } = ports([7, 5, 6, 5]);
+    const out = await runCriticLoop(
+      { first: version(1), opening: false, budgetUsd: 0.6 },
+      p,
+    );
+    expect(out.frames.ended).toBe('rounds');
+    expect(out.version.sceneKey).toBe('key-1');
+    expect(out.changed).toBe(false);
+    expect(out.frames.kept).toBe('key-1');
+    expect(out.frames.scores?.clarity).toBe(7);
+    // Every version made is handed back, for the ones not kept to be discarded.
+    expect(out.versions).toHaveLength(4);
+    // A better later version is kept.
+    const better = ports([5, 6, 7.5, 7]);
+    const out2 = await runCriticLoop(
+      { first: version(1), opening: false, budgetUsd: 0.6 },
+      better.p,
+    );
+    expect(out2.version.sceneKey).toBe('key-3');
+  });
+
+  it('asks again, once, when an answer leaves axes unscored', async () => {
+    let asked = 0;
+    const missing: (string[] | undefined)[] = [];
+    const { p } = ports([8.5], {
+      critic: (_v, _look, left) => {
+        asked += 1;
+        missing.push(left);
+        // First only the hook's, then every axis.
+        const whole = critique(8.5);
+        return Promise.resolve({
+          critique:
+            asked === 1
+              ? {
+                  scores: { hook: { score: 2, why: 'slow' } },
+                  fixes: [],
+                  verdict: '',
+                }
+              : whole,
+          costUsd: 0.01,
+        });
+      },
+    });
+    const out = await runCriticLoop(
+      { first: version(1), opening: false, budgetUsd: 0.6 },
+      p,
+    );
+    expect(asked).toBe(2);
+    expect(missing[1]).toEqual([
+      'clarity',
+      'readability',
+      'composition',
+      'motion',
+      'depth',
+      'truth',
+      'polish',
+    ]);
+    expect(out.frames.ended).toBe('passed');
+    expect(out.frames.costUsd).toBe(0.02);
   });
 
   it('never asks the critic past the budget', async () => {

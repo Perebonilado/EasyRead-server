@@ -241,6 +241,21 @@ export async function applyFixes(
     const next = starts.slice(k + 1).find((at) => at > from);
     return [from, next ?? n.keys.length];
   };
+  /**
+   * The words a target comes on at in a shot, where that is after its
+   * first words (the first item acting on it is later: a timeline's event,
+   * a region filled as it is named); null when it is there from the start.
+   */
+  const comesOnLater = (
+    shot: PlanShot,
+    target: string,
+    span: [number, number],
+  ): string | null => {
+    const first = shot.info.find((i) => sameName(i.target, target));
+    if (!first) return null;
+    const at = phraseAt(n, first.on, span[0], span[1]);
+    return at > span[0] + 2 ? first.on : null;
+  };
   const spans = lineSpans(ctx.rows);
   const rowAt = (key: number) =>
     ctx.rows[
@@ -331,28 +346,39 @@ export async function applyFixes(
           what = 'pushed in on the whole picture';
           break;
         }
+        // Something that comes on later in the shot is pushed in on as it
+        // comes, never framed before it is there (empty paper till then).
+        const later = comesOnLater(shot, target, span);
         const push = shot.camera.find(
           (c) => c.move === 'push' && (!c.target || sameName(c.target, target)),
         );
         if (push) {
           push.target = target;
           push.amount = push.amount === 'small' ? 'medium' : 'large';
+          if (later) push.on = later;
         } else {
           const named = find(n, splitTarget(target).rest, span);
           withMove(shot, {
             move: 'push',
             target,
-            on: named ? phraseText(n, named.at, named.length) : shot.on,
+            on:
+              later ??
+              (named ? phraseText(n, named.at, named.length) : shot.on),
             amount: 'medium',
           });
         }
-        shot.focal = target;
-        what = `pushed in on ${target}`;
+        if (!later) shot.focal = target;
+        what = `pushed in on ${target}${later ? ` as it comes on ("${later}")` : ''}`;
         break;
       }
       case 'reframe': {
         const target = targetName(fix.target, shot, ctx.registry);
-        if (target && target !== WHOLE_SET) {
+        const later = target ? comesOnLater(shot, target, span) : null;
+        if (target && target !== WHOLE_SET && later) {
+          // Framed as it comes on: a cut to it then.
+          withMove(shot, { move: 'cut-to', target, on: later });
+          what = `cut to ${target} as it comes on ("${later}")`;
+        } else if (target && target !== WHOLE_SET) {
           shot.focal = target;
           shot.camera = shot.camera.filter(
             (c) => !c.target || sameName(c.target, target),

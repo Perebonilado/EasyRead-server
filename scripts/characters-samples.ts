@@ -31,6 +31,7 @@ import type {
 import { makeKit } from '../src/business/domain/kit/registry';
 import { toAsset } from '../src/business/domain/kit/rig';
 import { kitStyle } from '../src/business/domain/kit/style';
+import type { ShowMapBase } from '../src/business/domain/scene-map';
 import type { PaletteToken } from '../src/business/domain/scene-palette';
 import { STAGES } from '../src/business/domain/scene-shape';
 import { shotLook } from '../src/business/domain/shots/shot-build';
@@ -51,7 +52,7 @@ const KIT = ['character.person', 'character.group'];
 interface Sample {
   name: string;
   lines: string[];
-  base: unknown;
+  base: ShowMapBase;
   palette: { thing: string; token: PaletteToken }[];
   registry: RegistryEntry[];
   plan: unknown;

@@ -177,6 +177,13 @@ export const LEAVES_WITH_SHOT: ReadonlySet<ShotInfoRecipe> =
   new Set<ShotInfoRecipe>(['label', 'spotlight', 'mark', 'flow', 'ask']);
 
 /**
+ * How long an attention cue holds the eye once it has drawn it (house):
+ * a ring or a spotlight is for the moment a thing is named, never a frame
+ * to sit in for the rest of a long shot.
+ */
+export const CUE_HOLD_MS = 3000;
+
+/**
  * Recipes that are a process, not a change: a flow's wave along the causal
  * path and a machine starting run as the words that name them are said, so
  * they start on their word rather than settle before it.
@@ -434,7 +441,13 @@ export function timeShots(
           else notes.push(`${where}: "${until}" is not said; ${item.id} stays`);
         }
         if (untilMs === undefined && LEAVES_WITH_SHOT.has(item.recipe))
-          untilMs = endMs;
+          untilMs = Math.round(
+            item.recipe === 'mark' || item.recipe === 'spotlight'
+              ? Math.min(endMs, timed.atMs + timed.durMs + CUE_HOLD_MS)
+              : item.recipe === 'flow'
+                ? Math.min(endMs, timed.atMs + timed.durMs + CUE_HOLD_MS / 3)
+                : endMs,
+          );
         const out: ShotInfoDto = {
           ...rest,
           atMs: timed.atMs,

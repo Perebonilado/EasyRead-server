@@ -256,6 +256,42 @@ describe('the board’s charts on the charts as drawn', () => {
   });
   const [timeline, calendar, quote] = built.shots;
 
+  it('draws a timeline event named by its own date with that date once', () => {
+    const once = buildShots(
+      {
+        shots: [
+          {
+            ...plan.shots[0],
+            set: {
+              kind: 'chart',
+              chart: {
+                kind: 'timeline',
+                spec: {
+                  events: [
+                    { when: '1945', name: '1945' },
+                    { when: '1951', name: '1951' },
+                  ],
+                },
+              },
+            },
+            info: [],
+          },
+        ],
+      },
+      registry,
+      {
+        shape: 'wide',
+        palette: [],
+        held: null,
+        theme: 'paper',
+        map: null,
+        seed: 'charts',
+      },
+    );
+    const svg = (once.assets['chart-1'] as { svg: string }).svg;
+    expect(svg.match(/>1945</g)).toHaveLength(1);
+  });
+
   it('draws a timeline, a calendar and a quotation from the shapes the board writes', () => {
     expect(built.shots.map((s) => s.set.kind)).toEqual([
       'chart',

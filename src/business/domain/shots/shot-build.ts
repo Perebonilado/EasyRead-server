@@ -20,6 +20,7 @@ import type {
   ShotAssetDto,
   ShotBox,
   ShotCreditDto,
+  ShotInfoRecipe,
   ShotJoin,
   ShotLifeDto,
   ShotLookDto,
@@ -167,10 +168,12 @@ const PLACE_BOX_SHARE = 0.03;
 
 /**
  * The least the camera shows round what it is aimed at, as a share of
- * its set's shorter side: a place is a point, and framed alone it would
- * fill the frame with a dot. A third of the map round it says where it is.
+ * its set's shorter side: a place is a point and a chart's part a piece of
+ * a whole, and framed alone either would fill the frame (a dot, a sheet's
+ * band), the set's own big names cut at its edges. Half the set round it
+ * says where it is.
  */
-const CAMERA_CONTEXT_SHARE = 0.3;
+const CAMERA_CONTEXT_SHARE = 0.5;
 
 /**
  * The kinds of part that hold others, by the prefix of their id, in the
@@ -195,6 +198,19 @@ const HOLDERS = [
   'dot',
   'path',
 ];
+
+/** What the camera must not leave out of the frame when it happens: facts and a flow's ends, not a passing cue. */
+const OUT_OF_VIEW: ReadonlySet<ShotInfoRecipe> = new Set<ShotInfoRecipe>([
+  'fill',
+  'pin',
+  'seam',
+  'draw',
+  'count',
+  'grow',
+  'transfer',
+  'flow',
+  'enter',
+]);
 
 /** A strike's new words come in this long after the line through the old ones has landed. */
 const NEW_WORDS_LAG_MS = 400;
@@ -254,6 +270,36 @@ export function travelMs(from: ShotBox, to: ShotBox, width: number): number {
   const [bx, by] = centre(to);
   const across = Math.hypot(bx - ax, by - ay) / Math.max(1, width);
   return Math.round(Math.max(400, Math.min(1200, 300 + 600 * across)));
+}
+
+/**
+ * A chart's spec as it is drawn: a timeline's event named only by its own
+ * date ({when: "1951", name: "1951"}) is drawn by its date alone, never
+ * the year twice.
+ */
+function drawnSpec(
+  kind: string,
+  spec: Record<string, unknown>,
+): Record<string, unknown> {
+  if (kind !== 'timeline' || !Array.isArray(spec.events)) return spec;
+  const key = (raw: unknown) =>
+    typeof raw === 'string' || typeof raw === 'number'
+      ? String(raw)
+          .toLowerCase()
+          .replace(/[^\p{L}\p{N}]/gu, '')
+      : '';
+  return {
+    ...spec,
+    events: (spec.events as unknown[]).map((raw) => {
+      const e = (raw && typeof raw === 'object' ? raw : {}) as Record<
+        string,
+        unknown
+      >;
+      return key(e.name) && key(e.name) === key(e.when)
+        ? { ...e, name: '' }
+        : e;
+    }),
+  };
 }
 
 /** A shot moved onto another copy of its set: every reference to the one asset made to the other. */
@@ -431,7 +477,7 @@ export function buildShots(
           return { set: { kind: 'chart', asset: kept.id }, asset: kept };
         const dto = chartAsset(
           planned.chart.kind,
-          planned.chart.spec ?? {},
+          drawnSpec(planned.chart.kind, planned.chart.spec ?? {}),
           look,
           ctx.shape,
         );
@@ -816,6 +862,18 @@ export function buildShots(
         return;
       }
       const to = one.to ? targetOf(one.to) : null;
+      // A flow runs along something: to where it goes, a part's own path,
+      // or a whole chart's paths; with none it would run off nowhere.
+      const runsAlong =
+        !!to ||
+        (target?.kind === 'asset' &&
+          (!target.part || !!svg?.parts[target.part]?.path));
+      if (one.recipe === 'flow' && !runsAlong) {
+        notes.push(
+          `shot ${i + 1}: flow on "${one.target ?? ''}" dropped (no path to run along and nowhere to go)`,
+        );
+        return;
+      }
       if (one.recipe === 'transfer' && !to) {
         notes.push(
           `shot ${i + 1}: transfer to "${one.to ?? ''}" dropped (nowhere to go)`,
@@ -864,7 +922,10 @@ export function buildShots(
       // A fill with no colour of its own lands on its part's: a region in
       // its side's colour, never the accent the recipe would choose.
       const role =
-        one.recipe === 'fill' && target?.kind === 'asset' && target.part
+        one.recipe === 'fill' &&
+        !one.until &&
+        target?.kind === 'asset' &&
+        target.part
           ? svg?.parts[target.part]?.role
           : undefined;
       const colour = one.colour ? sideOf(one.colour) : (role ?? null);
@@ -892,30 +953,56 @@ export function buildShots(
      * box (a place) widened to a share of its set, kept inside the set.
      */
     function inContext(target: ShotTargetDto): ShotTargetDto {
-      if (target.kind !== 'box' || !svg) return target;
+      if (!svg) return target;
+      const box =
+        target.kind === 'box'
+          ? target.box
+          : target.kind === 'asset' && target.part
+            ? boxOf(target)
+            : null;
+      if (!box) return target;
       const [bx, by, bw, bh] = svg.box;
       const least = Math.min(bw, bh) * CAMERA_CONTEXT_SHARE;
-      const [, , w, h] = target.box;
+      const [, , w, h] = box;
       if (w >= least && h >= least) return target;
       const W = Math.max(w, least);
       const H = Math.max(h, least);
-      const [cx, cy] = centre(target.box);
+      const [cx, cy] = centre(box);
       const x0 = Math.max(bx, Math.min(bx + bw - W, cx - W / 2));
       const y0 = Math.max(by, Math.min(by + bh - H, cy - H / 2));
       const r = (n: number) => Math.round(n * 10) / 10;
       return { kind: 'box', box: [r(x0), r(y0), r(W), r(H)] };
     }
 
+    /** The smallest box round two. */
+    const around = (a: ShotBox, b: ShotBox): ShotBox => {
+      const x0 = Math.min(a[0], b[0]);
+      const y0 = Math.min(a[1], b[1]);
+      const x1 = Math.max(a[0] + a[2], b[0] + b[2]);
+      const y1 = Math.max(a[1] + a[3], b[1] + b[3]);
+      return [x0, y0, x1 - x0, y1 - y0];
+    };
+    const inside = (outer: ShotBox, inner: ShotBox) =>
+      inner[0] >= outer[0] - 1 &&
+      inner[1] >= outer[1] - 1 &&
+      inner[0] + inner[2] <= outer[0] + outer[2] + 1 &&
+      inner[1] + inner[3] <= outer[1] + outer[3] + 1;
+
     // The camera: each move on what it names, with room round it, or the
     // shot's subject when what it names is not on this set; a travel as
     // long as its distance from where the camera was.
     const named = planned.focal ? targetOf(planned.focal) : null;
-    const moves = (planned.camera ?? ([] as PlanCamera[])).map((one) => {
-      const target = one.target ? targetOf(one.target) : null;
-      if (one.target && !target)
+    const moves = (planned.camera ?? ([] as PlanCamera[])).map((planned) => {
+      const target = planned.target ? targetOf(planned.target) : null;
+      if (planned.target && !target)
         notes.push(
-          `shot ${i + 1}: ${one.move} on "${one.target}" frames the subject instead`,
+          `shot ${i + 1}: ${planned.move} on "${planned.target}" frames the subject instead`,
         );
+      // A follow is of something that moves: on what stands still it is a travel to it.
+      const one: PlanCamera =
+        planned.move === 'follow' && target?.kind !== 'actor'
+          ? { ...planned, move: 'travel' }
+          : planned;
       return { one, target: target ? inContext(target) : null };
     });
     // A shot that travels to its subject opens where the camera was, not
@@ -955,6 +1042,39 @@ export function buildShots(
       });
       if (to) from = to;
     }
+    // What the shot shows that the camera would leave out of the frame (a
+    // region filled away from the one it is on, the far end of a flow):
+    // the camera travels once to take it in with what it was showing.
+    const view = from;
+    if (svg && view && camera.length < 3) {
+      const out = info.flatMap((x) => {
+        if (!OUT_OF_VIEW.has(x.recipe)) return [];
+        const boxes = [x.target, x.to]
+          .map((t) => (t ? boxOf(t) : null))
+          .filter((b): b is ShotBox => !!b && !inside(view, b));
+        return boxes.length ? [{ x, boxes }] : [];
+      });
+      if (out.length) {
+        const whole = out
+          .flatMap((o) => o.boxes)
+          .reduce((a, b) => around(a, b), view);
+        const target = inContext({
+          kind: 'box',
+          box: whole.map((n) => Math.round(n * 10) / 10) as ShotBox,
+        });
+        const wholeBox = boxOf(target) ?? whole;
+        camera.push({
+          move: 'travel',
+          on: out[0].x.on,
+          target,
+          durMs: travelMs(view, wholeBox, svg.box[2]),
+        });
+        from = wholeBox;
+        notes.push(
+          `shot ${i + 1}: the camera takes in ${out.length === 1 ? 'what it would leave out' : `${out.length} things it would leave out`}`,
+        );
+      }
+    }
     if (from) lastView = { asset: assetId, box: from };
 
     const life: ShotLifeDto[] = [...new Set(planned.life ?? [])]
@@ -990,11 +1110,19 @@ export function buildShots(
       one.shot = bringOnLater(one.shot, one.asset, id, notes, `shot ${i + 1}`);
   });
 
-  // A part a fill turns starts neutral in the run of shots it is first
-  // filled in (that run's own copy of the set), and keeps its colour in
-  // every run after; a run is shots one after another on one set.
-  const filled = new Set<string>();
+  // A part a lasting fill turns starts neutral in the run of shots it is
+  // first filled in (that run's own copy of the set), and keeps its colour
+  // in every run after; a run is shots one after another on one set. A
+  // highlight that lets go (a fill with until) leaves the part as it is
+  // drawn. A lasting fill of a part already in that colour is left out: it
+  // shows nothing, and on the stage it would hold the colour back.
+  const filled = new Map<string, string>();
   const paint = paintOf(look);
+  const lasting = (x: UntimedInfo) =>
+    x.recipe === 'fill' &&
+    !x.until &&
+    x.target?.kind === 'asset' &&
+    !!x.target.part;
   for (let k = 0; k < built.length;) {
     const id = assetOf(built[k].shot.set);
     let end = k + 1;
@@ -1002,33 +1130,38 @@ export function buildShots(
       end += 1;
     const asset = id ? assets[id] : undefined;
     if (id && asset?.kind === 'svg') {
-      const fills = built
-        .slice(k, end)
-        .flatMap((one) => one.shot.info)
-        .flatMap((x) =>
-          x.recipe === 'fill' &&
-          x.target?.kind === 'asset' &&
-          x.target.asset === id &&
-          x.target.part
-            ? [x.target.part]
-            : [],
-        );
-      const first = [...new Set(fills)]
-        .filter((p) => !filled.has(p) && asset.parts[p]?.role)
-        .sort();
+      const first: string[] = [];
+      for (let j = k; j < end; j += 1) {
+        const shot = built[j].shot;
+        const info = shot.info.filter((x) => {
+          if (!lasting(x) || x.target?.kind !== 'asset') return true;
+          const part = x.target.part!;
+          const colour = x.colour ?? '';
+          if (filled.get(part) === colour) {
+            notes.push(
+              `shot ${j + 1}: fill of ${part} left out (already that colour)`,
+            );
+            return false;
+          }
+          if (!filled.has(part) && asset.parts[part]?.role) first.push(part);
+          filled.set(part, colour);
+          return true;
+        });
+        if (info.length !== shot.info.length) built[j].shot = { ...shot, info };
+      }
       if (first.length) {
-        const copy = `${id}~${seedOf(first.join('+')).toString(36)}`;
+        const parts = [...new Set(first)].sort();
+        const copy = `${id}~${seedOf(parts.join('+')).toString(36)}`;
         const neutral =
           built[k].shot.set.kind === 'map'
             ? paint.dark
               ? mix(paint.paper, paint.ink, 0.1)
               : mix(paint.paper, '#FFFFFF', 0.8)
             : paint.faint;
-        assets[copy] ??= withNeutral(asset, first, neutral);
+        assets[copy] ??= withNeutral(asset, parts, neutral);
         for (let j = k; j < end; j += 1)
           built[j].shot = ontoAsset(built[j].shot, id, copy);
       }
-      for (const p of fills) filled.add(p);
     }
     k = end;
   }

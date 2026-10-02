@@ -8,7 +8,12 @@
  * The original is never touched.
  *
  *   npm run shots:remake -- --episode <id> --user <id> --copy [--scenes 1,2] [--voice kokoro]
+ *   npm run shots:remake -- --episode <copy id> --user <id> --again [--scenes 1,2]
  *
+ * --again makes a shots copy's scenes again as they are boarded (after a
+ * change to the build, the timing or the charts), asking nothing of the
+ * board; it refuses an episode any of whose lessons is not a scene of
+ * shots, so an original is never made again with the test voice.
  * --user must be the episode's owner: a made film's seconds are counted to
  * them. --scenes boards and makes only those scenes (1-based); the others
  * are left without a sheet. Nothing goes to a queue a worker reads: the
@@ -110,11 +115,12 @@ async function main() {
   const userId = option('--user');
   if (!episodeId || !userId)
     throw new Refused(
-      'Usage: npm run shots:remake -- --episode <id> --user <id> --copy [--scenes 1,2] [--voice kokoro]',
+      'Usage: npm run shots:remake -- --episode <id> --user <id> (--copy | --again) [--scenes 1,2] [--voice kokoro]',
     );
-  if (!process.argv.includes('--copy'))
+  const again = process.argv.includes('--again');
+  if (!process.argv.includes('--copy') && !again)
     throw new Refused(
-      'The remake is made as a copy beside the episode, never over it: add --copy.',
+      'The remake is made as a copy beside the episode, never over it: add --copy (or --again to make a shots copy again, as it is boarded).',
     );
   const app = await NestFactory.createApplicationContext(ShotsRemakeModule, {
     logger: ['log', 'warn', 'error'],
@@ -140,11 +146,29 @@ async function main() {
         `Episode ${episodeId} has no show cast to make it with`,
       );
 
-    // The copy, under the same show.
-    const copy = await copyOf(studio, show, episode);
-    logger.log(
-      `copied ${episode.id} as ${copy.id} "${copy.title}" (episode ${copy.number})`,
-    );
+    // The copy, under the same show; or, made again, the copy as it is.
+    let copy: StudioEpisodeRecord;
+    let rows: StudioSceneRecord[] = [];
+    const started = Date.now();
+    if (again) {
+      copy = episode;
+      rows = await studio.listScenes(copy.id);
+      // Only a shots copy is made again here: never an original with the
+      // test voice, nor a scene of today's storyboard.
+      const today = rows.filter(
+        (r) => r.sheet?.kind === 'explainer' && r.sheet.engine !== 'shots',
+      );
+      if (!rows.length || today.length)
+        throw new Refused(
+          `Episode ${episodeId} is not a shots copy (${today.length} of its lessons are today's storyboard): make a copy with --copy.`,
+        );
+      logger.log(`making ${copy.id} "${copy.title}" again, as boarded`);
+    } else {
+      copy = await copyOf(studio, show, episode);
+      logger.log(
+        `copied ${episode.id} as ${copy.id} "${copy.title}" (episode ${copy.number})`,
+      );
+    }
     const asked = scenesAsked(copy.outline!.scenes.length);
 
     // Boarded with the real board and the switch on: lesson scenes as
@@ -158,9 +182,9 @@ async function main() {
       material: app.get(StudioMaterialService),
       logger: { log: (l) => logger.log(l), warn: (l) => logger.warn(l) },
     });
-    const started = Date.now();
-    let rows: StudioSceneRecord[];
-    if (asked.length === copy.outline!.scenes.length) {
+    if (again) {
+      // As boarded: nothing asked of the board.
+    } else if (asked.length === copy.outline!.scenes.length) {
       await editor.boards(show, copy);
       rows = await studio.listScenes(copy.id);
     } else {
@@ -174,9 +198,10 @@ async function main() {
     const shots = rows.filter(
       (r) => r.sheet?.kind === 'explainer' && r.sheet.engine === 'shots',
     ).length;
-    logger.log(
-      `boarded ${asked.length} scenes in ${Math.round((Date.now() - started) / 1000)}s, ${shots} as shots`,
-    );
+    if (!again)
+      logger.log(
+        `boarded ${asked.length} scenes in ${Math.round((Date.now() - started) / 1000)}s, ${shots} as shots`,
+      );
 
     // Made here, as a worker makes each: voiced, built, timed, stored.
     const studioProcessor = app.get(StudioProcessor);

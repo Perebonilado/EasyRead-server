@@ -235,9 +235,12 @@ describe('the plan built', () => {
     expect(portrait.camera[0]).toMatchObject({
       move: 'push',
       amount: CAMERA_AMOUNT.small,
-      // Where the camera last was: the seam the shot before pushed in on.
-      target: { kind: 'asset', part: 'seam-federal-balance' },
     });
+    // Where the camera last was: round the seam the shot before pushed in on.
+    const aim = portrait.camera[0].target as { kind: string; box: number[] };
+    expect(aim.kind).toBe('box');
+    expect(aim.box[0]).toBeLessThanOrEqual(450);
+    expect(aim.box[0] + aim.box[2]).toBeGreaterThanOrEqual(800);
     expect(built.notes.join('\n')).toContain(
       'no cleared picture of "person:Ahmadu Bello"',
     );
@@ -273,12 +276,17 @@ describe('the plan built', () => {
     );
   });
 
-  it('frames a push on what it names, and says when it names what is not there', () => {
-    expect(built.shots[2].camera[0]).toMatchObject({
-      move: 'push',
-      target: { kind: 'asset', part: 'seam-federal-balance' },
-      amount: CAMERA_AMOUNT.medium,
-    });
+  it('frames a push on what it names, with room round it when it is thin', () => {
+    const push = built.shots[2].camera[0];
+    expect(push).toMatchObject({ move: 'push', amount: CAMERA_AMOUNT.medium });
+    // The seam is a line: the camera takes half the map round it.
+    const [x, y, w, h] = (push.target as { box: number[] }).box;
+    expect(w).toBeGreaterThanOrEqual(350);
+    expect(h).toBeGreaterThanOrEqual(350);
+    expect(x).toBeLessThanOrEqual(450);
+    expect(x + w).toBeGreaterThanOrEqual(800);
+    expect(y).toBeLessThanOrEqual(398);
+    expect(y + h).toBeGreaterThanOrEqual(402);
   });
 
   it('aims the camera at a place with room round it, while its pin points at the place itself', () => {
@@ -289,7 +297,7 @@ describe('the plan built', () => {
     const travel = last.camera[0].target as { kind: string; box: number[] };
     expect(pin.box[2]).toBeLessThan(30);
     expect(travel.kind).toBe('box');
-    expect(travel.box[2]).toBeCloseTo(700 * 0.3, 0);
+    expect(travel.box[2]).toBeCloseTo(700 * 0.5, 0);
     // Kept inside the map, round Lagos.
     expect(travel.box[0]).toBeGreaterThanOrEqual(0);
     expect(travel.box[0] + travel.box[2]).toBeLessThanOrEqual(900);
@@ -671,5 +679,138 @@ describe('a set’s later state and its own names, brought on by the changes the
     expect(made.notes.join(' ')).toContain(
       'day-2 brought on with its last change',
     );
+  });
+});
+
+describe('the camera and the fills, as the stage plays them', () => {
+  const entries = registryOf(REGISTRY);
+  const shot = (
+    more: Partial<ShotPlan['shots'][number]>,
+  ): ShotPlan['shots'][number] => ({
+    on: 'After the 1945 strikes',
+    set: { kind: 'map' },
+    actors: [],
+    info: [],
+    life: [],
+    camera: [],
+    join: 'continue',
+    ...more,
+  });
+
+  it('lets a highlight go back to the part’s own colour, and never starts its part neutral', () => {
+    const made = buildShots(
+      {
+        shots: [
+          shot({
+            info: [
+              {
+                recipe: 'fill',
+                target: 'region:North Region',
+                on: 'colonial Nigeria',
+                until: 'began shifting',
+              },
+            ],
+          }),
+        ],
+      },
+      entries,
+      ctx,
+    );
+    const fill = made.shots[0].info[0];
+    expect(fill.colour).toBeUndefined();
+    expect((made.shots[0].set as { asset: string }).asset).toBe('map');
+  });
+
+  it('leaves out a lasting fill of a part already that colour in the run', () => {
+    const made = buildShots(
+      {
+        shots: [
+          shot({
+            info: [
+              {
+                recipe: 'fill',
+                target: 'region:North Region',
+                on: 'colonial Nigeria',
+              },
+            ],
+          }),
+          shot({
+            on: 'Then the fight changed',
+            info: [
+              {
+                recipe: 'fill',
+                target: 'region:North Region',
+                on: 'independence',
+              },
+              { recipe: 'fill', target: 'region:West Region', on: 'but three' },
+            ],
+          }),
+        ],
+      },
+      entries,
+      ctx,
+    );
+    expect(
+      made.shots[1].info.map((i) => (i.target as { part: string }).part),
+    ).toEqual(['group-west-region']);
+    expect(made.notes.join(' ')).toContain(
+      'fill of group-north-region left out',
+    );
+  });
+
+  it('drops a flow with no path to run along and nowhere to go, and travels where a follow has nothing moving', () => {
+    const made = buildShots(
+      {
+        shots: [
+          shot({
+            info: [
+              { recipe: 'flow', target: 'place:Lagos', on: 'colonial Nigeria' },
+            ],
+            camera: [
+              { move: 'follow', target: 'place:Lagos', on: 'began shifting' },
+            ],
+          }),
+        ],
+      },
+      entries,
+      ctx,
+    );
+    expect(made.shots[0].info).toEqual([]);
+    expect(made.shots[0].camera[0].move).toBe('travel');
+  });
+
+  it('takes in what a shot shows away from where the camera is, with one travel', () => {
+    const made = buildShots(
+      {
+        shots: [
+          shot({
+            focal: 'region:East Region',
+            info: [
+              {
+                recipe: 'fill',
+                target: 'region:East Region',
+                on: 'colonial Nigeria',
+              },
+              {
+                recipe: 'fill',
+                target: 'region:North Region',
+                on: 'regional legislatures',
+              },
+            ],
+          }),
+        ],
+      },
+      entries,
+      ctx,
+    );
+    const travels = made.shots[0].camera.filter((c) => c.move === 'travel');
+    expect(travels).toHaveLength(1);
+    expect(travels[0].on).toBe('regional legislatures');
+    const [x, y, w, h] = (travels[0].target as { box: number[] }).box;
+    // The North (100, 50 to 800, 400) and the East together.
+    expect(x).toBeLessThanOrEqual(100);
+    expect(y).toBeLessThanOrEqual(50);
+    expect(x + w).toBeGreaterThanOrEqual(800);
+    expect(y + h).toBeGreaterThanOrEqual(650);
   });
 });

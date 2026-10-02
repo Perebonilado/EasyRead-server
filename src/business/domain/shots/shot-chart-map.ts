@@ -216,6 +216,28 @@ function elementAt(svg: string, start: number): string {
   return svg.slice(start);
 }
 
+/** A part's group as a move wraps it: its drawing inside a translate. */
+const MOVED = /^<g[^>]*><g transform="translate\((-?[\d.]+) (-?[\d.]+)\)">/;
+
+/** The box of a part's markup where it is drawn: its ink, and the move a translate made. */
+function placedInk(markup: string): ShotBox | null {
+  const raw = inkOf(markup);
+  const shift = MOVED.exec(markup);
+  return raw && shift
+    ? [raw[0] + Number(shift[1]), raw[1] + Number(shift[2]), raw[2], raw[3]]
+    : raw;
+}
+
+/** A part's group moved by so much across and down, its own attributes kept. */
+function movedBy(markup: string, dx: number, dy: number): string {
+  const r = (n: number) => Math.round(n * 10) / 10;
+  return markup.replace(
+    /^<g data-part="([^"]+)"([^>]*)>([\s\S]*)<\/g>$/,
+    (_all, name: string, attrs: string, inner: string) =>
+      `<g data-part="${name}"${attrs}><g transform="translate(${r(dx)} ${r(dy)})">${inner}</g></g>`,
+  );
+}
+
 /** The rings a path draws, each from a move to the next (the drawing's paths are absolute). */
 function ringsOf(d: string): [number, number][][] {
   return d
@@ -351,6 +373,34 @@ export async function mapAsset(
       const end = svg.indexOf('"', fill + 6);
       svg = `${svg.slice(0, fill + 6)}${side.colour}${svg.slice(end)}`;
     }
+    // A name the drawing set past the words' area (beside a region at the
+    // frame's side, or under one near the captions' band) comes in, with
+    // its tick, as far as it must.
+    {
+      const area = frame.text;
+      const labels = [...svg.matchAll(/<g data-part="label-[^"]+"/g)];
+      for (const m of labels.reverse()) {
+        const markup = elementAt(svg, m.index);
+        const box = inkOf(markup);
+        if (!box) continue;
+        const [x, y, w, h] = box;
+        const into = (from: number, size: number, lo: number, hi: number) =>
+          size > hi - lo
+            ? 0
+            : from < lo
+              ? lo - from
+              : from + size > hi
+                ? hi - (from + size)
+                : 0;
+        const dx = into(x, w, area.x0, area.x1);
+        const dy = into(y, h, area.y0, area.y1);
+        if (!dx && !dy) continue;
+        svg =
+          svg.slice(0, m.index) +
+          movedBy(markup, dx, dy) +
+          svg.slice(m.index + markup.length);
+      }
+    }
     // The key (each named group's colour) and the note of a past map's
     // borders are words: the drawing sets them in the frame's corners, so
     // each goes to the corner of the words' area (clear of the captions'
@@ -364,7 +414,7 @@ export async function mapAsset(
       for (const m of svg.matchAll(
         /<g data-part="(?:label|place|pin)-[^"]+"/g,
       )) {
-        const box = inkOf(elementAt(svg, m.index));
+        const box = placedInk(elementAt(svg, m.index));
         if (box) written.push(box);
       }
       const land = ringsOf(
@@ -421,14 +471,10 @@ export async function mapAsset(
             d: Math.hypot(sx - x, sy - y),
           }))
           .sort((a, b) => a.n - b.n || a.d - b.d);
-        const dx = Math.round((best.sx - x) * 10) / 10;
-        const dy = Math.round((best.sy - y) * 10) / 10;
-        const moved = note.replace(
-          /^<g data-part="([^"]+)"([^>]*)>([\s\S]*)<\/g>$/,
-          (_all, name: string, attrs: string, inner: string) =>
-            `<g data-part="${name}"${attrs}><g transform="translate(${dx} ${dy})">${inner}</g></g>`,
-        );
-        svg = svg.slice(0, at) + moved + svg.slice(at + note.length);
+        svg =
+          svg.slice(0, at) +
+          movedBy(note, best.sx - x, best.sy - y) +
+          svg.slice(at + note.length);
         written.push([best.sx, best.sy, w, h]);
       }
     }
@@ -437,18 +483,9 @@ export async function mapAsset(
       const at = svg.indexOf(`<g data-part="${id}"`);
       if (at < 0) continue;
       const markup = elementAt(svg, at);
-      const raw = inkOf(markup);
-      if (!raw) continue;
-      // A group moved by a translate (a key or note brought into the words' area) is measured where it went.
-      const shift =
-        id === 'key' || id === 'period'
-          ? /^<g[^>]*><g transform="translate\((-?[\d.]+) (-?[\d.]+)\)">/.exec(
-              markup,
-            )
-          : null;
-      const box: ShotBox = shift
-        ? [raw[0] + Number(shift[1]), raw[1] + Number(shift[2]), raw[2], raw[3]]
-        : raw;
+      // Measured where it is drawn (a name, key or note brought into the words' area where it went).
+      const box = placedInk(markup);
+      if (!box) continue;
       const name = names.get(id) ?? null;
       const side = name ? sideFor(paint, name) : null;
       const path = /^(route|seam)-/.test(id)

@@ -227,32 +227,51 @@ export function documentAsset(
   book.add('page', { box: [px, py, pageW, pageH], role: 'ink' });
   if (spec.stamp) {
     // The stamp: a double-ruled box of words, turned, over the body, below
-    // the headline it would hide (a tall frame's as wide as its picture).
+    // the headline it would hide.
     const colour = colourOf(paint, null, spec.colour ?? 'bad', 0);
-    const room = tall ? (frame.pic.x1 - frame.pic.x0) * 0.8 : pageW * 0.78;
-    const words = fit(
-      spec.stamp.toUpperCase(),
-      room,
-      frame.size.title,
-      floor,
-      2,
-      700,
-    );
-    const ww =
-      Math.max(...words.lines.map((l) => wordsWidth(l, words.size, 700))) +
-      words.size * 1.1;
-    const wh = words.lines.length * words.size * 1.1 + words.size * 0.8;
-    const cx = tall ? (frame.pic.x0 + frame.pic.x1) / 2 : px + pageW / 2;
-    // Over the body, below the headline it would hide; a tall frame's inside the safe band.
-    const lowest = tall
-      ? Math.min(foot, text.y1) - wh * 0.62
-      : foot - wh * 0.62;
-    const cy = Math.max(
-      bodyTop + wh * 0.62,
-      Math.min(lowest, (bodyTop + foot) / 2),
+    // Across the page; a tall frame's across the words' area, clear of its
+    // overlays at the side.
+    const [left, right] = tall ? [text.x0, text.x1] : [px, px + pageW];
+    const room = (right - left) * (tall ? 0.84 : 0.78);
+    const turn = tall ? -5 : -8;
+    const a = (Math.abs(turn) * Math.PI) / 180;
+    // Its words as large as fit between the headline and the captions'
+    // band once turned (at the reading floor where nothing larger does).
+    const stampAt = (most: number) => {
+      const set = fit(spec.stamp!.toUpperCase(), room, most, floor, 2, 700);
+      const sw =
+        Math.max(...set.lines.map((l) => wordsWidth(l, set.size, 700))) +
+        set.size * 1.1;
+      const sh = set.lines.length * set.size * 1.1 + set.size * 0.8;
+      return {
+        words: set,
+        ww: sw,
+        wh: sh,
+        // The box round the turned stamp.
+        bw: sw * Math.cos(a) + sh * Math.sin(a),
+        bh: sw * Math.sin(a) + sh * Math.cos(a),
+      };
+    };
+    let stamp = stampAt(floor);
+    for (let most = frame.size.title; most > floor; most -= 2) {
+      const one = stampAt(most);
+      if (one.bh <= text.y1 - bodyTop + floor * 0.3 && one.bw <= right - left) {
+        stamp = one;
+        break;
+      }
+    }
+    const { words, ww, wh, bw, bh } = stamp;
+    const cx = (left + right) / 2;
+    // Over the body, below the headline it would hide; turned, all of it
+    // above the captions' band at the frame's foot, in either shape.
+    const cy = Math.min(
+      text.y1 - bh / 2,
+      Math.max(
+        bodyTop + wh * 0.62,
+        Math.min(foot - wh * 0.62, (bodyTop + foot) / 2),
+      ),
     );
     const ring = Math.max(4, words.size * 0.08);
-    const turn = tall ? -5 : -8;
     const inside =
       `<rect x="${r1(cx - ww / 2)}" y="${r1(cy - wh / 2)}" width="${r1(ww)}" height="${r1(wh)}" rx="${r1(words.size * 0.18)}" fill="none" stroke="${esc(colour.colour)}" stroke-width="${r1(ring)}"/>` +
       `<rect x="${r1(cx - ww / 2 + ring * 1.7)}" y="${r1(cy - wh / 2 + ring * 1.7)}" width="${r1(ww - ring * 3.4)}" height="${r1(wh - ring * 3.4)}" rx="${r1(words.size * 0.12)}" fill="none" stroke="${esc(colour.colour)}" stroke-width="${r1(ring * 0.45)}"/>` +
@@ -269,10 +288,6 @@ export function documentAsset(
           spacing: words.size * 0.05,
         },
       );
-    // Its box round the turned stamp.
-    const a = (Math.abs(turn) * Math.PI) / 180;
-    const bw = ww * Math.cos(a) + wh * Math.sin(a);
-    const bh = ww * Math.sin(a) + wh * Math.cos(a);
     book.add('stamp', {
       box: [cx - bw / 2, cy - bh / 2, bw, bh],
       role: colour.role ?? 'accent',

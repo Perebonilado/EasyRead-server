@@ -359,6 +359,29 @@ describe('chartAsset', () => {
     }
   });
 
+  it("turns a document's stamp clear of its headline, inside the words' area and out of the captions' band", () => {
+    for (const shape of SHAPES) {
+      const { text, size } = frameOf(shape);
+      const asset = chartAsset(
+        'document',
+        CHART_SPECS.document.report,
+        LIGHT_LOOK,
+        shape,
+      )!;
+      const [x, y, w, h] = asset.parts.stamp.box;
+      const headline = asset.parts.headline.box;
+      expect([shape, y + h <= text.y1 + 1]).toEqual([shape, true]);
+      expect([shape, x >= text.x0 - 1 && x + w <= text.x1 + 1]).toEqual([
+        shape,
+        true,
+      ]);
+      expect([
+        shape,
+        y >= headline[1] + headline[3] - size.label * 0.3,
+      ]).toEqual([shape, true]);
+    }
+  });
+
   it('lights a chamber by party, what is left over muted', () => {
     const asset = chartAsset(
       'seats',
@@ -587,8 +610,16 @@ describe('mapAsset', () => {
     expect(asset!.parts['label-kano']).toBeDefined();
   });
 
-  it("keeps its names out of the captions' band, and its key and a past map's note inside the words' area", async () => {
+  it("keeps its names, its key and a past map's note inside the words' area, out of the captions' band", async () => {
     const past = { ...base, year: 1959 };
+    const tour = {
+      region: 'Nigeria',
+      highlight: null,
+      places: ['Kano', 'Lagos'],
+      routes: [{ from: 'Lagos', to: 'Kano', name: 'The tour north' }],
+      groups: base.groups.map((g) => ({ name: g.name })),
+      base: past,
+    };
     const europe = {
       region: 'Europe',
       highlight: [
@@ -601,26 +632,25 @@ describe('mapAsset', () => {
     };
     for (const shape of SHAPES) {
       const { text } = frameOf(shape);
-      const one = await mapAsset(past, LIGHT_LOOK, shape);
-      const two = await mapAsset(europe, LIGHT_LOOK, shape);
-      expect(one!.parts.period).toBeDefined();
-      expect(two!.parts.key).toBeDefined();
-      for (const asset of [one!, two!])
-        for (const [id, part] of Object.entries(asset.parts)) {
+      const assets = await Promise.all(
+        [past, tour, europe].map((input) => mapAsset(input, LIGHT_LOOK, shape)),
+      );
+      expect(assets[0]!.parts.period).toBeDefined();
+      expect(assets[1]!.parts['label-kano']).toBeDefined();
+      expect(assets[2]!.parts.key).toBeDefined();
+      for (const asset of assets)
+        for (const [id, part] of Object.entries(asset!.parts)) {
           if (!/^label-|^key$|^period$/.test(id)) continue;
           const [x, y, w, h] = part.box;
-          expect({ id, shape, clear: y + h <= text.y1 + 1 }).toEqual({
+          expect({
             id,
             shape,
-            clear: true,
-          });
-          if (id === 'key' || id === 'period')
-            expect({
-              id,
-              shape,
-              inside:
-                x >= text.x0 - 1 && y >= text.y0 - 1 && x + w <= text.x1 + 1,
-            }).toEqual({ id, shape, inside: true });
+            inside:
+              x >= text.x0 - 1 &&
+              y >= text.y0 - 1 &&
+              x + w <= text.x1 + 1 &&
+              y + h <= text.y1 + 1,
+          }).toEqual({ id, shape, inside: true });
         }
     }
   });

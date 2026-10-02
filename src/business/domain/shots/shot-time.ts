@@ -35,6 +35,8 @@ export type UntimedInfo = Omit<ShotInfoDto, 'atMs' | 'durMs' | 'untilMs'> & {
   until?: string;
   /** Its own length, when code knows better than the recipe's (a transfer of many tokens). */
   durMs?: number;
+  /** How long after the change it follows it lands: a strike's new words come once the line is drawn. */
+  lag?: number;
 };
 
 /** A camera move built but not timed. */
@@ -164,6 +166,15 @@ export const CUT_LEAD_MS = 100;
 
 /** The shortest a shot may be: anything shorter is a flash, not a picture. */
 export const MIN_SHOT_MS = PACE.minGapMs;
+
+/**
+ * What leaves when its shot ends, unless its words say sooner: words and
+ * cues belong to their moment, and a run of shots on one set would
+ * otherwise gather every label it ever showed. What builds the picture
+ * (a pin, a fill, a line drawn, a part brought on) stays for the run.
+ */
+export const LEAVES_WITH_SHOT: ReadonlySet<ShotInfoRecipe> =
+  new Set<ShotInfoRecipe>(['label', 'spotlight', 'mark', 'flow', 'ask']);
 
 /**
  * Recipes that are a process, not a change: a flow's wave along the causal
@@ -402,8 +413,8 @@ export function timeShots(
 
     const info = one.shot.info
       .map((item) => {
-        const { on, until, durMs: own, ...rest } = item;
-        const word = wordMs(on);
+        const { on, until, durMs: own, lag, ...rest } = item;
+        const word = wordMs(on) + (lag ?? 0);
         const length = own ?? RECIPE_MS[item.recipe];
         const timed = STARTS_ON_WORD.has(item.recipe)
           ? started(word, length)
@@ -422,6 +433,8 @@ export function timeShots(
             );
           else notes.push(`${where}: "${until}" is not said; ${item.id} stays`);
         }
+        if (untilMs === undefined && LEAVES_WITH_SHOT.has(item.recipe))
+          untilMs = endMs;
         const out: ShotInfoDto = {
           ...rest,
           atMs: timed.atMs,

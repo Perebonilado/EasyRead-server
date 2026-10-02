@@ -17,7 +17,12 @@ jest.mock('./shot-charts', () => {
   const asset = (
     parts: Record<
       string,
-      { box: [number, number, number, number]; value?: number }
+      {
+        box: [number, number, number, number];
+        value?: number;
+        later?: boolean;
+        path?: string;
+      }
     >,
   ): ShotSvgAssetDto => ({
     kind: 'svg',
@@ -39,7 +44,20 @@ jest.mock('./shot-charts', () => {
     }),
     strike: asset({
       old: { box: [300, 300, 600, 200] },
-      new: { box: [300, 520, 600, 200] },
+      strike: {
+        box: [280, 380, 640, 40],
+        later: true,
+        path: 'M280 400L920 390',
+      },
+      new: { box: [300, 520, 600, 200], later: true },
+    }),
+    document: asset({
+      page: { box: [400, 100, 800, 700] },
+      stamp: { box: [900, 500, 250, 120], later: true },
+    }),
+    calendar: asset({
+      'day-1': { box: [300, 300, 200, 200] },
+      'day-2': { box: [700, 300, 200, 200], later: true },
     }),
     quote: asset({
       'quote-line-1': { box: [200, 300, 1200, 120] },
@@ -106,7 +124,7 @@ describe('the registry as the build reads it', () => {
 });
 
 describe('the plan built', () => {
-  it('builds every shot, the map once among the assets', () => {
+  it('builds every shot, each set it shows among the assets and nothing else', () => {
     expect(built.shots.map((s) => s.id)).toEqual([
       's1',
       's2',
@@ -114,10 +132,13 @@ describe('the plan built', () => {
       's4',
       's5',
     ]);
-    expect(Object.keys(built.assets).sort()).toEqual(['chart-1', 'map']);
-    expect(built.shots[0].set).toEqual({
+    const shown = new Set(
+      built.shots.map((s) => ('asset' in s.set ? s.set.asset : '')),
+    );
+    shown.delete('');
+    expect(new Set(Object.keys(built.assets))).toEqual(shown);
+    expect(built.shots[0].set).toMatchObject({
       kind: 'map',
-      asset: 'map',
       style: 'atlas',
       // A drawn map cannot tilt: it lies flat until the map work package.
       tilt: 0,
@@ -127,11 +148,35 @@ describe('the plan built', () => {
     expect(built.shots[0].chip?.text).toContain("Today's borders");
   });
 
+  it('starts a region neutral in the run it is first filled in, and coloured in every run after', () => {
+    const first = built.shots[0].set as { asset: string };
+    const later = built.shots[4].set as { asset: string };
+    expect(first.asset).toMatch(/^map~/);
+    expect(later.asset).toMatch(/^map~/);
+    expect(later.asset).not.toBe(first.asset);
+    // The runs: shot 1 alone (a chart follows), then shots 3 to 5 on one copy.
+    expect((built.shots[2].set as { asset: string }).asset).toBe(later.asset);
+    const svg = (id: string) => (built.assets[id] as { svg: string }).svg;
+    const fillOf = (markup: string, part: string) =>
+      /fill="([^"]+)"/.exec(
+        markup.slice(markup.indexOf(`data-part="${part}"`)),
+      )?.[1];
+    // North is filled in the first run, so it starts neutral there; West later.
+    expect(fillOf(svg(first.asset), 'group-north-region')).not.toBe('#0050BE');
+    expect(fillOf(svg(first.asset), 'group-west-region')).toBe('#BB7907');
+    expect(fillOf(svg(later.asset), 'group-north-region')).toBe('#0050BE');
+    expect(fillOf(svg(later.asset), 'group-west-region')).not.toBe('#BB7907');
+    // And a fill with no colour of its own lands on its side's.
+    expect(built.shots[0].info.find((i) => i.recipe === 'fill')?.colour).toBe(
+      'North Region',
+    );
+  });
+
   it('resolves a region to its part and a place to a box round its point on the drawn map', () => {
     const [pin, fill] = built.shots[0].info;
     expect(fill).toMatchObject({
       recipe: 'fill',
-      target: { kind: 'asset', asset: 'map', part: 'group-north-region' },
+      target: { kind: 'asset', part: 'group-north-region' },
     });
     expect(pin.recipe).toBe('pin');
     expect(pin.target?.kind).toBe('box');
@@ -139,9 +184,8 @@ describe('the plan built', () => {
     const [px, py] = MAP.project!(3.38, 6.52)!;
     expect(x + w / 2).toBeCloseTo(px, 0);
     expect(y + h / 2).toBeCloseTo(py, 0);
-    expect(built.shots[0].focal).toEqual({
+    expect(built.shots[0].focal).toMatchObject({
       kind: 'asset',
-      asset: 'map',
       part: 'group-north-region',
     });
   });
@@ -192,7 +236,7 @@ describe('the plan built', () => {
       move: 'push',
       amount: CAMERA_AMOUNT.small,
       // Where the camera last was: the seam the shot before pushed in on.
-      target: { kind: 'asset', asset: 'map', part: 'seam-federal-balance' },
+      target: { kind: 'asset', part: 'seam-federal-balance' },
     });
     expect(built.notes.join('\n')).toContain(
       'no cleared picture of "person:Ahmadu Bello"',
@@ -474,11 +518,14 @@ describe('the board’s names, as the build resolves them', () => {
     expect(quote.info[1].target).toEqual({ kind: 'asset', asset: 'chart-3' });
   });
 
-  it('strikes a strike’s old words when the plan names nothing', () => {
-    expect(strike.info[0]).toMatchObject({
-      recipe: 'strike',
-      target: { kind: 'asset', asset: 'chart-2', part: 'old' },
-    });
+  it('draws a strike chart’s own line through the old words, its new words coming in after', () => {
+    expect(
+      strike.info.map((i) => [i.recipe, (i.target as { part?: string }).part]),
+    ).toEqual([
+      ['draw', 'strike'],
+      ['enter', 'new'],
+    ]);
+    expect(strike.info[1]).toMatchObject({ text: 'rise', lag: 400 });
   });
 
   it('drops a part the chart does not have, and a date with no timeline to show it', () => {
@@ -514,5 +561,115 @@ describe('the board’s names, as the build resolves them', () => {
       { kind: 'asset', asset: 'chart-1', part: 'event-1954' },
     ]);
     expect(missing.shots[1].info).toEqual([]);
+  });
+});
+
+describe('a set’s later state and its own names, brought on by the changes they belong to', () => {
+  const entries = registryOf(REGISTRY);
+  const labelled = {
+    ...MAP,
+    asset: {
+      ...MAP.asset,
+      svg: MAP.asset.svg.replace(
+        '</svg>',
+        '<g data-part="label-north-region"><text>North Region</text></g></svg>',
+      ),
+      parts: {
+        ...MAP.asset.parts,
+        'label-north-region': { box: [400, 200, 200, 40] },
+      },
+    },
+  } as typeof MAP;
+  const plan: ShotPlan = {
+    shots: [
+      {
+        on: 'After the 1945 strikes',
+        set: { kind: 'map' },
+        actors: [],
+        info: [
+          {
+            recipe: 'label',
+            target: 'region:North Region',
+            text: 'North Region',
+            on: 'colonial Nigeria',
+          },
+        ],
+        life: [],
+        camera: [],
+        join: 'cut',
+      },
+      {
+        on: 'Then the fight changed',
+        set: {
+          kind: 'chart',
+          chart: { kind: 'document', spec: { title: 'The Act' } },
+        },
+        actors: [],
+        info: [{ recipe: 'stamp', text: 'PASSED', on: 'independence' }],
+        life: [],
+        camera: [],
+        join: 'cut',
+      },
+      {
+        on: 'Why did self-government',
+        set: { kind: 'chart', chart: { kind: 'calendar', spec: {} } },
+        actors: [],
+        info: [
+          {
+            recipe: 'mark',
+            target: 'part:day-1',
+            on: 'become a regional fight',
+          },
+        ],
+        life: [],
+        camera: [],
+        join: 'cut',
+      },
+    ],
+  };
+  const made = buildShots(plan, entries, { ...ctx, map: labelled });
+  const [map, document, calendar] = made.shots;
+
+  it('names a region the map names itself by bringing its own name on, never writing a second', () => {
+    expect(map.info).toEqual([
+      expect.objectContaining({
+        recipe: 'enter',
+        target: {
+          kind: 'asset',
+          asset: expect.stringMatching(/^map/) as string,
+          part: 'label-north-region',
+        },
+        text: 'rise',
+        on: 'colonial Nigeria',
+      }),
+    ]);
+  });
+
+  it('lands a stamp with the document’s own stamp coming down, not a second one', () => {
+    expect(
+      document.info.map((i) => [
+        i.recipe,
+        (i.target as { part?: string }).part,
+        i.text,
+      ]),
+    ).toEqual([
+      ['stamp', 'stamp', undefined],
+      ['enter', 'stamp', 'scale'],
+    ]);
+  });
+
+  it('brings on a later part nothing brings on with the shot’s last change', () => {
+    expect(
+      calendar.info.map((i) => [
+        i.recipe,
+        (i.target as { part?: string }).part,
+      ]),
+    ).toEqual([
+      ['mark', 'day-1'],
+      ['enter', 'day-2'],
+    ]);
+    expect(made.notes.join(' ')).toContain(
+      'day-2 brought on with its last change',
+    );
   });
 });

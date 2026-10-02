@@ -40,10 +40,11 @@ import {
   type ExplainerTheme,
   type ThemeId,
 } from '../scene-themes';
+import { mix, paintOf } from './shot-chart-kit';
 import { chartAsset } from './shot-charts';
 import { WHOLE_SET } from './shot-check';
 import type { ShotMapSet } from './shot-map';
-import { chartPartIds } from './shot-parts';
+import { chartPartIds, partSlug } from './shot-parts';
 import { splitTarget } from './shot-registry';
 import {
   CAMERA_AMOUNT,
@@ -171,6 +172,33 @@ const PLACE_BOX_SHARE = 0.03;
  */
 const CAMERA_CONTEXT_SHARE = 0.3;
 
+/**
+ * The kinds of part that hold others, by the prefix of their id, in the
+ * order a name is matched to them: an event before its date and its dot,
+ * a bar before its value and its label.
+ */
+const HOLDERS = [
+  'event',
+  'bar',
+  'node',
+  'item',
+  'side',
+  'group',
+  'seats',
+  'date',
+  'day',
+  'step',
+  'point',
+  'phrase',
+  'value',
+  'label',
+  'dot',
+  'path',
+];
+
+/** A strike's new words come in this long after the line through the old ones has landed. */
+const NEW_WORDS_LAG_MS = 400;
+
 /** The life layer's amount when the plan only names the effect: under the rules' cap either way. */
 const LIFE_AMOUNT = 0.5;
 const LIFE_MOST = 3;
@@ -226,6 +254,137 @@ export function travelMs(from: ShotBox, to: ShotBox, width: number): number {
   const [bx, by] = centre(to);
   const across = Math.hypot(bx - ax, by - ay) / Math.max(1, width);
   return Math.round(Math.max(400, Math.min(1200, 300 + 600 * across)));
+}
+
+/** A shot moved onto another copy of its set: every reference to the one asset made to the other. */
+function ontoAsset<T>(value: T, from: string, to: string): T {
+  return JSON.parse(JSON.stringify(value), (_key, v: unknown) =>
+    v &&
+    typeof v === 'object' &&
+    !Array.isArray(v) &&
+    (v as { asset?: unknown }).asset === from
+      ? { ...v, asset: to }
+      : v,
+  ) as T;
+}
+
+/**
+ * An asset with some of its parts drawn in a neutral colour (the land a
+ * region lies on, the faint of an empty bar): the first colour each part
+ * is drawn in is the one a fill turns, so before its fill it is neutral.
+ */
+function withNeutral(
+  asset: ShotSvgAssetDto,
+  parts: readonly string[],
+  colour: string,
+): ShotSvgAssetDto {
+  let svg = asset.svg;
+  for (const id of parts) {
+    const at = svg.indexOf(`data-part="${id}"`);
+    if (at < 0) continue;
+    const fill = svg.indexOf('fill="', at);
+    const next = svg.indexOf('data-part="', at + 1);
+    if (fill < 0 || (next >= 0 && next < fill)) continue;
+    const end = svg.indexOf('"', fill + 6);
+    svg = `${svg.slice(0, fill + 6)}${colour}${svg.slice(end)}`;
+  }
+  return { ...asset, svg };
+}
+
+/**
+ * A shot's set drawn for its picture's later state (a strike's line and
+ * new words, a document's stamp, a calendar's later sheet) has those parts
+ * brought on by the change they belong to: the stage shows every part an
+ * asset draws unless a recipe brings it on. A strike on a chart that draws
+ * its own line is that line drawn on, its new words coming in after it; a
+ * stamp, a fill or any change on a later part brings it on with it; a
+ * later part nothing brings on comes with the shot's last change, else as
+ * it opens. What was done is said in `notes`.
+ */
+function bringOnLater(
+  shot: UntimedShot,
+  asset: ShotSvgAssetDto,
+  assetId: string,
+  notes: string[],
+  where: string,
+): UntimedShot {
+  const later = Object.keys(asset.parts).filter((id) => asset.parts[id].later);
+  if (!later.length) return shot;
+  const part = (id: string): ShotTargetDto => ({
+    kind: 'asset',
+    asset: assetId,
+    part: id,
+  });
+  const partOf = (info: UntimedInfo) =>
+    info.target?.kind === 'asset' && info.target.asset === assetId
+      ? info.target.part
+      : undefined;
+  const brought = new Set(
+    shot.info
+      .filter((x) => x.recipe === 'enter' || x.recipe === 'draw')
+      .map(partOf)
+      .filter((id): id is string => !!id),
+  );
+  const line = asset.parts.strike?.later && asset.parts.strike.path;
+  const out: UntimedInfo[] = [];
+  const bring = (id: string, after: UntimedInfo, lag = 0) => {
+    if (brought.has(id) || !asset.parts[id]?.later) return;
+    brought.add(id);
+    out.push({
+      id: `${after.id}-${id}`,
+      ...(asset.parts[id].path
+        ? { recipe: 'draw' as const, target: part(id) }
+        : {
+            recipe: 'enter' as const,
+            target: part(id),
+            text: after.recipe === 'stamp' ? 'scale' : 'rise',
+          }),
+      on: after.on,
+      ...(lag ? { lag } : {}),
+    });
+  };
+  for (const info of shot.info) {
+    if (info.recipe === 'strike' && line) {
+      // The chart's own line, drawn on; its new words in once it is drawn.
+      const drawn: UntimedInfo = {
+        id: info.id,
+        recipe: 'draw',
+        target: part('strike'),
+        on: info.on,
+      };
+      out.push(drawn);
+      brought.add('strike');
+      bring('new', drawn, NEW_WORDS_LAG_MS);
+      continue;
+    }
+    const target = partOf(info);
+    if (info.recipe === 'stamp' && target && asset.parts[target]?.later) {
+      // The chart's own stamp comes down; the recipe only lands it (its thump).
+      const landed = { ...info };
+      delete landed.text;
+      out.push(landed);
+      bring(target, landed);
+      continue;
+    }
+    out.push(info);
+    if (target && info.recipe !== 'enter' && info.recipe !== 'draw')
+      bring(target, info);
+  }
+  const last = [...out]
+    .reverse()
+    .find((x) => x.recipe !== 'enter' && x.recipe !== 'draw');
+  for (const id of later)
+    if (!brought.has(id)) {
+      bring(
+        id,
+        last ?? { id: `${shot.id}-open`, recipe: 'enter', on: shot.on },
+        last ? NEW_WORDS_LAG_MS : 0,
+      );
+      notes.push(
+        `${where}: ${id} brought on with ${last ? 'its last change' : 'its opening'}`,
+      );
+    }
+  return { ...shot, info: out };
 }
 
 /**
@@ -510,13 +669,43 @@ export function buildShots(
       return found ? onMap.parts[found] : null;
     }
 
-    /** A part of this shot's set: by its own id, else the first of the ids the board's words may have in its chart. */
+    /**
+     * A part of this shot's set by what it shows: its own id; else the
+     * first id the board expects for the words that the chart has
+     * (chartPartIds); else a part the charts name by the words
+     * ("event-<words>", "bar-<words>"), the part that holds the rest
+     * first; else a calendar's sheet by its date's place among them.
+     */
     function partOf(words: string): string | null {
       if (!svg) return null;
       if (svg.parts[words]) return words;
-      return chart
-        ? (chartPartIds(chart, words).find((p) => svg.parts[p]) ?? null)
-        : null;
+      if (!chart) return null;
+      const expected = chartPartIds(chart, words).find((p) => svg.parts[p]);
+      if (expected) return expected;
+      const slug = partSlug(words);
+      const named = Object.keys(svg.parts).filter(
+        (id) => id === slug || id.endsWith(`-${slug}`),
+      );
+      const rank = (id: string) => {
+        const k = HOLDERS.indexOf(id.split('-')[0]);
+        return k < 0 ? HOLDERS.length : k;
+      };
+      if (named.length) return named.sort((a, b) => rank(a) - rank(b))[0];
+      if (chart.kind === 'calendar') {
+        const key = partSlug(words);
+        const spec = chart.spec as {
+          calendars?: { dates?: unknown[] }[];
+          merge?: unknown;
+        };
+        if (typeof spec.merge === 'string' && partSlug(spec.merge) === key)
+          return svg.parts.merge ? 'merge' : null;
+        const dates = (spec.calendars ?? []).flatMap((c) =>
+          (c.dates ?? []).map(String),
+        );
+        const at = dates.findIndex((d) => partSlug(d) === key);
+        if (at >= 0 && svg.parts[`date-${at + 1}`]) return `date-${at + 1}`;
+      }
+      return null;
     }
 
     /**
@@ -634,6 +823,22 @@ export function buildShots(
         return;
       }
       const entry = one.target ? registry.resolve(one.target) : null;
+      // A region the map names itself is named as the voice names it: its
+      // own name brought on, never a second one written beside it.
+      const ownName =
+        one.recipe === 'label' && target?.kind === 'asset' && target.part
+          ? `label-${target.part.replace(/^group-/, '')}`
+          : null;
+      if (ownName && target?.kind === 'asset' && svg?.parts[ownName]) {
+        info.push({
+          id: `${id}-i${k + 1}`,
+          recipe: 'enter',
+          target: { kind: 'asset', asset: target.asset, part: ownName },
+          text: 'rise',
+          on: one.on,
+        });
+        return;
+      }
       const named =
         one.recipe === 'label' && !one.text && entry
           ? entry.name.replace(/^[a-z]+:/i, '')
@@ -645,7 +850,13 @@ export function buildShots(
       const counts = one.recipe === 'count' || one.recipe === 'grow';
       const value = one.value ?? (counts ? entry?.value : undefined);
       const unit = wordsUpTo(one.unit ?? (counts ? entry?.unit : undefined), 2);
-      const colour = one.colour ? sideOf(one.colour) : null;
+      // A fill with no colour of its own lands on its part's: a region in
+      // its side's colour, never the accent the recipe would choose.
+      const role =
+        one.recipe === 'fill' && target?.kind === 'asset' && target.part
+          ? svg?.parts[target.part]?.role
+          : undefined;
+      const colour = one.colour ? sideOf(one.colour) : (role ?? null);
       const replace = wordsUpTo(one.replace, TEXT.labelWordsMax);
       info.push({
         id: `${id}-i${k + 1}`,
@@ -760,6 +971,66 @@ export function buildShots(
       asset,
     });
   });
+
+  // Each set's later state brought on by the change it belongs to.
+  built.forEach((one, i) => {
+    const id = assetOf(one.shot.set);
+    if (id && one.asset?.kind === 'svg')
+      one.shot = bringOnLater(one.shot, one.asset, id, notes, `shot ${i + 1}`);
+  });
+
+  // A part a fill turns starts neutral in the run of shots it is first
+  // filled in (that run's own copy of the set), and keeps its colour in
+  // every run after; a run is shots one after another on one set.
+  const filled = new Set<string>();
+  const paint = paintOf(look);
+  for (let k = 0; k < built.length;) {
+    const id = assetOf(built[k].shot.set);
+    let end = k + 1;
+    while (end < built.length && id && assetOf(built[end].shot.set) === id)
+      end += 1;
+    const asset = id ? assets[id] : undefined;
+    if (id && asset?.kind === 'svg') {
+      const fills = built
+        .slice(k, end)
+        .flatMap((one) => one.shot.info)
+        .flatMap((x) =>
+          x.recipe === 'fill' &&
+          x.target?.kind === 'asset' &&
+          x.target.asset === id &&
+          x.target.part
+            ? [x.target.part]
+            : [],
+        );
+      const first = [...new Set(fills)]
+        .filter((p) => !filled.has(p) && asset.parts[p]?.role)
+        .sort();
+      if (first.length) {
+        const copy = `${id}~${seedOf(first.join('+')).toString(36)}`;
+        const neutral =
+          built[k].shot.set.kind === 'map'
+            ? paint.dark
+              ? mix(paint.paper, paint.ink, 0.1)
+              : mix(paint.paper, '#FFFFFF', 0.8)
+            : paint.faint;
+        assets[copy] ??= withNeutral(asset, first, neutral);
+        for (let j = k; j < end; j += 1)
+          built[j].shot = ontoAsset(built[j].shot, id, copy);
+      }
+      for (const p of fills) filled.add(p);
+    }
+    k = end;
+  }
+
+  // Only what the shots show is kept: a set every run of it has its own
+  // copy of is not sent.
+  const used = new Set(
+    built.flatMap(({ shot }) => [
+      ...(assetOf(shot.set) ? [assetOf(shot.set)!] : []),
+      ...shot.actors.map((a) => a.asset),
+    ]),
+  );
+  for (const id of Object.keys(assets)) if (!used.has(id)) delete assets[id];
 
   // Each join as the shots stand: one set carried on is a continue; a
   // continue onto another set is a cut; the last hands over to the next

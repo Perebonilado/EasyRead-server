@@ -60,12 +60,15 @@ import {
   chartWords,
   clip,
   fewerWords,
+  isClaimId,
   line,
+  roleOnly,
   shortLabel,
   wordsIn,
 } from './shot-parts';
 import {
   keysOf,
+  lineSpans,
   narrationOf,
   nearestPhrase,
   phraseAt,
@@ -75,6 +78,14 @@ import {
   wordsFrom,
   type Narration,
 } from './shot-phrases';
+import { mentionsOf, numbersSaid } from './shot-mentions';
+import {
+  PLAN_PACE,
+  planEvents,
+  planGaps,
+  shotStarts,
+  spareShots,
+} from './shot-pace';
 import { looseKey, splitTarget } from './shot-registry';
 import type {
   PlanActor,
@@ -106,6 +117,21 @@ const oneOf =
 
 /** The focal word for a shot about its whole set: a chart, a portrait, the whole map. */
 export const WHOLE_SET = 'set';
+
+/**
+ * Recipes whose change stays (a number counted, a bar grown, a line
+ * drawn, a part brought on, a strike or a stamp): they never let go, so
+ * they carry no `until`.
+ */
+export const LASTING: ReadonlySet<ShotInfoRecipe> = new Set<ShotInfoRecipe>([
+  'count',
+  'grow',
+  'draw',
+  'morph',
+  'strike',
+  'stamp',
+  'enter',
+]);
 
 /** How many shots a minute of narration has at most, and of what at most a shot. */
 export const SHOT_LIMITS = {
@@ -156,6 +182,15 @@ export interface PlanOptions {
   kit?: readonly string[];
   /** Whether the show has its one map (world.base): a map shot needs it, or a place with a point. */
   map?: boolean;
+  /**
+   * The scene's lines, said one after another as the narration: what a
+   * count is held to (a number its own line says, resting on that line's
+   * claims) and where the pauses fall for the pace. Absent, the narration
+   * is one line and the checks by line are left out.
+   */
+  lines?: readonly Pick<EditorialRow, 'say' | 'claims'>[];
+  /** The scene opens its episode: something changes by its third or fourth word. */
+  opening?: boolean;
 }
 
 const amountOf = nearestOf(AMOUNTS, {
@@ -302,9 +337,12 @@ function infoOf(raw: unknown): PlanInfo | null {
   if (!recipe || !on) return null;
   const target = targetName(said.target);
   const to = targetName(said.to);
-  const until = phrase(said.until);
-  // Only a label is words on the stage: what any other recipe wrote is dropped.
-  const text = recipe === 'label' ? clip(said.text, TEXT.labelWordsMax) : '';
+  // What changes the picture for good never lets go: no until on it.
+  const until = LASTING.has(recipe) ? '' : phrase(said.until);
+  // Only a label is words on the stage: what any other recipe wrote is
+  // dropped, and a label reading "label" is no words at all.
+  const written = recipe === 'label' ? clip(said.text, TEXT.labelWordsMax) : '';
+  const text = roleOnly(written) ? '' : written;
   const value = numberIn(said.value);
   const from = numberIn(said.from);
   const unit = clip(said.unit, 2);
@@ -427,7 +465,9 @@ export function planOf(
         },
       ];
     })
-    .slice(0, narration ? mostShots(narration) : 64);
+    // Twice the scene's share at most: the mend's own cap, which keeps
+    // what the pace needs, decides past that.
+    .slice(0, narration ? 2 * mostShots(narration) : 64);
   return { shots };
 }
 
@@ -616,6 +656,13 @@ function recipeMisfit(
     return `${to.name} is not in this shot's picture (${setWords(shot.set)})`;
   return null;
 }
+
+/** Whether a change fits a shot: its recipe acts on what the set shows, by the rules checkPlan holds it to. */
+export const fitsShot = (
+  info: PlanInfo,
+  shot: PlanShot,
+  registry: TargetRegistry,
+): boolean => recipeMisfit(info, shot, registry) === null;
 
 /** A set in a few words, for a message. */
 function setWords(set: PlanSet): string {
@@ -833,7 +880,10 @@ export function checkPlan(
     );
     return problems;
   }
-  if (plan.shots.length > mostShots(narration))
+  if (
+    plan.shots.length > mostShots(narration) &&
+    spareShots(plan, n, pausesOf(options)).length
+  )
     say(
       -1,
       'too-many-shots',
@@ -1010,6 +1060,7 @@ export function checkPlan(
       if (
         info.recipe === 'label' &&
         info.text &&
+        !roleOnly(info.text) &&
         !labelNames(info.text, targetIn(shot, info.target, registry), given)
       )
         say(
@@ -1134,6 +1185,7 @@ export function checkPlan(
         `${S}: ${untrue.join(', ')} ${untrue.length === 1 ? 'is no number' : 'are no numbers'} the research or the lines give; show only theirs.`,
       );
   });
+  checkLines(plan, n, registry, options, say);
   return problems;
 }
 
@@ -1254,6 +1306,41 @@ function subjectOf(shot: PlanShot, registry: TargetRegistry): string {
   return WHOLE_SET;
 }
 
+/**
+ * A chart's own words made the stage's: its source where the numbers come
+ * from, in words (a claim's id becomes that claim's source, or goes), and
+ * each timeline event named by what happened (one the board named by its
+ * own date takes the research's words for that date, at most three).
+ */
+function sourced(chart: PlanChart, registry: TargetRegistry): PlanChart {
+  const spec: Record<string, unknown> = { ...chart.spec };
+  const source = line(spec.source, 90);
+  if (source && isClaimId(source)) {
+    const ids: string[] = [...source.matchAll(/c(\d{1,4})/giu)].map(
+      (m) => `claim:c${m[1]}`,
+    );
+    const found = ids.map((id) => registry.resolve(id)?.source).find(Boolean);
+    if (found) spec.source = found.slice(0, 90);
+    else delete spec.source;
+  }
+  if (chart.kind === 'timeline')
+    spec.events = list(spec.events).map((one) => {
+      const event = record(one);
+      const when = line(event.when, 30);
+      const named = line(event.name);
+      // Named, and not by its own date: as the board named it.
+      if (named && keysOf(named).join(' ') !== keysOf(when).join(' '))
+        return event;
+      const date = registry.resolve(`date:${when}`);
+      const name =
+        date?.kind === 'date'
+          ? clip(date.about.replace(/^(?:the|a|an)\s+/iu, ''), 3)
+          : '';
+      return { ...event, name: name && !roleOnly(name) ? name : '' };
+    });
+  return { kind: chart.kind, spec };
+}
+
 /** A shot's information and camera held to its set, the registry and the rules; its words cut to the budget. */
 function mendShot(
   shot: PlanShot,
@@ -1342,6 +1429,15 @@ function mendShot(
         },
       };
     }
+    // Nothing the board meant for itself on the stage: a source given as a
+    // claim's id is where that claim comes from, or no source; an event
+    // named by its own date is named by what happened, as the research
+    // says it, or by its date alone.
+    if (out.set.kind === 'chart')
+      out = {
+        ...out,
+        set: { kind: 'chart', chart: sourced(out.set.chart, registry) },
+      };
     const now = out.set.kind === 'chart' ? out.set.chart : chart;
     if (chartNumbers(now).some((v) => !given.has(v))) return null;
     if (chartIsName(now, registry)) return null;
@@ -1367,17 +1463,22 @@ function mendShot(
     if (named?.kind === 'set') delete item.target;
     if (item.to && !to) delete item.to;
     if (item.target && !target) return [];
+    // What changes the picture for good never lets go.
+    if (LASTING.has(item.recipe)) delete item.until;
     // A label's words name what it is on: its own words when they do, else
-    // the name of what it labels.
+    // the name of what it labels; a field's name ("label") is no words.
     if (item.text) item.text = clip(item.text, TEXT.labelWordsMax);
+    if (item.text && roleOnly(item.text)) delete item.text;
     if (
       item.recipe === 'label' &&
       target &&
       (!item.text || !labelNames(item.text, target, given))
     ) {
       const name = clip(nameOf(target), TEXT.labelWordsMax);
-      if (name) item.text = name;
+      if (name && !roleOnly(name)) item.text = name;
+      else delete item.text;
     }
+    if (item.recipe === 'label' && !item.text) return [];
     if (item.replace) item.replace = clip(item.replace, TEXT.labelWordsMax);
     if (item.text && (!item.target || AUDIENCE.test(item.text))) return [];
     if (item.replace && AUDIENCE.test(item.replace)) delete item.replace;
@@ -1473,6 +1574,22 @@ export function mendPlan(
   registry: TargetRegistry,
   options: MendOptions = {},
 ): ShotPlan {
+  const once = mendShots(plan, narration, registry, options);
+  // Across its lines (counts, fills, the opening), then each shot again on
+  // its words: whatever the lines took away or moved is placed as the rest.
+  const lined = mendLines(once, narrationOf(narration), registry, options);
+  return JSON.stringify(lined) === JSON.stringify(once)
+    ? once
+    : mendShots(lined, narration, registry, options);
+}
+
+/** mendPlan's work on each shot and on the shots' order and words. */
+function mendShots(
+  plan: ShotPlan,
+  narration: string,
+  registry: TargetRegistry,
+  options: MendOptions,
+): ShotPlan {
   const n = narrationOf(narration);
   const kit = options.kit ?? [];
   const map =
@@ -1551,14 +1668,7 @@ export function mendPlan(
       kept.splice(k, 1);
     }
   }
-  // At most eight a minute: the ones that show least go (never the first).
-  const most = mostShots(narration);
-  while (kept.length > most) {
-    let least = 1;
-    for (let k = 2; k < kept.length; k += 1)
-      if (shows(kept[k].shot) < shows(kept[least].shot)) least = k;
-    kept.splice(least, 1);
-  }
+
   if (options.start !== false && kept.length && kept[0].at > 0) {
     kept[0].at = 0;
     kept[0].length = Math.min(3, n.keys.length);
@@ -1581,20 +1691,42 @@ export function mendPlan(
       const u = uniquePhrase(n, spot.at, Math.min(spot.length, PHRASE_MOST));
       return phraseText(n, u.at, u.length);
     };
-    const info = p.shot.info.map((item) => {
+    // Words said after the shot has given way are another shot's: what
+    // was put on them goes; words said just before it are its opening.
+    const after = (words: string) => {
+      if (within(words)) return false;
+      const anywhere = phraseAt(n, words, start);
+      return anywhere >= end;
+    };
+    const info = p.shot.info.flatMap((item): PlanInfo[] => {
+      if (after(item.on)) return [];
       const spot = within(item.on) ?? { at: start, length: own.length };
       const out: PlanInfo = { ...item, on: said(spot) };
       const until = within(item.until);
       if (until && until.at > spot.at) out.until = said(until);
       else delete out.until;
-      return out;
+      return [out];
     });
-    const camera = p.shot.camera.map((move) => {
+    const camera = p.shot.camera.flatMap((move): PlanCamera[] => {
+      if (after(move.on)) return [];
       const spot = within(move.on) ?? { at: start, length: own.length };
-      return { ...move, on: said(spot) };
+      return [{ ...move, on: said(spot) }];
     });
     return { ...p.shot, on: phraseText(n, own.at, own.length), info, camera };
   });
+
+  // At most eight a minute: the ones that show least go (never the first),
+  // unless going would leave the voice talking over nothing new for longer.
+  const most = mostShots(narration);
+  const pauses = pausesOf(options);
+  while (shots.length > most) {
+    const spare = spareShots({ shots }, n, pauses);
+    if (!spare.length) break;
+    const least = spare.reduce((a, b) =>
+      shows(shots[b]) < shows(shots[a]) ? b : a,
+    );
+    shots = shots.filter((_, i) => i !== least);
+  }
 
   // The same set carried into the next shot continues it.
   shots = shots.map((shot, k) => {
@@ -1603,6 +1735,436 @@ export function mendPlan(
       ? { ...shot, join: 'continue' }
       : shot;
   });
+  return { shots };
+}
+
+// ── The plan across its lines ─────────────────────────────────────────────
+
+/** A line as the checks by line see it: its words among the narration's, and the claims it rests on. */
+interface LineSpan {
+  from: number;
+  to: number;
+  claims: readonly string[];
+}
+
+function spansOf(options: PlanOptions): LineSpan[] {
+  if (!options.lines?.length) return [];
+  const lines = options.lines;
+  return lineSpans(lines).map(([from, to], k) => ({
+    from,
+    to,
+    claims: lines[k].claims,
+  }));
+}
+
+/** The line the words at `at` are in. */
+const lineAt = (lines: readonly LineSpan[], at: number): LineSpan | null =>
+  lines.find((l) => at >= l.from && at < l.to) ?? null;
+
+/** Where each line after the first starts: the pauses the pace counts. */
+export const pausesOf = (options: PlanOptions): number[] =>
+  spansOf(options)
+    .slice(1)
+    .map((l) => l.from);
+
+/** Where a shot's change lands: its words after its shot's start, else anywhere. */
+const landing = (n: Narration, on: string, from: number) => {
+  const after = phraseAt(n, on, Math.max(0, from));
+  return after >= 0 ? after : phraseAt(n, on);
+};
+
+/** Each shot's end: where the next shot starts, or the narration's end. */
+const endsOf = (starts: readonly number[], length: number) =>
+  starts.map((_, k) => starts.slice(k + 1).find((s) => s >= 0) ?? length);
+
+/**
+ * Whether a number is a line's own: said in its words, in figures or in
+ * words, and resting on its claims (a line resting on none asks only
+ * that it be said). "Three deadlines" is no count of "3 regions".
+ */
+function saidIn(
+  entry: RegistryEntry,
+  line: LineSpan,
+  said: readonly { at: number; value: number }[],
+): boolean {
+  if (entry.value === undefined) return false;
+  if (
+    !said.some(
+      (x) => x.at >= line.from && x.at < line.to && x.value === entry.value,
+    )
+  )
+    return false;
+  if (!line.claims.length) return true;
+  const rests = entry.claims ?? (entry.claim ? [entry.claim] : []);
+  return rests.some((id) => line.claims.includes(id));
+}
+
+/** The number a counter or a unit chart shows, when the set is one. */
+function counted(set: PlanSet): number | null {
+  if (set.kind !== 'chart') return null;
+  if (set.chart.kind === 'counter')
+    return numberIn(set.chart.spec.value) ?? null;
+  if (set.chart.kind === 'icons') return numberIn(set.chart.spec.count) ?? null;
+  return null;
+}
+
+/**
+ * Whether a counter's number is the voice's while it is up: said in a
+ * line it is on screen through (from a few words before it comes on), as
+ * a number of the registry resting on that line's claims.
+ */
+function counterSaid(
+  value: number,
+  from: number,
+  to: number,
+  lines: readonly LineSpan[],
+  said: readonly { at: number; value: number }[],
+  registry: TargetRegistry,
+): boolean {
+  const numbers = registry
+    .entries()
+    .filter((e) => e.kind === 'number' && e.value === value);
+  const near = said.filter(
+    (x) => x.value === value && x.at >= from - PLAN_PACE.roomWords && x.at < to,
+  );
+  return near.some((x) => {
+    const line = lineAt(lines, x.at);
+    return Boolean(line) && numbers.some((e) => saidIn(e, line!, said));
+  });
+}
+
+/** A region filled later than the voice first names it, in a run of map shots: where its fill is, and where it should be. */
+interface LateFill {
+  region: RegistryEntry;
+  /** Where it should be filled: its first mention in the run, or the run's start when named before it. */
+  at: number;
+  /** The fill there is, later: its shot and its item; none when the run never fills it. */
+  shot: number;
+  item: number;
+}
+
+/** The regions a plan fills late, or never, in each run of map shots that the voice names them in. */
+function lateFills(
+  plan: ShotPlan,
+  n: Narration,
+  registry: TargetRegistry,
+): LateFill[] {
+  const starts = shotStarts(plan, n);
+  const ends = endsOf(starts, n.keys.length);
+  const mentions = mentionsOf(n, registry).filter(
+    (m) => m.entry.kind === 'region',
+  );
+  const out: LateFill[] = [];
+  let k = 0;
+  while (k < plan.shots.length) {
+    if (plan.shots[k].set.kind !== 'map' || starts[k] < 0) {
+      k += 1;
+      continue;
+    }
+    let last = k;
+    while (
+      last + 1 < plan.shots.length &&
+      plan.shots[last + 1].set.kind === 'map' &&
+      starts[last + 1] >= 0
+    )
+      last += 1;
+    const [from, to] = [starts[k], ends[last]];
+    const regions = new Map<string, RegistryEntry>();
+    for (const m of mentions) if (m.at < to) regions.set(m.entry.name, m.entry);
+    for (const region of regions.values()) {
+      const first = mentions.find((m) => m.entry.name === region.name)!.at;
+      const should = Math.max(first, from);
+      let filled: { at: number; shot: number; item: number } | null = null;
+      for (let s = k; s <= last; s += 1)
+        plan.shots[s].info.forEach((info, i) => {
+          if (info.recipe !== 'fill' || info.target !== region.name) return;
+          const at = landing(n, info.on, starts[s]);
+          if (at >= 0 && (!filled || at < filled.at))
+            filled = { at, shot: s, item: i };
+        });
+      const found = filled as { at: number; shot: number; item: number } | null;
+      if (!found) {
+        // Named while the map is up, never filled: filled as it is named.
+        if (first >= from && first < to)
+          out.push({ region, at: should, shot: -1, item: -1 });
+      } else if (found.at - should > PLAN_PACE.subWords + 1)
+        out.push({ region, at: should, shot: found.shot, item: found.item });
+    }
+    k = last + 1;
+  }
+  return out;
+}
+
+/** What is wrong with a plan across its lines: counts, leaks, fills, the opening and the pace. */
+function checkLines(
+  plan: ShotPlan,
+  n: Narration,
+  registry: TargetRegistry,
+  options: PlanOptions,
+  say: (shot: number, code: string, message: string) => void,
+): void {
+  const lines = spansOf(options);
+  const starts = shotStarts(plan, n);
+  const ends = endsOf(starts, n.keys.length);
+  const said = numbersSaid(n);
+  const shown: number[] = [];
+  plan.shots.forEach((shot, k) => {
+    const S = `Shot ${k + 1}`;
+    // A count is the number its own line says, once.
+    if (lines.length && starts[k] >= 0) {
+      for (const info of shot.info) {
+        if (info.recipe !== 'count' && info.recipe !== 'grow') continue;
+        const entry = registry.resolve(info.target ?? '');
+        if (entry?.kind !== 'number') continue;
+        const line = lineAt(lines, landing(n, info.on, starts[k]));
+        if (!line || !saidIn(entry, line, said))
+          say(
+            k,
+            'count-unsaid',
+            `${S} counts ${entry.value}, a number its line never says; count only a number the line itself says, from the list.`,
+          );
+      }
+      const value = counted(shot.set);
+      if (value !== null) {
+        if (shown.includes(value))
+          say(
+            k,
+            'count-repeat',
+            `${S} shows the counter ${value} again; a counter comes once, never repeated.`,
+          );
+        else if (!counterSaid(value, starts[k], ends[k], lines, said, registry))
+          say(
+            k,
+            'count-unsaid',
+            `${S}'s counter shows ${value}, a number its lines never say; a counter only for a number the line says, from the list.`,
+          );
+        shown.push(value);
+      }
+    }
+    // Nothing the board meant for itself reaches the stage.
+    for (const info of shot.info) {
+      if (info.until && LASTING.has(info.recipe))
+        say(
+          k,
+          'leak-until',
+          `${S}: a ${info.recipe} stays once made; it has no "until".`,
+        );
+      if (info.text && roleOnly(info.text))
+        say(
+          k,
+          'leak-label',
+          `${S}: the label "${info.text}" is a field's name, not words for the screen; a label names what it is on.`,
+        );
+    }
+    if (shot.set.kind === 'chart') {
+      const source = line(shot.set.chart.spec.source, 90);
+      if (source && isClaimId(source))
+        say(
+          k,
+          'leak-source',
+          `${S}: the source "${source}" is a claim's id; a source is where the numbers come from, in words, or none.`,
+        );
+      for (const event of list(shot.set.chart.spec.events)) {
+        const e = record(event);
+        if (
+          line(e.name) &&
+          keysOf(line(e.name)).join(' ') === keysOf(line(e.when)).join(' ')
+        )
+          say(
+            k,
+            'leak-date',
+            `${S}: the event "${line(e.when)}" is named by its own date; name what happened.`,
+          );
+      }
+    }
+  });
+  // A region filled when the voice first names it, never later.
+  for (const late of lateFills(plan, n, registry))
+    say(
+      late.shot,
+      'fill-late',
+      `${late.shot >= 0 ? `Shot ${late.shot + 1}` : 'The map'}: ${late.region.name} is named at "${phraseText(n, late.at, 3)}" but filled ${late.shot >= 0 ? 'later' : 'never'}; fill a region as the voice first names it.`,
+    );
+  // The episode's first change by its third or fourth word.
+  if (options.opening && plan.shots.length && starts[0] >= 0) {
+    const early = planEvents(plan, n).find(
+      (e) => e.at > starts[0] + PLAN_PACE.subWords,
+    );
+    if (!early || early.at > starts[0] + PLAN_PACE.openingWords)
+      say(
+        0,
+        'first-late',
+        `The episode opens here: change something by the third or fourth word ("${phraseText(n, 0, PLAN_PACE.openingWords + 1)}").`,
+      );
+  }
+  // Something new every few words.
+  for (const gap of planGaps(plan, n, pausesOf(options)))
+    say(
+      gap.shot,
+      'gap-long',
+      `Shot ${gap.shot + 1}: nothing new for about ${Math.round(gap.words * PLAN_PACE.secondsPerWord)} seconds, from "${phraseText(n, gap.from, 4)}" to "${phraseText(n, Math.max(gap.from, gap.to - 4), 4)}"; put something new every few words on the words that name it (a pin, a fill, a label, a mark, a count, a move to what is named), or a new shot where the voice moves on to something the map or a picture can show.`,
+    );
+}
+
+/**
+ * A plan put right across its lines, silently: a count of a number its
+ * line never says, and a counter shown twice, gone (the picture before
+ * holds, and the board's pace gives the line something of its own); a
+ * region filled as the voice first names it (moved there, or filled there
+ * when the map's run never filled it); and the episode's opening changing
+ * by its third or fourth word.
+ */
+function mendLines(
+  plan: ShotPlan,
+  n: Narration,
+  registry: TargetRegistry,
+  options: PlanOptions,
+): ShotPlan {
+  const lines = spansOf(options);
+  const said = numbersSaid(n);
+  let shots = plan.shots.map((s) => ({ ...s, info: [...s.info] }));
+  // Counts the voice says, each counter once.
+  if (lines.length) {
+    const starts = shotStarts({ shots }, n);
+    const ends = endsOf(starts, n.keys.length);
+    const shown: number[] = [];
+    shots = shots.flatMap((shot, k) => {
+      const info = shot.info.flatMap((item): PlanInfo[] => {
+        if (item.recipe !== 'count' && item.recipe !== 'grow') return [item];
+        const entry = registry.resolve(item.target ?? '');
+        if (entry?.kind !== 'number') return [item];
+        const line = lineAt(lines, landing(n, item.on, starts[k]));
+        if (!line || !saidIn(entry, line, said)) return [];
+        // On the words that say it, inside its shot.
+        const spoken = said.find(
+          (x) =>
+            x.value === entry.value &&
+            x.at >= Math.max(line.from, starts[k]) &&
+            x.at < Math.min(line.to, ends[k]),
+        );
+        if (!spoken || landing(n, item.on, starts[k]) === spoken.at)
+          return [item];
+        const spot = uniquePhrase(n, spoken.at, Math.max(2, spoken.length));
+        return [{ ...item, on: phraseText(n, spot.at, spot.length) }];
+      });
+      const value = counted(shot.set);
+      if (value !== null) {
+        if (
+          shown.includes(value) ||
+          !counterSaid(value, starts[k], ends[k], lines, said, registry)
+        )
+          return [];
+        shown.push(value);
+      }
+      return [{ ...shot, info }];
+    });
+  }
+  // Each region filled as the voice first names it: its fill moved there
+  // (or one added, where the run never filled it), one at a time, each
+  // looked for again after the last moved.
+  const skipped = new Set<string>();
+  for (let pass = 0; pass < 24; pass += 1) {
+    const late = lateFills({ shots }, n, registry).find(
+      (l) => !skipped.has(`${l.region.name}@${l.at}`),
+    );
+    if (!late) break;
+    skipped.add(`${late.region.name}@${late.at}`);
+    const starts = shotStarts({ shots }, n);
+    let host = -1;
+    for (let s = 0; s < shots.length; s += 1)
+      if (starts[s] >= 0 && starts[s] <= late.at) host = s;
+    if (host < 0 || shots[host].set.kind !== 'map') continue;
+    const spot = uniquePhrase(n, late.at, 3);
+    const on = phraseText(n, spot.at, spot.length);
+    const original = late.shot >= 0 ? shots[late.shot].info[late.item] : null;
+    const moved: PlanInfo = original
+      ? { ...original, on }
+      : { recipe: 'fill', target: late.region.name, on };
+    delete moved.until;
+    // Room where it lands: a fill moving within its own shot frees its place.
+    const held = shots[host].info.length - (late.shot === host ? 1 : 0);
+    if (held >= SHOT_LIMITS.info) {
+      const label = shots[host].info.findIndex(
+        (i) =>
+          i !== original &&
+          i.recipe === 'label' &&
+          i.target === late.region.name,
+      );
+      if (label < 0) continue;
+      shots[host] = {
+        ...shots[host],
+        info: shots[host].info.filter((_, i) => i !== label),
+      };
+    }
+    if (original)
+      shots[late.shot] = {
+        ...shots[late.shot],
+        info: shots[late.shot].info.filter((i) => i !== original),
+      };
+    shots[host] = { ...shots[host], info: [...shots[host].info, moved] };
+  }
+  // The episode's opening changes by its third or fourth word.
+  if (options.opening && shots.length) {
+    const starts = shotStarts({ shots }, n);
+    const first = shots[0];
+    const at = (on: string) => landing(n, on, starts[0]);
+    const early = planEvents({ shots }, n).some(
+      (e) =>
+        e.shot === 0 &&
+        e.at > starts[0] + PLAN_PACE.subWords &&
+        e.at <= starts[0] + PLAN_PACE.openingWords,
+    );
+    if (!early && starts[0] >= 0) {
+      const spot = uniquePhrase(n, starts[0] + 3, 3);
+      const on = phraseText(n, spot.at, spot.length);
+      const order = first.info
+        .map((item, i) => ({ i, at: at(item.on) }))
+        .sort((a, b) => a.at - b.at);
+      if (order.length) {
+        // Its first change moved to where its own subject is named, when
+        // that is early enough; else to the fourth word.
+        const one = order[0].i;
+        const named = mentionsOf(n, registry).find(
+          (m) =>
+            m.entry.name === first.info[one].target &&
+            m.at > starts[0] + PLAN_PACE.subWords &&
+            m.at <= starts[0] + PLAN_PACE.openingWords,
+        );
+        const there = named ? uniquePhrase(n, named.at, 3) : null;
+        const words = there ? phraseText(n, there.at, there.length) : on;
+        shots[0] = {
+          ...first,
+          info: first.info.map((item, i) =>
+            i === one ? { ...item, on: words } : item,
+          ),
+        };
+      } else {
+        const focal = targetIn(first, first.focal, registry);
+        if (
+          focal &&
+          focal.kind !== 'set' &&
+          focal.kind !== 'actor' &&
+          shownBy(first, focal)
+        )
+          shots[0] = {
+            ...first,
+            info: [
+              ...first.info,
+              {
+                recipe:
+                  focal.kind === 'entry' && focal.entry.kind === 'region'
+                    ? 'fill'
+                    : focal.kind === 'entry' && focal.entry.kind === 'place'
+                      ? 'pin'
+                      : 'mark',
+                target: focal.name,
+                on,
+              },
+            ],
+          };
+      }
+    }
+  }
   return { shots };
 }
 

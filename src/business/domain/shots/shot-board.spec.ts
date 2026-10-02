@@ -96,18 +96,19 @@ describe("a lesson scene's shots boarded", () => {
     const sets = made.plan.shots.map((s) =>
       s.set.kind === 'chart' ? s.set.chart.kind : s.set.kind,
     );
-    expect(sets).toEqual(['map', 'counter', 'quote']);
+    expect(sets).toEqual(['map', 'counter', 'calendar', 'quote', 'map']);
+    // The episode's opening: the pin lands as Berlin is named, by the third word.
     expect(made.plan.shots[0].info[0]).toEqual({
       recipe: 'pin',
       target: 'place:Berlin',
-      on: 'In 1961, Berlin',
+      on: 'Berlin was cut',
     });
     expect(made.plan.shots[1].info[0]).toMatchObject({
       recipe: 'count',
       value: 1393,
       unit: 'km',
     });
-    expect(made.plan.shots[2].set).toMatchObject({
+    expect(made.plan.shots[3].set).toMatchObject({
       chart: { spec: { text: 'Mr. Gorbachev, tear down this wall!' } },
     });
     expect(JSON.stringify(made.plan)).not.toMatch(/"kind":"(?:words|plain)"/u);
@@ -138,8 +139,9 @@ describe("a lesson scene's shots boarded", () => {
     expect(calls[1].problems!.join(' ')).toContain(
       '"place:Checkpoint Charlie" is not in the list of what you may name',
     );
-    // The fake's second answer was better: its problems are none.
-    expect(made.problems).toEqual([]);
+    // The fake's second answer named only what the list gives; what it
+    // left to the pace and the opening, code gave it.
+    expect(made.problems.map((p) => p.code)).not.toContain('unknown-target');
     expect(made.plan.shots[0].info[0].target).toBe('place:Berlin');
   });
 

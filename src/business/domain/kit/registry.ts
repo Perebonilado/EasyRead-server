@@ -16,6 +16,7 @@ import type { KitLook, KitStyle } from './style';
 import { validateRig, type KitPiece } from './rig';
 import { PEOPLE_KIT } from './people';
 import { VEHICLE_KIT } from './vehicles';
+import { UI_KIT } from './ui';
 
 /** The families of the kit (plan §7.2). */
 export type KitFamily =
@@ -25,7 +26,9 @@ export type KitFamily =
   | 'buildings'
   | 'documents'
   | 'objects'
-  | 'machines';
+  | 'machines'
+  /** Devices with screens built by code, and the cursor (ui.ts, WP18). */
+  | 'ui';
 
 /** A piece's settings as code reads them: each a value of its list, or a number in its range. */
 export type KitParams = Record<string, string | number>;
@@ -36,6 +39,8 @@ export interface KitParam {
   values?: readonly string[];
   /** Or the whole numbers it may be, least and most. */
   range?: readonly [number, number];
+  /** Or a few words (at most this many) the script says: a screen's title, a button's words (ui.ts). */
+  text?: number;
   default: string | number;
   /** A few words for the board: what it sets. */
   about: string;
@@ -54,6 +59,8 @@ export interface KitEntry {
   people?: boolean;
   /** It shows a count of people, honest when a number is said (its `count` setting). */
   counts?: boolean;
+  /** Its own words for its moves, before the kit's (a cursor's "tap" is a click). */
+  synonyms?: Readonly<Record<string, string>>;
   make(params: KitParams, style: KitStyle, seed: number): KitPiece;
 }
 
@@ -61,6 +68,7 @@ export interface KitEntry {
 const FAMILIES: readonly Readonly<Record<string, KitEntry>>[] = [
   PEOPLE_KIT,
   VEHICLE_KIT,
+  UI_KIT,
 ];
 
 export const KIT: Readonly<Record<string, KitEntry>> = Object.assign(
@@ -103,7 +111,9 @@ export function paramsOf(
     const value = given.get(wordKey(name));
     out[name] = param.range
       ? numberIn(value, param.range, param.default as number)
-      : wordIn(value, param.values ?? [], param.default as string);
+      : param.text
+        ? textIn(value, param.text, param.default as string)
+        : wordIn(value, param.values ?? [], param.default as string);
   }
   return out;
 }
@@ -121,6 +131,18 @@ function numberIn(
         : NaN;
   if (!Number.isFinite(n)) return fallback;
   return Math.max(lo, Math.min(hi, Math.round(n)));
+}
+
+/** A few words of a setting, on one line; the default when there are none. */
+function textIn(raw: unknown, most: number, fallback: string): string {
+  if (typeof raw !== 'string' && typeof raw !== 'number') return fallback;
+  const words = String(raw)
+    .replace(/[\r\n\t<>]+/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, most);
+  return words.length ? words.join(' ').slice(0, 120) : fallback;
 }
 
 function wordIn(
@@ -175,7 +197,9 @@ export function makeKit(
 const paramText = (name: string, param: KitParam): string =>
   param.range
     ? `${name} ${param.range[0]}–${param.range[1]} (${param.about})`
-    : `${name} ${(param.values ?? []).join(' | ')} (${param.about})`;
+    : param.text
+      ? `${name} words (${param.about})`
+      : `${name} ${(param.values ?? []).join(' | ')} (${param.about})`;
 
 /**
  * The kit for the board's prompt, for a show's look: each id with what it
@@ -222,8 +246,10 @@ const MOVE_NAMES: Readonly<Record<string, string>> = {
   'turn-around': 'turn',
 };
 
-/** A move as the board named it, as the stage plays it. */
-export const actorMove = (name: string): string => {
+/** A move as the board named it, as the stage plays it: the piece's own word for it first (a cursor's), then the kit's. */
+export const actorMove = (name: string, kit?: string): string => {
   const key = wordKey(name);
-  return MOVE_NAMES[key] ?? key;
+  const own = kit ? KIT[kit]?.synonyms : undefined;
+  if (own && kit && KIT[kit].moves.includes(key)) return key;
+  return own?.[key] ?? MOVE_NAMES[key] ?? key;
 };

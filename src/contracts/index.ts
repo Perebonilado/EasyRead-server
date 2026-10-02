@@ -2289,7 +2289,13 @@ export type ShotInfoRecipe =
   | 'mark'
   | 'enter'
   | 'exit'
-  | 'ask';
+  | 'ask'
+  /** The UI kit's (tech §11, WP18): a numbered dot on a leader to a part, in the order the voice counts them. */
+  | 'callout'
+  /** A part changing to another of its states (a toggle on, a button loading, a slider moved, a screen scrolled or turned dark), behind a short blur where its content changes. */
+  | 'swap'
+  /** Words typed into an input, a character at a time, with its caret. */
+  | 'type';
 
 /** How a shot hands over to the next. */
 export type ShotJoin =
@@ -2300,7 +2306,9 @@ export type ShotJoin =
   | 'zoom-through'
   | 'dissolve'
   | 'dip'
-  | 'push';
+  | 'push'
+  /** A chapter break (WP18): the frame frosts with the chapter's number big on it, then clears into the next shot. */
+  | 'frost';
 
 /** The life layer's effects: motion that carries no information, capped so it never competes with what does. */
 export type ShotLifeEffect =
@@ -2421,6 +2429,12 @@ export interface ShotRigDto {
    * the way it faces as drawn.
    */
   vehicle?: { goes: 'road' | 'rail' | 'water' | 'air' | 'up'; facing: 1 | -1 };
+  /**
+   * The UI kit's cursor (WP18): its hot spot (the arrow's tip, the hand's
+   * fingertip) in the piece's units, the point that sits on what it acts
+   * on; it moves to a part, clicks, drags, scrolls and types.
+   */
+  cursor?: { tip: [number, number] };
 }
 
 /** An archive photo or a portrait, from the picture desk. */
@@ -2483,6 +2497,8 @@ export interface ShotDto {
   chip?: ShotCreditDto;
   /** A drawn picture of a real event or place: it carries an "Illustration" tag. */
   illustration?: boolean;
+  /** The chapter a frost join into this shot opens, its number shown big while the frame is frosted; absent, the frost's own count in the scene. */
+  chapter?: number;
 }
 
 export type ShotSetDto =

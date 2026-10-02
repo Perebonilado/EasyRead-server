@@ -50,6 +50,7 @@ import { kitStyle, type KitLook } from '../kit/style';
 import { chartAsset } from './shot-charts';
 import { WHOLE_SET } from './shot-check';
 import { pictureAssetOf, pictureSetOf } from './shot-pictures';
+import { buildUi, deskAsset, isUiActor, newUiCarry } from './shot-ui';
 import type { ShotMapSet } from './shot-map';
 import { chartPartIds, partSlug } from './shot-parts';
 import { splitTarget } from './shot-registry';
@@ -674,10 +675,18 @@ export function buildShots(
           illustration: true,
         };
       }
+      case 'screen':
+        // The UI kit's desk (WP18): one for the scene, so shots on it are one run.
+        return {
+          set: { kind: 'set', asset: 'desk' },
+          asset: { id: 'desk', dto: deskAsset(look, ctx.shape) },
+        };
       case 'plain':
         return { set: { kind: 'plain' } };
     }
   };
+  /** What the scene's devices and cursor are left in, shot to shot (shot-ui). */
+  const uiCarry = newUiCarry();
 
   // Each shot's own set where it can be drawn; the first that can stands
   // in for any before it.
@@ -751,12 +760,25 @@ export function buildShots(
       ? { kind: 'asset', asset: assetId }
       : null;
 
+    // The UI kit's devices and cursor (shot-ui): on the desk, carried on
+    // from the shot before.
+    const ui = buildUi(planned, i, {
+      look,
+      shape: ctx.shape,
+      seed: ctx.seed,
+      carry: uiCarry,
+    });
+    if (ui) {
+      Object.assign(assets, ui.assets);
+      notes.push(...ui.notes);
+    }
+
     // Actors: the kit's pieces on the set, in the show's look and their
     // side's colour, each standing where the plan says by the placement
     // rule (kit/place): on a place, at a word, or apart from the shot's
     // subject and what its labels sit on; one scale for the whole shot.
-    const actors: UntimedActor[] = [];
-    const actorIds = new Set<string>();
+    const actors: UntimedActor[] = [...(ui?.actors ?? [])];
+    const actorIds = new Set<string>(actors.map((a) => a.id));
     const boxNamed = (name?: string): ShotBox | null => {
       const target = name ? targetOf(name) : null;
       return target ? boxOf(target) : null;
@@ -768,6 +790,7 @@ export function buildShots(
     let scale: number | undefined;
     const planned_actors = planned.actors ?? [];
     planned_actors.forEach((one, k) => {
+      if (isUiActor(one)) return;
       const side = one.side ? sideOf(one.side) : null;
       const made = kitPiece(
         one.kit,
@@ -814,7 +837,7 @@ export function buildShots(
       // starts from standing, a walk is as long as its way.
       const moves: UntimedMove[] = [];
       for (const move of one.moves ?? []) {
-        const name = actorMove(move.move);
+        const name = actorMove(move.move, one.kit);
         if (!made.moves.includes(name)) {
           notes.push(
             `shot ${i + 1}: actor ${one.id} cannot ${move.move}; left out`,
@@ -902,6 +925,7 @@ export function buildShots(
 
     /** A target's box in its set's units, where it has one. */
     function boxOf(target: ShotTargetDto): ShotBox | null {
+      if (target.kind === 'actor' && ui) return ui.boxOf(target);
       if (geoMap && target.kind !== 'actor')
         return geoMap.boxOf?.(target) ?? null;
       if (target.kind === 'box') return target.box;
@@ -1006,7 +1030,10 @@ export function buildShots(
      */
     function targetOf(name: string | undefined): ShotTargetDto | null {
       if (!name?.trim()) return null;
-      if (name.trim().toLowerCase() === WHOLE_SET) return whole;
+      if (name.trim().toLowerCase() === WHOLE_SET) return ui?.focus ?? whole;
+      // A device's part, or a device whole (the UI kit's).
+      const onDevice = ui?.target(name);
+      if (onDevice) return onDevice;
       const { prefix, rest } = splitTarget(name);
       if ((prefix === 'part' || !prefix) && assetId) {
         const part = partOf(rest);
@@ -1227,7 +1254,7 @@ export function buildShots(
       const box =
         target.kind === 'box'
           ? target.box
-          : target.kind === 'asset' && target.part
+          : (target.kind === 'asset' && target.part) || target.kind === 'actor'
             ? boxOf(target)
             : null;
       if (!box) return target;
@@ -1298,7 +1325,12 @@ export function buildShots(
       named &&
       moves[0]?.one.move === 'travel' &&
       JSON.stringify(moves[0].target) === JSON.stringify(inContext(named));
-    const focal = named && !opensOnTravel ? inContext(named) : null;
+    const focal =
+      named && !opensOnTravel
+        ? inContext(named)
+        : !named && ui?.focus
+          ? ui.focus
+          : null;
     const carried =
       lastView && assetId !== null && lastView.asset === assetId
         ? lastView.box
@@ -1536,11 +1568,13 @@ export function buildShots(
     const next = built[i + 1]?.shot;
     const join: ShotJoin = !next
       ? 'cut'
-      : sameSet(shot.set, next.set)
-        ? 'continue'
-        : shot.join === 'continue'
-          ? 'cut'
-          : shot.join;
+      : shot.join === 'frost'
+        ? 'frost'
+        : sameSet(shot.set, next.set)
+          ? 'continue'
+          : shot.join === 'continue'
+            ? 'cut'
+            : shot.join;
     return { ...shot, join };
   });
   return { look, assets, shots, notes };

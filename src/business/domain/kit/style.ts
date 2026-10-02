@@ -28,6 +28,8 @@ export interface KitStyle {
   look: KitLook;
   /** The frame the film is made in first: a piece may lay itself out for it (a crowd deeper in a tall frame). */
   shape: FilmShape;
+  /** The look's text face, for a piece that sets words (a device's screen, ui.ts). */
+  face?: string;
   paper: string;
   ink: string;
   muted: string;
@@ -76,6 +78,7 @@ export function kitStyle(
   return {
     look: kind,
     shape: options.shape ?? 'wide',
+    ...(look.fonts?.text ? { face: look.fonts.text } : {}),
     paper: p.paper,
     ink: p.ink,
     muted: p.muted,

@@ -98,6 +98,11 @@ export const RECIPE_MS: Readonly<Record<ShotInfoRecipe, number>> = {
   enter: 500,
   exit: 400,
   ask: 600,
+  // The UI kit's (ui-timing.ts): a numbered dot popping on; a state's
+  // change behind its blur; words typed (as long as their letters take).
+  callout: 450,
+  swap: 180,
+  type: 1200,
 };
 
 /**
@@ -138,6 +143,7 @@ export const JOIN_MS: Readonly<Record<ShotJoin, number>> = {
   match: 500,
   morph: 900,
   'zoom-through': 1200,
+  frost: 1800,
 };
 
 /** An actor's moves: enter and exit as recipes do, a walk as far as a stage crossing takes. */

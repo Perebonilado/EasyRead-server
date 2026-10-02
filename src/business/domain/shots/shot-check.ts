@@ -30,6 +30,7 @@ import { readMapBase } from '../scene-map';
 import { placesIn } from '../scene-map-places';
 import { eraOf } from '../kit/eras';
 import { KIT, actorMove } from '../kit/registry';
+import { UI_STATE_WORDS, uiTargetIn } from '../kit/ui';
 import { TEXT } from '../studio/explainer-rules';
 import type { EditorWorld } from '../studio/studio-editor';
 import type { EditorialRow } from '../studio/studio-editorial';
@@ -289,6 +290,8 @@ function setOf(raw: unknown): PlanSet | null {
         },
       };
     }
+    case 'screen':
+      return { kind: 'screen' };
     case 'plain':
       return { kind: 'plain' };
     default:
@@ -305,8 +308,17 @@ function infoOf(raw: unknown): PlanInfo | null {
   const target = targetName(said.target);
   const to = targetName(said.to);
   const until = phrase(said.until);
-  // Only a label is words on the stage: what any other recipe wrote is dropped.
-  const text = recipe === 'label' ? clip(said.text, TEXT.labelWordsMax) : '';
+  // Only a label is words on the stage: what any other recipe wrote is
+  // dropped, but a swap's state (a word of the kit's, or a slider's value)
+  // and the few words a type puts in a field (the UI kit's).
+  const text =
+    recipe === 'label'
+      ? clip(said.text, TEXT.labelWordsMax)
+      : recipe === 'swap'
+        ? uiStateWord(said.text)
+        : recipe === 'type'
+          ? clip(said.text, UI_TYPED_WORDS)
+          : '';
   const value = numberIn(said.value);
   const from = numberIn(said.from);
   const unit = clip(said.unit, 2);
@@ -353,7 +365,18 @@ const ACTOR_SETTINGS = [
   'dress',
   'facing',
   'wagons',
+  // The UI kit's devices (kit/ui.ts).
+  'screen',
+  'pieces',
+  'theme',
+  'title',
+  'words',
+  'items',
+  'state',
 ] as const;
+
+/** Settings that are lists of a few words each, and so longer than one word. */
+const LONG_SETTINGS = new Set(['pieces', 'items', 'state']);
 
 function actorOf(
   raw: unknown,
@@ -371,7 +394,7 @@ function actorOf(
     if (['string', 'number', 'boolean'].includes(typeof value))
       params[key.slice(0, 24)] =
         typeof value === 'string'
-          ? value.slice(0, 40)
+          ? value.slice(0, LONG_SETTINGS.has(key) ? 120 : 40)
           : (value as number | boolean);
   // An era in words ("the 1950s", "Victorian") as the kit names eras.
   if (typeof params.era === 'string') {
@@ -385,13 +408,20 @@ function actorOf(
     else params.count = count;
   }
   const moves = list(said.moves)
-    .map((one) => ({
-      move: line(record(one).move, 24),
-      on: phrase(record(one).on),
-      ...(targetName(record(one).to)
-        ? { to: targetName(record(one).to)! }
-        : {}),
-    }))
+    .map((one) => {
+      const m = record(one);
+      // A cursor's click leaves its part in a state (or a slider at a
+      // value); its type move puts a few words in a field.
+      const state = uiStateWord(m.state);
+      const text = clip(m.text, UI_TYPED_WORDS);
+      return {
+        move: line(m.move, 24),
+        on: phrase(m.on),
+        ...(targetName(m.to) ? { to: targetName(m.to)! } : {}),
+        ...(state ? { state } : {}),
+        ...(text ? { text } : {}),
+      };
+    })
     .filter((m) => m.move && m.on)
     .slice(0, 4);
   const place = targetName(said.place);
@@ -404,6 +434,49 @@ function actorOf(
     ...(side ? { side } : {}),
     ...(moves.length ? { moves } : {}),
   };
+}
+
+/** The most words a type puts in a field (the UI kit's): a short entry, never a paragraph. */
+const UI_TYPED_WORDS = 4;
+
+/** A state a swap or a click leaves a part in: a word of the UI kit's, or a slider's value (0 to 1, or a percentage). */
+function uiStateWord(raw: unknown): string {
+  if (typeof raw === 'number' && Number.isFinite(raw))
+    return String(Math.max(0, Math.min(1, raw > 1 ? raw / 100 : raw)));
+  const said = line(raw, 24).toLowerCase();
+  if (!said) return '';
+  const number = /^(\d+(?:\.\d+)?)\s*%?$/.exec(said);
+  if (number) {
+    const v = Number(number[1]);
+    return String(
+      Math.round(Math.max(0, Math.min(1, v > 1 ? v / 100 : v)) * 100) / 100,
+    );
+  }
+  const words = said
+    .replace(/[^a-z-]+/g, ' ')
+    .trim()
+    .split(/\s+/);
+  return (
+    words.map((w) => UI_STATE_WORDS.find((s) => s === w)).find(Boolean) ?? ''
+  );
+}
+
+/**
+ * Two shots' actors made one shot's: an actor in both keeps the moves of
+ * both (a cursor's clicks in order), each other actor once.
+ */
+function actorsOfBoth(
+  a: readonly PlanActor[],
+  b: readonly PlanActor[],
+): PlanActor[] {
+  const out = a.map((one) => ({ ...one }));
+  for (const other of b) {
+    const same = out.find((one) => one.id === other.id);
+    if (!same) out.push(other);
+    else if (other.moves?.length)
+      same.moves = [...(same.moves ?? []), ...other.moves].slice(0, 6);
+  }
+  return out.slice(0, SHOT_LIMITS.actors);
 }
 
 // ── People on the stage ───────────────────────────────────────────────────
@@ -504,7 +577,7 @@ function actorFaults(
   if (!entry) return [];
   const out: { code: string; message: string; drop: boolean }[] = [];
   for (const move of actor.moves ?? [])
-    if (!entry.moves.includes(actorMove(move.move)))
+    if (!entry.moves.includes(actorMove(move.move, actor.kit)))
       out.push({
         code: 'unknown-move',
         message: `${actor.id} (${actor.kit}) cannot ${move.move}; its moves are ${entry.moves.join(', ')}.`,
@@ -557,7 +630,7 @@ function soundActor(
   const params = { ...(actor.params ?? {}) };
   if (faults.some((f) => f.code === 'untrue-count')) delete params.count;
   const moves = (actor.moves ?? []).filter(
-    (m) => !entry || entry.moves.includes(actorMove(m.move)),
+    (m) => !entry || entry.moves.includes(actorMove(m.move, actor.kit)),
   );
   const { params: _p, moves: _m, ...rest } = actor;
   void _p;
@@ -641,6 +714,14 @@ function targetIn(
   if (name.trim().toLowerCase() === WHOLE_SET)
     return { kind: 'set', name: WHOLE_SET };
   const { prefix, rest } = splitTarget(name);
+  if (prefix === 'actor' || prefix === 'part' || !prefix) {
+    // A part of one of the shot's devices (the UI kit's): its actor's part.
+    if (!shot.actors.some((a) => a.id === rest)) {
+      const part = uiTargetIn(shot.actors, name);
+      if (part)
+        return { kind: 'actor', name: `actor:${part.actor}.${part.part}` };
+    }
+  }
   if (prefix === 'part' || (!prefix && shot.set.kind === 'chart')) {
     if (shot.set.kind !== 'chart') return null;
     const words = keysOf(rest).join(' ');
@@ -725,7 +806,7 @@ const RECIPE_TARGETS: Record<
   fill: { needs: true, kinds: ['region', 'part'] },
   seam: { needs: true, kinds: ['seam'] },
   count: { needs: true, kinds: ['number', 'part'] },
-  grow: { needs: true, kinds: ['number', 'part'] },
+  grow: { needs: true, kinds: ['number', 'part', 'actor'] },
   transfer: { needs: true, kinds: ['part', 'place', 'region'], to: 'needs' },
   morph: { needs: true, kinds: ['part', 'date', 'number'] },
   run: { needs: true, kinds: ['actor'] },
@@ -760,6 +841,10 @@ const RECIPE_TARGETS: Record<
   },
   enter: { needs: true, kinds: ['part', 'actor'] },
   exit: { needs: true, kinds: ['part', 'actor'] },
+  // The UI kit's: a part of a device (an actor's part) or of a chart.
+  callout: { needs: true, kinds: ['actor', 'part'] },
+  swap: { needs: true, kinds: ['actor'] },
+  type: { needs: true, kinds: ['actor'] },
   ask: {
     needs: false,
     kinds: [
@@ -815,6 +900,8 @@ function setWords(set: PlanSet): string {
       return `a ${set.chart.kind}`;
     case 'set':
       return 'a drawn set';
+    case 'screen':
+      return 'a device on its desk';
     default:
       return `the ${set.kind}`;
   }
@@ -1729,6 +1816,7 @@ export function mendPlan(
             0,
             SHOT_LIMITS.camera,
           ),
+          actors: actorsOfBoth(before.shot.actors, p.shot.actors),
         };
       continue;
     }
@@ -1747,10 +1835,7 @@ export function mendPlan(
         ...a,
         info: [...a.info, ...b.info],
         camera: [...a.camera, ...b.camera],
-        actors: [
-          ...a.actors,
-          ...b.actors.filter((x) => !a.actors.some((y) => y.id === x.id)),
-        ].slice(0, SHOT_LIMITS.actors),
+        actors: actorsOfBoth(a.actors, b.actors),
         life: [...new Set([...a.life, ...b.life])].slice(0, SHOT_LIMITS.life),
         join: b.join,
       };

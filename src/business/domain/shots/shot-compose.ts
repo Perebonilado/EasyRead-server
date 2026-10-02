@@ -28,6 +28,7 @@ import type { TimedBeat } from '../scene-timing';
 import type { LearningStage } from '../scene-stage';
 import type { ExplainerSheet } from '../studio/studio';
 import type { EditorWorld } from '../studio/studio-editor';
+import { uiTimed } from './shot-ui';
 import { buildShots } from './shot-build';
 import { checkTimed, mendTimed } from './shot-check-timed';
 import type { ShotMapSet } from './shot-map';
@@ -168,7 +169,8 @@ export function composeShotScene(
   const options = { first: input.first, holds };
   const mended = mendTimed(timed, durationMs, options);
   notes.push(...mended.mended);
-  const shots = mended.shots;
+  // The UI kit's cursors: each click's change at its press, each run's callouts numbered (shot-ui).
+  const shots = uiTimed(mended.shots, built.assets);
   const problems = checkTimed(shots, durationMs, options);
   const stage = STAGES[shape];
   const scene: SceneDto = {

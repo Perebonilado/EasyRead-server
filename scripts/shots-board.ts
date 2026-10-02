@@ -67,6 +67,8 @@ function setWords(set: PlanSet): string {
       return `document ${set.document}`;
     case 'set':
       return `drawn set ${JSON.stringify(set.set)}`;
+    case 'screen':
+      return 'a device on its desk';
     case 'plain':
       return 'paper';
   }

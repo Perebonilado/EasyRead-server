@@ -33,7 +33,7 @@ import type {
   ShotSvgAssetDto,
   ShotTargetDto,
 } from '../../../contracts';
-import { toAsset } from '../kit/rig';
+import { partTree, toAsset } from '../kit/rig';
 import { kitStyle } from '../kit/style';
 import {
   CURSOR_MOVES,
@@ -240,6 +240,8 @@ export interface UiBuilt {
   target(name: string): ShotTargetDto | null;
   /** A target's box on the desk, for the camera: a device's part, a device whole. */
   boxOf(target: ShotTargetDto): ShotBox | null;
+  /** What the camera frames for a target: a control with the settings row it sits in, else the target. */
+  frameOf(target: ShotTargetDto): ShotBox | null;
   /** What the shot is about when the plan names nothing: a device's screen, or both devices of a before and an after. */
   focus: ShotTargetDto | null;
 }
@@ -328,6 +330,20 @@ export function buildUi(
     if (!d) return null;
     const own = t.part ? d.made.parts[t.part]?.box : d.made.piece.box;
     return own ? boxOnDesk(d.placed, d.made.piece.box, own) : null;
+  };
+  /** A switch, a slider or a box to tick is framed with its row, so its words are never cut off. */
+  const frameOf = (t: ShotTargetDto): ShotBox | null => {
+    if (t.kind === 'actor' && t.part) {
+      const d = deviceById.get(t.actor);
+      const parent = d?.made.parts[t.part]?.parent;
+      const kind = kindOfPart(t.part);
+      if (
+        parent?.startsWith('setting-') &&
+        ['toggle', 'slider', 'checkbox'].includes(kind)
+      )
+        return boxOf({ ...t, part: parent });
+    }
+    return boxOf(t);
   };
   const actors: UntimedActor[] = devices.map((d, k) => ({
     id: d.id,
@@ -574,8 +590,82 @@ export function buildUi(
               }),
           }
         : null;
-  return { actors, assets, devices, notes, target, boxOf, focus };
+  return { actors, assets, devices, notes, target, boxOf, frameOf, focus };
 }
+
+// ── The camera on a device ───────────────────────────────────────────────
+
+/**
+ * How much room the camera leaves round a device's part it moves in on,
+ * by the board's amount: the part grown to at least this share of the
+ * desk's short side. A device's part is small on its desk (a switch's row,
+ * a price), so a push that only closed in a few percent would never show
+ * it; the camera frames it close, as the reference's camera does.
+ */
+export const UI_ROOM = { small: 0.6, medium: 0.4, large: 0.26 } as const;
+
+/** The box the camera frames for a device's part: the part with room round it, inside the desk. */
+export function uiFrame(
+  part: ShotBox,
+  desk: ShotBox,
+  amount: keyof typeof UI_ROOM = 'medium',
+): ShotBox {
+  const least = Math.min(desk[2], desk[3]) * UI_ROOM[amount];
+  const w = Math.min(desk[2], Math.max(part[2] * 1.2, least));
+  const h = Math.min(desk[3], Math.max(part[3] * 1.2, least * 0.56));
+  const cx = part[0] + part[2] / 2;
+  const cy = part[1] + part[3] / 2;
+  const x = Math.max(desk[0], Math.min(desk[0] + desk[2] - w, cx - w / 2));
+  const y = Math.max(desk[1], Math.min(desk[1] + desk[3] - h, cy - h / 2));
+  const r = (n: number) => Math.round(n * 10) / 10;
+  return [r(x), r(y), r(w), r(h)];
+}
+
+/**
+ * A camera move of a shot on the desk as the camera makes it: one that
+ * moves in on a device's part frames it close (a travel to the part with
+ * room round it); a pull, a return or an establish goes back to the
+ * device. Null for one the build makes as usual.
+ */
+export function uiCamera(
+  move: { move: string; amount?: keyof typeof UI_ROOM },
+  target: ShotTargetDto | null,
+  ui: Pick<UiBuilt, 'boxOf' | 'focus'> & Partial<Pick<UiBuilt, 'frameOf'>>,
+  desk: ShotBox,
+): {
+  move: 'travel' | 'cut-to' | 'establish';
+  target: ShotTargetDto;
+  durMs?: number;
+} | null {
+  if (
+    target?.kind === 'actor' &&
+    target.part &&
+    ['push', 'travel', 'zoom-through', 'follow', 'cut-to'].includes(move.move)
+  ) {
+    const box = ui.frameOf?.(target) ?? ui.boxOf(target);
+    if (!box) return null;
+    const framed: ShotTargetDto = {
+      kind: 'box',
+      box: uiFrame(box, desk, move.amount),
+    };
+    return move.move === 'cut-to'
+      ? { move: 'cut-to', target: framed }
+      : { move: 'travel', target: framed, durMs: UI_PUSH_MS };
+  }
+  if (
+    ['pull', 'return', 'establish'].includes(move.move) &&
+    ui.focus &&
+    (!target || target.kind === 'actor')
+  )
+    return move.move === 'establish'
+      ? { move: 'establish', target: ui.focus }
+      : { move: 'travel', target: ui.focus, durMs: UI_PULL_MS };
+  return null;
+}
+
+/** How long the camera takes to move in on a device's part, and back out to the device: a zoom of two or three times needs its time. */
+export const UI_PUSH_MS = 850;
+export const UI_PULL_MS = 750;
 
 /** Whether a plan's actor is the UI kit's (its own module builds it). */
 export const isUiActor = (actor: PlanActor): boolean => isUiKit(actor.kit);
@@ -588,6 +678,7 @@ function partBox(
   assets: Record<string, ShotAssetDto>,
   actorId: string,
   part?: string,
+  ms?: number,
 ): ShotBox | null {
   const actor = shot.actors.find((a) => a.id === actorId);
   if (!actor || !('x' in actor.at)) return null;
@@ -597,10 +688,73 @@ function partBox(
   const k = actor.size / Math.max(1e-6, ah);
   const own = part ? asset.parts[part]?.box : asset.box;
   if (!own) return null;
+  // A part in the scrolling content is where the scroll has taken it by then.
+  const scrolled =
+    part && ms !== undefined && scrolls(asset, part)
+      ? scrollAt(shot, actorId, ms, drawnScroll(asset))
+      : drawnScroll(asset);
+  const moved =
+    part && scrolls(asset, part) ? scrolled - drawnScroll(asset) : 0;
   // As the stage places it: its feet at `at`, its box's foot middle there.
   const left = actor.at.x + k * (own[0] - (ax + aw / 2));
-  const top = actor.at.y - k * (ay + ah) + k * own[1];
+  const top = actor.at.y - k * (ay + ah) + k * (own[1] - moved);
   return [left, top, own[2] * k, own[3] * k];
+}
+
+/** Each drawing's parts that sit in its scrolling content (kit/rig partTree), kept per drawing. */
+const IN_CONTENT = new WeakMap<ShotSvgAssetDto, Set<string>>();
+
+/** Whether a device's part scrolls with its content. */
+export function scrolls(asset: ShotSvgAssetDto, part: string): boolean {
+  let inside = IN_CONTENT.get(asset);
+  if (!inside) {
+    const { parent } = partTree(asset.svg);
+    inside = new Set<string>();
+    for (const id of parent.keys()) {
+      for (let up = parent.get(id) ?? null; up; up = parent.get(up) ?? null)
+        if (up === 'content') {
+          inside.add(id);
+          break;
+        }
+    }
+    IN_CONTENT.set(asset, inside);
+  }
+  return inside.has(part);
+}
+
+/** How far a device's content is scrolled as drawn (its `data-scroll`). */
+const drawnScroll = (asset: ShotSvgAssetDto): number =>
+  Number(
+    /data-part="content"[^>]*data-scroll="([\d.]+)"/.exec(asset.svg)?.[1] ?? 0,
+  ) || 0;
+
+/**
+ * How far a device's content is scrolled at a moment: its last scroll's
+ * offset once that has landed, part of the way through one in progress.
+ */
+export function scrollAt(
+  shot: ShotDto,
+  actorId: string,
+  ms: number,
+  drawn: number,
+): number {
+  let at = drawn;
+  const swaps = shot.info
+    .filter(
+      (i) =>
+        i.recipe === 'swap' &&
+        i.target?.kind === 'actor' &&
+        i.target.actor === actorId &&
+        i.target.part === 'content',
+    )
+    .sort((a, b) => a.atMs - b.atMs);
+  for (const swap of swaps) {
+    if (swap.atMs > ms) break;
+    const to = Number(swap.text) || 0;
+    const u = Math.min(1, (ms - swap.atMs) / Math.max(1, swap.durMs));
+    at = at + (to - at) * u;
+  }
+  return at;
 }
 
 /** A slider's value as drawn, from its asset part. */
@@ -643,6 +797,21 @@ export function uiTimed(
     info: [...shot.info],
   }));
   for (const shot of shots) {
+    // The board's own swaps take their part's own time (a dialog rises
+    // slower than a button swaps), landing as the voice put them.
+    shot.info = shot.info.map((item) => {
+      if (
+        item.recipe !== 'swap' ||
+        item.target?.kind !== 'actor' ||
+        !item.target.part
+      )
+        return item;
+      const own = SWAP_MS[kindOfPart(item.target.part)];
+      if (!own || own === item.durMs) return item;
+      const end = item.atMs + item.durMs;
+      const atMs = Math.max(shot.startMs, end - own);
+      return { ...item, atMs: Math.round(atMs), durMs: Math.round(end - atMs) };
+    });
     for (const actor of shot.actors) {
       const asset = assets[actor.asset];
       if (asset?.kind !== 'svg' || !asset.rig?.cursor) continue;
@@ -673,7 +842,9 @@ export function uiTimed(
         const to = move.to?.kind === 'actor' ? move.to : null;
         const part = to?.part;
         const kind = part ? kindOfPart(part) : 'part';
-        const box = to ? partBox(shot, assets, to.actor, part) : null;
+        const box = to
+          ? partBox(shot, assets, to.actor, part, move.atMs)
+          : null;
         const value =
           kind === 'slider' && to && part
             ? (values.get(`${to.actor}.${part}`) ??
@@ -850,9 +1021,89 @@ export function uiTimed(
       actor.moves = out.sort((a, b) => a.atMs - b.atMs);
     }
     shot.info.sort((a, b) => a.atMs - b.atMs);
+    followTall(shot, assets);
   }
   return numbered(chapters(shots));
 }
+
+/**
+ * In a tall frame the words sit above the captions' band, so a device's
+ * part named low on the frame (a callout's dot level with it, a field
+ * typed into, a part changing) is moved in on as it is named: a travel
+ * to the part on its moment, where the camera is not already moving. The
+ * camera is then on the part being talked about. A wide frame shows the
+ * whole device with its dots beside it, as the reference does.
+ */
+function followTall(shot: ShotDto, assets: Record<string, ShotAssetDto>): void {
+  const desk = assets[('asset' in shot.set && shot.set.asset) || ''];
+  if (desk?.kind !== 'svg' || desk.box[3] <= desk.box[2]) return;
+  const boxOfTarget = (t: ShotTargetDto | undefined): ShotBox | null =>
+    !t
+      ? null
+      : t.kind === 'box'
+        ? t.box
+        : t.kind === 'actor'
+          ? partBox(shot, assets, t.actor, t.part)
+          : null;
+  const focal = boxOfTarget(shot.focal);
+  if (!focal) return;
+  const moves = [...shot.camera].sort((a, b) => a.atMs - b.atMs);
+  const added: ShotDto['camera'] = [];
+  for (const item of shot.info) {
+    if (!['callout', 'swap', 'type'].includes(item.recipe)) continue;
+    const t = item.target;
+    if (
+      t?.kind !== 'actor' ||
+      !t.part ||
+      t.part === 'screen' ||
+      t.part === 'content'
+    )
+      continue;
+    const part = partBox(shot, assets, t.actor, t.part, item.atMs);
+    if (!part) continue;
+    // Where the camera is aimed as the item comes on: its last move's target before then, else the shot's subject.
+    const before = [...moves, ...added]
+      .filter((m) => m.atMs <= item.atMs)
+      .sort((a, b) => a.atMs - b.atMs);
+    const last = before[before.length - 1];
+    const aim =
+      (last &&
+        (last.move === 'pull' && !last.target
+          ? focal
+          : boxOfTarget(last.target))) ??
+      focal;
+    const view = tallView(aim);
+    const share = (part[1] + part[3] / 2 - view.y) / view.h;
+    if (share >= 0.16 && share <= TALL_WORDS_FOOT) continue;
+    // Not while the camera is already moving then.
+    const at = Math.max(shot.startMs, item.atMs - 450);
+    const busy = [...moves, ...added].some(
+      (m) => m.atMs < at + UI_PUSH_MS && m.atMs + m.durMs > at,
+    );
+    if (busy) continue;
+    added.push({
+      move: 'travel',
+      atMs: at,
+      durMs: UI_PUSH_MS,
+      target: { kind: 'box', box: uiFrame(part, desk.box, 'small') },
+    });
+  }
+  if (added.length)
+    shot.camera = [...shot.camera, ...added].sort((a, b) => a.atMs - b.atMs);
+}
+
+/**
+ * Where a box framed in a tall frame shows in it, roughly as the client's
+ * camera frames a subject (it fills 80% of the frame where it is limited,
+ * its middle at 0.42 of the height): the view's top and height.
+ */
+function tallView(box: ShotBox): { y: number; h: number } {
+  const h = Math.max(box[3] / 0.8, box[2] / (0.8 * (9 / 16)));
+  return { y: box[1] + box[3] / 2 - 0.42 * h, h };
+}
+
+/** The lowest share of a tall frame's height a word may sit at: the top of the captions' band (rules SAFE.tall.captionY0). */
+const TALL_WORDS_FOOT = 0.52;
 
 /** A slider's track on the desk (where its knob runs), from its `.track` part. */
 function boxKnobTrack(

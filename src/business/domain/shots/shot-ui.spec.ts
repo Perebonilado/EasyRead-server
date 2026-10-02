@@ -13,14 +13,17 @@ import { timeShots } from './shot-time';
 import {
   PRESS_MS,
   SETTLE_MS,
+  UI_ROOM,
   chapters,
   hotSpot,
   kindOfPart,
   numbered,
   travelMs,
+  uiCamera,
+  uiFrame,
   uiTimed,
 } from './shot-ui';
-import type { PlanShot, ShotPlan } from './types';
+import type { ShotPlan } from './types';
 
 const ctx: BuildContext = {
   shape: 'wide',
@@ -41,8 +44,8 @@ function beatsOf(lines: [string, number, number][]): TimedBeat[] {
       startMs,
       endMs,
       words: found.map((m, i) => [
-        m.index!,
-        m.index! + m[0].length,
+        m.index,
+        m.index + m[0].length,
         Math.round(startMs + i * each),
         Math.round(startMs + (i + 1) * each - 40),
       ]),
@@ -112,7 +115,7 @@ const PLAN: ShotPlan = {
         },
       ],
       join: 'continue',
-    } as PlanShot,
+    },
     {
       on: 'Now type your email',
       set: { kind: 'screen' },
@@ -140,7 +143,7 @@ const PLAN: ShotPlan = {
       life: [],
       camera: [],
       join: 'frost',
-    } as PlanShot,
+    },
     {
       on: 'sign in',
       set: { kind: 'screen' },
@@ -149,7 +152,7 @@ const PLAN: ShotPlan = {
       life: [],
       camera: [],
       join: 'cut',
-    } as PlanShot,
+    },
   ],
 };
 
@@ -201,7 +204,7 @@ describe('building a shot of the UI kit', () => {
       state: '0.9',
     });
     // The camera pushes into the part with room round it, on the desk.
-    const push = first.camera.find((c) => c.move === 'push')!;
+    const push = first.camera.find((c) => c.move === 'travel' && c.atMs > 0)!;
     expect(push.target?.kind).toBe('box');
   });
 
@@ -344,16 +347,13 @@ describe('the press and the hot spot', () => {
       endMs: 1000,
       set: { kind: 'set', asset: 'desk' },
       actors: [],
-      info: info.map(
-        (i, k) =>
-          ({
-            id: `${id}-${k}`,
-            recipe: 'callout',
-            atMs: 0,
-            durMs: 400,
-            ...i,
-          }) as ShotInfoDto,
-      ),
+      info: info.map((i, k) => ({
+        id: `${id}-${k}`,
+        recipe: 'callout',
+        atMs: 0,
+        durMs: 400,
+        ...i,
+      })),
       life: [],
       camera: [],
       join,
@@ -374,5 +374,99 @@ describe('the press and the hot spot', () => {
       [500, 2],
     ]);
     expect(counted[1].info[0].value).toBe(3);
+  });
+});
+
+describe('the camera on a device', () => {
+  const desk: [number, number, number, number] = [0, 0, 1600, 900];
+
+  it('frames a part close, with room round it, inside the desk', () => {
+    const part: [number, number, number, number] = [700, 300, 60, 30];
+    const framed = uiFrame(part, desk, 'medium');
+    expect(framed[2]).toBeCloseTo(900 * UI_ROOM.medium, 0);
+    expect(framed[0]).toBeLessThanOrEqual(part[0]);
+    expect(framed[0] + framed[2]).toBeGreaterThanOrEqual(part[0] + part[2]);
+    expect(uiFrame(part, desk, 'large')[2]).toBeLessThan(
+      uiFrame(part, desk, 'small')[2],
+    );
+    const corner = uiFrame([1580, 880, 20, 20], desk, 'small');
+    expect(corner[0] + corner[2]).toBeLessThanOrEqual(1600);
+    expect(corner[1] + corner[3]).toBeLessThanOrEqual(900);
+  });
+
+  it('turns a push into a device part into a travel to it, and a pull back to the device', () => {
+    const ui = {
+      boxOf: () => [700, 300, 60, 30] as [number, number, number, number],
+      frameOf: () => [600, 290, 300, 50] as [number, number, number, number],
+      focus: { kind: 'actor' as const, actor: 'phone', part: 'screen' },
+    };
+    const push = uiCamera(
+      { move: 'push', amount: 'medium' },
+      { kind: 'actor', actor: 'phone', part: 'toggle-dark' },
+      ui,
+      desk,
+    )!;
+    expect(push.move).toBe('travel');
+    expect(push.durMs).toBeGreaterThan(600);
+    // The row a control sits in is what is framed.
+    const box = (push.target as { box: [number, number, number, number] }).box;
+    expect(box[0]).toBeLessThanOrEqual(600);
+    expect(box[0] + box[2]).toBeGreaterThanOrEqual(900);
+    const pull = uiCamera({ move: 'pull' }, null, ui, desk)!;
+    expect(pull.move).toBe('travel');
+    expect(pull.target).toEqual(ui.focus);
+    expect(pull.durMs).toBeGreaterThan(0);
+    // A move on something else is the build's as usual.
+    expect(
+      uiCamera({ move: 'push' }, { kind: 'box', box: [0, 0, 1, 1] }, ui, desk),
+    ).toBeNull();
+  });
+
+  it('frames a control with the settings row it sits in', () => {
+    const push = first.camera.find(
+      (c) => c.atMs > 0 && c.target?.kind === 'box',
+    )!;
+    const device = first.actors.find((a) => a.id === 'phone')!;
+    const asset = built.assets[device.asset] as ShotSvgAssetDto;
+    const row = asset.parts['setting-dark-mode'].box;
+    const k = device.size / asset.box[3];
+    const framed = (push.target as { box: [number, number, number, number] })
+      .box;
+    // As wide as the row's on the desk, at least.
+    expect(framed[2]).toBeGreaterThanOrEqual(row[2] * k - 1);
+  });
+
+  it('in a tall frame moves in on a part named under the captions’ band, at its moment; never in a wide one', () => {
+    const plan: ShotPlan = {
+      shots: [
+        {
+          on: 'Open the settings',
+          set: { kind: 'screen' },
+          actors: [
+            { id: 'phone', kit: 'ui.phone', params: { screen: 'product' } },
+          ],
+          info: [
+            {
+              recipe: 'callout',
+              target: 'phone.btn-primary',
+              on: 'Then slide',
+            },
+          ],
+          life: [],
+          camera: [],
+          join: 'cut',
+        },
+      ],
+    };
+    const made = (shape: 'wide' | 'tall') => {
+      const b = buildShots(plan, registryOf([]), { ...ctx, shape });
+      return uiTimed(timeShots(b.shots, BEATS, DURATION), b.assets)[0];
+    };
+    const tall = made('tall');
+    const callout = tall.info.find((i) => i.recipe === 'callout')!;
+    const travel = tall.camera.find((c) => c.move === 'travel')!;
+    expect(travel).toBeDefined();
+    expect(Math.abs(travel.atMs - callout.atMs)).toBeLessThanOrEqual(450);
+    expect(made('wide').camera.some((c) => c.move === 'travel')).toBe(false);
   });
 });

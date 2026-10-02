@@ -1468,7 +1468,12 @@ function tabBar(
 }
 
 /** A dialog over the screen: a dimming scrim and a card that rises into place; hidden until it is swapped to shown. */
-function modal(b: Builder, parent: string, area: ScreenArea): void {
+function modal(
+  b: Builder,
+  parent: string,
+  area: ScreenArea,
+  worded = true,
+): void {
   const pal = b.pal;
   const id = b.id('modal');
   const drawn = b.initial(id, UI_STATES.modal!);
@@ -1501,10 +1506,12 @@ function modal(b: Builder, parent: string, area: ScreenArea): void {
     ),
     box: [area.x, area.y, area.w, area.h],
   });
-  const title = b.spec.title ? fitWords(b.spec.title, w - 48, 19, 700) : '';
-  const yes = b.spec.words
-    ? fitWords(b.spec.words, (w - 58) / 2 - 16, 15, 700)
-    : '';
+  const title =
+    worded && b.spec.title ? fitWords(b.spec.title, w - 48, 19, 700) : '';
+  const yes =
+    worded && b.spec.words
+      ? fitWords(b.spec.words, (w - 58) / 2 - 16, 15, 700)
+      : '';
   const bw = (w - 58) / 2;
   b.add({
     id: `${id}.card`,
@@ -1533,7 +1540,12 @@ function modal(b: Builder, parent: string, area: ScreenArea): void {
 }
 
 /** A notice that slides down from the top; hidden until it is swapped to shown. */
-function toast(b: Builder, parent: string, area: ScreenArea): void {
+function toast(
+  b: Builder,
+  parent: string,
+  area: ScreenArea,
+  worded = true,
+): void {
   const pal = b.pal;
   const id = b.id('toast');
   const drawn = b.initial(id, UI_STATES.toast!);
@@ -1541,7 +1553,8 @@ function toast(b: Builder, parent: string, area: ScreenArea): void {
   const h = 56;
   const x = area.x + (area.w - w) / 2;
   const y = area.y + area.status + 8;
-  const said = b.spec.words ? fitWords(b.spec.words, w - 84, 15, 700) : '';
+  const said =
+    worded && b.spec.words ? fitWords(b.spec.words, w - 84, 15, 700) : '';
   b.add({
     id,
     parent,
@@ -1827,9 +1840,14 @@ function column(
   }
   // The fixed pieces over the content: the tab bar at the foot, then the overlays.
   if (tabs) tabBar(b, root, area.x, area.y + area.h - tabH, area.w, tabH);
-  if (pieces.includes('modal')) modal(b, root, area);
-  if (pieces.includes('toast')) toast(b, root, area);
-  if (pieces.includes('keyboard')) keyboard(b, root, area);
+  // A dialog and a notice wait hidden over every screen, a keyboard over any
+  // with a field, so a swap can show one; listed as pieces, they take the
+  // screen's words, else they are wireframe bars.
+  const listed = (p: UiPiece) => pieces.includes(p);
+  modal(b, root, area, listed('modal'));
+  toast(b, root, area, listed('toast'));
+  if (listed('keyboard') || pieces.includes('input') || listed('search'))
+    keyboard(b, root, area);
   const reach = y + 24 + tabH;
   return {
     most: Math.max(0, Math.round(reach - (area.y + area.h))),

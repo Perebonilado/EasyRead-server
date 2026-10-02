@@ -48,7 +48,12 @@ function beatsOf(lines: string[]): { beats: TimedBeat[]; durationMs: number } {
       text,
       startMs,
       endMs,
-      words: found.map((m, i) => [m.index!, m.index! + m[0].length, startMs + i * each, startMs + (i + 1) * each - 40]),
+      words: found.map((m, i) => [
+        m.index,
+        m.index + m[0].length,
+        startMs + i * each,
+        startMs + (i + 1) * each - 40,
+      ]),
     };
   });
   return { beats, durationMs: at + 600 };
@@ -74,17 +79,31 @@ interface Sample {
 const product = {
   id: 'phone',
   kit: 'ui.phone',
-  params: { screen: 'product', title: 'Organic Strawberries', words: 'Add to cart', items: 'Free delivery, Fresh, Organic, Local' },
+  params: {
+    screen: 'product',
+    title: 'Organic Strawberries',
+    words: 'Add to cart',
+    items: 'Free delivery, Fresh, Organic, Local',
+  },
 };
 const settings = {
   id: 'phone',
   kit: 'ui.phone',
-  params: { screen: 'settings', title: 'Settings', items: 'Dark mode, Notifications, Brightness' },
+  params: {
+    screen: 'settings',
+    title: 'Settings',
+    items: 'Dark mode, Notifications, Brightness',
+  },
 };
 const login = {
   id: 'phone',
   kit: 'ui.phone',
-  params: { screen: 'login', title: 'Welcome back', words: 'Sign in', items: 'Email, Password, Remember me' },
+  params: {
+    screen: 'login',
+    title: 'Welcome back',
+    words: 'Sign in',
+    items: 'Email, Password, Remember me',
+  },
 };
 
 const SAMPLES: Sample[] = [
@@ -105,9 +124,21 @@ const SAMPLES: Sample[] = [
           on: 'This page sells',
           actors: [product],
           info: [
-            { recipe: 'callout', target: 'phone.nav-back', on: 'First, the photo' },
-            { recipe: 'callout', target: 'phone.title', on: 'Second, the title' },
-            { recipe: 'callout', target: 'phone.rating', on: 'Third, the rating' },
+            {
+              recipe: 'callout',
+              target: 'phone.nav-back',
+              on: 'First, the photo',
+            },
+            {
+              recipe: 'callout',
+              target: 'phone.title',
+              on: 'Second, the title',
+            },
+            {
+              recipe: 'callout',
+              target: 'phone.rating',
+              on: 'Third, the rating',
+            },
           ],
           camera: [{ move: 'establish', on: 'This page sells' }],
         }),
@@ -115,10 +146,25 @@ const SAMPLES: Sample[] = [
           on: 'Fourth, the price',
           actors: [product],
           info: [
-            { recipe: 'callout', target: 'phone.price', on: 'Fourth, the price' },
-            { recipe: 'callout', target: 'phone.btn-primary', on: 'And fifth, the button' },
+            {
+              recipe: 'callout',
+              target: 'phone.price',
+              on: 'Fourth, the price',
+            },
+            {
+              recipe: 'callout',
+              target: 'phone.btn-primary',
+              on: 'And fifth, the button',
+            },
           ],
-          camera: [{ move: 'push', target: 'phone.btn-primary', amount: 'medium', on: 'too far from' }],
+          camera: [
+            {
+              move: 'push',
+              target: 'phone.btn-primary',
+              amount: 'medium',
+              on: 'too far from',
+            },
+          ],
           join: 'cut',
         }),
       ],
@@ -127,7 +173,11 @@ const SAMPLES: Sample[] = [
   {
     name: 'ui-theme',
     title: 'Dark mode',
-    lines: ['Open the settings.', 'Dark mode is one switch away.', 'Turn it on, and the whole screen goes calm and dark.'],
+    lines: [
+      'Open the settings.',
+      'Dark mode is one switch away.',
+      'Turn it on, and the whole screen goes calm and dark.',
+    ],
     plan: {
       shots: [
         shot({
@@ -138,13 +188,22 @@ const SAMPLES: Sample[] = [
               id: 'cursor',
               kit: 'ui.cursor',
               moves: [
-                { move: 'move-to', on: 'one switch away', to: 'phone.toggle-dark' },
+                {
+                  move: 'move-to',
+                  on: 'one switch away',
+                  to: 'phone.toggle-dark',
+                },
                 { move: 'click', on: 'Turn it on', to: 'phone.toggle-dark' },
               ],
             },
           ],
           camera: [
-            { move: 'push', target: 'phone.setting-dark-mode', amount: 'medium', on: 'Dark mode is' },
+            {
+              move: 'push',
+              target: 'phone.setting-dark-mode',
+              amount: 'medium',
+              on: 'Dark mode is',
+            },
             { move: 'pull', on: 'the whole screen' },
           ],
           join: 'cut',
@@ -155,7 +214,10 @@ const SAMPLES: Sample[] = [
   {
     name: 'ui-slider',
     title: 'Brightness',
-    lines: ['Brightness is a slider.', 'Drag it all the way up, and the screen is bright again.'],
+    lines: [
+      'Brightness is a slider.',
+      'Drag it all the way up, and the screen is bright again.',
+    ],
     plan: {
       shots: [
         shot({
@@ -165,11 +227,31 @@ const SAMPLES: Sample[] = [
             {
               id: 'cursor',
               kit: 'ui.cursor',
-              moves: [{ move: 'drag', on: 'Drag it all the way up', to: 'phone.slider-brightness', state: '0.95' }],
+              moves: [
+                {
+                  move: 'drag',
+                  on: 'Drag it all the way up',
+                  to: 'phone.slider-brightness',
+                  state: '0.95',
+                },
+              ],
             },
           ],
-          info: [{ recipe: 'callout', target: 'phone.slider-brightness', on: 'Brightness is a slider' }],
-          camera: [{ move: 'push', target: 'phone.slider-brightness', amount: 'medium', on: 'is a slider' }],
+          info: [
+            {
+              recipe: 'callout',
+              target: 'phone.slider-brightness',
+              on: 'Brightness is a slider',
+            },
+          ],
+          camera: [
+            {
+              move: 'push',
+              target: 'phone.slider-brightness',
+              amount: 'medium',
+              on: 'is a slider',
+            },
+          ],
           join: 'cut',
         }),
       ],
@@ -178,17 +260,42 @@ const SAMPLES: Sample[] = [
   {
     name: 'ui-dashboard',
     title: 'Sales',
-    lines: ['This dashboard shows a week of sales.', 'Watch the bars grow as the orders come in.', 'The last day is the best of the week.'],
+    lines: [
+      'This dashboard shows a week of sales.',
+      'Watch the bars grow as the orders come in.',
+      'The last day is the best of the week.',
+    ],
     plan: {
       shots: [
         shot({
           on: 'This dashboard shows',
-          actors: [{ id: 'laptop', kit: 'ui.laptop', params: { screen: 'dashboard', title: 'Weekly sales', items: 'Revenue, Orders, Visitors' } }],
+          actors: [
+            {
+              id: 'laptop',
+              kit: 'ui.laptop',
+              params: {
+                screen: 'dashboard',
+                title: 'Weekly sales',
+                items: 'Revenue, Orders, Visitors',
+              },
+            },
+          ],
           info: [
             { recipe: 'grow', target: 'laptop.chart', on: 'the bars grow' },
-            { recipe: 'callout', target: 'laptop.chart.bar-9', on: 'The last day' },
+            {
+              recipe: 'callout',
+              target: 'laptop.chart.bar-9',
+              on: 'The last day',
+            },
           ],
-          camera: [{ move: 'push', target: 'laptop.chart', amount: 'medium', on: 'Watch the bars' }],
+          camera: [
+            {
+              move: 'push',
+              target: 'laptop.chart',
+              amount: 'medium',
+              on: 'Watch the bars',
+            },
+          ],
           join: 'cut',
         }),
       ],
@@ -218,10 +325,24 @@ const SAMPLES: Sample[] = [
             {
               id: 'cursor',
               kit: 'ui.cursor',
-              moves: [{ move: 'type', on: 'type your email', to: 'phone.input-email', text: 'ana@mail.org' }],
+              moves: [
+                {
+                  move: 'type',
+                  on: 'type your email',
+                  to: 'phone.input-email',
+                  text: 'ana@mail.org',
+                },
+              ],
             },
           ],
-          camera: [{ move: 'push', target: 'phone.input-email', amount: 'medium', on: 'type your email' }],
+          camera: [
+            {
+              move: 'push',
+              target: 'phone.input-email',
+              amount: 'medium',
+              on: 'type your email',
+            },
+          ],
           join: 'frost',
         }),
         shot({
@@ -231,10 +352,66 @@ const SAMPLES: Sample[] = [
             {
               id: 'cursor',
               kit: 'ui.cursor',
-              moves: [{ move: 'click', on: 'press sign in', to: 'phone.btn-primary', state: 'loading' }],
+              moves: [
+                {
+                  move: 'click',
+                  on: 'press sign in',
+                  to: 'phone.btn-primary',
+                  state: 'loading',
+                },
+              ],
             },
           ],
-          info: [{ recipe: 'swap', target: 'phone.btn-primary', text: 'success', on: 'you are in' }],
+          info: [
+            {
+              recipe: 'swap',
+              target: 'phone.btn-primary',
+              text: 'success',
+              on: 'you are in',
+            },
+            {
+              recipe: 'swap',
+              target: 'phone.toast',
+              text: 'shown',
+              on: 'And you are in',
+            },
+          ],
+          join: 'cut',
+        }),
+      ],
+    },
+  },
+  {
+    name: 'ui-scroll',
+    title: 'A feed',
+    lines: [
+      'A feed shows one post at a time.',
+      'Scroll down to the next one.',
+      'And a tap on the heart likes it.',
+    ],
+    plan: {
+      shots: [
+        shot({
+          on: 'A feed shows',
+          actors: [
+            {
+              id: 'phone',
+              kit: 'ui.phone',
+              params: { screen: 'feed', title: 'Following' },
+            },
+            {
+              id: 'cursor',
+              kit: 'ui.cursor',
+              moves: [
+                {
+                  move: 'scroll',
+                  on: 'Scroll down to the',
+                  to: 'phone.post-2',
+                },
+                { move: 'tap', on: 'a tap on the heart', to: 'phone.like-2' },
+              ],
+            },
+          ],
           join: 'cut',
         }),
       ],
@@ -243,19 +420,56 @@ const SAMPLES: Sample[] = [
   {
     name: 'ui-before',
     title: 'Before and after',
-    lines: ['Before, the form hid its mistakes.', 'After, it says what is wrong, right where it is.'],
+    lines: [
+      'Before, the form hid its mistakes.',
+      'After, it says what is wrong, right where it is.',
+    ],
     plan: {
       shots: [
         shot({
           on: 'Before, the form',
           actors: [
-            { id: 'before', kit: 'ui.phone', params: { screen: 'login', title: 'Welcome back', words: 'Sign in', items: 'Email, Password', state: 'btn-primary: disabled' } },
-            { id: 'after', kit: 'ui.phone', params: { screen: 'login', title: 'Welcome back', words: 'Sign in', items: 'Email, Password', state: 'input-email: error' } },
+            {
+              id: 'before',
+              kit: 'ui.phone',
+              params: {
+                screen: 'login',
+                title: 'Welcome back',
+                words: 'Sign in',
+                items: 'Email, Password',
+                state: 'btn-primary: disabled',
+              },
+            },
+            {
+              id: 'after',
+              kit: 'ui.phone',
+              params: {
+                screen: 'login',
+                title: 'Welcome back',
+                words: 'Sign in',
+                items: 'Email, Password',
+                state: 'input-email: error',
+              },
+            },
           ],
           info: [
-            { recipe: 'label', target: 'before.screen', text: 'Before', on: 'Before, the form' },
-            { recipe: 'label', target: 'after.screen', text: 'After', on: 'After, it says' },
-            { recipe: 'callout', target: 'after.input-email', on: 'what is wrong' },
+            {
+              recipe: 'label',
+              target: 'before',
+              text: 'Before',
+              on: 'Before, the form',
+            },
+            {
+              recipe: 'label',
+              target: 'after',
+              text: 'After',
+              on: 'After, it says',
+            },
+            {
+              recipe: 'callout',
+              target: 'after.input-email',
+              on: 'what is wrong',
+            },
           ],
           join: 'cut',
         }),
@@ -274,7 +488,8 @@ function scene(sample: Sample, shape: FilmShape) {
     map: null,
     seed: sample.name,
   });
-  for (const note of built.notes) console.log(`  ${sample.name} ${shape}: ${note}`);
+  for (const note of built.notes)
+    console.log(`  ${sample.name} ${shape}: ${note}`);
   const timed = timeShots(built.shots, beats, durationMs);
   const mended = mendTimed(timed, durationMs, {});
   const shots = uiTimed(mended.shots, built.assets);
@@ -294,7 +509,13 @@ function scene(sample: Sample, shape: FilmShape) {
     sound: { mood: 'curious' },
     stagings: { box: { w, h, places: [] }, wide: { w, h, places: [] } },
     engine: 'shots',
-    shots: { version: 1, look: built.look, assets: built.assets, shots, sounds: soundsOf(shots) },
+    shots: {
+      version: 1,
+      look: built.look,
+      assets: built.assets,
+      shots,
+      sounds: soundsOf(shots),
+    },
   };
 }
 
@@ -302,7 +523,12 @@ mkdirSync(LAB, { recursive: true });
 for (const sample of SAMPLES)
   for (const shape of ['wide', 'tall'] as const) {
     const made = scene(sample, shape);
-    const file = join(LAB, `${sample.name}${shape === 'tall' ? '-tall' : ''}.json`);
+    const file = join(
+      LAB,
+      `${sample.name}${shape === 'tall' ? '-tall' : ''}.json`,
+    );
     writeFileSync(file, JSON.stringify(made));
-    console.log(`wrote ${file} (${Math.round(JSON.stringify(made).length / 1024)} KB, ${made.shots.shots.length} shots, ${made.durationMs} ms)`);
+    console.log(
+      `wrote ${file} (${Math.round(JSON.stringify(made).length / 1024)} KB, ${made.shots.shots.length} shots, ${made.durationMs} ms)`,
+    );
   }

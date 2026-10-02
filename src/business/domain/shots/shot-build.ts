@@ -50,7 +50,7 @@ import { kitStyle, type KitLook } from '../kit/style';
 import { chartAsset } from './shot-charts';
 import { WHOLE_SET } from './shot-check';
 import { pictureAssetOf, pictureSetOf } from './shot-pictures';
-import { buildUi, deskAsset, isUiActor, newUiCarry } from './shot-ui';
+import { buildUi, deskAsset, isUiActor, newUiCarry, uiCamera } from './shot-ui';
 import type { ShotMapSet } from './shot-map';
 import { chartPartIds, partSlug } from './shot-parts';
 import { splitTarget } from './shot-registry';
@@ -275,6 +275,10 @@ const OUT_OF_VIEW: ReadonlySet<ShotInfoRecipe> = new Set<ShotInfoRecipe>([
   'transfer',
   'flow',
   'enter',
+  // The UI kit's: a part changing, words typed, a part counted.
+  'swap',
+  'type',
+  'callout',
 ]);
 
 /**
@@ -1295,6 +1299,16 @@ export function buildShots(
         notes.push(
           `shot ${i + 1}: ${planned.move} on "${planned.target}" frames the subject instead`,
         );
+      // On the desk, the camera frames a device's part close, and pulls
+      // back to the device (shot-ui).
+      const onDevice =
+        ui && setBox ? uiCamera(planned, target, ui, setBox) : null;
+      if (onDevice)
+        return {
+          one: { ...planned, move: onDevice.move },
+          target: onDevice.target,
+          durMs: onDevice.durMs,
+        };
       // A follow is of something that moves: on what stands still it is a
       // travel to it, and when a flow runs from it, to the flow's whole way.
       const still = planned.move === 'follow' && target?.kind !== 'actor';
@@ -1340,7 +1354,11 @@ export function buildShots(
     const camera: UntimedCamera[] = safeMove ? [safeMove] : [];
     /** Where the camera was aimed before each of its moves. */
     const before: (ShotBox | null)[] = safeMove ? [from] : [];
-    for (const { one, target } of moves) {
+    for (const { one, target, durMs: own } of moves as {
+      one: PlanCamera;
+      target: ShotTargetDto | null;
+      durMs?: number;
+    }[]) {
       before.push(from);
       const amount =
         one.move === 'push' ||
@@ -1354,9 +1372,11 @@ export function buildShots(
         on: one.on,
         ...(target ? { target } : {}),
         ...(amount !== undefined ? { amount } : {}),
-        ...(one.move === 'travel' && from && to && setBox
-          ? { durMs: travelMs(from, to, setBox[2]) }
-          : {}),
+        ...(own !== undefined
+          ? { durMs: own }
+          : one.move === 'travel' && from && to && setBox
+            ? { durMs: travelMs(from, to, setBox[2]) }
+            : {}),
       });
       if (to) from = to;
     }

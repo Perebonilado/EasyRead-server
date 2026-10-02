@@ -385,6 +385,8 @@ export function uiLookOf(style: KitStyle): UiLook {
 /** A device's parts beyond the rig's: each one's kind, states and box, for the checks and the timing. */
 export interface UiPartInfo {
   kind?: UiKind;
+  /** The part it is drawn in (a switch in its settings row). */
+  parent?: string;
   states?: readonly string[];
   state?: string;
   box: ShotBox;
@@ -455,6 +457,7 @@ export function makeDevice(
   for (const part of drawn.parts) {
     info[part.id] = {
       box: tidy(part.box),
+      ...(part.parent ? { parent: part.parent } : {}),
       ...(part.kind ? { kind: part.kind } : {}),
       ...(part.states ? { states: part.states } : {}),
       ...(part.state ? { state: part.state } : {}),
@@ -682,6 +685,9 @@ const SIZE: Readonly<
   watch: { wide: { h: 0.74, w: 0.4 }, tall: { h: 0.46, w: 0.6 } },
 };
 
+/** Where two or more devices' middle sits on a tall desk: low enough that the words' band above them has room for their labels. */
+const TALL_PAIR_MIDDLE = 0.64;
+
 /** Where a subject's middle sits on the desk, as a share of its height: the camera's optical centre (client camera.ts). */
 const MIDDLE: Readonly<Record<FilmShape, number>> = { wide: 0.46, tall: 0.42 };
 
@@ -727,7 +733,9 @@ export function placeDevices(
   return devices.map((d) => {
     const w = d.box[2] * k;
     const h = d.box[3] * k;
-    const cy = H * MIDDLE[shape];
+    // A tall before and after stands low, leaving the words' band above it for their labels.
+    const cy =
+      H * (shape === 'tall' && n > 1 ? TALL_PAIR_MIDDLE : MIDDLE[shape]);
     const top = Math.max(H * 0.04, Math.min(H * 0.96 - h, cy - h / 2));
     const box: ShotBox = [r1(x), r1(top), r1(w), r1(h)];
     x += w + gap;

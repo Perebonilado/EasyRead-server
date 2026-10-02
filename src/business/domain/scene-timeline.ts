@@ -12,6 +12,8 @@ import { PAPER } from './scene-themes';
 
 export interface TimelineSpec {
   events: { when: string; name: string }[];
+  /** Its source, written small under it (drawn by scene-code). */
+  source?: string | null;
 }
 
 /** The most events one timeline holds: more is a second timeline. */

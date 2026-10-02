@@ -101,7 +101,7 @@ export type LaidThing =
         ends?: { left: [number, number]; right: [number, number] };
       }[];
       viewBox?: [number, number, number, number];
-      /** Drawn by code: working, a graph, a passage, a timeline, a chart, a map, flags, a flow or a molecule. */
+      /** Drawn by code: working, a graph, a passage, a timeline, a chart, a map, flags, a flow, a molecule, or an infographic kind. */
       source?:
         | 'math'
         | 'plot'
@@ -111,7 +111,16 @@ export type LaidThing =
         | 'map'
         | 'flag'
         | 'flow'
-        | 'molecule';
+        | 'molecule'
+        | 'counter'
+        | 'icons'
+        | 'namecard'
+        | 'calendar'
+        | 'seats'
+        | 'strike'
+        | 'transfer'
+        | 'document'
+        | 'split';
       /** A passage: the size of its words, in its own units. */
       words?: { size: number };
       /**

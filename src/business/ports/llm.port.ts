@@ -62,6 +62,18 @@ export type LlmTask =
   | 'studio_write'
   // Whether a scene made again as the maker asked now shows what they asked for.
   | 'studio_check'
+  // The editor's desk (infographic-editor-plan): an explainer show planned
+  // and an episode written as an editor does; the research and the fact
+  // check, with the web; and each scene's board on the written script.
+  | 'explainer_edit'
+  | 'explainer_research'
+  | 'explainer_board'
+  // The shots engine's board (explainer-animation-tech §4.1): a lesson
+  // scene's plan of shots, named from closed lists and the scene's registry.
+  | 'explainer_shots'
+  // The picture desk (WP11): where an archive picture's subject is, and
+  // what the picture is, so it is cropped to the subject, never past a face.
+  | 'picture_focus'
   | 'topic_quiz'
   | 'item_write'
   | 'item_verify'
@@ -96,6 +108,21 @@ export interface LlmUsage {
   latencyMs: number;
   /** Of `tokensIn`, those the provider served from its cache, priced lower; absent when it did not say. */
   tokensCached?: number;
+  /** Web searches the call made, billed by the search; absent for none. */
+  searches?: number;
+}
+
+/** A step of the editor's desk the editor model writes (explainer_edit). */
+export type EditorWriteStep =
+  'plan' | 'world' | 'beats' | 'hooks' | 'script' | 'read' | 'package';
+
+/** A step of the editor's desk that searches the web (explainer_research). */
+export type EditorSearchStep = 'angles' | 'research' | 'facts';
+
+/** A page a search found: where a claim may come from. */
+export interface EditorFound {
+  url: string;
+  title: string;
 }
 
 export interface LlmResult<T> {
@@ -599,6 +626,12 @@ export interface LlmGatewayPort {
     plain?: string;
     /** The page's part of its chapter's teacher's notes. */
     notes?: string;
+    /**
+     * A Studio explainer's lesson: its writer is told the explainer's
+     * craft (explainerWrite: no card in place of a picture, no one
+     * drawn). Absent, a book's page, as always.
+     */
+    explainer?: boolean;
     previous?: SceneScriptDraft;
     problems?: string[];
   }): Promise<LlmResult<SceneScriptDraft>>;
@@ -946,6 +979,64 @@ export interface LlmGatewayPort {
     scene?: number;
     others?: number[];
   }): Promise<LlmResult<StudioCheckVerdict>>;
+
+  /**
+   * The editor's desk (infographic-editor-plan): one step of a show's
+   * planning or an episode's editing, by the editor model (explainer_edit),
+   * its prompt's parts said by the caller (studio-editor-words). Made sound
+   * by the step's own sanitizer (studio-editor, studio-editorial).
+   */
+  editorWrite(
+    input: { step: EditorWriteStep; parts: string[] } & StudioRevision,
+  ): Promise<LlmResult<Record<string, unknown>>>;
+
+  /**
+   * A step that searches the web (explainer_research): the angles' quick
+   * look round, the research, the fact check. With the pages the searches
+   * really found, the only ones a claim may cite; none where the model has
+   * no search, which then answers from what it knows.
+   */
+  editorSearch(input: {
+    step: EditorSearchStep;
+    parts: string[];
+    /** The most searches it may make; absent, the setting's. */
+    searches?: number;
+  }): Promise<
+    LlmResult<{ value: Record<string, unknown>; found: EditorFound[] }>
+  >;
+
+  /**
+   * A scene's board (explainer_board) on the editor's written script: a
+   * lesson scene's storyboard (sceneScriptSchema), its narration given;
+   * or an illustrated scene's shots (a story's sheet), its narration given.
+   */
+  editorBoard(
+    input: { kind: 'lesson' | 'illustrated'; parts: string[] } & StudioRevision,
+  ): Promise<LlmResult<Record<string, unknown>>>;
+
+  /**
+   * A lesson scene's plan of shots (explainer_shots; explainer-animation-
+   * tech §4.1): each shot's set, information, camera, life and join,
+   * every name from the closed lists or the scene's registry (its parts
+   * say both), never a coordinate, a time or a colour. Made sound by
+   * shot-check's planOf, held to the rules by checkPlan and mendPlan.
+   */
+  shotsBoard(
+    input: { parts: string[] } & StudioRevision,
+  ): Promise<LlmResult<Record<string, unknown>>>;
+
+  /**
+   * Where an archive picture's subject is (picture_focus; WP11), on a grid
+   * of six columns (A–F) by six rows (1–6): the cells of the people's
+   * faces, the cells of what it is of, how many people show, and what the
+   * picture is (a photograph, a photograph of a print, a screen, a statue,
+   * a painting…). Names cells only; code makes the box (pictures/focus).
+   */
+  pictureFocus(input: {
+    png: Buffer;
+    /** What the desk was told it shows: "Ahmadu Bello, 1960". */
+    about: string;
+  }): Promise<LlmResult<Record<string, unknown>>>;
 
   /** Whether text asks for what no one should be made: flagged, with the categories. */
   moderate(input: {

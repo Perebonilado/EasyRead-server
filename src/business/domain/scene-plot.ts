@@ -22,6 +22,8 @@ export interface PlotSpec {
   points: { x: number; name: string }[];
   xLabel: string | null;
   yLabel: string | null;
+  /** Its source, written small under it (drawn by scene-code). */
+  source?: string | null;
 }
 
 /** A graph's canvas and plotting area: a wide film's; a tall film's is square (studio-vertical-plan §4.2). */

@@ -47,7 +47,19 @@ type Rows = Pick<StudioRepository, 'noteActivity' | 'listScenes'> &
   Partial<Pick<StudioRepository, 'findScene'>>;
 
 /** The jobs that only write: what goes wrong is the writer's. */
-const WRITING = new Set(['bible', 'outline', 'script', 'scene']);
+const WRITING = new Set([
+  'bible',
+  'outline',
+  'script',
+  'scene',
+  // The editor's desk.
+  'angles',
+  'research',
+  'plan',
+  'world',
+  'edit',
+  'replan',
+]);
 
 type Target = { episodeId: string } | { sceneId: string };
 const keyOf = (target: Target) =>
@@ -73,6 +85,19 @@ export function jobSays(
       return { says: 'Changing the pace of the voice', short: 'Pacing' };
     case 'twin':
       return { says: `Making ${scene} in its new shape`, short: 'Making' };
+    // The editor's desk: the show planned, an episode written.
+    case 'angles':
+      return { says: 'Finding the questions this could answer' };
+    case 'research':
+      return { says: 'Researching the topic' };
+    case 'replan':
+      return { says: 'Researching what you asked for, and planning around it' };
+    case 'plan':
+      return { says: 'Planning the episodes' };
+    case 'world':
+      return { says: 'Designing the world' };
+    case 'edit':
+      return { says: 'Writing the script' };
     default:
       return null;
   }

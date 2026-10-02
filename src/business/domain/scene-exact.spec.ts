@@ -345,7 +345,7 @@ describe('exact pictures: the check', () => {
     expect(plain.problems.filter((p) => p.rule === 'exact')).toEqual([]);
   });
 
-  it('sets a flow the check turns down in type', () => {
+  it('leaves out a flow the check turns down, never a card of its name', () => {
     const thin = sheet({
       ...NONE,
       id: 'w',
@@ -357,10 +357,8 @@ describe('exact pictures: the check', () => {
         edges: null,
       },
     });
-    expect(repairExplainer(thin, options).draft.cast[0]).toMatchObject({
-      kind: 'words',
-      flow: null,
-    });
+    expect(repairExplainer(thin, options).draft.cast).toEqual([]);
+    expect(checkExplainer(thin, options).script.cast).toEqual([]);
   });
 });
 

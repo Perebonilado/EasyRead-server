@@ -7,6 +7,8 @@ import type {
 } from '../domain/studio/studio';
 import type { SheetProblem } from '../domain/studio/studio-check';
 import type { DocumentPick } from '../domain/studio/studio-document';
+import type { StudioEditor } from '../domain/studio/studio-editor';
+import type { StudioEditorial } from '../domain/studio/studio-editorial';
 import type { FilmShape } from '../domain/scene-shape';
 
 /**
@@ -23,9 +25,24 @@ export const EPISODE_PHASES = [
 ] as const;
 export type EpisodePhase = (typeof EPISODE_PHASES)[number];
 
-/** What an episode is busy with: writing its cast, developing its story, its outline or its scenes, or making the film. */
+/**
+ * What an episode is busy with: writing its cast, developing its story,
+ * its outline or its scenes, or making the film; and the editor's desk
+ * (studio-editor): the show's questions, research, plan and world, worked
+ * on its first episode, and an episode's script edited.
+ */
 export type EpisodeBusy =
-  'bible' | 'story' | 'outline' | 'script' | 'scene' | 'make';
+  | 'bible'
+  | 'story'
+  | 'outline'
+  | 'script'
+  | 'scene'
+  | 'make'
+  | 'angles'
+  | 'research'
+  | 'plan'
+  | 'world'
+  | 'edit';
 
 /** A scene: being written, written and checked, being made, made, or failed. */
 export type StudioSceneStatus =
@@ -68,6 +85,8 @@ export interface StudioShowRecord {
   bible: StudioBible | null;
   /** The document given to it in the chat, if any. */
   documentId?: string | null;
+  /** An explainer the editor plans (studio-editor); null or absent for a story and a show made before the editor. */
+  editor?: StudioEditor | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -94,6 +113,8 @@ export interface StudioEpisodeRecord {
   shape?: FilmShape;
   /** The episode it is the twin of, in the other shape: that one's script and voice are its. Absent or null for an episode of its own. */
   twinOf?: string | null;
+  /** An episode the editor wrote (studio-editorial); null or absent otherwise. */
+  editorial?: StudioEditorial | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -139,7 +160,16 @@ export interface StudioEventRecord {
     | 'failed'
     | 'checked'
     | 'document'
-    | 'pages';
+    | 'pages'
+    // The editor's desk: the questions offered, the research done, the
+    // show planned, its world drawn up, an episode's script written.
+    | 'angles'
+    | 'research'
+    | 'plan'
+    | 'world'
+    | 'editorial'
+    /** A film made into a video file: "Your video is ready". */
+    | 'export';
   /** The step it belongs to: a phase, or the story's own step (the Story card), which no episode's phase is. */
   step: EpisodePhase | 'story';
   sceneId?: string;
@@ -189,6 +219,8 @@ export interface StudioRepository {
     userId: string;
     title: string;
     brief: StudioBrief;
+    /** A show the editor will plan once it is an explainer (STUDIO_EDITOR). */
+    editor?: StudioEditor | null;
   }): Promise<StudioShowRecord>;
   /** A show that is not deleted. */
   findShow(id: string): Promise<StudioShowRecord | null>;
@@ -199,7 +231,7 @@ export interface StudioRepository {
     patch: Partial<
       Pick<
         StudioShowRecord,
-        'title' | 'format' | 'brief' | 'bible' | 'documentId'
+        'title' | 'format' | 'brief' | 'bible' | 'documentId' | 'editor'
       >
     >,
   ): Promise<void>;
@@ -237,6 +269,7 @@ export interface StudioRepository {
         | 'thumbKey'
         | 'pages'
         | 'shape'
+        | 'editorial'
       >
     >,
   ): Promise<void>;

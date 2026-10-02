@@ -568,13 +568,20 @@ describe("the Studio's lessons, held to their own words", () => {
     expect(made.problems.map((p) => p.message).join(' ')).toContain(
       'dates the scene never says: Day 30',
     );
-    // Left so by the writer, it is set in type: nothing made up is drawn.
+    // Left so by the writer, it is left out: nothing made up is drawn, and
+    // no card of its name stands in (explainer-animation-plan §10). Its
+    // scene, with nothing else, shows nothing: the board's plain lesson
+    // takes it from there (studio-editor.processor lessonBoard).
     const repaired = repairExplainer(lesson(['Days 3–7', 'Day 30']), options);
-    expect(repaired.draft.cast[0]).toMatchObject({
-      kind: 'words',
-      timeline: null,
-    });
-    expect(errorsIn(checkExplainer(repaired, options).problems)).toEqual([]);
+    expect(repaired.draft.cast).toEqual([]);
+    expect(
+      errorsIn(checkExplainer(repaired, options).problems).map(
+        (p) => p.message,
+      ),
+    ).toEqual([
+      'The storyboard never puts anything on the stage.',
+      'Nothing is ever shown on the stage.',
+    ]);
   });
 });
 

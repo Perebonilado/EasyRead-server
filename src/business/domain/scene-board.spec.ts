@@ -11,6 +11,7 @@ import { composeScene } from './scene-compose';
 import { STAGINGS } from './scene-layout';
 import type { SceneScript, SceneThing } from './scene-script';
 import type { TimedBeat } from './scene-timing';
+import type { GatedDrawing } from './scene-svg';
 
 const drawing = (id: string, name = id): SceneThing => ({
   id,
@@ -100,9 +101,21 @@ describe('a continuous build on its board (part C)', () => {
           1300 + i * 3000 + k * 400,
         ]),
     }));
+    // Each drawn: a Studio lesson leaves out what was not (explainerFloor).
+    const drawn = (): GatedDrawing => ({
+      svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100"/></svg>',
+      viewBox: [0, 0, 100, 100],
+      aspect: 1,
+      parts: {},
+      labels: {},
+      states: {},
+      moves: false,
+      callouts: [],
+      field: null,
+    });
     const { scene } = composeScene({
       script,
-      drawings: new Map(),
+      drawings: new Map(script.cast.map((t) => [t.id, drawn()])),
       beats,
       durationMs: 11_000,
       timing: 'estimated',

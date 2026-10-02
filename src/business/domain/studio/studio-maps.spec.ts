@@ -137,7 +137,7 @@ describe('a map in a lesson', () => {
     );
   });
 
-  it('sends back a map of nowhere, and sets it in type', () => {
+  it("sends back a map of nowhere: a book's page sets it in type, an explainer leaves it out", () => {
     const nowhere = draftOf([
       {
         ...AFRICA_MAP,
@@ -149,8 +149,17 @@ describe('a map in a lesson', () => {
     });
     expect(script.cast[0].kind).toBe('words');
     expect(problems[0]).toMatch(/^The map "africa" names no place code knows/);
+    // An explainer's: no card of its name, ever (explainer-animation-plan
+    // §10). Its mend leaves it out, and so does its repair.
+    const checked = checkExplainer(sheetOf(nowhere), OPTIONS);
+    expect(checked.script.cast).toEqual([]);
+    expect(checked.problems.map((p) => p.message)).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/^The map "africa" names no place code knows/),
+      ]),
+    );
     const repaired = repairExplainer(sheetOf(nowhere), OPTIONS);
-    expect(repaired.draft.cast[0].kind).toBe('words');
+    expect(repaired.draft.cast).toEqual([]);
   });
 
   it("never lets the artist draw a real place's map", () => {

@@ -101,6 +101,15 @@ const TASK_VAR: Record<LlmTask, string> = {
   studio_write: 'AI_MODEL_STUDIO_WRITE',
   // Whether a scene made again as asked shows it: a small read, a make.
   studio_check: 'AI_MODEL_STUDIO_CHECK',
+  // The editor's desk: a show planned and an episode written as an editor
+  // does (many small careful jobs), its research and fact check with the
+  // web, and each scene's board on the written script.
+  explainer_edit: 'AI_MODEL_EXPLAINER_EDIT',
+  explainer_research: 'AI_MODEL_EXPLAINER_RESEARCH',
+  explainer_board: 'AI_MODEL_EXPLAINER_BOARD',
+  // The shots engine's board: each lesson scene's plan of shots.
+  explainer_shots: 'AI_MODEL_EXPLAINER_SHOTS',
+  picture_focus: 'AI_MODEL_PICTURE_FOCUS',
   topic_quiz: 'AI_MODEL_QUIZ',
   // Guided reading: the preview is one call per chapter ever (cached), the
   // graders run once per checkpoint — all three default to the cheap model
@@ -148,13 +157,32 @@ const TASK_DEFAULT: Partial<Record<LlmTask, string>> = {
   // the cave with her two readings in three), at about five times the
   // cost: the small model by choice, 4.1 by setting AI_MODEL_SCENE_STORY.
   scene_story: 'openai:gpt-4.1-mini',
-  // The Studio on DeepSeek, as the video writer is: never gpt-4.1 for the
-  // writer (Richard, 2026-09-25). Thinking: STUDIO_WRITE_THINKING.
-  studio_chat: 'deepseek:deepseek-flash',
-  studio_write: 'deepseek:deepseek-flash',
-  // The check of a scene made again as asked: a few thousand tokens in, a
-  // verdict out, thinking off (STUDIO_CHECK_THINKING).
-  studio_check: 'deepseek:deepseek-flash',
+  // The Studio's words on a GPT mini, Richard's choice (2026-10-01:
+  // "DeepSeek is trash at writing"; "we agreed to switch to gpt 5 mini for
+  // these tasks"): the producer's chat, a story's writing and the check of
+  // a scene made again. Never gpt-4.1. The thinking settings
+  // (STUDIO_CHAT_THINKING, STUDIO_WRITE_THINKING, STUDIO_CHECK_THINKING)
+  // become its reasoning effort: off is low, on is medium. DeepSeek still
+  // draws (scene_draw, cast_draw, set_paint), with GPT mini as its backup.
+  studio_chat: 'openai:gpt-5.4-mini',
+  studio_write: 'openai:gpt-5.4-mini',
+  studio_check: 'openai:gpt-5.4-mini',
+  // The editor's desk on a GPT mini, Richard's choice (2026-10-01): DeepSeek
+  // leaves the explainer's writing. GPT-5.4 mini, the newest "mini", at
+  // $0.75 / $4.50 a million; its reasoning effort is EXPLAINER_EDIT_EFFORT
+  // (medium), EXPLAINER_RESEARCH_EFFORT (low) and EXPLAINER_BOARD_EFFORT
+  // (low). The research and the fact check search the web with OpenAI's
+  // own tool (EXPLAINER_RESEARCH_SEARCHES, 30 a run at most). Never gpt-4.1.
+  explainer_edit: 'openai:gpt-5.4-mini',
+  explainer_research: 'openai:gpt-5.4-mini',
+  explainer_board: 'openai:gpt-5.4-mini',
+  // The shots engine's board on the same GPT mini (explainer-animation-
+  // plan §5.3), its reasoning effort EXPLAINER_SHOTS_EFFORT (low): it
+  // names from closed lists, and code checks and mends what it names.
+  explainer_shots: 'openai:gpt-5.4-mini',
+  // The picture desk's look at a picture (WP11): a small image, cells named
+  // from a grid; the smallest model that sees.
+  picture_focus: 'openai:gpt-5.4-mini',
   // A drawing judged from its picture: DeepSeek cannot see. Gemini 3.8
   // Flash, Richard's choice (2026-09-27; never gpt-4.1): it named every
   // flaw he found in Clover, Dot and Eggbert (a blanket drawn as a scarf, a
@@ -231,6 +259,137 @@ export function normaliseBaseUrlVars(
  * Only providers actually named by the configuration are constructed, so
  * running entirely on OpenAI never requires an Anthropic key to exist.
  */
+/** A language model's two calls, as a backup wraps them: their options carry the caller's abort signal. */
+export type BackedOptions = { abortSignal?: AbortSignal } & Record<
+  string,
+  unknown
+>;
+export interface BackedModel {
+  doGenerate(options: BackedOptions): PromiseLike<unknown>;
+  doStream(options: BackedOptions): PromiseLike<unknown>;
+}
+
+/**
+ * A model whose two calls fall back to another's: a call the first fails,
+ * or leaves unanswered past `after` ms, is made again on `backup`; a
+ * stream that opens but says nothing within `first` ms (DeepSeek's outage
+ * of 2026-10-01 answered, then went silent) is cancelled and streamed
+ * from `backup` instead. Once an answer is coming its clock stops, so a
+ * long answer is never cut off. A call the caller cancelled is never made
+ * again. Everything else about the model stays the first's own.
+ */
+export function backedBy(
+  first: BackedModel,
+  backup: BackedModel,
+  after: number,
+  said: (why: string) => void = () => undefined,
+  firstWords = Math.min(after, 20_000),
+): BackedModel {
+  /** A call with its own clock, which the caller's cancelling also stops. */
+  const clocked = (options: BackedOptions, ms: number) => {
+    const asked = options.abortSignal;
+    const own = new AbortController();
+    let late = false;
+    const timer = setTimeout(() => {
+      late = true;
+      own.abort(new Error('no answer in time'));
+    }, ms);
+    const cancel = () => own.abort(asked?.reason);
+    asked?.addEventListener('abort', cancel, { once: true });
+    return {
+      options: { ...options, abortSignal: own.signal },
+      stop: () => {
+        clearTimeout(timer);
+        asked?.removeEventListener('abort', cancel);
+      },
+      late: () => late,
+      asked: () => Boolean(asked?.aborted),
+      ms,
+    };
+  };
+  const why = (error: unknown, late: boolean, ms: number) =>
+    late
+      ? `gave no answer in ${Math.round(ms / 1000)}s`
+      : `failed (${error instanceof Error ? error.message.slice(0, 120) : 'error'})`;
+
+  const backed = Object.create(first) as BackedModel;
+  backed.doGenerate = async (options) => {
+    const call = clocked(options, after);
+    try {
+      return await first.doGenerate(call.options);
+    } catch (error) {
+      if (call.asked()) throw error;
+      said(why(error, call.late(), call.ms));
+      return backup.doGenerate(options);
+    } finally {
+      call.stop();
+    }
+  };
+  backed.doStream = async (options) => {
+    const call = clocked(options, firstWords);
+    try {
+      const opened = (await first.doStream(call.options)) as {
+        stream: ReadableStream<{ type?: string; error?: unknown }>;
+      } & Record<string, unknown>;
+      const reader = opened.stream.getReader();
+      // What came before the first words (the stream's own start, its
+      // metadata) is kept to be passed on; the clock runs until words come.
+      const before: { type?: string; error?: unknown }[] = [];
+      // A stream that will not hear its cancelling still loses the race.
+      const silent = new Promise<never>((_, reject) => {
+        const signal = call.options.abortSignal;
+        const fail = () => {
+          void reader.cancel().catch(() => undefined);
+          reject(new Error('no answer in time'));
+        };
+        if (signal.aborted) fail();
+        else signal.addEventListener('abort', fail, { once: true });
+      });
+      // Lost after the words came, it is no one's error.
+      silent.catch(() => undefined);
+      for (;;) {
+        const part = await Promise.race([reader.read(), silent]);
+        if (part.done) throw new Error('ended before any answer');
+        if (part.value.type === 'error') {
+          const said = part.value.error;
+          throw said instanceof Error
+            ? said
+            : new Error(typeof said === 'string' ? said : 'error');
+        }
+        before.push(part.value);
+        if (
+          part.value.type !== 'stream-start' &&
+          part.value.type !== 'response-metadata'
+        )
+          break;
+      }
+      call.stop();
+      return {
+        ...opened,
+        stream: new ReadableStream({
+          start(controller) {
+            for (const part of before) controller.enqueue(part);
+          },
+          async pull(controller) {
+            const part = await reader.read();
+            if (part.done) controller.close();
+            else controller.enqueue(part.value);
+          },
+          cancel(reason) {
+            return reader.cancel(reason);
+          },
+        }),
+      };
+    } catch (error) {
+      call.stop();
+      if (call.asked()) throw error;
+      said(why(error, call.late(), call.ms));
+      return backup.doStream(options);
+    }
+  };
+  return backed;
+}
+
 export class ModelRegistry {
   private readonly logger = new Logger(ModelRegistry.name);
   private readonly clients = new Map<ProviderName, Providers[ProviderName]>();
@@ -271,6 +430,11 @@ export class ModelRegistry {
       useChat && provider.chat
         ? provider.chat(ref.modelId)
         : provider.languageModel(ref.modelId);
+    if (ref.provider === 'deepseek')
+      return {
+        model: await this.withBackup(model as LanguageModel, task),
+        ref,
+      };
     if (ref.provider !== 'openai')
       return { model: model as LanguageModel, ref };
 
@@ -291,6 +455,47 @@ export class ModelRegistry {
       }),
       ref,
     };
+  }
+
+  /**
+   * DeepSeek with a backup (Richard, 2026-10-01, when DeepSeek's API went
+   * down mid-film: "Use GPT mini as backup"): a call DeepSeek fails, or
+   * leaves unanswered past LLM_BACKUP_AFTER_MS (two minutes), is made
+   * again on LLM_BACKUP (GPT-5.4 mini), so an outage never stalls a film
+   * or the producer's chat. DeepSeek stays first for every call; a call
+   * the caller cancelled is never made again. LLM_BACKUP=off turns it off,
+   * and so does having no OpenAI key. The ledger still names DeepSeek for
+   * a call the backup answered (the log says so).
+   */
+  private async withBackup(
+    primary: LanguageModel,
+    task: LlmTask,
+  ): Promise<LanguageModel> {
+    const spec = this.config.get<string>('LLM_BACKUP', 'openai:gpt-5.4-mini');
+    if (!spec || spec === 'off') return primary;
+    const [backupProvider, ...rest] = spec.split(':');
+    const backupId = rest.join(':');
+    if (backupProvider !== 'openai' || !backupId || !this.keyOf('openai'))
+      return primary;
+    const after = Math.max(
+      5_000,
+      Number(this.config.get<string>('LLM_BACKUP_AFTER_MS', '120000')) ||
+        120_000,
+    );
+    const openai = await this.client('openai');
+    const { wrapLanguageModel, defaultSettingsMiddleware } =
+      await this.modules();
+    const backup = wrapLanguageModel({
+      model: openai.languageModel(backupId) as Parameters<
+        typeof wrapLanguageModel
+      >[0]['model'],
+      middleware: defaultSettingsMiddleware({
+        settings: { providerOptions: { openai: { strictJsonSchema: false } } },
+      }),
+    }) as unknown as BackedModel;
+    return backedBy(primary as unknown as BackedModel, backup, after, (why) =>
+      this.logger.warn(`${task}: DeepSeek ${why}; asking ${backupId} instead`),
+    ) as unknown as LanguageModel;
   }
 
   async embeddingModel(): Promise<{ model: EmbeddingModel; ref: ModelRef }> {
@@ -362,10 +567,28 @@ export class ModelRegistry {
     return this.config.get<string>('AI_EMBED_MODEL') || DEFAULT_EMBED_MODEL;
   }
 
+  /**
+   * The web search tool of a task's provider, where it has one (OpenAI's,
+   * through the Responses API): null for a provider that cannot search,
+   * whose model then answers from what it knows.
+   */
+  async webSearch(
+    task: LlmTask,
+    options: { searchContextSize: 'low' | 'medium' | 'high' },
+  ): Promise<unknown> {
+    const ref = this.refFor(task);
+    if (ref.provider !== 'openai') return null;
+    const provider = await this.client(ref.provider);
+    const tools = provider.tools as
+      { webSearch?: (options: unknown) => unknown } | undefined;
+    return tools?.webSearch?.(options) ?? null;
+  }
+
   private async client(name: ProviderName): Promise<{
     languageModel(id: string): unknown;
     chat?(id: string): unknown;
     textEmbeddingModel?(id: string): unknown;
+    tools?: unknown;
   }> {
     const cached = this.clients.get(name);
     if (cached) return cached as never;

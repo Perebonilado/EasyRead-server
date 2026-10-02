@@ -22,6 +22,12 @@ const PER_MILLION: Record<
   'gpt-4.1-nano': { in: 0.1, out: 0.4 },
   'gpt-4.1': { in: 2, out: 8, cached: 0.5 },
   'gpt-5-mini': { in: 0.25, out: 2 },
+  // The editor's desk (explainer_edit, its research and boards), the
+  // shots engine's board (explainer_shots), and the smallest of OpenAI's
+  // newest, a candidate on its bench: from OpenAI's price list of 1
+  // October 2026.
+  'gpt-5.4-mini': { in: 0.75, out: 4.5, cached: 0.075 },
+  'gpt-6-luna': { in: 0.1, out: 0.5 },
   'gpt-5': { in: 1.25, out: 10 },
   'text-embedding-3-small': { in: 0.02, out: 0 },
   'text-embedding-3-large': { in: 0.13, out: 0 },
@@ -52,6 +58,16 @@ const DATED: Record<
     { in: 1.5, out: 7.5, cached: 0.15, from: '2027-01-01' },
   ],
 };
+
+/**
+ * A web search the editor's research makes with OpenAI's tool, at $10 a
+ * thousand; what it reads is billed as the model's input tokens, apart.
+ */
+export const WEB_SEARCH_USD = 0.01;
+
+/** What a call's web searches cost. */
+export const webSearchCost = (searches: number): number =>
+  Math.round(Math.max(0, Math.round(searches)) * WEB_SEARCH_USD * 1e6) / 1e6;
 
 /** A text model's price on a day: its dated rate then, else its one rate. */
 function priceOf(

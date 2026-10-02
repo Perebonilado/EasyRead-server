@@ -94,7 +94,9 @@ import {
   stagedFaults,
   stillThere,
 } from '../../business/domain/studio/studio-staged';
-import type { SceneDto } from '../../contracts';
+import type { FilmShape, SceneDto } from '../../contracts';
+import type { SceneReading } from '../../business/domain/scene-reading';
+import type { ThemeId } from '../../business/domain/scene-themes';
 import {
   onItsVoice,
   paintedAt,
@@ -228,6 +230,15 @@ import {
   showLookStyle,
   showTheme,
 } from '../../business/domain/studio/studio-look';
+import { keySecret } from '../../business/domain/studio/studio-export';
+import { Ffmpeg } from '../export/ffmpeg';
+import {
+  PuppeteerFilmCapture,
+  chromePath,
+  exportGl,
+} from '../export/film-capture';
+import { RenderPageEyes } from '../export/scene-eyes';
+import { SceneCritic } from './scene-critic';
 import { studioReading } from '../../business/domain/studio/studio-motion';
 
 /** A kit's spec for a character: a person's, an animal's, or a creature's. */
@@ -301,6 +312,38 @@ const FAILED: Record<
     line: 'The scene could not be written. Try again in a moment.',
   },
 };
+
+/**
+ * The critic's eyes on the render page (scene-eyes), from the worker's
+ * settings: the web the export renders on (RENDER_WEB_URL), its render
+ * keys' secret, Chrome and its GL. None where no render page is named
+ * (the critic does not run without one) or EXPLAINER_CRITIC is off.
+ */
+export function criticEyes(
+  setting: (name: string) => string | undefined,
+): RenderPageEyes | null {
+  const web = setting('RENDER_WEB_URL')?.trim().replace(/\/+$/u, '');
+  if (
+    !web ||
+    /^(?:off|false|0|no)$/iu.test((setting('EXPLAINER_CRITIC') ?? '').trim())
+  )
+    return null;
+  const capture = new PuppeteerFilmCapture(
+    new Ffmpeg(setting('FFMPEG_PATH') || 'ffmpeg'),
+    {
+      chrome: chromePath(setting('CHROME_PATH')),
+      pages: 1,
+      gl: exportGl(setting('EXPORT_GL')),
+    },
+  );
+  return new RenderPageEyes(capture, {
+    web,
+    secret: keySecret({
+      own: setting('STUDIO_EXPORT_SECRET'),
+      access: setting('JWT_ACCESS_SECRET'),
+    }),
+  });
+}
 
 /**
  * An explainer's scenes as the stage plays them, by position: each sheet
@@ -773,7 +816,22 @@ export class StudioProcessor {
       pictures: this.pictures ?? null,
       logger: this.logger,
     });
+    const setting = (name: string) =>
+      this.config?.get<string>(name) ?? process.env[name];
+    this.critic = new SceneCritic({
+      studio: this.studio,
+      llm: this.llm,
+      calls: this.calls,
+      storage: this.storage,
+      scenes: this.scenes,
+      eyes: criticEyes(setting),
+      setting,
+      logger: this.logger,
+    });
   }
+
+  /** The critic (scene-critic, WP13): a scene of shots looked at, scored and fixed once made. */
+  private readonly critic: SceneCritic;
 
   /** The editor's desk (studio-editor.processor): an explainer show planned, and its episodes written, as an editor does. */
   private readonly editor: StudioEditorProcessor;
@@ -3095,6 +3153,54 @@ export class StudioProcessor {
     return gesturingIn(cast);
   }
 
+  /**
+   * A twin's scene composed again on the plan the critic's loop ended on:
+   * the lead's version's voice, the twin's frame. Null when it cannot be
+   * (the twin then fails as one not composed does, and is made again).
+   */
+  private async criticTwin(input: {
+    shots: NonNullable<ReturnType<typeof studioMakeOf>['shots']>;
+    of: ReturnType<typeof studioMakeOf>;
+    scene: SceneDto;
+    base: string;
+    who: string;
+    keepAs: string;
+    shape: FilmShape;
+    theme?: ThemeId;
+    reading?: SceneReading;
+  }): Promise<{ scene: SceneDto; sceneKey: string; thumbKey: string } | null> {
+    const { of, scene } = input;
+    const voiced = of.script ? onItsVoice(of.script, scene) : null;
+    if (!voiced) return null;
+    return this.scenes
+      .recompose({
+        script: voiced,
+        kept: new Map(),
+        beats: scene.beats,
+        durationMs: scene.durationMs,
+        timing: scene.timing,
+        profile: of.profile,
+        story: null,
+        base: input.base,
+        who: `${input.who} (${input.shape}, the critic's plan)`,
+        keepAs: input.keepAs,
+        shape: input.shape,
+        shots: input.shots,
+        ...(input.theme ? { theme: input.theme } : {}),
+        ...(input.reading ? { reading: input.reading } : {}),
+        ...(of.finish ? { finish: of.finish } : {}),
+        ...(scene.voicePace !== undefined
+          ? { voicePace: scene.voicePace }
+          : {}),
+      })
+      .catch((error: Error) => {
+        this.logger.warn(
+          `${input.who}: the ${input.shape} twin not composed on the critic's plan: ${error.message}`,
+        );
+        return null;
+      });
+  }
+
   /** The show's sets as painted: none yet, or none that can be read, is none. */
   private async paintedSets(showId: string): Promise<Sets | null> {
     try {
@@ -3278,7 +3384,66 @@ export class StudioProcessor {
       ).catch((error: Error) =>
         this.logger.warn(`${who}: build drawings not kept: ${error.message}`),
       );
-    const { scene, sceneKey, thumbKey, voice } = made;
+    let { scene, sceneKey, thumbKey } = made;
+    const { voice } = made;
+    // A scene of shots looked at, scored and fixed on its voice before it
+    // is shown (the critic's loop, WP13): it ends on its best version, and
+    // its sheet on the plan that version was built from.
+    let madeHash = fingerprint;
+    let twinScene = 'twin' in made ? (made.twin ?? null) : null;
+    if (of.shots && this.critic.on()) {
+      const looked = await this.critic
+        .loop({
+          show,
+          episode,
+          row,
+          make: {
+            script: of.script!,
+            profile: of.profile,
+            shots: of.shots,
+            ...(of.finish ? { finish: of.finish } : {}),
+            theme: showTheme(show.brief, bible) ?? undefined,
+            reading: studioReading(show.brief),
+          },
+          made: {
+            scene,
+            sceneKey,
+            thumbKey,
+            audioKey: voice.audioKey,
+            durationMs: voice.durationMs,
+          },
+          shape,
+          who,
+        })
+        .catch((error: Error) => {
+          this.logger.warn(`${who}: critic: not looked at: ${error.message}`);
+          return null;
+        });
+      if (looked) {
+        ({ scene, sceneKey, thumbKey } = looked);
+        if (looked.sheet) {
+          madeHash = sceneFingerprint(
+            looked.sheet,
+            bible,
+            show.brief,
+            carriedWears(rows, bible).get(row.position) ?? [],
+          );
+          // Its twin, on the plan it ends on.
+          if (twinned && twinBase)
+            twinScene = await this.criticTwin({
+              shots: { ...of.shots, plan: looked.sheet.shots! },
+              of,
+              scene,
+              base: `${twinBase}c`,
+              who,
+              keepAs: `studio-${row.id}-${twinned.twin.shape}`,
+              shape: episodeShape(twinned.twin),
+              theme: showTheme(show.brief, bible) ?? undefined,
+              reading: studioReading(show.brief),
+            });
+        }
+      }
+    }
     await this.studio.updateScene(row.id, {
       status: 'made',
       step: null,
@@ -3286,7 +3451,7 @@ export class StudioProcessor {
       sceneKey,
       audioKey: voice.audioKey,
       thumbKey,
-      madeHash: fingerprint,
+      madeHash,
       durationMs: voice.durationMs,
     });
     // Its twin's scene: made on the same voice, at the same fingerprint.
@@ -3294,8 +3459,12 @@ export class StudioProcessor {
       await this.twinMade(
         show,
         twinned,
-        'twin' in made ? (made.twin ?? null) : null,
-        { audioKey: voice.audioKey, durationMs: voice.durationMs, fingerprint },
+        twinScene,
+        {
+          audioKey: voice.audioKey,
+          durationMs: voice.durationMs,
+          fingerprint: madeHash,
+        },
         who,
       );
     // A clip's still is its last frame: the card the next lesson opens on.

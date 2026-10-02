@@ -110,6 +110,8 @@ const TASK_VAR: Record<LlmTask, string> = {
   // The shots engine's board: each lesson scene's plan of shots.
   explainer_shots: 'AI_MODEL_EXPLAINER_SHOTS',
   picture_focus: 'AI_MODEL_PICTURE_FOCUS',
+  // The critic: a scene's contact sheet scored, its worst problems named.
+  explainer_critic: 'AI_MODEL_EXPLAINER_CRITIC',
   topic_quiz: 'AI_MODEL_QUIZ',
   // Guided reading: the preview is one call per chapter ever (cached), the
   // graders run once per checkpoint — all three default to the cheap model
@@ -183,6 +185,10 @@ const TASK_DEFAULT: Partial<Record<LlmTask, string>> = {
   // The picture desk's look at a picture (WP11): a small image, cells named
   // from a grid; the smallest model that sees.
   picture_focus: 'openai:gpt-5.4-mini',
+  // The critic (explainer-animation-plan §9.3, decision 2): GPT-5.4 mini
+  // with the scene's contact sheet as a picture, about a cent a look; its
+  // reasoning effort is EXPLAINER_CRITIC_EFFORT (medium). Never gpt-4.1.
+  explainer_critic: 'openai:gpt-5.4-mini',
   // A drawing judged from its picture: DeepSeek cannot see. Gemini 3.8
   // Flash, Richard's choice (2026-09-27; never gpt-4.1): it named every
   // flaw he found in Clover, Dot and Eggbert (a blanket drawn as a scarf, a

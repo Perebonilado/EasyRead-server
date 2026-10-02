@@ -23,9 +23,10 @@ const PER_MILLION: Record<
   'gpt-4.1': { in: 2, out: 8, cached: 0.5 },
   'gpt-5-mini': { in: 0.25, out: 2 },
   // The editor's desk (explainer_edit, its research and boards), the
-  // shots engine's board (explainer_shots), and the smallest of OpenAI's
-  // newest, a candidate on its bench: from OpenAI's price list of 1
-  // October 2026.
+  // shots engine's board (explainer_shots) and its critic (explainer_critic,
+  // whose contact sheet is billed as input tokens), and the smallest of
+  // OpenAI's newest, a candidate on its bench: from OpenAI's price list of
+  // 1 October 2026.
   'gpt-5.4-mini': { in: 0.75, out: 4.5, cached: 0.075 },
   'gpt-6-luna': { in: 0.1, out: 0.5 },
   'gpt-5': { in: 1.25, out: 10 },

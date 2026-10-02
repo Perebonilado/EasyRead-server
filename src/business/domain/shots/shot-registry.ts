@@ -785,7 +785,8 @@ export function buildRegistry(input: RegistryInput): TargetRegistry {
     return {
       name: `claim:${claim.id}`,
       kind: 'claim',
-      about: `${claim.kind}: ${line(claim.text, 320)}`,
+      // Its words as the research has them, quotation marks and all.
+      about: `${claim.kind}: ${claim.text.replace(/\s+/gu, ' ').trim().slice(0, 320)}`,
       claim: claim.id,
       claims: [claim.id],
       ...(source ? { source } : {}),

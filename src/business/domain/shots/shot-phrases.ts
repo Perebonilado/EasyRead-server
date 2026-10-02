@@ -8,8 +8,8 @@
  * that looks for its first time, finds the place the board meant.
  *
  * Words are matched in any script: letters and digits of every language
- * are words, everything else parts them, and an apostrophe joins
- * ("Nigeria’s" is one word).
+ * are words, everything else parts them, an apostrophe joins ("don’t" is
+ * one word) and a possessive is its name ("Nigeria’s" is Nigeria).
  */
 import type { EditorialRow } from '../studio/studio-editorial';
 
@@ -19,16 +19,21 @@ export interface Narration {
   keys: string[];
   /** For each key, the place in `words` of the word it comes from ("self-government" is two keys of one word). */
   of: number[];
-  /** The text's words as written, the punctuation at their ends taken off. */
+  /** The text's words as written, with their punctuation: a phrase is trimmed at its two ends only. */
   words: string[];
 }
 
-/** A word's keys: "Nigeria’s" is ["nigerias"], "self-government" ["self", "government"], "1,500" ["1", "500"]. */
+/**
+ * A word's keys: "Nigeria’s" is ["nigeria"] (a possessive is its name),
+ * "don’t" ["dont"], "self-government" ["self", "government"], "1,500"
+ * ["1", "500"].
+ */
 export function keysOf(text: string): string[] {
   return text
     .normalize('NFD')
     .replace(/\p{M}/gu, '')
     .toLowerCase()
+    .replace(/['’`]s\b/gu, '')
     .replace(/['’‘`]/gu, '')
     .replace(/[^\p{L}\p{N}]+/gu, ' ')
     .trim()
@@ -43,7 +48,7 @@ export function narrationOf(text: string): Narration {
     const keys = keysOf(raw);
     if (!keys.length) continue;
     const at = out.words.length;
-    out.words.push(raw.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}%]+$/gu, ''));
+    out.words.push(raw);
     for (const key of keys) {
       out.keys.push(key);
       out.of.push(at);
@@ -89,13 +94,28 @@ export function phraseAt(
   return -1;
 }
 
-/** The narration's own words for keys `at` to `at + length`, as the board may write them. */
+/**
+ * The narration's own words for keys `at` to `at + length`, as the board
+ * may write them: as written inside ("In 1961, Berlin"), without the
+ * punctuation at the phrase's two ends.
+ */
 export function phraseText(n: Narration, at: number, length: number): string {
   if (length <= 0 || at < 0 || at >= n.keys.length) return '';
   const first = n.of[at];
   const last = n.of[Math.min(n.keys.length, at + length) - 1];
-  return n.words.slice(first, last + 1).join(' ');
+  return n.words
+    .slice(first, last + 1)
+    .join(' ')
+    .replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}%]+$/gu, '');
 }
+
+/** A word without the ending a plural or a verb adds: "borders" is "border", "matches" "match". */
+const stem = (key: string) =>
+  key.length > 4 && /(?:ches|shes|sses|xes)$/u.test(key)
+    ? key.slice(0, -2)
+    : key.length > 3 && key.endsWith('s') && !key.endsWith('ss')
+      ? key.slice(0, -1)
+      : key;
 
 /** Words too common to place a phrase by themselves. */
 const COMMON = new Set([
@@ -154,11 +174,11 @@ export function nearestPhrase(
     length += 1
   )
     for (let at = Math.max(0, from); at + length <= to; at += 1) {
-      const pool = n.keys.slice(at, at + length);
+      const pool = n.keys.slice(at, at + length).map(stem);
       let shared = 0;
       let content = 0;
       for (const key of want) {
-        const i = pool.indexOf(key);
+        const i = pool.indexOf(stem(key));
         if (i < 0) continue;
         pool.splice(i, 1);
         shared += 1;
@@ -172,12 +192,15 @@ export function nearestPhrase(
     }
   if (!best || score < 0.5) return null;
   // Tight to the words it shares: none it does not at either end.
-  const wanted = new Set(want);
-  while (best.length > 1 && !wanted.has(n.keys[best.at])) {
+  const wanted = new Set(want.map(stem));
+  while (best.length > 1 && !wanted.has(stem(n.keys[best.at]))) {
     best.at += 1;
     best.length -= 1;
   }
-  while (best.length > 1 && !wanted.has(n.keys[best.at + best.length - 1]))
+  while (
+    best.length > 1 &&
+    !wanted.has(stem(n.keys[best.at + best.length - 1]))
+  )
     best.length -= 1;
   return best;
 }

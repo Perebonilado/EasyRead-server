@@ -87,6 +87,22 @@ export function clip(raw: unknown, most: number): string {
   return words.join(' ').replace(/[,;:–—-]+$/u, '');
 }
 
+/**
+ * A long name made a short label: what comes after its last "of" when
+ * that is short ("Length of the inner border" is "inner border"), else
+ * its first words.
+ */
+export function shortLabel(raw: unknown, most: number): string {
+  const words = line(raw, 200).split(' ').filter(Boolean);
+  if (words.length <= most) return clip(raw, most);
+  const of = words.map((w) => w.toLowerCase()).lastIndexOf('of');
+  const after = of >= 0 ? words.slice(of + 1) : [];
+  while (after.length && TRAILING.has(after[0].toLowerCase())) after.shift();
+  return after.length && after.length <= most
+    ? after.join(' ')
+    : clip(raw, most);
+}
+
 /** A label's words, or null when it has none. */
 const label = (raw: unknown, most: number): string | null =>
   clip(raw, most) || null;

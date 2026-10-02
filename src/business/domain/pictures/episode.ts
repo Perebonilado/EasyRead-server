@@ -122,20 +122,25 @@ export function passQuestions(input: PassInput): PassQuestion[] {
       name: p.name,
       role: p.role,
       said: `${p.role} ${p.did}`,
+      claims: p.claims,
     })),
     ...(world?.people ?? []).map((p) => ({
       name: p.name,
       role: p.role,
       said: p.role,
+      claims: p.claims,
     })),
   ];
   for (const person of people) {
     const key = nameWords(person.name).join(' ');
     if (!key || seen.has(key) || out.length >= PEOPLE_MOST) continue;
     seen.add(key);
-    // Their years: what their own notes, the claims naming them and the
-    // timeline's events naming them say.
-    const naming = claims.filter((c) => namesPerson(c.text, person.name));
+    // Their years: what their own notes, the claims naming them or
+    // resting on them, and the timeline's events naming them say.
+    const own = new Set(person.claims ?? []);
+    const naming = claims.filter(
+      (c) => own.has(c.id) || namesPerson(c.text, person.name),
+    );
     const events = (research?.timeline ?? []).filter((e) =>
       namesPerson(e.event, person.name),
     );

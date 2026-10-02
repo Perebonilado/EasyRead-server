@@ -1,7 +1,12 @@
 import { fileOf, regionOf, structuredOf } from './commons.adapter';
 import { measureImage } from './measure';
 import { PoliteHttp, userAgentOf } from './polite-http';
-import { itemOf, personOf, type WikiEntity } from './wikidata.adapter';
+import {
+  itemOf,
+  personOf,
+  WikidataAdapter,
+  type WikiEntity,
+} from './wikidata.adapter';
 
 // What Commons said of the Oak Ridge photograph of Ahmadu Bello (2026-10-02), cut to the fields read.
 const PAGE = {
@@ -220,6 +225,37 @@ describe("the picture desk's adapters", () => {
       mime: 'image/jpeg',
     });
     expect(measureImage(Buffer.from('GIF89a......'))).toBeNull();
+  });
+
+  it("asks Wikidata's full-text search for people by their words, and reads its ids", async () => {
+    const asked: string[] = [];
+    const http = new PoliteHttp({
+      userAgent: userAgentOf('https://easiread.com'),
+      minGapMs: 0,
+      fetch: (url: string) => {
+        asked.push(url);
+        // What it answered for "James Robertson Nigeria" on 2026-10-02.
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              query: { search: [{ title: 'Q6145713' }, { title: 'Talk:x' }] },
+            }),
+            { status: 200 },
+          ),
+        );
+      },
+    });
+    const hits = await new WikidataAdapter(http).searchText(
+      'James Robertson Nigeria',
+      { limit: 5, humans: true },
+    );
+    expect(hits).toEqual([{ qid: 'Q6145713' }]);
+    const url = new URL(asked[0]);
+    expect(url.searchParams.get('list')).toBe('search');
+    expect(url.searchParams.get('srsearch')).toBe(
+      'James Robertson Nigeria haswbstatement:P31=Q5',
+    );
+    expect(url.searchParams.get('srlimit')).toBe('5');
   });
 
   it('asks one request at a time, spaced, naming the app, and waits out a 429 as told', async () => {

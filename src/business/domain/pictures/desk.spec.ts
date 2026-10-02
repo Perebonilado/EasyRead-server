@@ -1,4 +1,5 @@
 import {
+  BELLO,
   commonsFile,
   FAKE_PIXELS,
   FakeDepth,
@@ -7,6 +8,8 @@ import {
   FILES,
   MemoryCache,
   MemoryStorage,
+  ROBERTSON,
+  ROBERTSON_NAMESAKE,
 } from './__fixtures__/desk';
 import { DESK_RULES, lookupKey, PictureDesk, PICK_LEAST } from './desk';
 import type { LicenceMode } from './licence';
@@ -93,6 +96,35 @@ describe('the picture desk', () => {
     expect(qid).toBe('Q181782');
     expect(found).toEqual([]);
     expect(reason).toMatch(/no picture of Nnamdi Azikiwe clears/u);
+  });
+
+  it('finds a person the name search does not reach by their name with a word of the research’s: Nigeria’s last governor-general', async () => {
+    const sources = new FakeSources([BELLO, ROBERTSON_NAMESAKE, ROBERTSON]);
+    const { desk } = deskWith({ sources, licence: 'off' });
+    const { qid, found } = await desk.find({
+      name: 'Sir James Robertson',
+      kind: 'person',
+      years: [1955, 1960],
+      place: ['Nigeria'],
+      role: 'Governor-General of Nigeria',
+    });
+    expect(qid).toBe('Q6145713');
+    expect(found.map((c) => c.file.sourceId)).toEqual([
+      'File:Sir James Robertson, Governor-General of Nigeria, 1958.jpg',
+    ]);
+    expect(sources.calls).toContain('search-text:james robertson Nigeria');
+    // The name search alone gave only his namesake, and nobody.
+    const named = new FakeSources([ROBERTSON_NAMESAKE]);
+    const alone = await deskWith({ sources: named }).desk.find({
+      name: 'Sir James Robertson',
+      kind: 'person',
+      years: [1955, 1960],
+      place: ['Nigeria'],
+      role: 'Governor-General of Nigeria',
+    });
+    expect(alone.reason).toBe(
+      'Sir James Robertson matched by name only: no year, role or place agrees',
+    );
   });
 
   it('gives no portrait for a person whose facts it cannot match', async () => {

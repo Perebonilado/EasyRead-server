@@ -1,5 +1,6 @@
 import {
   factsOf,
+  fitOf,
   kmBetween,
   matchPerson,
   matchPlace,
@@ -192,7 +193,179 @@ describe('who a picture is of', () => {
   it('reads a year after their death, or before they were grown, as outside their life', () => {
     expect(factsOf({ years: [1975] }, BELLO).ruledOut).toMatch(/outside/u);
     expect(factsOf({ years: [1915] }, BELLO).ruledOut).toMatch(/outside/u);
-    expect(factsOf({ years: [1966] }, BELLO)).toEqual({ matched: ['years'] });
+    expect(factsOf({ years: [1966] }, BELLO)).toEqual({
+      matched: ['years'],
+      life: 'alive',
+    });
+    // A year just after their death rules nobody out, and is no fact for them.
+    expect(factsOf({ years: [1967] }, BELLO)).toEqual({
+      matched: [],
+      life: 'after',
+    });
+  });
+});
+
+describe('two people of one name, told apart by the research (production, 2026-10-02)', () => {
+  // As Wikidata has them on 2026-10-02, cut to what the match reads.
+  const DUCHESS_OF_FIFE = person({
+    qid: 'Q255953',
+    label: 'Princess Alexandra, 2nd Duchess of Fife',
+    aliases: ['Princess Alexandra', 'Princess Alexandra, Duchess of Fife'],
+    description:
+      'British princess; elder daughter of Louise, Princess Royal, and Alexander Duff, 1st Duke of Fife (1891-1959)',
+    born: 1891,
+    died: 1959,
+    roles: [
+      'aristocrat',
+      'nurse',
+      'Counsellor of State',
+      'heir presumptive',
+      'Colonel-in-Chief',
+    ],
+    places: ['United Kingdom', 'London', 'Mar Lodge'],
+  });
+  const ALEXANDRA_OF_KENT = person({
+    qid: 'Q170191',
+    label: 'Princess Alexandra, Lady Ogilvy',
+    aliases: ['HRH Princess Alexandra of Kent', 'Alexandra Windsor'],
+    description: 'member of the British royal family',
+    born: 1936,
+    roles: ['aristocrat', 'patron of the arts', 'sponsor'],
+    places: ['United Kingdom', 'Belgrave Square', "St James's Palace"],
+  });
+  const SARNOFF = person({
+    qid: 'Q360106',
+    label: 'David Sarnoff',
+    description: 'Russian-born American businessman (1891–1971)',
+    born: 1891,
+    died: 1971,
+    roles: ['entrepreneur', 'engineer', 'president'],
+    places: ['Russian Empire', 'United States', 'Manhattan'],
+  });
+  const COACH = person({
+    qid: 'Q139662850',
+    label: 'David B. Sarnoff',
+    aliases: ['David Sarnoff'],
+    description:
+      'ICF Certified Executive Coach, leadership trainer, and keynote speaker.',
+  });
+
+  it('takes the princess alive at Nigeria’s independence in 1960, not the one who died in 1959', () => {
+    // Both are "Princess Alexandra"; both are British princesses. The old
+    // match let a year just after a death count, and could not choose.
+    const match = matchPerson(
+      {
+        name: 'Princess Alexandra',
+        years: [1960],
+        role: 'British princess who represented the Queen',
+        place: ['Nigeria', 'Lagos'],
+      },
+      [DUCHESS_OF_FIFE, ALEXANDRA_OF_KENT],
+    );
+    expect(match).toMatchObject({ qid: 'Q170191' });
+    expect(match.qid && match.facts).toEqual(['years', 'role']);
+  });
+
+  it('takes RCA’s David Sarnoff, alive in the research’s years, over a coach of that name nobody dates', () => {
+    const match = matchPerson(
+      {
+        name: 'David Sarnoff',
+        years: [1939],
+        role: 'RCA executive who pushed television into homes',
+      },
+      [COACH, SARNOFF],
+    );
+    expect(match).toMatchObject({ qid: 'Q360106', facts: ['years'] });
+  });
+
+  it('takes the colonial governor among the James Robertsons by his years, his post and Nigeria', () => {
+    const governor = person({
+      qid: 'Q6145713',
+      label: 'James Wilson Robertson',
+      aliases: ['Sir James Wilson Robertson'],
+      description: 'British colonial governor (1899-1983)',
+      born: 1899,
+      died: 1983,
+      roles: ['politician', 'colonial governor', 'Governor-General of Nigeria'],
+      places: ['Nigeria', 'Broughty Ferry'],
+    });
+    const officer = person({
+      qid: 'Q108162573',
+      label: 'James Robertson',
+      description: 'British Royal Navy officer, lieutenant in 1815',
+      roles: ['naval officer'],
+      places: ['United Kingdom of Great Britain and Ireland'],
+    });
+    const engraver = person({
+      qid: 'Q1348650',
+      label: 'James Robertson',
+      description: 'English photographer and gem and coin engraver (1813-1888)',
+      born: 1813,
+      died: 1888,
+      roles: ['photographer', 'engraver'],
+      places: ['United Kingdom', 'Yokohama'],
+    });
+    const query = {
+      name: 'Sir James Robertson',
+      years: [1955, 1960],
+      role: 'Governor-General of Nigeria',
+      place: ['Nigeria'],
+    };
+    // Without him among those found, nobody: the others share no fact.
+    expect(matchPerson(query, [officer, engraver])).toEqual({
+      qid: null,
+      reason:
+        'Sir James Robertson matched by name only: no year, role or place agrees',
+    });
+    expect(matchPerson(query, [officer, engraver, governor])).toMatchObject({
+      qid: 'Q6145713',
+      facts: ['years', 'role', 'place'],
+    });
+  });
+
+  it('still refuses true namesakes: both alive then, both fitting the research alike', () => {
+    const a = person({
+      qid: 'Q20',
+      label: 'Mary Okafor',
+      description: 'Nigerian politician',
+      born: 1920,
+      died: 1990,
+      places: ['Nigeria'],
+    });
+    const b = person({
+      qid: 'Q21',
+      label: 'Mary Okafor',
+      description: 'Nigerian politician',
+      born: 1925,
+      died: 2001,
+      places: ['Nigeria'],
+    });
+    const match = matchPerson(
+      {
+        name: 'Mary Okafor',
+        years: [1959],
+        role: 'politician',
+        place: ['Nigeria'],
+      },
+      [a, b],
+    );
+    expect(match).toEqual({
+      qid: null,
+      reason: '2 people called Mary Okafor fit the research equally (Q20, Q21)',
+    });
+  });
+
+  it('weighs a closer description when the facts are even', () => {
+    expect(
+      fitOf(
+        {
+          role: 'RCA executive and broadcasting pioneer',
+          place: ['United States'],
+        },
+        SARNOFF,
+      ),
+    ).toBe(2);
+    expect(fitOf({ role: 'RCA executive' }, COACH)).toBe(1);
   });
 });
 

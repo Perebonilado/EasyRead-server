@@ -1,12 +1,19 @@
 /**
  * Who and where a picture is of (research §3.5: "people are resolved only
  * by QID"). A person is taken as Wikidata's only when the name matches
- * and at least one of the research's facts does too: their years, who
- * they were, or where. A namesake whose life the research's years fall
- * outside is never them. Two people the facts cannot tell apart are no
- * one: a wrong face is worse than no face, and the board then shows the
- * person's trace. A place is taken only by its name and, where the show's
- * map knows it, its point. Pure.
+ * and at least one of the research's facts does too: a year in their
+ * life, who they were, or where. A namesake whose life the research's
+ * years fall outside is never them. Two people of one name are told apart
+ * by the facts (Richard, 2026-10-02): the one alive in the research's
+ * years before one whose dates nobody knows, and either before one who
+ * had died by then (Princess Alexandra of Kent at Nigeria's independence
+ * in 1960, not her great-aunt the Duchess of Fife, who died in 1959;
+ * RCA's David Sarnoff, not a coach of that name with no dates); then the
+ * one whose description holds more of the research's words for them. Two
+ * people the facts still cannot tell apart are no one: a wrong face is
+ * worse than no face, and the board then shows the person's trace. A
+ * place is taken only by its name and, where the show's map knows it,
+ * its point. Pure.
  */
 import type { PictureQuery, WikiItem, WikiPerson } from './types';
 
@@ -152,24 +159,42 @@ function stems(text: string): Set<string> {
 const overlaps = (a: Set<string>, b: Set<string>) =>
   [...a].some((w) => b.has(w));
 
-/** The facts a candidate shares with the research, and whether any rules them out. */
+/** How a person's life stands to the research's years: in it, unknown (no dates, or no years asked), or only just after it. */
+export type LifeFit = 'alive' | 'unknown' | 'after';
+
+/** How many years after a death the research's years may still be of that life (a funeral, a legacy). */
+const AFTER_DEATH = 2;
+
+/**
+ * The facts a candidate shares with the research, and whether any rules
+ * them out. Their years agree when one of the research's years falls in
+ * their grown life; a year in the two after their death rules nobody out
+ * (a claim may tell of a legacy) but is no fact for them either.
+ */
 export function factsOf(
   query: Pick<PictureQuery, 'years' | 'role' | 'place'>,
   person: WikiPerson,
-): { matched: ('years' | 'role' | 'place')[]; ruledOut?: string } {
+): {
+  matched: ('years' | 'role' | 'place')[];
+  ruledOut?: string;
+  life: LifeFit;
+} {
   const matched: ('years' | 'role' | 'place')[] = [];
   const years = [...(query.years ?? [])].filter(Number.isFinite);
+  let life: LifeFit = 'unknown';
   if (years.length && person.born) {
     // Grown up by then, and not long dead: the research's years are of their life.
     const from = person.born + 12;
-    const to = person.died !== undefined ? person.died + 2 : Infinity;
-    const outside = years.filter((y) => y < from || y > to);
+    const died = person.died ?? Infinity;
+    const outside = years.filter((y) => y < from || y > died + AFTER_DEATH);
     if (outside.length)
       return {
         matched,
         ruledOut: `${outside.join(', ')} is outside ${person.label}'s life (${person.born}–${person.died ?? ''})`,
+        life: 'after',
       };
-    matched.push('years');
+    life = years.some((y) => y >= from && y <= died) ? 'alive' : 'after';
+    if (life === 'alive') matched.push('years');
   }
   const role = stems(query.role ?? '');
   if (
@@ -186,7 +211,36 @@ export function factsOf(
     )
   )
     matched.push('place');
-  return { matched };
+  return { matched, life };
+}
+
+/** How many of the research's words for a person (their role, their places) what Wikidata says of them holds. */
+export function fitOf(
+  query: Pick<PictureQuery, 'role' | 'place'>,
+  person: WikiPerson,
+): number {
+  const asked = stems(
+    [query.role ?? '', ...[query.place ?? []].flat()].join(' '),
+  );
+  const said = stems(
+    [person.description, ...person.roles, ...person.places].join(' '),
+  );
+  return [...asked].filter((w) => said.has(w)).length;
+}
+
+/**
+ * The weight of a candidate's facts: a year in their life counts double
+ * (dates are the surest of them), who they were and where once each, and
+ * a death before every one of the research's years against them.
+ */
+function weightOf(one: {
+  matched: readonly ('years' | 'role' | 'place')[];
+  life: LifeFit;
+}): number {
+  return (
+    one.matched.reduce((n, fact) => n + (fact === 'years' ? 2 : 1), 0) +
+    (one.life === 'after' ? -2 : 0)
+  );
 }
 
 export type PersonMatch =
@@ -199,7 +253,8 @@ export type PersonMatch =
 
 /**
  * The one person Wikidata has who is the research's: a human of that
- * name sharing a fact with the research, and no other who shares as many.
+ * name sharing a fact with the research, and no other whose facts weigh
+ * as much and whose description fits as well.
  */
 export function matchPerson(
   query: Pick<PictureQuery, 'name' | 'qid' | 'years' | 'role' | 'place'>,
@@ -232,9 +287,16 @@ export function matchPerson(
       qid: null,
       reason: `everyone called ${query.name} lived at another time`,
     };
+  // The best by its facts (a year in their life the surest), then by how
+  // much of the research's words for them Wikidata's description holds.
   const withFacts = judged
     .filter((one) => one.matched.length > 0)
-    .sort((a, b) => b.matched.length - a.matched.length);
+    .map((one) => ({
+      ...one,
+      weight: weightOf(one),
+      fit: fitOf(query, one.person),
+    }))
+    .sort((a, b) => b.weight - a.weight || b.fit - a.fit);
   if (!withFacts.length)
     return {
       qid: null,
@@ -242,7 +304,8 @@ export function matchPerson(
     };
   if (
     withFacts.length > 1 &&
-    withFacts[1].matched.length === withFacts[0].matched.length
+    withFacts[1].weight === withFacts[0].weight &&
+    withFacts[1].fit === withFacts[0].fit
   )
     return {
       qid: null,

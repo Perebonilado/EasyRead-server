@@ -60,6 +60,32 @@ export const AZIKIWE_NAMESAKE: WikiPerson = {
   images: [],
 };
 
+/** Nigeria's last governor-general, as Wikidata has him: its name search for "Sir James Robertson" never reaches him. */
+export const ROBERTSON: WikiPerson = {
+  qid: 'Q6145713',
+  label: 'James Wilson Robertson',
+  aliases: ['Sir James Wilson Robertson'],
+  description: 'British colonial governor (1899-1983)',
+  human: true,
+  born: 1899,
+  died: 1983,
+  roles: ['politician', 'colonial governor', 'Governor-General of Nigeria'],
+  places: ['Nigeria', 'Broughty Ferry'],
+  images: [],
+};
+
+/** One of the James Robertsons the name search gives first, with nothing of the research's. */
+export const ROBERTSON_NAMESAKE: WikiPerson = {
+  qid: 'Q108162573',
+  label: 'James Robertson',
+  aliases: [],
+  description: 'British Royal Navy officer, lieutenant in 1815',
+  human: true,
+  roles: ['naval officer'],
+  places: ['United Kingdom of Great Britain and Ireland'],
+  images: [],
+};
+
 export const LAGOS: WikiItem = {
   qid: 'Q8673',
   label: 'Lagos',
@@ -173,6 +199,18 @@ export const FILES: readonly SourceFile[] = [
     structured: null,
   }),
   commonsFile({
+    sourceId: 'File:Sir James Robertson, Governor-General of Nigeria, 1958.jpg',
+    width: 1600,
+    height: 2000,
+    artist: 'Unknown author',
+    credit: 'The National Archives (United Kingdom)',
+    description: 'Sir James Robertson, Governor-General of Nigeria',
+    date: '1958',
+    categories: ['PD-UKGov'],
+    depicts: [{ qid: 'Q6145713' }],
+    structured: null,
+  }),
+  commonsFile({
     sourceId: 'File:Lagos skyline 2019.jpg',
     width: 4000,
     height: 2250,
@@ -226,6 +264,35 @@ export class FakeSources implements PictureSourcesPort {
           label: e.label,
           description: e.description,
         })),
+    );
+  }
+  /** Wikidata's full-text search: every word in a person's or an item's words. */
+  searchText(words: string, opts: { limit: number; humans?: boolean }) {
+    this.calls.push(`search-text:${words}`);
+    const asked = words.toLowerCase().split(/\s+/u).filter(Boolean);
+    const all: { qid: string; words: string; human: boolean }[] = [
+      ...this.people_.map((p) => ({
+        qid: p.qid,
+        words: [p.label, ...p.aliases, p.description, ...p.roles, ...p.places]
+          .join(' ')
+          .toLowerCase(),
+        human: p.human,
+      })),
+      ...this.items_.map((i) => ({
+        qid: i.qid,
+        words: [i.label, ...i.aliases, i.description].join(' ').toLowerCase(),
+        human: false,
+      })),
+    ];
+    return Promise.resolve(
+      all
+        .filter(
+          (e) =>
+            (!opts.humans || e.human) &&
+            asked.every((w) => e.words.includes(w)),
+        )
+        .slice(0, opts.limit)
+        .map((e) => ({ qid: e.qid })),
     );
   }
   people(qids: readonly string[]) {

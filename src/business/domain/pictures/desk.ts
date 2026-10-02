@@ -228,8 +228,23 @@ export class PictureDesk {
     const width = FETCH_WIDTH[use];
     if (query.kind === 'person') {
       const ids = await this.ids(query);
-      const people = ids.length ? await this.deps.sources.people(ids) : [];
-      const match = matchPerson(query, people);
+      let people = ids.length ? await this.deps.sources.people(ids) : [];
+      let match = matchPerson(query, people);
+      // Wikidata's name search gives a name's best-known holders first;
+      // the one the research means may not be among them (seven James
+      // Robertsons before Nigeria's last governor-general). When the name
+      // alone found no one surely theirs, it is asked again with a word of
+      // the research's for them: their place, their post.
+      if (match.qid === null || match.facts.length < 2) {
+        const more = await this.textIds(query, new Set(ids));
+        if (more.length) {
+          people = [
+            ...people,
+            ...(await this.safely(() => this.deps.sources.people(more), [])),
+          ];
+          match = matchPerson(query, people);
+        }
+      }
       if (match.qid === null) return { found: [], reason: match.reason };
       const person = match.person;
       const files = await this.filesOf(
@@ -346,6 +361,40 @@ export class PictureDesk {
       if (ids.size >= 7) break;
     }
     return [...ids].slice(0, 10);
+  }
+
+  /**
+   * More of Wikidata's people for a name, by its words with one of the
+   * research's (their first place; the longest word of who they were),
+   * a request each; none already found.
+   */
+  private async textIds(
+    query: PictureQuery,
+    had: ReadonlySet<string>,
+  ): Promise<string[]> {
+    const name = nameWords(query.name).join(' ');
+    if (!name) return [];
+    const place = [query.place ?? []].flat().find(Boolean);
+    const post = (query.role ?? '')
+      .split(/[^\p{L}]+/u)
+      .filter(
+        (w) =>
+          w.length >= 5 && !nameWords(query.name).includes(w.toLowerCase()),
+      )
+      .sort((a, b) => b.length - a.length)[0];
+    const out = new Set<string>();
+    for (const word of [place, post].filter(Boolean)) {
+      const hits = await this.safely(
+        () =>
+          this.deps.sources.searchText(`${name} ${word}`, {
+            limit: 5,
+            humans: true,
+          }),
+        [],
+      );
+      for (const hit of hits) if (!had.has(hit.qid)) out.add(hit.qid);
+    }
+    return [...out].slice(0, 8);
   }
 
   /** A person's or a place's files: its own Wikidata pictures, those that say they depict it, and its category's. */

@@ -1,23 +1,34 @@
-import type { ShotDto } from '../../../contracts';
-import { SNAP_WITHIN_MS, snapToBeat, soundsOf } from './shot-sound';
+import type { ShotDto, ShotInfoDto } from '../../../contracts';
+import {
+  DENSITY,
+  LABEL_APART_MS,
+  REVEAL_MS,
+  SHOT_SOUNDS,
+  SNAP_MS,
+  SWELL_CREST,
+  joinsOf,
+  soundsOf,
+} from './shot-sound';
 
 const box = {
   kind: 'box' as const,
   box: [0, 0, 10, 10] as [number, number, number, number],
 };
 
+const map = {
+  kind: 'map' as const,
+  asset: 'map',
+  style: 'atlas' as const,
+  tilt: 0,
+  bearing: 0,
+  terrain: false,
+};
+
 const shot = (more: Partial<ShotDto>): ShotDto => ({
   id: 's1',
   startMs: 0,
-  endMs: 10000,
-  set: {
-    kind: 'map',
-    asset: 'map',
-    style: 'atlas',
-    tilt: 0,
-    bearing: 0,
-    terrain: false,
-  },
+  endMs: 20000,
+  set: map,
   actors: [],
   info: [],
   life: [],
@@ -27,105 +38,242 @@ const shot = (more: Partial<ShotDto>): ShotDto => ({
   ...more,
 });
 
-describe('a beat for a cue', () => {
-  it('lands on the nearest beat within reach, and stays put otherwise', () => {
-    expect(snapToBeat(1000, [940, 1100, 2000])).toBe(940);
-    expect(snapToBeat(1000, [1090, 1200])).toBe(1090);
-    expect(snapToBeat(1000, [1000 + SNAP_WITHIN_MS + 1])).toBe(1000);
-    expect(snapToBeat(1000, [])).toBe(1000);
-    expect(snapToBeat(1000, [880], 200)).toBe(880);
-  });
-});
+const item = (
+  id: string,
+  recipe: ShotInfoDto['recipe'],
+  atMs: number,
+  durMs: number,
+  more: Partial<ShotInfoDto> = {},
+): ShotInfoDto => ({ id, recipe, target: box, atMs, durMs, ...more });
 
 describe('the sounds of a scene’s motion', () => {
   const shots: ShotDto[] = [
     shot({
       info: [
-        { id: 'pin', recipe: 'pin', target: box, atMs: 1000, durMs: 350 },
-        {
-          id: 'label',
-          recipe: 'label',
-          target: box,
-          atMs: 1400,
-          durMs: 250,
-          text: 'Kano',
-        },
-        { id: 'stamp', recipe: 'stamp', target: box, atMs: 3000, durMs: 400 },
-        { id: 'draw', recipe: 'draw', target: box, atMs: 4000, durMs: 600 },
-        {
-          id: 'count',
-          recipe: 'count',
-          target: box,
-          atMs: 5000,
-          durMs: 1500,
-          value: 3,
-        },
-        { id: 'morph', recipe: 'morph', target: box, atMs: 7000, durMs: 1000 },
-        { id: 'flow', recipe: 'flow', target: box, atMs: 8200, durMs: 2500 },
-        { id: 'ask', recipe: 'ask', atMs: 9300, durMs: 600 },
+        item('pin', 'pin', 1000, 350),
+        item('stamp', 'stamp', 3000, 400),
+        item('draw', 'draw', 4500, 600),
+        item('count', 'count', 6000, 1500, { value: 3 }),
+        item('morph', 'morph', 8500, 1000),
+        item('flow', 'flow', 10500, 2500),
+        item('fill', 'fill', 14000, 600),
+        item('ask', 'ask', 15500, 600),
+        item('label', 'label', 17600, 250, { text: 'Kano' }),
       ],
       camera: [
         { move: 'establish', atMs: 0, durMs: 1200 },
-        { move: 'travel', atMs: 2000, durMs: 900, target: box },
-        { move: 'push', atMs: 6000, durMs: 2500, amount: 0.05 },
-        { move: 'push', atMs: 6600, durMs: 800, amount: 0.12, target: box },
+        { move: 'travel', atMs: 2000, durMs: 700, target: box },
+        { move: 'push', atMs: 12000, durMs: 2500, amount: 0.05 },
+        { move: 'pull', atMs: 19000, durMs: 800, amount: 0.12 },
       ],
     }),
     shot({
       id: 's2',
-      startMs: 10000,
-      endMs: 14000,
+      startMs: 20000,
+      endMs: 26000,
       set: { kind: 'document', asset: 'picture-1' },
-      camera: [{ move: 'zoom-through', atMs: 12000, durMs: 1200, target: box }],
+      camera: [{ move: 'zoom-through', atMs: 23000, durMs: 1200, target: box }],
     }),
   ];
   const sounds = soundsOf(shots);
 
-  it('gives each heard event its one sound: a tick as a pin lands, a thump as a stamp does, the rest as they start', () => {
-    expect(sounds.map((s) => [s.atMs, s.sound])).toEqual([
-      [1350, 'tick'],
-      [2000, 'air'],
-      [3400, 'thump'],
-      [4000, 'pencil'],
-      [5000, 'ticks'],
-      [6600, 'air'],
-      [7000, 'whoosh'],
-      [8200, 'swell'],
-      [9300, 'rise'],
-      [10000, 'paper'],
-      [12000, 'air'],
+  it('gives each heard event its one sound: a pop as a pin lands, a thump as a stamp does, the lasting ones over their motion', () => {
+    expect(sounds.map((s) => [s.atMs, s.sound, s.durMs ?? null])).toEqual([
+      [1350, 'pop', null],
+      [2000, 'air', 700],
+      [3400, 'thump', null],
+      [4500, 'pencil', 600],
+      [6000, 'ticks', 1500],
+      [8500, 'whoosh', 1000],
+      [10500, 'swell', 2500],
+      [15500, 'rise', null],
+      [17850, 'tick', null],
+      [19000, 'air', 800],
+      [20000, 'paper', null],
+      [23000, 'whoosh', 1200],
     ]);
   });
 
-  it('keeps every gain between 0.3 and 0.8, and is silent for a label, an establish and a drift', () => {
-    for (const s of sounds) {
-      expect(s.gain).toBeGreaterThanOrEqual(0.3);
-      expect(s.gain).toBeLessThanOrEqual(0.8);
-    }
-    expect(sounds.find((s) => s.atMs === 1400)).toBeUndefined();
-    expect(sounds.find((s) => s.atMs === 6000)).toBeUndefined();
+  it('is silent for a fill, an establish and a slow drift, and says what makes each sound', () => {
+    expect(sounds.find((s) => s.of === 'fill')).toBeUndefined();
+    expect(sounds.find((s) => s.of === 's1:camera:0')).toBeUndefined();
+    expect(sounds.find((s) => s.of === 's1:camera:2')).toBeUndefined();
+    expect(sounds.find((s) => s.sound === 'ticks')?.of).toBe('count');
+    expect(sounds.find((s) => s.sound === 'paper')?.of).toBe('s2:set');
   });
 
-  it('lands cues on the score’s beats where one is near, and hears one sound once at a moment', () => {
-    const snapped = soundsOf(shots, [1300, 5050]);
-    expect(snapped[0]).toMatchObject({ atMs: 1300, sound: 'tick' });
-    expect(snapped.find((s) => s.sound === 'ticks')?.atMs).toBe(5050);
+  it('keeps every gain between a quarter and the library’s level, and every sound one the library makes', () => {
+    for (const s of sounds) {
+      expect(s.gain).toBeGreaterThanOrEqual(0.25);
+      expect(s.gain).toBeLessThanOrEqual(1);
+      expect(SHOT_SOUNDS).toContain(s.sound);
+    }
+  });
+
+  it('lets a landing move only a little onto the beat, a soft sound further, and nothing move that is pinned to a cut', () => {
+    const of = (sound: string) => sounds.find((s) => s.sound === sound)!;
+    expect(of('pop').snapMs).toBe(SNAP_MS.landing);
+    expect(of('thump').snapMs).toBe(SNAP_MS.landing);
+    expect(of('ticks').snapMs).toBe(SNAP_MS.landing);
+    expect(of('pencil').snapMs).toBe(SNAP_MS.soft);
+    expect(of('swell').snapMs).toBe(SNAP_MS.soft);
+    expect(of('air').snapMs).toBe(SNAP_MS.soft);
+    expect(sounds.some((s) => s.downbeat)).toBe(false);
+  });
+
+  it('is the same for the same shots', () => {
+    expect(soundsOf(shots)).toEqual(sounds);
+  });
+
+  it('hears one sound once at a moment', () => {
     const twice = soundsOf([
       shot({
-        info: [
-          { id: 'a', recipe: 'pin', target: box, atMs: 1000, durMs: 350 },
-          { id: 'b', recipe: 'pin', target: box, atMs: 1040, durMs: 350 },
-        ],
+        info: [item('a', 'pin', 1000, 350), item('b', 'pin', 1040, 350)],
       }),
     ]);
     expect(twice).toHaveLength(1);
   });
 
+  it('ticks a label only when it is the first in a while', () => {
+    const labels = soundsOf([
+      shot({
+        info: [
+          item('l1', 'label', 1000, 250),
+          item('l2', 'label', 2000, 250),
+          item('l3', 'label', 3000, 250),
+          item('l4', 'label', 1000 + LABEL_APART_MS + 100, 250),
+        ],
+      }),
+    ]);
+    expect(labels.map((s) => s.of)).toEqual(['l1', 'l4']);
+  });
+
+  it('starts no more than two cues in any second, keeping the most important', () => {
+    const crowded = soundsOf([
+      shot({
+        info: [
+          item('seam', 'seam', 1000, 900),
+          item('label', 'label', 1100, 250),
+          item('stamp', 'stamp', 1000, 400),
+          item('enter', 'enter', 1200, 500),
+          item('count', 'count', 1500, 1500, { value: 9 }),
+        ],
+      }),
+    ]);
+    expect(crowded.map((s) => s.of)).toEqual(['stamp', 'count']);
+    for (const s of crowded)
+      expect(
+        crowded.filter(
+          (t) => t.atMs >= s.atMs && t.atMs < s.atMs + DENSITY.windowMs,
+        ).length,
+      ).toBeLessThanOrEqual(DENSITY.count);
+  });
+
+  it('leaves a question’s quiet quiet: only its rise is heard in it', () => {
+    const asked = soundsOf([
+      shot({
+        info: [
+          item('ask', 'ask', 2000, 1500),
+          item('pin', 'pin', 2400, 350),
+          item('later', 'pin', 4000, 350),
+        ],
+      }),
+    ]);
+    expect(asked.map((s) => s.of)).toEqual(['ask', 'later']);
+  });
+
   it('opens a document with paper only when it is a new set, not one carried on', () => {
     const carried = soundsOf([
       shot({ set: { kind: 'document', asset: 'p' } }),
-      shot({ id: 's2', startMs: 10000, set: { kind: 'document', asset: 'p' } }),
+      shot({
+        id: 's2',
+        startMs: 20000,
+        endMs: 30000,
+        set: { kind: 'document', asset: 'p' },
+      }),
     ]);
     expect(carried.filter((s) => s.sound === 'paper')).toHaveLength(1);
+  });
+
+  it('swells into the payoff, the first use of the held colour, cresting on it and rather on a bar’s first beat', () => {
+    const payoff = soundsOf([
+      shot({
+        info: [
+          item('first', 'fill', 4000, 600, { colour: 'held' }),
+          item('again', 'fill', 9000, 600, { colour: 'held' }),
+        ],
+      }),
+    ]);
+    expect(payoff).toHaveLength(1);
+    const [swell] = payoff;
+    expect(swell).toMatchObject({
+      sound: 'swell',
+      of: 'first:reveal',
+      durMs: REVEAL_MS,
+      snapMs: SNAP_MS.reveal,
+      downbeat: true,
+    });
+    expect(swell.atMs + SWELL_CREST * REVEAL_MS).toBeCloseTo(4600, -1);
+  });
+
+  it('whooshes a dive through and a push between shots, loudest on the cut, and keeps it pinned there', () => {
+    const joined = soundsOf([
+      shot({ endMs: 6000, join: 'zoom-through', joinMs: 1200 }),
+      shot({
+        id: 's2',
+        startMs: 6000,
+        endMs: 12000,
+        set: { kind: 'chart', asset: 'c1' },
+        join: 'push',
+        joinMs: 500,
+      }),
+      shot({
+        id: 's3',
+        startMs: 12000,
+        endMs: 18000,
+        set: { kind: 'chart', asset: 'c2' },
+        join: 'dissolve',
+        joinMs: 600,
+      }),
+      shot({
+        id: 's4',
+        startMs: 18000,
+        endMs: 24000,
+        set: { kind: 'chart', asset: 'c3' },
+      }),
+    ]);
+    expect(joined.map((s) => [s.of, s.atMs, s.durMs, s.snapMs])).toEqual([
+      ['s1:join', 5400, 1200, undefined],
+      ['s2:join', 11750, 500, undefined],
+    ]);
+  });
+});
+
+describe('the hand-overs between shots, as the stage makes them', () => {
+  it('runs shots carried on over one set together, cuts at each next run, and gives no join more than either run has', () => {
+    const joins = joinsOf([
+      shot({ endMs: 4000, join: 'continue' }),
+      shot({
+        id: 's2',
+        startMs: 4000,
+        endMs: 5000,
+        join: 'zoom-through',
+        joinMs: 1200,
+      }),
+      shot({
+        id: 's3',
+        startMs: 5000,
+        endMs: 5600,
+        set: { kind: 'chart', asset: 'c' },
+        join: 'continue',
+      }),
+      shot({ id: 's4', startMs: 5600, endMs: 9000, set: { kind: 'plain' } }),
+    ]);
+    expect(joins.map((j) => [j.shot.id, j.kind, j.cutMs, j.halfMs])).toEqual([
+      // s1 and s2 are one run on the map; the dive takes no more than the 600 ms run after it.
+      ['s2', 'zoom-through', 5000, 300],
+      // A continue onto another set is a cut.
+      ['s3', 'cut', 5600, 0],
+    ]);
   });
 });

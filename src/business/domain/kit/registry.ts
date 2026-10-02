@@ -133,12 +133,17 @@ function wordIn(
   if (typeof raw !== 'string' && typeof raw !== 'number') return fallback;
   const key = wordKey(String(raw));
   if (!key) return fallback;
+  // The same word; its singular; a word it starts or ends; its stem ("points", "pointing").
+  const stem = key.replace(/(?:ing|ed|es|s)$/, '');
   return (
     values.find((v) => wordKey(v) === key) ??
     values.find((v) => wordKey(v) === key.replace(/s$/, '')) ??
     values.find(
       (v) => key.startsWith(wordKey(v)) || wordKey(v).startsWith(key),
     ) ??
+    (stem.length >= 3
+      ? values.find((v) => wordKey(v).startsWith(stem))
+      : undefined) ??
     fallback
   );
 }
@@ -147,17 +152,24 @@ function wordIn(
  * A piece made: its settings made sound, drawn, and checked; null for an
  * id the kit does not have or a drawing that fails its own checks (the
  * build leaves that actor out and says so, never shows a broken piece).
+ * `colour` is code's choice, never the board's: a side's name or a role
+ * of the look ("ink"), worn as the piece's fill.
  */
 export function makeKit(
   id: string,
   raw: Readonly<Record<string, unknown>>,
   style: KitStyle,
   seed: number,
+  colour?: string,
 ): { piece: KitPiece; params: KitParams } | null {
   const entry = KIT[id];
   if (!entry) return null;
   const params = paramsOf(id, raw);
-  const piece = entry.make(params, style, seed >>> 0);
+  const piece = entry.make(
+    colour ? { ...params, colour } : params,
+    style,
+    seed >>> 0,
+  );
   return validateRig(piece).length ? null : { piece, params };
 }
 
@@ -184,3 +196,36 @@ export function kitGuide(look: KitLook): string {
     })
     .join('\n');
 }
+
+/** The moves the board may name for an actor, as the stage plays them: a walk's synonyms, a vehicle's. */
+const MOVE_NAMES: Readonly<Record<string, string>> = {
+  arrive: 'enter',
+  appear: 'enter',
+  'come-in': 'enter',
+  go: 'walk',
+  move: 'walk',
+  march: 'walk',
+  'walk-to': 'walk',
+  depart: 'leave',
+  'walk-off': 'leave',
+  'drive-off': 'leave',
+  disappear: 'exit',
+  drive: 'travel-to',
+  sail: 'travel-to',
+  fly: 'travel-to',
+  travel: 'travel-to',
+  'sail-to': 'travel-to',
+  'fly-to': 'travel-to',
+  halt: 'stop',
+  'sit-down': 'sit',
+  'stand-up': 'stand',
+  'hand-up': 'raise-hand',
+  cheers: 'cheer',
+  'turn-around': 'turn',
+};
+
+/** A move as the board named it, as the stage plays it. */
+export const actorMove = (name: string): string => {
+  const key = wordKey(name);
+  return MOVE_NAMES[key] ?? key;
+};

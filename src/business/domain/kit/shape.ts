@@ -140,16 +140,17 @@ export function capsule(a: Pt, ra: number, b: Pt, rb: number): Shape {
   if (d <= Math.abs(ra - rb) + 1e-6)
     return circle(ra >= rb ? a : b, Math.max(ra, rb));
   // The touching lines leave each circle at θ ± α; the far end is rounded
-  // through θ (2α of it shows), the near end through θ + π (the rest).
+  // through θ (2α of it shows), the near end through θ + π (the rest);
+  // drawn clockwise on screen, as every shape of the kit is.
   const theta = Math.atan2(b[1] - a[1], b[0] - a[0]);
   const alpha = Math.acos(Math.max(-1, Math.min(1, (ra - rb) / d)));
   const a1 = add(a, scale(dir(theta + alpha), ra));
-  const b1 = add(b, scale(dir(theta + alpha), rb));
   const a2 = add(a, scale(dir(theta - alpha), ra));
-  const endB = arcCubics(b, rb, theta + alpha, theta - alpha);
-  const endA = arcCubics(a, ra, theta - alpha, theta + alpha - 2 * Math.PI);
+  const b2 = add(b, scale(dir(theta - alpha), rb));
+  const endB = arcCubics(b, rb, theta - alpha, theta + alpha);
+  const endA = arcCubics(a, ra, theta + alpha, theta - alpha + 2 * Math.PI);
   const cubic = (s: Pt[]) => `C${pt(s[1])} ${pt(s[2])} ${pt(s[3])}`;
-  const path = `M${pt(a1)}L${pt(b1)}${endB.map(cubic).join('')}L${pt(a2)}${endA.map(cubic).join('')}Z`;
+  const path = `M${pt(a2)}L${pt(b2)}${endB.map(cubic).join('')}L${pt(a1)}${endA.map(cubic).join('')}Z`;
   return {
     d: path,
     box: unionBox([circle(a, ra).box, circle(b, rb).box]),
@@ -157,10 +158,26 @@ export function capsule(a: Pt, ra: number, b: Pt, rb: number): Shape {
 }
 
 /**
+ * Points in clockwise order on screen (y down), as every shape of the
+ * kit is drawn: shapes joined into one path then fill their overlaps
+ * instead of cutting holes in each other.
+ */
+export function clockwise(points: readonly Pt[]): Pt[] {
+  let sum = 0;
+  for (let i = 0; i < points.length; i += 1) {
+    const [x1, y1] = points[i];
+    const [x2, y2] = points[(i + 1) % points.length];
+    sum += x1 * y2 - x2 * y1;
+  }
+  return sum < 0 ? [...points].reverse() : [...points];
+}
+
+/**
  * A smooth closed shape through points (Catmull–Rom turned into cubics):
  * a torso, a coat, a hull. `tension` 0 is a polygon, 1 the full curve.
  */
-export function blob(points: readonly Pt[], tension = 1): Shape {
+export function blob(given: readonly Pt[], tension = 1): Shape {
+  const points = clockwise(given);
   const n = points.length;
   if (n < 3) return { d: '', box: boxOf(points) };
   const all: Pt[] = [];
@@ -183,7 +200,8 @@ export function blob(points: readonly Pt[], tension = 1): Shape {
  * sharp): a placard, a carriage, a container. Corners are quadratic-like
  * cubics, so the shape stays a path of absolute commands.
  */
-export function rounded(points: readonly Pt[], r: number): Shape {
+export function rounded(given: readonly Pt[], r: number): Shape {
+  const points = clockwise(given);
   const n = points.length;
   if (n < 3) return { d: '', box: boxOf(points) };
   if (r <= 0)
@@ -292,5 +310,29 @@ export function groundShadow(
     `<stop offset="0.6" stop-color="${colour}" stop-opacity="${Math.round(opacity * 45) / 100}"/>` +
     `<stop offset="1" stop-color="${colour}" stop-opacity="0"/></radialGradient></defs>` +
     `<ellipse cx="${n1(centre[0])}" cy="${n1(centre[1])}" rx="${n1(rx)}" ry="${n1(ry)}" fill="url(#${id})"/>`
+  );
+}
+
+/**
+ * The filter that lights a drawing's outline from the side the light
+ * comes from: its own shape, less itself moved away from the light, is
+ * the lit edge, and the light's colour is laid over that edge, so it is
+ * a lighter edge of whatever colour is there. On a figure's body or a
+ * vehicle's, only the outline is lit, however its parts are posed; in
+ * the drawing's units, so it scales with it.
+ */
+export function rimFilter(
+  id: string,
+  away: Pt,
+  colour: string,
+  strength: number,
+): string {
+  return (
+    `<filter id="${id}" x="-0.1" y="-0.1" width="1.2" height="1.2" color-interpolation-filters="sRGB">` +
+    `<feOffset in="SourceAlpha" dx="${n1(away[0])}" dy="${n1(away[1])}" result="away"/>` +
+    '<feComposite in="SourceAlpha" in2="away" operator="out" result="edge"/>' +
+    `<feFlood flood-color="${colour}" flood-opacity="${Math.round(strength * 100) / 100}"/>` +
+    '<feComposite in2="edge" operator="in" result="lit"/>' +
+    '<feMerge><feMergeNode in="SourceGraphic"/><feMergeNode in="lit"/></feMerge></filter>'
   );
 }

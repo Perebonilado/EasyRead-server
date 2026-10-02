@@ -40,6 +40,21 @@ const uses = (title: string, table: Record<string, string>) =>
   [title, ...Object.entries(table).map(([k, v]) => `- ${k}: ${v}`)].join('\n');
 
 /**
+ * How the board shows how something works on a screen (the UI kit, WP18;
+ * after Richard's UI/UX reference): one device that never cuts, a cursor
+ * that makes every change, numbered callouts, the camera on the part the
+ * voice is on, chapter breaks, a before and an after. A generic UI only.
+ */
+export const UI_GUIDE = [
+  '  - A device and the cursor, on a "screen" set (its desk), for how an app, a site or a tool works, a design looked at closely, a before and an after. A generic UI only: never a real product’s name, logo or look.',
+  '  - A device: kit ui.phone, ui.tablet, ui.laptop, ui.browser, ui.window or ui.watch; screen (its kind) or pieces (its own pieces from the top); theme; title, words (the main button’s) and items (labels, commas between): only words the line or the list says, a few each, never a figure; state ("btn-primary: disabled" for a part that starts so).',
+  '  - Its parts are named by what they are: screen, content, image, title, badge, rating, price, qty, btn-primary, chip-1, row-1, card-1, stat-1, chart, chart.bar-3, donut, tabs.tab-2, modal, toast, keyboard, and a control by its label’s first word (toggle-dark, slider-volume, input-email, check-remember). Name one as <device id>.<part>.',
+  '  - The cursor: kit ui.cursor, one a shot. Its moves, each on its exact words, to a part: move-to; click (state: what the part becomes; a switch flips by itself; a click is the change, no swap with it); drag (a slider; state: its value, 0 to 1); scroll (to: the part to bring into view); type (to: a field; text: the few words typed).',
+  '  - Information on a device: callout, a numbered dot on each part the voice counts (code numbers them in order); swap, a part changing on its own (a dialog shown, a button loading); label, mark and spotlight on its parts. The camera pushes into the part the voice is on (target <device>.<part>) and pulls back to the device.',
+  '  - A chapter of a walkthrough: join "frost" into its first shot. A before and an after: two devices with the same screen, the first in its old state (state), each labelled ("Before", "After").',
+].join('\n');
+
+/**
  * How the board stands the kit's pieces on a set (kit/registry; research
  * §3.5): groups as silhouettes in their side's colour, counted honestly,
  * never a named person, never the audience. Which pieces a scene may use
@@ -56,6 +71,7 @@ export const KIT_GUIDE = [
   '  - A building (kit building, its kind a field) stands on a drawn set or the map as a kind of building of its era and climate, never a named one: a factory for industry, a hall for a legislature in general.',
   '  - A machine (machine.turbofan, or machine with its kind) is a shot\u2019s subject on a display set: name its parts as actor:<its id>.<part> (actor:engine.combustor) to label, spotlight or push to them; a flow on actor:<its id>.core-flow (text "compress": the air squeezed and heated) or .bypass-flow; run on the machine starts it.',
   '  - An object or a document (kits object and document, their kind a field) is a prop: on a display when the line is about the thing itself, in a drawn set\u2019s scene otherwise. A document shows no words of its own.',
+  UI_GUIDE,
 ].join('\n');
 
 /**
@@ -77,6 +93,7 @@ export const CHARACTER_GUIDE = [
   'Humour, sparingly (an illustrated show only):',
   '  - say: a speech bubble of one to six words from a character on the stage (target: its actor id; text: the words), for a short aside the line invites ("Wait!", "Not again."): at most one in twenty seconds, never the voice’s own words, never a fact.',
   '  - eyes: a region of the map made a character by a pair of eyes (the shot’s "eyes": at a region, to the region or place it glances at, face calm, angry, worried or surprised), for regions eyeing each other; at most two a shot, a few a scene.',
+  UI_GUIDE,
 ].join('\n');
 
 /** A chart's fields, by kind: the scene writer's own names, and how its parts are named. */
@@ -110,6 +127,7 @@ const DECIDE = [
   '- exact words: a quote of a quote claim’s words.',
   '- many people (a crowd, workers, voters, migrants): the kit’s silhouettes in their side’s colour, on the map at their place or on a drawn set, counted only by a number the list or the line gives.',
   '- what moves people or goods (a train, a ship, a lorry): the kit’s vehicle of its era, travelling on the map or across a drawn set.',
+  '- how something works on a screen (an app, a site, a setting, a design, a sign-in): a "screen" set with a device and the cursor; the cursor clicks, drags and types on the words that say so; callouts number what the voice counts; the camera pushes into the part the voice names; a chapter is a frost join.',
   '- a scene (a moment of people in a place), a feeling, an atmosphere: the place on the map when the line names one the list gives; else a drawn set of a kind of place (a coast at dusk, a city at night), never a named one, with life; or the shot before carried on with a slow push.',
   '- how a machine works: a display set with the kit\u2019s machine as the subject (a jet engine cut open, gears, a pump), its parts labelled one at a time on the words that name them, a flow along its path, the camera pushing to the part the line asks about.',
   '- a thing or a paper the line is about (coins, an oil barrel, a ballot, a treaty): the kit\u2019s object or document, big, on a display.',

@@ -30,6 +30,7 @@ import { readMapBase } from '../scene-map';
 import { placesIn } from '../scene-map-places';
 import { eraOf } from '../kit/eras';
 import { KIT, actorMove } from '../kit/registry';
+import { UI_STATE_WORDS, uiTargetIn } from '../kit/ui';
 import { TEXT } from '../studio/explainer-rules';
 import type { EditorWorld } from '../studio/studio-editor';
 import type { EditorialRow } from '../studio/studio-editorial';
@@ -407,6 +408,8 @@ function setOf(raw: unknown): PlanSet | null {
         },
       };
     }
+    case 'screen':
+      return { kind: 'screen' };
     case 'plain':
       return { kind: 'plain' };
     default:
@@ -425,15 +428,25 @@ function infoOf(raw: unknown): PlanInfo | null {
   // What changes the picture for good never lets go: no until on it.
   const until = LASTING.has(recipe) ? '' : phrase(said.until);
   // Only a label and a speech bubble are words on the stage: what any other
-  // recipe wrote is dropped, and a label reading "label" is no words at all.
+  // recipe wrote is dropped, and a label reading "label" is no words at all;
+  // but a swap keeps its state (a word of the kit's, or a slider's value)
+  // and a type the few words it puts in a field (the UI kit's).
   const written =
     recipe === 'label'
       ? clip(said.text, TEXT.labelWordsMax)
       : recipe === 'say'
         ? clip(said.text, SAY_WORDS)
         : '';
-  const text = roleOnly(written) ? '' : written;
-  const value = numberIn(said.value);
+  const text =
+    recipe === 'swap'
+      ? uiStateWord(said.text)
+      : recipe === 'type'
+        ? clip(said.text, UI_TYPED_WORDS)
+        : roleOnly(written)
+          ? ''
+          : written;
+  // A callout's number is code's (the order its words come in), never the board's.
+  const value = recipe === 'callout' ? undefined : numberIn(said.value);
   const from = numberIn(said.from);
   const unit = clip(said.unit, 2);
   const colour = line(said.colour, 60);
@@ -483,10 +496,28 @@ const ACTOR_SETTINGS = [
   'expression',
   'prop',
   'name',
+  // The UI kit's devices (kit/ui.ts).
+  'screen',
+  'pieces',
+  'theme',
+  'title',
+  'words',
+  'items',
+  'state',
 ] as const;
 
-/** Settings that are words of the board's own (a dress from the look notes, a person's name): kept longer. */
-const LONG_SETTINGS = new Set(['dress', 'name']);
+/**
+ * Settings that are words of the board's own, longer than one word, and
+ * the most characters each keeps: a dress from the look notes and a
+ * person's name; a device's lists of a few words each.
+ */
+const LONG_SETTINGS: Readonly<Record<string, number>> = {
+  dress: 90,
+  name: 90,
+  pieces: 120,
+  items: 120,
+  state: 120,
+};
 
 function actorOf(
   raw: unknown,
@@ -504,7 +535,7 @@ function actorOf(
     if (['string', 'number', 'boolean'].includes(typeof value))
       params[key.slice(0, 24)] =
         typeof value === 'string'
-          ? value.slice(0, LONG_SETTINGS.has(key) ? 90 : 40)
+          ? value.slice(0, LONG_SETTINGS[key] ?? 40)
           : (value as number | boolean);
   // An era in words ("the 1950s", "Victorian") as the kit names eras.
   if (typeof params.era === 'string') {
@@ -518,13 +549,20 @@ function actorOf(
     else params.count = count;
   }
   const moves = list(said.moves)
-    .map((one) => ({
-      move: line(record(one).move, 24),
-      on: phrase(record(one).on),
-      ...(targetName(record(one).to)
-        ? { to: targetName(record(one).to)! }
-        : {}),
-    }))
+    .map((one) => {
+      const m = record(one);
+      // A cursor's click leaves its part in a state (or a slider at a
+      // value); its type move puts a few words in a field.
+      const state = uiStateWord(m.state);
+      const text = clip(m.text, UI_TYPED_WORDS);
+      return {
+        move: line(m.move, 24),
+        on: phrase(m.on),
+        ...(targetName(m.to) ? { to: targetName(m.to)! } : {}),
+        ...(state ? { state } : {}),
+        ...(text ? { text } : {}),
+      };
+    })
     .filter((m) => m.move && m.on)
     .slice(0, 4);
   const place = targetName(said.place);
@@ -537,6 +575,49 @@ function actorOf(
     ...(side ? { side } : {}),
     ...(moves.length ? { moves } : {}),
   };
+}
+
+/** The most words a type puts in a field (the UI kit's): a short entry, never a paragraph. */
+const UI_TYPED_WORDS = 4;
+
+/** A state a swap or a click leaves a part in: a word of the UI kit's, or a slider's value (0 to 1, or a percentage). */
+function uiStateWord(raw: unknown): string {
+  if (typeof raw === 'number' && Number.isFinite(raw))
+    return String(Math.max(0, Math.min(1, raw > 1 ? raw / 100 : raw)));
+  const said = line(raw, 24).toLowerCase();
+  if (!said) return '';
+  const number = /^(\d+(?:\.\d+)?)\s*%?$/.exec(said);
+  if (number) {
+    const v = Number(number[1]);
+    return String(
+      Math.round(Math.max(0, Math.min(1, v > 1 ? v / 100 : v)) * 100) / 100,
+    );
+  }
+  const words = said
+    .replace(/[^a-z-]+/g, ' ')
+    .trim()
+    .split(/\s+/);
+  return (
+    words.map((w) => UI_STATE_WORDS.find((s) => s === w)).find(Boolean) ?? ''
+  );
+}
+
+/**
+ * Two shots' actors made one shot's: an actor in both keeps the moves of
+ * both (a cursor's clicks in order), each other actor once.
+ */
+function actorsOfBoth(
+  a: readonly PlanActor[],
+  b: readonly PlanActor[],
+): PlanActor[] {
+  const out = a.map((one) => ({ ...one }));
+  for (const other of b) {
+    const same = out.find((one) => one.id === other.id);
+    if (!same) out.push(other);
+    else if (other.moves?.length)
+      same.moves = [...(same.moves ?? []), ...other.moves].slice(0, 6);
+  }
+  return out.slice(0, SHOT_LIMITS.actors);
 }
 
 // ── People on the stage ───────────────────────────────────────────────────
@@ -637,7 +718,7 @@ function actorFaults(
   if (!entry) return [];
   const out: { code: string; message: string; drop: boolean }[] = [];
   for (const move of actor.moves ?? [])
-    if (!entry.moves.includes(actorMove(move.move)))
+    if (!entry.moves.includes(actorMove(move.move, actor.kit)))
       out.push({
         code: 'unknown-move',
         message: `${actor.id} (${actor.kit}) cannot ${move.move}; its moves are ${entry.moves.join(', ')}.`,
@@ -725,7 +806,7 @@ function soundActor(
     else delete params.name;
   }
   const moves = (actor.moves ?? []).filter(
-    (m) => !entry || entry.moves.includes(actorMove(m.move)),
+    (m) => !entry || entry.moves.includes(actorMove(m.move, actor.kit)),
   );
   const { params: _p, moves: _m, ...rest } = actor;
   void _p;
@@ -864,6 +945,14 @@ function targetIn(
   if (name.trim().toLowerCase() === WHOLE_SET)
     return { kind: 'set', name: WHOLE_SET };
   const { prefix, rest } = splitTarget(name);
+  if (prefix === 'actor' || prefix === 'part' || !prefix) {
+    // A part of one of the shot's devices (the UI kit's): its actor's part.
+    if (!shot.actors.some((a) => a.id === rest)) {
+      const part = uiTargetIn(shot.actors, name);
+      if (part)
+        return { kind: 'actor', name: `actor:${part.actor}.${part.part}` };
+    }
+  }
   if (prefix === 'part' || (!prefix && shot.set.kind === 'chart')) {
     if (shot.set.kind !== 'chart') return null;
     const words = keysOf(rest).join(' ');
@@ -960,7 +1049,7 @@ const RECIPE_TARGETS: Record<
   fill: { needs: true, kinds: ['region', 'part'] },
   seam: { needs: true, kinds: ['seam'] },
   count: { needs: true, kinds: ['number', 'part'] },
-  grow: { needs: true, kinds: ['number', 'part'] },
+  grow: { needs: true, kinds: ['number', 'part', 'actor'] },
   transfer: { needs: true, kinds: ['part', 'place', 'region'], to: 'needs' },
   morph: { needs: true, kinds: ['part', 'date', 'number'] },
   run: { needs: true, kinds: ['actor'] },
@@ -997,6 +1086,10 @@ const RECIPE_TARGETS: Record<
   exit: { needs: true, kinds: ['part', 'actor'] },
   // A speech bubble comes from a character on the stage.
   say: { needs: true, kinds: ['actor'] },
+  // The UI kit's: a part of a device (an actor's part) or of a chart.
+  callout: { needs: true, kinds: ['actor', 'part'] },
+  swap: { needs: true, kinds: ['actor'] },
+  type: { needs: true, kinds: ['actor'] },
   ask: {
     needs: false,
     kinds: [
@@ -1059,6 +1152,8 @@ function setWords(set: PlanSet): string {
       return `a ${set.chart.kind}`;
     case 'set':
       return 'a drawn set';
+    case 'screen':
+      return 'a device on its desk';
     default:
       return `the ${set.kind}`;
   }
@@ -1143,10 +1238,17 @@ function labelNames(
 
 // ── What a shot puts on the stage ─────────────────────────────────────────
 
-/** The words a shot puts on the stage: its labels' and its chart's. */
+/**
+ * The words a shot puts on the stage: its labels' and its chart's. A
+ * swap's text is a part's state, never shown; words typed into a device's
+ * field are its small print, not words to read off the stage.
+ */
 export function stageWords(shot: PlanShot): number {
   const labels = shot.info.reduce(
-    (n, i) => n + wordsIn(i.text) + wordsIn(i.replace),
+    (n, i) =>
+      i.recipe === 'swap' || i.recipe === 'type'
+        ? n
+        : n + wordsIn(i.text) + wordsIn(i.replace),
     0,
   );
   return labels + (shot.set.kind === 'chart' ? chartWords(shot.set.chart) : 0);
@@ -1156,12 +1258,17 @@ export function stageWords(shot: PlanShot): number {
 function stageNumbers(shot: PlanShot): number[] {
   return [
     ...(shot.set.kind === 'chart' ? chartNumbers(shot.set.chart) : []),
-    ...shot.info.flatMap((i) => [
-      ...(i.value !== undefined ? [i.value] : []),
-      ...(i.from !== undefined && i.from !== 0 ? [i.from] : []),
-      ...numbersIn(i.text ?? ''),
-      ...numbersIn(i.replace ?? ''),
-    ]),
+    // A swap's value is a part's state (a slider's place), not a figure on the stage.
+    ...shot.info.flatMap((i) =>
+      i.recipe === 'swap'
+        ? []
+        : [
+            ...(i.value !== undefined ? [i.value] : []),
+            ...(i.from !== undefined && i.from !== 0 ? [i.from] : []),
+            ...numbersIn(i.text ?? ''),
+            ...numbersIn(i.replace ?? ''),
+          ],
+    ),
   ];
 }
 
@@ -1916,13 +2023,22 @@ function mendShot(
     if (LASTING.has(item.recipe)) delete item.until;
     // A label's words name what it is on: its own words when they do, else
     // the name of what it labels; a field's name ("label") is no words. A
-    // speech bubble keeps its own few words (SAY_WORDS).
+    // speech bubble keeps its own few words (SAY_WORDS); a swap its state
+    // and a type the words it puts in a field (a device's own small print).
+    const device = item.recipe === 'swap' || item.recipe === 'type';
     if (item.text)
-      item.text = clip(
-        item.text,
-        item.recipe === 'say' ? SAY_WORDS : TEXT.labelWordsMax,
-      );
-    if (item.text && roleOnly(item.text)) delete item.text;
+      item.text =
+        item.recipe === 'swap'
+          ? uiStateWord(item.text)
+          : clip(
+              item.text,
+              item.recipe === 'say'
+                ? SAY_WORDS
+                : item.recipe === 'type'
+                  ? UI_TYPED_WORDS
+                  : TEXT.labelWordsMax,
+            );
+    if (item.text && !device && roleOnly(item.text)) delete item.text;
     if (
       item.recipe === 'label' &&
       target &&
@@ -2107,6 +2223,7 @@ function mendShots(
             0,
             SHOT_LIMITS.camera,
           ),
+          actors: actorsOfBoth(before.shot.actors, p.shot.actors),
         };
       continue;
     }
@@ -2131,10 +2248,7 @@ function mendShots(
         set: mergedSet(a.set, b.set),
         info: [...a.info, ...b.info],
         camera: [...a.camera, ...b.camera],
-        actors: [
-          ...a.actors,
-          ...b.actors.filter((x) => !a.actors.some((y) => y.id === x.id)),
-        ].slice(0, SHOT_LIMITS.actors),
+        actors: actorsOfBoth(a.actors, b.actors),
         life: [...new Set([...a.life, ...b.life])].slice(0, SHOT_LIMITS.life),
         join: b.join,
       };

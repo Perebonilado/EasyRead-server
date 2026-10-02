@@ -62,6 +62,8 @@ export type PlanSet =
   | { kind: 'document'; document: string }
   | { kind: 'set'; set: PlanSetScene }
   | { kind: 'chart'; chart: PlanChart }
+  /** A device's screen on the UI kit's desk (WP18): the devices and the cursor are the shot's actors. */
+  | { kind: 'screen' }
   | { kind: 'plain' };
 
 /** A code-drawn set: a kind of place, never a named one (kit/sets). */
@@ -121,7 +123,18 @@ export interface PlanActor {
   place?: string;
   /** A side's name from the visual system, for its colour. */
   side?: string;
-  moves?: { move: string; on: string; to?: string }[];
+  /**
+   * Its moves on their words, each to a target; a cursor's (the UI kit's)
+   * also with the state its click leaves a part in (or a slider's value),
+   * and the words it types.
+   */
+  moves?: {
+    move: string;
+    on: string;
+    to?: string;
+    state?: string;
+    text?: string;
+  }[];
 }
 
 export interface PlanInfo {

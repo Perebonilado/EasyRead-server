@@ -44,6 +44,10 @@ export const RECIPE_USES: Record<ShotInfoRecipe, string> = {
   exit: 'a part leaves',
   ask: 'a question the voice asks, held over what is still open, then a moment of quiet',
   say: 'a speech bubble of one to six words from a character (target the actor; its words in text): an illustrated show only, at most one in twenty seconds, for a short line of humour or surprise ("Wait!"), never the voice’s words',
+  callout:
+    'a numbered dot on a leader to a part of a device’s screen, coming on in the order the voice counts them (problems, steps, features): code numbers them',
+  swap: 'a part of a device changing state on its words (text: the state, from its list): a button loading, a switch on, a dialog shown, a screen turning dark; a cursor’s click makes one by itself',
+  type: 'words typed into a field of a device, a letter at a time (text: the few words typed); a cursor’s type move makes one by itself',
 };
 export const INFO_RECIPES = Object.keys(RECIPE_USES) as ShotInfoRecipe[];
 
@@ -72,6 +76,8 @@ export const JOIN_USES: Record<ShotJoin, string> = {
   dissolve: 'time passes',
   dip: 'a dip to black after a grave fact, or at an act’s end',
   push: 'the next item of a list pushes in',
+  frost:
+    'a chapter break in a how-it-works film: the frame frosts over with the chapter’s number, then clears into the next shot',
 };
 export const SHOT_JOINS = Object.keys(JOIN_USES) as ShotJoin[];
 
@@ -109,6 +115,8 @@ export const SET_USES: Record<SetKind, string> = {
   photo: 'an archive photo: only a photo the list gives',
   document: 'a scan of a real document: only a document the list gives',
   set: 'a code-drawn kind of place (a coast at dusk, a city at night), never a named one: for a feeling or an atmosphere',
+  screen:
+    'a device on a desk (the kit’s ui devices and cursor as the actors): how an app, a site or a tool works, a design looked at closely, a before and an after',
   plain: 'paper',
 };
 export const SET_KINDS = Object.keys(SET_USES) as SetKind[];
@@ -274,6 +282,18 @@ export function nearestOf<T extends string>(
 
 /** A recipe a model named: its own, a synonym, or the nearest; null for none (glows and sparkles are none). */
 export const recipeOf = nearestOf(INFO_RECIPES, {
+  // The UI kit's.
+  numbered: 'callout',
+  numberedcallout: 'callout',
+  annotate: 'callout',
+  annotation: 'callout',
+  state: 'swap',
+  setstate: 'swap',
+  toggle: 'swap',
+  switch: 'swap',
+  typing: 'type',
+  typein: 'type',
+  typewrite: 'type',
   highlight: 'mark',
   circle: 'mark',
   underline: 'mark',
@@ -380,6 +400,10 @@ export const moveOf = nearestOf(CAMERA_MOVES, {
 
 /** A join a model named, or the nearest. */
 export const joinOf = nearestOf(SHOT_JOINS, {
+  chapter: 'frost',
+  chapterbreak: 'frost',
+  frosted: 'frost',
+  blur: 'frost',
   hardcut: 'cut',
   straightcut: 'cut',
   fade: 'dissolve',
@@ -438,6 +462,16 @@ export const setKindOf = nearestOf(SET_KINDS, {
   backdrop: 'set',
   paper: 'plain',
   blank: 'plain',
+  device: 'screen',
+  phone: 'screen',
+  app: 'screen',
+  ui: 'screen',
+  desk: 'screen',
+  laptop: 'screen',
+  website: 'screen',
+  browser: 'screen',
+  mockup: 'screen',
+  interface: 'screen',
 });
 
 /** A chart kind a model named, or the nearest; a name card is none. */

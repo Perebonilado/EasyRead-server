@@ -237,9 +237,13 @@ export function documentAsset(
       words.size * 1.1;
     const wh = words.lines.length * words.size * 1.1 + words.size * 0.8;
     const cx = tall ? (frame.pic.x0 + frame.pic.x1) / 2 : px + pageW / 2;
+    // Over the body, below the headline it would hide; a tall frame's inside the safe band.
+    const lowest = tall
+      ? Math.min(foot, text.y1) - wh * 0.62
+      : foot - wh * 0.62;
     const cy = Math.max(
       bodyTop + wh * 0.62,
-      Math.min(foot - wh * 0.62, (bodyTop + foot) / 2),
+      Math.min(lowest, (bodyTop + foot) / 2),
     );
     const ring = Math.max(4, words.size * 0.08);
     const turn = tall ? -5 : -8;

@@ -144,6 +144,31 @@ describe('chartAsset', () => {
   );
 
   it.each(each)(
+    "%s: keeps every word out of the captions' band at the foot",
+    (_, { asset, shape }) => {
+      const { H } = frameOf(shape);
+      const foot = SAFE[shape].captionY0 * H + 1;
+      const top = SAFE[shape].y0 * H - 1;
+      for (const m of asset.svg.matchAll(/<text([^>]*)>(.*?)<\/text>/g)) {
+        const size = Number(/font-size="([\d.]+)"/.exec(m[1])?.[1] ?? 0);
+        const ys = [
+          Number(/ y="([-\d.]+)"/.exec(m[1])?.[1] ?? NaN),
+          ...[...m[2].matchAll(/<tspan[^>]* y="([-\d.]+)"/g)].map((t) =>
+            Number(t[1]),
+          ),
+        ].filter((y) => Number.isFinite(y));
+        const words = m[2].replace(/<[^>]+>/g, '');
+        // A tall list in pages of a frame's height each: each word against its own page's band.
+        for (const y of ys) {
+          const page = Math.floor((y - size * 0.75) / H) * H;
+          expect([words, y - page + size * 0.2 <= foot]).toEqual([words, true]);
+          expect([words, y - page - size * 0.75 >= top]).toEqual([words, true]);
+        }
+      }
+    },
+  );
+
+  it.each(each)(
     '%s: draws the same for the same spec, every time',
     (_, { kind, name, shape, asset }) => {
       const again = chartAsset(

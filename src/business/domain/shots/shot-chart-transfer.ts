@@ -92,7 +92,9 @@ export function transferAsset(
   ];
   const stroke = Math.max(3, frame.H * 0.004);
   // The two ends: sheets with their names, edged in their sides' colours.
-  const boxW = tall ? text.x1 - text.x0 : frame.W * 0.27;
+  // The two ends side by side: across a wide frame, at the top of a tall
+  // one's words (the arc then swoops down the frame between them).
+  const boxW = tall ? (text.x1 - text.x0 - floor * 0.8) / 2 : frame.W * 0.27;
   const nameOf = (label: string) =>
     fitBalanced(
       label,
@@ -108,7 +110,7 @@ export function transferAsset(
     ...names.map((n) => n.lines.length * n.size * 1.1 + floor * 1.4),
     tall ? floor * 2.4 : frame.H * 0.24,
   );
-  const tokenSize = tall ? floor * 1.1 : floor * 1.5;
+  const tokenSize = floor * 1.5;
   const laid = (): {
     a: ShotBox;
     b: ShotBox;
@@ -118,30 +120,26 @@ export function transferAsset(
     p3: [number, number];
   } => {
     if (tall) {
-      // One over the other inside the words' area (the foot of a tall
-      // frame is under the platform's own words), the arc bowing out to
-      // the right between them.
-      const gapH = Math.max(floor * 2.5, text.y1 - text.y0 - boxH * 2);
+      // The ends inside the band, at its top; the arc leaves the first's
+      // foot, swoops down the frame (a picture may run past the words) and
+      // comes back up into the second's.
       const a: ShotBox = [text.x0, text.y0, boxW, boxH];
-      const b: ShotBox = [text.x0, text.y0 + boxH + gapH, boxW, boxH];
-      const p0: [number, number] = [a[0] + boxW * 0.72, a[1] + boxH];
-      const p3: [number, number] = [b[0] + boxW * 0.72, b[1]];
-      return {
-        a,
-        b,
-        p0,
-        p3,
-        c1: [frame.W + floor * 0.6, p0[1] + gapH * 0.1],
-        c2: [frame.W + floor * 0.6, p3[1] - gapH * 0.1],
-      };
+      const b: ShotBox = [text.x1 - boxW, text.y0, boxW, boxH];
+      const p0: [number, number] = [a[0] + boxW / 2, a[1] + boxH];
+      const p3: [number, number] = [b[0] + boxW / 2, b[1] + boxH];
+      const lowest = frame.H * 0.84;
+      const deep = p0[1] + (lowest - p0[1]) / 0.75;
+      return { a, b, p0, p3, c1: [p0[0], deep], c2: [p3[0], deep] };
     }
-    // Side by side, the arc rising over the middle.
-    const y = text.y0 + (text.y1 - text.y0) * 0.5;
+    // Side by side at the foot of the words' area, the arc rising over the
+    // middle to just under the words at its top.
+    const y = text.y1 - boxH;
     const a: ShotBox = [text.x0, y, boxW, boxH];
     const b: ShotBox = [text.x1 - boxW, y, boxW, boxH];
     const p0: [number, number] = [a[0] + boxW * 0.62, a[1]];
     const p3: [number, number] = [b[0] + boxW * 0.38, b[1]];
-    const rise = frame.H * 0.42;
+    const ceiling = text.y0 + (spec.label ? floor * 1.5 : 0) + tokenSize * 0.6;
+    const rise = (y - ceiling) / 0.75;
     return {
       a,
       b,
@@ -218,10 +216,14 @@ export function transferAsset(
   // What moves, written by the arc's top (beside it in a tall frame).
   if (spec.label) {
     const size = floor;
+    // Over the arc's top in a wide frame; inside its swoop, under the ends, in a tall one.
     const at: [number, number] = tall
-      ? [text.x0 + floor * 0.2, (a[1] + a[3] + b[1]) / 2]
+      ? [
+          frame.W / 2 - (frame.W / 2 - (text.x0 + text.x1) / 2),
+          a[1] + a[3] + floor * 1.3,
+        ]
       : [frame.W / 2, arcBox[1] - tokenSize / 2 - floor * 0.7];
-    const anchor = tall ? 'start' : 'middle';
+    const anchor = 'middle';
     const box = linesBox(
       [spec.label],
       at[0],

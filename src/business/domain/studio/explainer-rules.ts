@@ -82,9 +82,20 @@ export const SAFETY = { flashesPerSecond: 3, flicker: 0.1 } as const;
  * wide (EBU R95); for tall, the box clear of YouTube's and the platforms'
  * overlays, with the caption band at its foot. Only text, labels, the chip
  * and captions must sit inside; the picture runs full-bleed.
+ *
+ * The foot of every captioned film is the captions' (house, 2026-10-02):
+ * from `captionY0` down, a frame's own words (labels, values, names) stay
+ * out, so a caption never sits on them; pictures may run under it. In a
+ * wide frame that is its lowest 18%.
  */
 export const SAFE = {
-  wide: { x0: 96 / 1920, x1: 1824 / 1920, y0: 54 / 1080, y1: 1026 / 1080 },
+  wide: {
+    x0: 96 / 1920,
+    x1: 1824 / 1920,
+    y0: 54 / 1080,
+    y1: 1026 / 1080,
+    captionY0: 0.82,
+  },
   tall: {
     x0: 48 / 1080,
     x1: 887 / 1080,

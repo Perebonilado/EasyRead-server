@@ -86,12 +86,24 @@ interface Edge {
 function sized(
   frame: Frame,
   spec: FlowSpec,
-  width: number,
+  given: number,
+  most = given,
 ): { lines: string[]; w: number; h: number; kind: FlowNodeKind }[] {
   const floor = frame.size.label;
   const padX = floor * 0.6;
   const padY = floor * 0.45;
   return spec.nodes.map((node) => {
+    // A box widens (as far as `most`) to hold its longest word whole.
+    const longest = Math.max(
+      ...node.label.split(/\s+/).map((w) => wordsWidth(w, floor, 700)),
+    );
+    const width = Math.min(
+      most,
+      Math.max(
+        given,
+        node.kind === 'decision' ? longest / 0.62 : longest + padX * 2,
+      ),
+    );
     const inner = node.kind === 'decision' ? width * 0.62 : width - padX * 2;
     const { lines } = fit(node.label, inner, floor, floor, 3, 700);
     const textW = Math.max(...lines.map((l) => wordsWidth(l, floor, 700)));
@@ -209,40 +221,15 @@ function layOut(
     spec.edges.length === n - 1 &&
     spec.edges.every((e, i) => e.from === i && e.to === i + 1);
   const cycle = spec.direction === 'cycle';
-  if (tall && (chain || cycle || n <= 6)) {
-    // One under another, the words' width; a cycle's last step back to its first round the right.
-    const boxes = sized(frame, spec, width * 0.86);
-    const arrow = floor * 1.5;
-    let y = text.y0;
-    const nodes = boxes.map((b) => {
-      const node = { ...b, x: text.x0 + width * 0.43, y: y + b.h / 2 };
-      y += b.h + arrow;
-      return node;
-    });
-    const edges = spec.edges.map((e) => {
-      const a = nodes[e.from];
-      const b = nodes[e.to];
-      if (e.to === e.from + 1)
-        return straight(a, b, gap, e.label, e.from, e.to);
-      // Any other link goes round the right of the column.
-      const side = frame.pic.x1 - floor * 0.3;
-      return elbow(
-        [
-          [a.x + a.w / 2 + gap, a.y],
-          [side, a.y],
-          [side, b.y],
-          [b.x + b.w / 2 + gap * 2, b.y],
-        ],
-        e.from,
-        e.to,
-        e.label,
-      );
-    });
-    return { nodes, edges, bottom: y - arrow };
-  }
   if (cycle) {
     // Round a ring as wide and tall as the words' area.
-    const boxes = sized(frame, spec, Math.min(frame.W * 0.24, width / 3));
+    // Each step's box as wide as a ring of so many leaves room for.
+    const boxes = sized(
+      frame,
+      spec,
+      Math.min(frame.W * (tall ? 0.42 : 0.24), width / (n <= 4 ? 2.1 : 3)),
+      width / 2,
+    );
     const maxW = Math.max(...boxes.map((b) => b.w));
     const maxH = Math.max(...boxes.map((b) => b.h));
     const cx = (text.x0 + text.x1) / 2;
@@ -279,21 +266,43 @@ function layOut(
     return { nodes, edges, bottom: text.y1 };
   }
   if (chain) {
-    // One row, or two read as lines of text are, the second under the first.
-    for (const rows of [1, 2, 3]) {
-      const per = Math.ceil(n / rows);
-      const arrow = floor * 1.4;
+    // One row, or two read as lines of text are, the second under the
+    // first; a tall frame's a step or two (or three) a row, inside the band.
+    const tries = tall
+      ? [1, 2, 3].map((per) => ({ rows: Math.ceil(n / per), per }))
+      : [1, 2, 3].map((rows) => ({ rows, per: Math.ceil(n / rows) }));
+    // Each way measured: whether every word stands whole in its box, and
+    // how tall it stands. The first that is whole and inside the words'
+    // area; failing that, the shortest whole one; a broken word only when
+    // no way keeps them whole.
+    const arrow = floor * 1.4;
+    const between = floor * (tall ? 1.1 : 1.6);
+    const measured = tries.map(({ rows, per }) => {
       const slot = (width - arrow * (per - 1)) / per;
-      const boxes = sized(frame, spec, slot);
-      // Every word whole in its box: a word broken to fit wants another row.
-      const fits = spec.nodes.every(
+      const whole = spec.nodes.every(
         (node) => wrap(node.label, slot - floor * 1.2, floor, 3, 700) !== null,
       );
+      const boxes = sized(frame, spec, slot);
       const rowH = Math.max(...boxes.map((b) => b.h));
-      const between = floor * 1.6;
-      const total = rows * rowH + (rows - 1) * between;
-      if ((!fits || total > text.y1 - text.y0) && rows < 3) continue;
-      const top = text.y0 + (text.y1 - text.y0 - total) / 2;
+      return {
+        rows,
+        per,
+        slot,
+        whole,
+        boxes,
+        rowH,
+        total: rows * rowH + (rows - 1) * between,
+      };
+    });
+    const chosen =
+      measured.find((m) => m.whole && m.total <= text.y1 - text.y0) ??
+      [...measured]
+        .filter((m) => m.whole)
+        .sort((a, b) => a.total - b.total)[0] ??
+      measured[measured.length - 1];
+    {
+      const { per, slot, boxes, rowH, total } = chosen;
+      const top = text.y0 + Math.max(0, text.y1 - text.y0 - total) / 2;
       const nodes = boxes.map((b, i) => {
         const row = Math.floor(i / per);
         const k = i % per;

@@ -2479,7 +2479,15 @@ export type ShotSetDto =
       terrain: boolean;
     }
   | { kind: 'photo'; asset: string; treatment: 'natural' | 'duotone' | 'halftone' | 'cutout' }
-  | { kind: 'portrait'; asset: string; name: string; dates?: string; role?: string }
+  | {
+      kind: 'portrait';
+      asset: string;
+      name: string;
+      dates?: string;
+      role?: string;
+      /** How the print is shown: a black-and-white one in the show's ink and paper; absent, as it is. */
+      treatment?: 'natural' | 'duotone' | 'halftone' | 'cutout';
+    }
   | { kind: 'document'; asset: string }
   | { kind: 'set'; asset: string }
   | { kind: 'chart'; asset: string }

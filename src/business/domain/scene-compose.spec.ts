@@ -2915,30 +2915,23 @@ describe("a Studio explainer's floor: never a card, the stage keeping what it ha
     expect(scene.steps[0]).toMatchObject({ atMs: 0, show: ['sun'] });
   });
 
-  it('opens on its first picture as the voice starts, never on an empty stage', () => {
+  it('keeps a late first picture where its writer put it: only what is left out is stood in for', () => {
     const late: SceneScript = {
       ...script,
       steps: script.steps.slice(1),
     };
-    const scene = composed(
-      [
-        ['leaf', drawing()],
-        ['sun', drawing()],
-      ],
-      film,
-      late,
-    );
-    expect(scene.steps[0]).toMatchObject({ atMs: 0, show: ['sun', 'leaf'] });
-    // A book's page as it was: on its words.
-    const book = composed(
-      [
-        ['leaf', drawing()],
-        ['sun', drawing()],
-      ],
-      null,
-      late,
-    );
-    expect(book.steps[0].atMs).toBeGreaterThan(2000);
+    for (const profile of [film, null]) {
+      const scene = composed(
+        [
+          ['leaf', drawing()],
+          ['sun', drawing()],
+        ],
+        profile,
+        late,
+      );
+      expect(scene.steps[0].show).toEqual(['sun', 'leaf']);
+      expect(scene.steps[0].atMs).toBeGreaterThan(2000);
+    }
   });
 
   it('is a pure function of its script and drawings', () => {

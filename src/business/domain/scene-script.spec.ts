@@ -1908,6 +1908,39 @@ describe("an explainer's floor: left out, never a card, and no one drawn", () =>
     },
   );
 
+  it('opens on its next picture where the first was left out, never an empty stage', () => {
+    const person = thing('student', 'person', {
+      name: 'Teen student',
+      figure: { age: 'teen' },
+    });
+    const opened: SceneScriptDraft = {
+      ...lesson(person),
+      steps: [
+        step(0, 'About seven', { layout: 'one', show: ['student'] }),
+        step(1, 'Here is', { layout: 'one', show: ['share'] }),
+        step(2, 'still true', { effects: [{ target: 'share', do: 'pulse' }] }),
+      ],
+    };
+    const { script, mended } = mendScript(opened, {
+      formats: ['explainer'],
+      explainer: true,
+    });
+    expect(
+      script.steps.map((s) => [s.at.beat, s.at.phrase, s.stage?.show ?? null]),
+    ).toEqual([
+      [0, 'About seven', ['share']],
+      [2, 'still true', null],
+    ]);
+    expect(mended).toContain('step 2: opens the scene, at "About seven"');
+    // A book's page as it was: the person on, then the number.
+    const book = mendScript(opened, { formats: ['explainer'] });
+    expect(book.script.steps.map((s) => s.stage?.show ?? null)).toEqual([
+      ['student'],
+      ['share'],
+      null,
+    ]);
+  });
+
   it('leaves out drawings past the most an explainer draws, the first seen kept', () => {
     const drawings = Array.from({ length: MAX_DRAWINGS + 2 }, (_, k) =>
       thing(`d${k + 1}`, 'drawing', { name: `Part ${k + 1}` }),

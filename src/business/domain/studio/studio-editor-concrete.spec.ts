@@ -197,9 +197,10 @@ describe('a script told as a story of people, never a lecture', () => {
     },
     deep,
   );
+  // Its places and people the research's, each with a claim (worldOf).
   const world = worldOf({
-    places: [{ name: 'Lagos, the House', kind: 'hall' }],
-    people: [{ name: 'Nnamdi Azikiwe' }],
+    places: [{ name: 'Lagos, the House', kind: 'hall', claims: ['c4'] }],
+    people: [{ name: 'Nnamdi Azikiwe', claims: ['c4'] }],
   });
   const ctx = concreteContext(deep, plan, 1, world);
   const rows = (lines: [string, number, EditorialRow['visual']?][]) =>

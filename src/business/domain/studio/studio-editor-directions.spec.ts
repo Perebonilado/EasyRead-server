@@ -349,9 +349,16 @@ describe('narration, never a stage direction', () => {
 
   it("tells a writer the world's people and places by their names, never their ids", () => {
     const told = describeWorld(
+      // Each with a claim, as every world's are (worldOf).
       worldOf({
-        places: [{ name: 'Modern home office', kind: 'home' }],
-        people: [{ name: 'A calendar user', role: 'keeps the calendar' }],
+        places: [{ name: 'Modern home office', kind: 'home', claims: ['c1'] }],
+        people: [
+          {
+            name: 'A calendar user',
+            role: 'keeps the calendar',
+            claims: ['c2'],
+          },
+        ],
       }),
     );
     expect(told).toContain('- Modern home office (');

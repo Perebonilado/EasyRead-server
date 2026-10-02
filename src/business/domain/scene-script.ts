@@ -2267,6 +2267,14 @@ export function mendScript(
 
   const steps: SceneStep[] = [];
   let onStage: string[] = [];
+  /**
+   * An explainer's first picture, when all it showed was left out: where
+   * it was asked for, for its next picture to open the scene in its place
+   * (explainer-animation-plan §10), never an empty stage.
+   */
+  let opening: { at: SceneStep['at']; word: number; index: number } | null =
+    null;
+  let staged = false;
   for (const one of anchored) {
     const { raw } = one;
     let stage: SceneStage | null = null;
@@ -2350,6 +2358,18 @@ export function mendScript(
         }
         onStage = show;
       }
+      if (
+        options.explainer &&
+        !staged &&
+        !opening &&
+        !show.length &&
+        backdrop === undefined
+      )
+        opening = {
+          at: { beat: one.beat, phrase: one.phrase },
+          word: one.word,
+          index: steps.length,
+        };
     }
     const effects: SceneEffect[] = [];
     for (const effect of raw.effects ?? []) {
@@ -2359,6 +2379,21 @@ export function mendScript(
       else effects.push(found);
     }
     const held = raw.hold === true;
+    if (stage && !staged && opening) {
+      // The first picture left out: this one comes on where it was asked.
+      mended.push(
+        `step ${one.index + 1}: opens the scene, at "${opening.at.phrase}"`,
+      );
+      steps.splice(opening.index, 0, {
+        at: opening.at,
+        word: opening.word,
+        stage,
+        effects: [],
+      });
+      stage = null;
+      staged = true;
+    }
+    if (stage) staged = true;
     if (!stage && !effects.length) {
       // A hold asked on a moment that changes nothing holds its sentence.
       if (held && beats[one.beat]) beats[one.beat].hold = true;

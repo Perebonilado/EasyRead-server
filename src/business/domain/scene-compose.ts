@@ -1508,42 +1508,27 @@ export function isExplainerScene(
 
 /**
  * A Studio explainer's scene held to the floor (explainer-animation-plan
- * §10). A thing that could not be drawn is left out, never shown as a
- * card of its name (thingDto's): its steps go with it and the stage keeps
- * what it had (withoutThings). And the scene opens on its first picture
- * as the voice starts, never on an empty stage while its first sentence
- * is said, unless a build carries the board on from the scene before.
+ * §10): a thing that could not be drawn is left out, never shown as a
+ * card of its name (thingDto's). Its steps go with it and the stage keeps
+ * what it had; and when it was what the scene opened on, the scene's next
+ * picture opens it in its place (withoutThings), never an empty stage.
  */
 export function explainerFloor(
   script: SceneScript,
   drawings: ReadonlyMap<string, GatedDrawing | null>,
 ): SceneScript {
-  const undrawn = new Set(
-    script.cast.flatMap((thing) =>
-      thing.kind !== 'stat' && thing.kind !== 'words' && !drawings.get(thing.id)
-        ? [thing.id]
-        : [],
+  return withoutThings(
+    script,
+    new Set(
+      script.cast.flatMap((thing) =>
+        thing.kind !== 'stat' &&
+        thing.kind !== 'words' &&
+        !drawings.get(thing.id)
+          ? [thing.id]
+          : [],
+      ),
     ),
   );
-  const kept = withoutThings(script, undrawn);
-  if (kept.board?.carried.length) return kept;
-  const first = kept.steps.findIndex((step) => step.stage);
-  const opening = kept.steps[first];
-  if (!opening || opening.after !== undefined || opening.at.beat === 0)
-    return kept;
-  const words = (kept.beats[0]?.say ?? '').split(/\s+/).filter(Boolean);
-  return {
-    ...kept,
-    steps: kept.steps.map((step, k) =>
-      k === first
-        ? {
-            ...step,
-            at: { beat: 0, phrase: words.slice(0, 3).join(' ') },
-            word: 0,
-          }
-        : step,
-    ),
-  };
 }
 
 /**

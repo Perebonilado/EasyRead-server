@@ -2047,12 +2047,12 @@ function crowdPiece(
       boxes.push(box);
       drawn += row.n;
       const id = `row-${row.k}`;
-      // A thin cut of paper round each far person (its stroke under its
+      // A thin cut of the air round each far person (its stroke under its
       // fill, so only the outer edge shows), so a head reads against the row behind it.
       parts.push({
         id,
         parent: null,
-        markup: `<g fill="${fill}" stroke="${style.paper}" stroke-width="${n1(0.032 * H)}" stroke-linejoin="round" paint-order="stroke">${uses}</g>`,
+        markup: `<g fill="${fill}" stroke="${style.air}" stroke-width="${n1(0.032 * H)}" stroke-linejoin="round" paint-order="stroke">${uses}</g>`,
         box,
         pivot: [box[0] + box[2] / 2, box[1] + box[3]],
       });

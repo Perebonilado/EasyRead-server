@@ -11,8 +11,9 @@
  *    rim's lighter edge, glass, the dark of a tyre, metal, a lamp's light.
  *  - A rim light: a lighter edge on the side the light comes from, the
  *    same direction on every piece of a film (the upper left by default).
- *  - The paper: far things fade toward it a little (a crowd's back rows),
- *    as the paper's own grain lies over everything on the stage.
+ *  - The air: far things fade into it a little (a crowd's back rows): the
+ *    paper on a page or a map, a drawn set's low sky; the paper's own
+ *    grain lies over everything on the stage.
  *  - Corner radius, and a soft shadow on the ground under each piece.
  *
  * Colours are mixed in OKLab, so a tint keeps its hue.
@@ -43,8 +44,14 @@ export interface KitStyle {
   shadow: { colour: string; opacity: number; squash: number };
   /** Round corners on boxy things, as a share of their shorter side. */
   radius: number;
-  /** How far the farthest things of a piece fade toward the paper, 0 to 1. */
+  /** How far the farthest things of a piece fade into the air, 0 to 1. */
   haze: number;
+  /**
+   * The air far things fade into, and the gap that shows between people
+   * one behind another: the paper on a page or a map, the low sky of a
+   * drawn set (a dusk's mauve, a night's blue).
+   */
+  air: string;
 }
 
 /** The light comes from the upper left, as on most of the house's stills. */
@@ -56,7 +63,12 @@ const LIGHT_ANGLE = (225 * Math.PI) / 180;
  */
 export function kitStyle(
   look: ShotLookDto,
-  options: { look?: KitLook; shape?: FilmShape; light?: string } = {},
+  options: {
+    look?: KitLook;
+    shape?: FilmShape;
+    light?: string;
+    air?: string;
+  } = {},
 ): KitStyle {
   const kind = options.look ?? 'editorial';
   const p = look.palette;
@@ -75,9 +87,9 @@ export function kitStyle(
       : mixOk(p.ink, '#000000', 0.35),
     rim: {
       angle: LIGHT_ANGLE,
-      width: 0.016,
+      width: 0.011,
       colour: options.light ?? (dark ? '#fff1d6' : '#fff6e8'),
-      strength: dark ? 0.5 : 0.42,
+      strength: dark ? 0.42 : 0.3,
     },
     shadow: {
       colour: dark ? '#000000' : mixOk(p.ink, '#000000', 0.4),
@@ -86,6 +98,7 @@ export function kitStyle(
     },
     radius: 0.12,
     haze: dark ? 0.35 : 0.42,
+    air: options.air ?? p.paper,
   };
 }
 
@@ -143,9 +156,9 @@ export function fillsOf(style: KitStyle, colour: string): KitFills {
   };
 }
 
-/** A colour faded toward the paper by depth: 0 at the front, the style's haze at the back. */
+/** A colour faded into the air by depth: 0 at the front, the style's haze at the back. */
 export const hazed = (style: KitStyle, colour: string, depth: number): string =>
-  mixOk(colour, style.paper, Math.max(0, Math.min(1, depth)) * style.haze);
+  mixOk(colour, style.air, Math.max(0, Math.min(1, depth)) * style.haze);
 
 // ── Colour ────────────────────────────────────────────────────────────────
 

@@ -3131,7 +3131,6 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
       model,
       schema: pictureFocusSchema,
       system: pictureFocusPrompt(),
-      temperature: 0,
       messages: [
         {
           role: 'user' as const,

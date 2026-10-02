@@ -45,6 +45,7 @@ import { contentBox, isMono } from './depth';
 import {
   focalFromFocus,
   focusOf,
+  GRID,
   photoDoubt,
   portraitDoubt,
   type Focus,
@@ -100,7 +101,7 @@ const LOOKUP_DAYS = 30;
  * again (a portrait that is a statue's photograph, once let through, is
  * not handed out for a month after the rule against it).
  */
-export const DESK_RULES = 6;
+export const DESK_RULES = 7;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** The width the desk asks a source for: a full frame's with room for a 12% push; a portrait's print; a page. */
@@ -644,7 +645,7 @@ export class PictureDesk {
     let focus: Focus | null = null;
     if (this.deps.focus && this.deps.pixels.png) {
       const png = await this.safely(
-        () => this.deps.pixels.png!(bytes, 512),
+        () => this.deps.pixels.png!(bytes, 768, GRID),
         null,
       );
       const answer = png

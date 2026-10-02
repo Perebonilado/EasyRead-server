@@ -24,7 +24,7 @@ export const pictureFocusSchema = z.object({
 export function pictureFocusPrompt(): string {
   return [
     'You look at an archive picture for a documentary film, to crop it to its subject. You never say who anyone is.',
-    'The picture is divided into a grid of six columns, A to F from left to right, and six rows, 1 to 6 from top to bottom. A1 is the top-left cell, F6 the bottom-right.',
+    'A grid is drawn over the picture: six columns, A to F from left to right, and six rows, 1 to 6 from top to bottom, each cell named in its top-left corner (A1 top-left, F6 bottom-right). Read the names on the picture; name a cell only if the thing is inside it.',
     'Answer:',
     '- faces: every cell holding part of a clearly visible human face (none for none);',
     '- subject: the cells holding what the picture is of: the people, the building, the scene that matters;',

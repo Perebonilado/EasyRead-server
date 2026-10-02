@@ -55,6 +55,27 @@ export const GRID_MS = 2000;
  * then is of the title card, not of the film.
  */
 export const TITLE_GOES_MS = 900;
+/**
+ * How long the film takes to go down to black at its end, and a dip
+ * between scenes to go down and come up (the client's HANDLES.close.out,
+ * dip.out and dip.in): a still then is of the black coming, not the film.
+ */
+export const CLOSE_OUT_MS = 1200;
+export const DIP_OUT_MS = 700;
+export const DIP_IN_MS = 800;
+
+/** Whether a moment of the video is the film going down to black or coming up from it: at its end, or in a dip between scenes. */
+export function inFade(timeline: FilmTimeline, videoMs: number): boolean {
+  if (videoMs > timeline.titleMs + timeline.filmMs - CLOSE_OUT_MS) return true;
+  return timeline.clips.some((clip, index) => {
+    if (index === 0 || clip.join !== 'dip') return false;
+    const before = timeline.clips[index - 1];
+    return (
+      videoMs > endOf(before) - DIP_OUT_MS &&
+      videoMs < clip.startsAtMs + DIP_IN_MS
+    );
+  });
+}
 
 /** Where a moment of a scene plays in the video. */
 export const videoMsOf = (clip: FilmClip, sceneMs: number): number =>
@@ -124,6 +145,7 @@ export function momentsOf(
   const take = (videoMs: number, why: Moment['why']) => {
     if (videoMs < timeline.titleMs + (timeline.titleMs ? TITLE_GOES_MS : 0))
       return;
+    if (inFade(timeline, videoMs)) return;
     const at = clipAt(timeline, Math.round(videoMs), scenes);
     if (at) out.push({ videoMs: Math.round(videoMs), ...at, why });
   };

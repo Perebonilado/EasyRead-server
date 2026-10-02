@@ -80,6 +80,24 @@ export interface PlanSetScene {
   /** Townscape density and era, when there are buildings. */
   town?: 'none' | 'village' | 'town' | 'city';
   era?: string;
+  /** What the place is for, which sets what stands in it; the last two are places of their own. */
+  place?:
+    | 'open'
+    | 'farm'
+    | 'port'
+    | 'industry'
+    | 'market'
+    | 'city'
+    | 'oilfield'
+    | 'assembly-hall'
+    | 'ceremony-ground'
+    | 'display';
+  /** The climate its buildings are built for (never a country): from the land when absent. */
+  climate?: 'temperate' | 'arid' | 'tropical' | 'cold';
+  /** The light changing while the shot is on (the sun setting, the lights coming on), on the words that say so. */
+  becomes?: { state: 'day' | 'dusk' | 'night' | 'dawn' | 'lights-on'; on: string };
+  /** It stands for a real event or a real kind of moment: it carries an "Illustration" tag. */
+  illustration?: boolean;
 }
 
 /**

@@ -31,7 +31,6 @@ import {
   type ShowMapBase,
 } from '../scene-map';
 import { PAPER } from '../scene-themes';
-import { TEXT } from '../studio/explainer-rules';
 import {
   assetOf,
   boxR,
@@ -217,6 +216,49 @@ function elementAt(svg: string, start: number): string {
   return svg.slice(start);
 }
 
+/** A part's group as a move wraps it: its drawing inside a translate. */
+const MOVED = /^<g[^>]*><g transform="translate\((-?[\d.]+) (-?[\d.]+)\)">/;
+
+/** The box of a part's markup where it is drawn: its ink, and the move a translate made. */
+function placedInk(markup: string): ShotBox | null {
+  const raw = inkOf(markup);
+  const shift = MOVED.exec(markup);
+  return raw && shift
+    ? [raw[0] + Number(shift[1]), raw[1] + Number(shift[2]), raw[2], raw[3]]
+    : raw;
+}
+
+/** A part's group moved by so much across and down, its own attributes kept. */
+function movedBy(markup: string, dx: number, dy: number): string {
+  const r = (n: number) => Math.round(n * 10) / 10;
+  return markup.replace(
+    /^<g data-part="([^"]+)"([^>]*)>([\s\S]*)<\/g>$/,
+    (_all, name: string, attrs: string, inner: string) =>
+      `<g data-part="${name}"${attrs}><g transform="translate(${r(dx)} ${r(dy)})">${inner}</g></g>`,
+  );
+}
+
+/** The rings a path draws, each from a move to the next (the drawing's paths are absolute). */
+function ringsOf(d: string): [number, number][][] {
+  return d
+    .split(/(?=M)/)
+    .map((piece) => pathPoints(piece))
+    .filter((ring) => ring.length > 2);
+}
+
+/** Whether a point is inside rings (even-odd, so a hole is outside). */
+function inRings(rings: [number, number][][], [x, y]: [number, number]) {
+  let inside = false;
+  for (const ring of rings)
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const [xi, yi] = ring[i];
+      const [xj, yj] = ring[j];
+      if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi)
+        inside = !inside;
+    }
+  return inside;
+}
+
 /**
  * The frame a map asset is drawn into: the show's own frame (or the
  * region's), scaled and centred to fill the film's, and the box the
@@ -227,11 +269,16 @@ async function fullFrameOf(
   spec: MapSpec,
   shape: FilmShape,
 ): Promise<{ full: MapFrame; region: ShotBox }> {
-  const { W, H } = frameOf(shape);
+  const { W, H, text } = frameOf(shape);
   const own = await frameFor(spec.base ?? spec.region, shape);
-  const k = Math.min(W / own.width, H / own.height) * FILL;
-  const ox = (W - own.width * k) / 2;
-  const oy = (H - own.height * k) / 2;
+  // The show's region inside the words' area (clear of the captions' band
+  // at the foot, and of a tall frame's overlays), so the names drawn in it
+  // are too; its neighbours and the sea run on to the frame's edges.
+  const tw = text.x1 - text.x0;
+  const th = text.y1 - text.y0;
+  const k = Math.min(tw / own.width, th / own.height) * FILL;
+  const ox = text.x0 + (tw - own.width * k) / 2;
+  const oy = text.y0 + (th - own.height * k) / 2;
   return {
     full: {
       ...own,
@@ -283,7 +330,7 @@ export async function mapAsset(
     // Its names at the reading floor: renderMap sets them at 0.9 of its size, the size scaled from its room.
     const room = EXACT_ROOM[shape];
     const scale = 1 / Math.min(room.w / W, room.h / H);
-    const text = (TEXT.mustRead * H) / 0.9 / scale;
+    const text = frame.size.label / 0.9 / scale;
     const drawn = await renderMap(spec, shape, text, full);
     const prefix = defsPrefix(`map|${JSON.stringify(spec)}|${shape}`);
     let svg = drawn.svg
@@ -326,12 +373,118 @@ export async function mapAsset(
       const end = svg.indexOf('"', fill + 6);
       svg = `${svg.slice(0, fill + 6)}${side.colour}${svg.slice(end)}`;
     }
+    // A name the drawing set past the words' area (beside a region at the
+    // frame's side, or under one near the captions' band) comes in, with
+    // its tick, as far as it must.
+    {
+      const area = frame.text;
+      const labels = [...svg.matchAll(/<g data-part="label-[^"]+"/g)];
+      for (const m of labels.reverse()) {
+        const markup = elementAt(svg, m.index);
+        const box = inkOf(markup);
+        if (!box) continue;
+        const [x, y, w, h] = box;
+        const into = (from: number, size: number, lo: number, hi: number) =>
+          size > hi - lo
+            ? 0
+            : from < lo
+              ? lo - from
+              : from + size > hi
+                ? hi - (from + size)
+                : 0;
+        const dx = into(x, w, area.x0, area.x1);
+        const dy = into(y, h, area.y0, area.y1);
+        if (!dx && !dy) continue;
+        svg =
+          svg.slice(0, m.index) +
+          movedBy(markup, dx, dy) +
+          svg.slice(m.index + markup.length);
+      }
+    }
+    // The key (each named group's colour) and the note of a past map's
+    // borders are words: the drawing sets them in the frame's corners, so
+    // each goes to the corner of the words' area (clear of the captions'
+    // band at the foot, and of a tall frame's overlays) where it hides
+    // least, as the drawing chooses: no name or mark, then as little of
+    // what is coloured and of the region's land as it can, then the
+    // nearest to where the drawing set it.
+    {
+      const area = frame.text;
+      const written: ShotBox[] = [];
+      for (const m of svg.matchAll(
+        /<g data-part="(?:label|place|pin)-[^"]+"/g,
+      )) {
+        const box = placedInk(elementAt(svg, m.index));
+        if (box) written.push(box);
+      }
+      const land = ringsOf(
+        new RegExp(`id="${prefix}-map-land" d="([^"]+)"`).exec(svg)?.[1] ?? '',
+      );
+      const coloured = [
+        ...svg.matchAll(/<g data-part="(?:group|country|area)-[^"]+"/g),
+      ].flatMap((m) =>
+        [...elementAt(svg, m.index).matchAll(/ d="([^"]+)"/g)].flatMap((d) =>
+          ringsOf(d[1]),
+        ),
+      );
+      const hides = ([bx, by, bw, bh]: ShotBox) => {
+        let n = 0;
+        for (let i = 0; i <= 6; i++)
+          for (let j = 0; j <= 4; j++) {
+            const q: [number, number] = [bx + (bw * i) / 6, by + (bh * j) / 4];
+            if (inRings(coloured, q)) n += 3;
+            else if (inRings(land, q)) n += 1;
+          }
+        for (const [ox, oy, ow, oh] of written)
+          if (bx < ox + ow && bx + bw > ox && by < oy + oh && by + bh > oy)
+            n += 100;
+        return n;
+      };
+      for (const id of ['key', 'period']) {
+        const at = svg.indexOf(`<g data-part="${id}"`);
+        const note = at >= 0 ? elementAt(svg, at) : null;
+        const box = note ? inkOf(note) : null;
+        if (!note || !box) continue;
+        const [x, y, w, h] = box;
+        const inside =
+          x >= area.x0 && y >= area.y0 && x + w <= area.x1 && y + h <= area.y1;
+        if (inside) {
+          written.push(box);
+          continue;
+        }
+        const left = area.x0;
+        const right = Math.max(area.x0, area.x1 - w);
+        const top = area.y0;
+        const foot = Math.max(area.y0, area.y1 - h);
+        const [best] = (
+          [
+            [left, top],
+            [right, top],
+            [left, foot],
+            [right, foot],
+          ] as [number, number][]
+        )
+          .map(([sx, sy]) => ({
+            sx,
+            sy,
+            n: hides([sx, sy, w, h]),
+            d: Math.hypot(sx - x, sy - y),
+          }))
+          .sort((a, b) => a.n - b.n || a.d - b.d);
+        svg =
+          svg.slice(0, at) +
+          movedBy(note, best.sx - x, best.sy - y) +
+          svg.slice(at + note.length);
+        written.push([best.sx, best.sy, w, h]);
+      }
+    }
     const ids = [...svg.matchAll(/data-part="([^"]+)"/g)].map((m) => m[1]);
     for (const id of ids) {
       const at = svg.indexOf(`<g data-part="${id}"`);
       if (at < 0) continue;
       const markup = elementAt(svg, at);
-      const box = inkOf(markup);
+      // Measured where it is drawn (a name, key or note brought into the words' area where it went).
+      const box = placedInk(markup);
       if (!box) continue;
       const name = names.get(id) ?? null;
       const side = name ? sideFor(paint, name) : null;

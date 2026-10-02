@@ -44,11 +44,13 @@ import {
 } from '../scene-themes';
 import { mix, paintOf } from './shot-chart-kit';
 import { placeActor } from '../kit/place';
-import { KIT, actorMove, makeKit } from '../kit/registry';
+import { KIT, actorMove, makeKit, unknownOf } from '../kit/registry';
 import { toAsset } from '../kit/rig';
 import { kitStyle, type KitLook } from '../kit/style';
+import { eraOf } from '../kit/eras';
+import { CHANGE_MS, climateOf, drawSet, setSettingsOf } from '../kit/sets';
 import { chartAsset } from './shot-charts';
-import { WHOLE_SET } from './shot-check';
+import { WHOLE_SET, partKey } from './shot-check';
 import { pictureAssetOf, pictureSetOf } from './shot-pictures';
 import type { ShotMapSet } from './shot-map';
 import { chartPartIds, partSlug } from './shot-parts';
@@ -148,10 +150,12 @@ function kitPiece(
   ctx: Pick<BuildContext, 'shape' | 'look'>,
   colour: string,
   seed: number,
+  air?: string,
 ): {
   asset: ShotSvgAssetDto;
   family: string;
   moves: string[];
+  states: string[];
   notes: string[];
   box: ShotBox;
   parts: string[];
@@ -161,7 +165,11 @@ function kitPiece(
   const made = makeKit(
     kit,
     params ?? {},
-    kitStyle(look, { look: ctx.look ?? 'editorial', shape: ctx.shape }),
+    kitStyle(look, {
+      look: ctx.look ?? 'editorial',
+      shape: ctx.shape,
+      ...(air ? { air } : {}),
+    }),
     seed,
     colour,
   );
@@ -170,6 +178,7 @@ function kitPiece(
     asset: toAsset(made.piece),
     family: entry.family,
     moves: made.piece.rig.moves,
+    states: Object.keys(made.piece.rig.states ?? {}),
     notes: made.piece.notes ?? [],
     box: made.piece.box,
     parts: Object.keys(made.piece.parts),
@@ -199,12 +208,74 @@ function moveMs(
   return undefined;
 }
 
-/** A code-drawn set (WP10's kit/sets): a kind of place, never a named one. None yet. */
+/**
+ * A code-drawn set (kit/sets): a kind of place, never a named one, in the
+ * show's look; where actors stand on it, at what scale, and the air far
+ * things in it fade into.
+ */
 function kitSet(
   set: Extract<PlanSet, { kind: 'set' }>['set'],
-): ShotSvgAssetDto | null {
-  void set;
-  return null;
+  look: ShotLookDto,
+  ctx: Pick<BuildContext, 'shape' | 'look' | 'seed'>,
+): { asset: ShotSvgAssetDto; stage: SetStage; notes: string[] } | null {
+  const settings = setSettingsOf(set, eraOf(set.era));
+  const made = drawSet(settings, look, {
+    shape: ctx.shape,
+    kitLook: ctx.look ?? 'editorial',
+    seed: seedOf(`${ctx.seed}:set:${JSON.stringify(settings)}`),
+  });
+  return {
+    asset: made.asset,
+    stage: {
+      ground: made.ground,
+      ...(made.unitsPerMetre ? { unitsPerMetre: made.unitsPerMetre } : {}),
+      air: made.air,
+      ...(eraOf(set.era) && settings.place !== 'display'
+        ? { era: settings.era, climate: climateOf(settings) }
+        : {}),
+      ...(settings.place !== 'display' ? { time: settings.time } : {}),
+    },
+    notes: made.notes,
+  };
+}
+
+/** Where actors stand on a drawn set, at what scale, and the air they fade into; its era and climate when it has them. */
+interface SetStage {
+  ground: number;
+  /** Absent on a display: what stands there is sized big. */
+  unitsPerMetre?: number;
+  air: string;
+  era?: string;
+  climate?: string;
+  /** The light it opens in: a building on it opens with its windows lit or dark to match. */
+  time?: string;
+}
+
+/**
+ * A piece's settings, its era and climate its set's where the plan leaves
+ * them out: the people and buildings on a street of 1910 are of 1910 and
+ * built for its weather, as the set's own are.
+ */
+export function withSetDefaults(
+  kit: string,
+  params: PlanActor['params'],
+  stage: Pick<SetStage, 'era' | 'climate'> | undefined,
+): PlanActor['params'] {
+  const takes = KIT[kit]?.params ?? {};
+  const out = { ...(params ?? {}) };
+  if (stage?.era && takes.era && out.era === undefined) out.era = stage.era;
+  if (stage?.climate && takes.climate && out.climate === undefined)
+    out.climate = stage.climate;
+  return Object.keys(out).length ? out : params;
+}
+
+/** The state a piece opens in on a set in this light, where its rig has one (a building's windows dark by day, lit at dusk and night). */
+function lightState(
+  states: readonly string[],
+  time: string | undefined,
+): string | undefined {
+  const named = time === 'dawn' ? 'dusk' : time;
+  return named && states.includes(named) ? named : undefined;
 }
 
 /**
@@ -332,6 +403,10 @@ interface BuiltSet {
   chip?: ShotCreditDto;
   /** A drawn picture of a real event or place. */
   illustration?: boolean;
+  /** A drawn set's ground for its actors. */
+  stage?: SetStage;
+  /** A drawn set's change of light while the shot is on, on its words. */
+  change?: { state: string; on: string; durMs: number };
 }
 
 const assetOf = (set: ShotSetDto): string | null =>
@@ -598,6 +673,11 @@ export function buildShots(
   /** Each chart drawn, by its kind and spec: drawn once, shown by every shot that asks for it. */
   const charts = new Map<string, { id: string; dto: ShotSvgAssetDto }>();
   const pictures = new Map<string, string>();
+  /** Each drawn set, by its place (not its change of light): drawn once, carried on by every shot that shows it. */
+  const drawnSets = new Map<
+    string,
+    { id: string; dto: ShotSvgAssetDto; stage: SetStage }
+  >();
 
   /** A planned set drawn, or null when it cannot be. */
   const setOf = (planned: PlanSet, i: number): BuiltSet | null => {
@@ -674,16 +754,38 @@ export function buildShots(
         return { set, asset: { id, dto: picture.asset }, chip: picture.credit };
       }
       case 'set': {
-        const dto = kitSet(planned.set);
-        if (!dto) {
-          notes.push(`shot ${i + 1}: no code-drawn set yet`);
-          return null;
+        const { becomes, illustration, ...place } = planned.set;
+        const key = JSON.stringify(place);
+        let drawn = drawnSets.get(key);
+        if (!drawn) {
+          const made = kitSet(planned.set, look, ctx);
+          if (!made) {
+            notes.push(`shot ${i + 1}: no code-drawn set could be drawn`);
+            return null;
+          }
+          drawn = {
+            id: `set-${drawnSets.size + 1}`,
+            dto: made.asset,
+            stage: made.stage,
+          };
+          drawnSets.set(key, drawn);
+          notes.push(`shot ${i + 1}: drawn set ${made.notes.join('; ')}`);
         }
-        const id = `set-${i + 1}`;
         return {
-          set: { kind: 'set', asset: id },
-          asset: { id, dto },
-          illustration: true,
+          set: { kind: 'set', asset: drawn.id },
+          asset: { id: drawn.id, dto: drawn.dto },
+          stage: drawn.stage,
+          // A kind of place is no claim; one standing for a real event carries the tag.
+          ...(illustration ? { illustration: true } : {}),
+          ...(becomes
+            ? {
+                change: {
+                  state: becomes.state,
+                  on: becomes.on,
+                  durMs: CHANGE_MS[becomes.state],
+                },
+              }
+            : {}),
         };
       }
       case 'plain':
@@ -788,17 +890,26 @@ export function buildShots(
           : null;
       const made = kitPiece(
         one.kit,
-        person?.likeness
-          ? { ...(one.params ?? {}), looks: person.likeness }
-          : one.params,
+        // Its era and climate its set's where the plan leaves them out.
+        withSetDefaults(
+          one.kit,
+          person?.likeness
+            ? { ...(one.params ?? {}), looks: person.likeness }
+            : one.params,
+          shotSet.stage,
+        ),
         look,
         ctx,
         side ?? 'ink',
         seedOf(`${ctx.seed}:${i}:${one.id}`),
+        shotSet.stage?.air,
       );
       if (!made) {
+        const unknown = unknownOf(one.kit, one.params ?? {});
         notes.push(
-          `shot ${i + 1}: actor ${one.id} (${one.kit}) left out: no such piece in this look`,
+          unknown.length
+            ? `shot ${i + 1}: actor ${one.id} (${one.kit}) left out: the kit draws no ${unknown.map((k) => `${k} "${String(one.params?.[k])}"`).join(', ')}`
+            : `shot ${i + 1}: actor ${one.id} (${one.kit}) left out: no such piece in this look`,
         );
         return;
       }
@@ -814,6 +925,15 @@ export function buildShots(
       const placed = placeActor({
         set: setBox,
         map: Boolean(onMap),
+        // A drawn set says where its ground is and its scale there.
+        ...(shotSet.stage
+          ? {
+              ground: shotSet.stage.ground,
+              ...(shotSet.stage.unitsPerMetre
+                ? { unitsPerMetre: shotSet.stage.unitsPerMetre }
+                : {}),
+            }
+          : {}),
         piece: { box: made.box, family: made.family, id: one.kit },
         on,
         ...(word ? { word } : {}),
@@ -888,7 +1008,11 @@ export function buildShots(
           ? Math.round((placed.size / setBox[3]) * 1000) / 1000
           : placed.size,
         z: placed.z,
-        ...(firstSeat?.move === 'sit' ? { state: 'standing' } : {}),
+        ...(firstSeat?.move === 'sit'
+          ? { state: 'standing' }
+          : lightState(made.states, shotSet.stage?.time)
+            ? { state: lightState(made.states, shotSet.stage?.time)! }
+            : {}),
         ...(side ? { side } : {}),
         moves,
       });
@@ -1048,6 +1172,22 @@ export function buildShots(
       }
       if (prefix === 'actor' || !prefix) {
         if (actorIds.has(rest)) return { kind: 'actor', actor: rest };
+        // A part of an actor (a machine's combustor, its core flow): <id>.<part>, as its piece names it.
+        const dot = rest.indexOf('.');
+        if (dot > 0 && actorIds.has(rest.slice(0, dot))) {
+          const actor = actors.find((a) => a.id === rest.slice(0, dot));
+          const piece = actor ? assets[actor.asset] : undefined;
+          const want = partKey(rest.slice(dot + 1));
+          const part =
+            piece?.kind === 'svg'
+              ? (Object.keys(piece.parts).find((p) => p === want) ??
+                Object.keys(piece.parts).find(
+                  (p) => p.replace(/-\d+$/u, '') === want,
+                ))
+              : undefined;
+          if (actor && part) return { kind: 'actor', actor: actor.id, part };
+          return null;
+        }
         if (prefix === 'actor') return null;
       }
       const entry = registry.resolve(name);
@@ -1139,10 +1279,17 @@ export function buildShots(
       const to = one.to ? targetOf(one.to) : null;
       // A flow runs along something: to where it goes, a part's own path,
       // or a whole chart's paths; with none it would run off nowhere.
+      const actorPath = (): boolean => {
+        if (target?.kind !== 'actor' || !target.part) return false;
+        const actor = actors.find((a) => a.id === target.actor);
+        const piece = actor ? assets[actor.asset] : undefined;
+        return piece?.kind === 'svg' && !!piece.parts[target.part]?.path;
+      };
       const runsAlong =
         !!to ||
         (target?.kind === 'asset' &&
-          (!target.part || !!svg?.parts[target.part]?.path));
+          (!target.part || !!svg?.parts[target.part]?.path)) ||
+        actorPath();
       if (one.recipe === 'flow' && !runsAlong) {
         notes.push(
           `shot ${i + 1}: flow on "${one.target ?? ''}" dropped (no path to run along and nowhere to go)`,
@@ -1481,6 +1628,8 @@ export function buildShots(
         join: planned.join,
         ...(shotSet.chip ? { chip: shotSet.chip } : {}),
         ...(shotSet.illustration ? { illustration: true } : {}),
+        // A carried-on set keeps no change of its own: only the shot that planned it changes the light.
+        ...(shotSet.change && own[i] ? { changes: [shotSet.change] } : {}),
       },
       asset,
     });

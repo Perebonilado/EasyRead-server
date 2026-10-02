@@ -4,8 +4,11 @@
  * carries its value and its name, so there is no axis to read and no
  * legend; a line names its first and last values. The bars stand on one
  * baseline and use most of the frame: columns when every name fits under
- * its bar, rows otherwise (and always in a tall frame, where a long chart
- * runs on down past the frame's foot for the camera to travel down).
+ * its bar, rows otherwise. Words stay above the captions' band at the
+ * frame's foot; pictures may run under it. In a tall frame a few bars
+ * rise as columns from low in the frame under a row of their words, more
+ * stand as rows inside the safe band reaching to the frame's edge, and a
+ * line runs large down the frame under its ends' values.
  *
  * Parts: each bar `bar-<name>` (its value, and its pivot on the baseline
  * so it grows from there), its value `value-<name>` and its name
@@ -368,241 +371,127 @@ function rows(
   const marks: string[] = [];
   const barBoxes: ShotBox[] = [];
   let bottom = 0;
-  if (tall) {
-    // The name and the value on one line, the bar under them.
-    const valueSize = floor;
-    const valueW = Math.max(
-      ...values.map((v) => figuresWidth(v, valueSize, paint.figure)),
-    );
-    const nameW = text.x1 - x0 - valueW - floor * 0.5;
-    const names = bars.map(
-      (b) =>
-        wrap(b.label, nameW, floor, 2, 600) ??
-        fit(b.label, nameW, floor, floor, 2, 600).lines,
-    );
-    // The longest bar ends under the values' right edge.
-    const barX0 = x0;
-    const barX1 = text.x1;
-    const thick = floor * 0.62;
-    const zeroX = barX0 + ((0 - low) / span) * (barX1 - barX0);
-    let y = text.y0 + unitRoom;
-    bars.forEach((bar, i) => {
-      const base = y + floor * ASCENT;
-      const lbox = linesBox(names[i], x0, base, floor, 'start', 1.12, 600);
-      book.add(bar.labelId, { box: lbox, role: 'ink' });
-      out.push(
-        textSvg(
-          names[i],
-          x0,
-          base,
-          {
-            size: floor,
-            fill: paint.ink,
-            family: paint.text,
-            weight: 600,
-            leading: 1.12,
-          },
-          bar.labelId,
-        ),
-      );
-      const vbox = linesBox(
-        [values[i]],
-        text.x1,
+  // Names in a column at the left, the bars from one edge, the values at their ends.
+  const labelSize = floor;
+  const names = bars.map(
+    (b) => fit(b.label, frame.W * 0.3, labelSize, labelSize, 2, 600).lines,
+  );
+  const nameW = Math.max(
+    ...names.map((l) =>
+      Math.max(...l.map((line) => wordsWidth(line, labelSize, 600))),
+    ),
+  );
+  const valueSize = Math.min(frame.size.title, floor * 1.15);
+  const valueW = Math.max(
+    ...values.map((v) => figuresWidth(v, valueSize, paint.figure)),
+  );
+  const barX0 = x0 + nameW + floor * 0.6;
+  const barX1 = text.x1 - valueW - floor * 0.5;
+  const sourceRoom = read.source ? frame.size.chip * 2.2 : 0;
+  const top = text.y0 + unitRoom;
+  const room = text.y1 - sourceRoom - top;
+  const rowH = Math.min(room / bars.length, frame.H * 0.2);
+  const thick = Math.min(rowH * 0.62, frame.H * 0.11);
+  const zeroX = barX0 + ((0 - low) / span) * (barX1 - barX0);
+  const startY = top + (room - rowH * bars.length) / 2;
+  bars.forEach((bar, i) => {
+    const cy = startY + rowH * (i + 0.5);
+    const lines = names[i];
+    const base =
+      cy - ((lines.length - 1) * labelSize * 1.12) / 2 + labelSize * 0.35;
+    const lbox = linesBox(lines, x0, base, labelSize, 'start', 1.12, 600);
+    book.add(bar.labelId, { box: lbox, role: 'ink' });
+    out.push(
+      textSvg(
+        lines,
+        x0,
         base,
-        valueSize,
-        'end',
-        1.15,
-        700,
-        'display',
-        paint.figure,
-      );
-      book.add(bar.valueId, { box: vbox, value: bar.value, role: 'ink' });
-      out.push(
-        textSvg(
-          [values[i]],
-          text.x1,
-          base,
-          {
-            size: valueSize,
-            fill: paint.ink,
-            family: paint.display,
-            anchor: 'end',
-            tabular: true,
-          },
-          bar.valueId,
-        ),
-      );
-      const barY = lbox[1] + lbox[3] + floor * 0.22;
-      const end = barX0 + ((bar.value - low) / span) * (barX1 - barX0);
-      const bx = Math.min(zeroX, end);
-      const bw = Math.max(3, Math.abs(end - zeroX));
-      const box: ShotBox = [bx, barY, bw, thick];
-      barBoxes.push(box);
-      book.add(bar.id, {
-        box,
-        value: bar.value,
-        role: bar.colour.role,
-        pivot: bar.value >= 0 ? [0, 0.5] : [1, 0.5],
-      });
-      marks.push(
-        partSvg(
-          bar.id,
-          `<rect x="${r1(bx)}" y="${r1(barY)}" width="${r1(bw)}" height="${r1(thick)}" rx="${r1(thick * 0.12)}"/>`,
-          ` fill="${bar.colour.colour}"`,
-        ),
-      );
-      y = barY + thick + floor * 0.62;
-    });
-    bottom = y;
-    // The baseline down the rows' zero.
-    const axisPath = `M${r1(zeroX)} ${r1(text.y0 + unitRoom)}V${r1(y - floor * 0.4)}`;
-    book.add('axis', {
-      box: [
-        zeroX - 2,
-        text.y0 + unitRoom,
-        4,
-        y - floor * 0.4 - text.y0 - unitRoom,
-      ],
-      path: axisPath,
-      role: 'ink',
-    });
-    if (low < 0)
-      out.push(
-        partSvg(
-          'axis',
-          `<path d="${axisPath}" stroke="${paint.ink}" stroke-width="3" stroke-linecap="round"/>`,
-        ),
-      );
-    else
-      out.push(
-        partSvg(
-          'axis',
-          `<path d="${axisPath}" stroke="${paint.rule}" stroke-width="3" stroke-linecap="round"/>`,
-        ),
-      );
-  } else {
-    // Names in a column at the left, the bars from one edge, the values at their ends.
-    const labelSize = floor;
-    const names = bars.map(
-      (b) => fit(b.label, frame.W * 0.3, labelSize, labelSize, 2, 600).lines,
-    );
-    const nameW = Math.max(
-      ...names.map((l) =>
-        Math.max(...l.map((line) => wordsWidth(line, labelSize, 600))),
+        {
+          size: labelSize,
+          fill: paint.ink,
+          family: paint.text,
+          weight: 600,
+          leading: 1.12,
+        },
+        bar.labelId,
       ),
     );
-    const valueSize = Math.min(frame.size.title, floor * 1.15);
-    const valueW = Math.max(
-      ...values.map((v) => figuresWidth(v, valueSize, paint.figure)),
+    const end = barX0 + ((bar.value - low) / span) * (barX1 - barX0);
+    const bx = Math.min(zeroX, end);
+    const bw = Math.max(3, Math.abs(end - zeroX));
+    const box: ShotBox = [bx, cy - thick / 2, bw, thick];
+    barBoxes.push(box);
+    book.add(bar.id, {
+      box,
+      value: bar.value,
+      role: bar.colour.role,
+      pivot: bar.value >= 0 ? [0, 0.5] : [1, 0.5],
+    });
+    marks.push(
+      partSvg(
+        bar.id,
+        `<rect x="${r1(bx)}" y="${r1(cy - thick / 2)}" width="${r1(bw)}" height="${r1(thick)}" rx="${r1(Math.min(thick * 0.1, 8))}"/>`,
+        ` fill="${bar.colour.colour}"`,
+      ),
     );
-    const barX0 = x0 + nameW + floor * 0.6;
-    const barX1 = text.x1 - valueW - floor * 0.5;
-    const sourceRoom = read.source ? frame.size.chip * 2.2 : 0;
-    const top = text.y0 + unitRoom;
-    const room = text.y1 - sourceRoom - top;
-    const rowH = Math.min(room / bars.length, frame.H * 0.2);
-    const thick = Math.min(rowH * 0.62, frame.H * 0.11);
-    const zeroX = barX0 + ((0 - low) / span) * (barX1 - barX0);
-    const startY = top + (room - rowH * bars.length) / 2;
-    bars.forEach((bar, i) => {
-      const cy = startY + rowH * (i + 0.5);
-      const lines = names[i];
-      const base =
-        cy - ((lines.length - 1) * labelSize * 1.12) / 2 + labelSize * 0.35;
-      const lbox = linesBox(lines, x0, base, labelSize, 'start', 1.12, 600);
-      book.add(bar.labelId, { box: lbox, role: 'ink' });
-      out.push(
-        textSvg(
-          lines,
-          x0,
-          base,
-          {
-            size: labelSize,
-            fill: paint.ink,
-            family: paint.text,
-            weight: 600,
-            leading: 1.12,
-          },
-          bar.labelId,
-        ),
-      );
-      const end = barX0 + ((bar.value - low) / span) * (barX1 - barX0);
-      const bx = Math.min(zeroX, end);
-      const bw = Math.max(3, Math.abs(end - zeroX));
-      const box: ShotBox = [bx, cy - thick / 2, bw, thick];
-      barBoxes.push(box);
-      book.add(bar.id, {
-        box,
-        value: bar.value,
-        role: bar.colour.role,
-        pivot: bar.value >= 0 ? [0, 0.5] : [1, 0.5],
-      });
-      marks.push(
-        partSvg(
-          bar.id,
-          `<rect x="${r1(bx)}" y="${r1(cy - thick / 2)}" width="${r1(bw)}" height="${r1(thick)}" rx="${r1(Math.min(thick * 0.1, 8))}"/>`,
-          ` fill="${bar.colour.colour}"`,
-        ),
-      );
-      // Its value just past its end: right of a bar that grows right, left of one that grows left.
-      const right = bar.value >= 0;
-      const vx = right ? bx + bw + floor * 0.3 : bx - floor * 0.3;
-      const vy = cy + valueSize * 0.35;
-      const anchor = right ? 'start' : 'end';
-      const vbox = linesBox(
+    // Its value just past its end: right of a bar that grows right, left of one that grows left.
+    const right = bar.value >= 0;
+    const vx = right ? bx + bw + floor * 0.3 : bx - floor * 0.3;
+    const vy = cy + valueSize * 0.35;
+    const anchor = right ? 'start' : 'end';
+    const vbox = linesBox(
+      [values[i]],
+      vx,
+      vy,
+      valueSize,
+      anchor,
+      1.15,
+      700,
+      'display',
+      paint.figure,
+    );
+    book.add(bar.valueId, { box: vbox, value: bar.value, role: 'ink' });
+    out.push(
+      textSvg(
         [values[i]],
         vx,
         vy,
-        valueSize,
-        anchor,
-        1.15,
-        700,
-        'display',
-        paint.figure,
-      );
-      book.add(bar.valueId, { box: vbox, value: bar.value, role: 'ink' });
-      out.push(
-        textSvg(
-          [values[i]],
-          vx,
-          vy,
-          {
-            size: valueSize,
-            fill: paint.ink,
-            family: paint.display,
-            anchor,
-            tabular: true,
-          },
-          bar.valueId,
-        ),
-      );
-    });
-    bottom = startY + rowH * bars.length;
-    const axisPath = `M${r1(zeroX)} ${r1(startY)}V${r1(bottom)}`;
-    book.add('axis', {
-      box: [zeroX - 2, startY, 4, bottom - startY],
-      path: axisPath,
-      role: 'ink',
-    });
-    out.push(
-      partSvg(
-        'axis',
-        `<path d="${axisPath}" stroke="${paint.ink}" stroke-width="${r1(Math.max(3, frame.H * 0.004))}" stroke-linecap="round"/>`,
+        {
+          size: valueSize,
+          fill: paint.ink,
+          family: paint.display,
+          anchor,
+          tabular: true,
+        },
+        bar.valueId,
       ),
     );
-    if (read.source)
-      out.push(
-        sourceSvg(
-          book,
-          paint,
-          frame,
-          read.source,
-          x0,
-          text.y1 - frame.size.chip * 0.35,
-          text.x1 - x0,
-        ).svg,
-      );
-  }
+  });
+  bottom = startY + rowH * bars.length;
+  const axisPath = `M${r1(zeroX)} ${r1(startY)}V${r1(bottom)}`;
+  book.add('axis', {
+    box: [zeroX - 2, startY, 4, bottom - startY],
+    path: axisPath,
+    role: 'ink',
+  });
+  out.push(
+    partSvg(
+      'axis',
+      `<path d="${axisPath}" stroke="${paint.ink}" stroke-width="${r1(Math.max(3, frame.H * 0.004))}" stroke-linecap="round"/>`,
+    ),
+  );
+  if (read.source)
+    out.push(
+      sourceSvg(
+        book,
+        paint,
+        frame,
+        read.source,
+        x0,
+        text.y1 - frame.size.chip * 0.35,
+        text.x1 - x0,
+      ).svg,
+    );
   const all = union(...barBoxes);
   book.add('bars', { box: all, pivot: [0, 0.5] });
   out.unshift(partSvg('bars', marks.join('')));
@@ -680,7 +569,13 @@ function spreadNames(
  * foot as many as fit. The baseline is drawn in ink only where it is
  * zero: a line need not start from zero, and a heavy foot would say it did.
  */
-function lineChart(
+/**
+ * A tall frame's line: where it starts and where it ends up written over
+ * it, in the words' area, each over its own end; the line itself large
+ * below, running down past the words (a picture may), with faint lines
+ * across and no words under the safe band.
+ */
+function tallLine(
   frame: Frame,
   paint: Paint,
   book: PartBook,
@@ -689,7 +584,204 @@ function lineChart(
   withUnit: boolean,
 ): { svg: string; focal: ShotBox } {
   const { text } = frame;
-  const tall = frame.shape === 'tall';
+  const floor = frame.size.label;
+  const out: string[] = [];
+  const n = bars.length;
+  const colour = bars[0].colour;
+  const unitRoom =
+    read.unit && !withUnit && !attachedUnit(read.unit) ? floor * 1.5 : 0;
+  if (unitRoom)
+    out.push(
+      unitLine(
+        book,
+        paint,
+        frame,
+        read.unit!,
+        text.x0,
+        text.y0 + floor * ASCENT,
+      ).svg,
+    );
+  // The ends, written over their own ends of the line: when, then how much.
+  const valueSize = frame.size.title;
+  const headTop = text.y0 + unitRoom;
+  const ends: [number, 'start' | 'end', number][] = [
+    [0, 'start', text.x0],
+    [n - 1, 'end', text.x1],
+  ];
+  for (const [i, anchor, x] of ends) {
+    const bar = bars[i];
+    const ly = headTop + floor * ASCENT;
+    const lbox = linesBox([bar.label], x, ly, floor, anchor, 1.15, 600);
+    book.add(bar.labelId, { box: lbox, role: 'muted' });
+    out.push(
+      textSvg(
+        [bar.label],
+        x,
+        ly,
+        {
+          size: floor,
+          fill: paint.muted,
+          family: paint.text,
+          weight: 600,
+          anchor,
+        },
+        bar.labelId,
+      ),
+    );
+    const value = shown(bar.value, read.unit, withUnit);
+    const vy = headTop + floor * 1.15 + valueSize * ASCENT;
+    const vbox = linesBox(
+      [value],
+      x,
+      vy,
+      valueSize,
+      anchor,
+      1.15,
+      700,
+      'display',
+      paint.figure,
+    );
+    book.add(bar.valueId, { box: vbox, value: bar.value, role: colour.role });
+    out.push(
+      textSvg(
+        [value],
+        x,
+        vy,
+        {
+          size: valueSize,
+          fill: colour.colour,
+          family: paint.display,
+          anchor,
+          tabular: true,
+        },
+        bar.valueId,
+      ),
+    );
+  }
+  const headH = floor * 1.15 + valueSize * 1.15;
+  const sourceH = read.source ? frame.size.chip * 2.4 : 0;
+  if (read.source)
+    out.push(
+      sourceSvg(
+        book,
+        paint,
+        frame,
+        read.source,
+        text.x0,
+        headTop + headH + frame.size.chip * 1.2,
+        text.x1 - text.x0,
+      ).svg,
+    );
+  // The line, large, from under the words down the frame.
+  const values = bars.map((b) => b.value);
+  const rawLow = Math.min(...values);
+  const rawHigh = Math.max(...values);
+  const pad = (rawHigh - rawLow || Math.abs(rawHigh) || 1) * 0.1;
+  let low = rawLow - pad;
+  let high = rawHigh + pad;
+  if (low > 0 && low < (high - low) * 0.25) low = 0;
+  if (high < 0 && -high < (high - low) * 0.25) high = 0;
+  const grid = ticks(low, high, 4).filter((v) => v >= low && v <= high);
+  if (grid.length && grid[0] <= rawLow) low = grid[0];
+  if (grid.length && grid[grid.length - 1] >= rawHigh)
+    high = grid[grid.length - 1];
+  const stroke = Math.max(5, Math.min(frame.W, frame.H) * 0.0075);
+  const dot = stroke * 1.5;
+  const x0 = text.x0 + dot;
+  const x1 = text.x1 - dot;
+  const top = headTop + headH + sourceH + floor * 0.8;
+  const bottom = frame.H * 0.9;
+  const px = (i: number) => x0 + ((x1 - x0) * i) / (n - 1);
+  const py = (v: number) =>
+    bottom - ((v - low) / (high - low)) * (bottom - top);
+  book.add('grid', { box: [x0, top, x1 - x0, bottom - top], role: 'muted' });
+  out.push(
+    partSvg(
+      'grid',
+      grid
+        .filter((v) => v !== low && v !== 0)
+        .map(
+          (v) =>
+            `<path d="M${r1(x0)} ${r1(py(v))}H${r1(x1)}" stroke="${paint.rule}" stroke-width="2"/>`,
+        )
+        .join(''),
+    ),
+  );
+  const zeroIn = low <= 0 && high >= 0;
+  const axisY = zeroIn ? py(0) : bottom;
+  const axisPath = `M${r1(x0)} ${r1(axisY)}H${r1(x1)}`;
+  book.add('axis', {
+    box: [x0, axisY - 2, x1 - x0, 4],
+    path: axisPath,
+    role: zeroIn ? 'ink' : 'muted',
+  });
+  out.push(
+    partSvg(
+      'axis',
+      `<path d="${axisPath}" stroke="${zeroIn ? paint.ink : paint.rule}" stroke-width="3" stroke-linecap="round"/>`,
+    ),
+  );
+  const points = bars.map((b, i) => [px(i), py(b.value)] as const);
+  const path = points
+    .map(([x, y], i) => `${i ? 'L' : 'M'}${r1(x)} ${r1(y)}`)
+    .join('');
+  book.add('line', {
+    box: union(...points.map(([x, y]): ShotBox => [x, y, 0, 0])),
+    path,
+    role: colour.role,
+  });
+  out.push(
+    partSvg(
+      'line',
+      `<path d="${path}" fill="none" stroke-width="${r1(stroke)}" stroke-linecap="round" stroke-linejoin="round"/>`,
+      ` stroke="${colour.colour}"`,
+    ),
+  );
+  bars.forEach((bar, i) => {
+    const [x, y] = points[i];
+    book.add(bar.id, {
+      box: [x - dot, y - dot, dot * 2, dot * 2],
+      value: bar.value,
+      role: colour.role,
+    });
+    out.push(
+      partSvg(
+        bar.id,
+        `<circle cx="${r1(x)}" cy="${r1(y)}" r="${r1(dot)}" stroke="${paint.paper}" stroke-width="${r1(stroke * 0.6)}"/>`,
+        ` fill="${colour.colour}"`,
+      ),
+    );
+  });
+  // A faint line down from each end's words to its point.
+  for (const [i] of ends) {
+    const [x, y] = points[i];
+    const from = headTop + headH + sourceH + floor * 0.2;
+    if (y - dot * 2 - from > floor)
+      out.push(
+        `<path d="M${r1(x)} ${r1(from)}V${r1(y - dot * 2)}" stroke="${paint.rule}" stroke-width="3" stroke-dasharray="${r1(floor * 0.12)} ${r1(floor * 0.2)}" stroke-linecap="round"/>`,
+      );
+  }
+  return {
+    svg: out.join(''),
+    focal: union(
+      [x0, top, x1 - x0, bottom - top],
+      [text.x0, headTop, text.x1 - text.x0, headH],
+    ),
+  };
+}
+
+function lineChart(
+  frame: Frame,
+  paint: Paint,
+  book: PartBook,
+  read: ChartRead,
+  bars: Bar[],
+  withUnit: boolean,
+): { svg: string; focal: ShotBox } {
+  if (frame.shape === 'tall')
+    return tallLine(frame, paint, book, read, bars, withUnit);
+  const { text } = frame;
+  const tall = false;
   const out: string[] = [];
   const floor = frame.size.label;
   const values = bars.map((b) => b.value);
@@ -967,6 +1059,347 @@ function lineChart(
   };
 }
 
+/**
+ * A tall frame's few bars: columns rising from a baseline low in the
+ * frame (the picture may run under the captions and the platform's own
+ * words), each one's value and name in a row across the top of the words'
+ * area, a faint line down from each to its column. Every word stays in
+ * the safe band; the picture fills the frame's height.
+ */
+function tallColumns(
+  frame: Frame,
+  paint: Paint,
+  book: PartBook,
+  read: ChartRead,
+  bars: Bar[],
+  withUnit: boolean,
+): { svg: string; focal: ShotBox } {
+  const { text } = frame;
+  const floor = frame.size.label;
+  const out: string[] = [];
+  const n = bars.length;
+  const slot = (text.x1 - text.x0) / n;
+  const unitRoom =
+    read.unit && !withUnit && !attachedUnit(read.unit) ? floor * 1.5 : 0;
+  if (unitRoom)
+    out.push(
+      unitLine(
+        book,
+        paint,
+        frame,
+        read.unit!,
+        text.x0,
+        text.y0 + floor * ASCENT,
+      ).svg,
+    );
+  const values = bars.map((b) => shown(b.value, read.unit, withUnit));
+  let valueSize = floor;
+  for (let s = frame.size.title * 1.2; s >= floor; s -= 1)
+    if (values.every((v) => figuresWidth(v, s, paint.figure) <= slot * 0.92)) {
+      valueSize = r1(s);
+      break;
+    }
+  const names = bars.map((b) =>
+    fit(b.label, slot * 0.92, floor, floor, 2, 600),
+  );
+  const nameH = Math.max(...names.map((nm) => nm.lines.length)) * floor * 1.12;
+  const headTop = text.y0 + unitRoom;
+  const headH = valueSize * 1.12 + nameH;
+  const sourceH = read.source ? frame.size.chip * 2.4 : 0;
+  // The columns: from a baseline low in the frame up to just under the header.
+  const base = frame.H - frame.H * 0.1;
+  const top = headTop + headH + sourceH + floor * 0.9;
+  const { low, high } = scaleOf(bars.map((b) => b.value));
+  const span = high - low;
+  const zero = base - ((0 - low) / span) * (base - top);
+  const y = (v: number) => zero - (v / span) * (base - top);
+  const barW = Math.min(slot * 0.62, frame.W * 0.2);
+  const marks: string[] = [];
+  const boxes: ShotBox[] = [];
+  bars.forEach((bar, i) => {
+    const cx = text.x0 + slot * (i + 0.5);
+    const yv = y(bar.value);
+    const box: ShotBox = [
+      cx - barW / 2,
+      Math.min(yv, zero),
+      barW,
+      Math.max(3, Math.abs(zero - yv)),
+    ];
+    boxes.push(box);
+    book.add(bar.id, {
+      box,
+      value: bar.value,
+      role: bar.colour.role,
+      pivot: bar.value >= 0 ? [0.5, 1] : [0.5, 0],
+    });
+    marks.push(
+      partSvg(
+        bar.id,
+        `<rect x="${r1(box[0])}" y="${r1(box[1])}" width="${r1(barW)}" height="${r1(box[3])}" rx="${r1(Math.min(barW * 0.06, 8))}"/>`,
+        ` fill="${bar.colour.colour}"`,
+      ),
+    );
+    // Its value and name in the row across the top.
+    const vy = headTop + valueSize * ASCENT;
+    const vbox = linesBox(
+      [values[i]],
+      cx,
+      vy,
+      valueSize,
+      'middle',
+      1.15,
+      700,
+      'display',
+      paint.figure,
+    );
+    book.add(bar.valueId, { box: vbox, value: bar.value, role: 'ink' });
+    out.push(
+      textSvg(
+        [values[i]],
+        cx,
+        vy,
+        {
+          size: valueSize,
+          fill: paint.ink,
+          family: paint.display,
+          anchor: 'middle',
+          tabular: true,
+        },
+        bar.valueId,
+      ),
+    );
+    const ny = headTop + valueSize * 1.12 + floor * ASCENT;
+    const nbox = linesBox(names[i].lines, cx, ny, floor, 'middle', 1.12, 600);
+    book.add(bar.labelId, { box: nbox, role: 'ink' });
+    out.push(
+      textSvg(
+        names[i].lines,
+        cx,
+        ny,
+        {
+          size: floor,
+          fill: paint.ink,
+          family: paint.text,
+          weight: 600,
+          anchor: 'middle',
+          leading: 1.12,
+        },
+        bar.labelId,
+      ),
+    );
+    // A faint line from its name down to its column, where they stand apart.
+    const from = headTop + headH + sourceH + floor * 0.2;
+    if (box[1] - from > floor)
+      out.push(
+        `<path d="M${r1(cx)} ${r1(from)}V${r1(box[1] - floor * 0.25)}" stroke="${paint.rule}" stroke-width="3" stroke-dasharray="${r1(floor * 0.12)} ${r1(floor * 0.2)}" stroke-linecap="round"/>`,
+      );
+  });
+  const all = union(...boxes);
+  book.add('bars', { box: all, pivot: [0.5, 1] });
+  out.unshift(partSvg('bars', marks.join('')));
+  const axisPath = `M${r1(text.x0)} ${r1(zero)}H${r1(text.x1)}`;
+  book.add('axis', {
+    box: [text.x0, zero - 2, text.x1 - text.x0, 4],
+    path: axisPath,
+    role: 'ink',
+  });
+  out.push(
+    partSvg(
+      'axis',
+      `<path d="${axisPath}" stroke="${paint.ink}" stroke-width="${r1(Math.max(3, floor * 0.07))}" stroke-linecap="round"/>`,
+    ),
+  );
+  if (read.source)
+    out.push(
+      sourceSvg(
+        book,
+        paint,
+        frame,
+        read.source,
+        text.x0,
+        headTop + headH + frame.size.chip * 1.4,
+        text.x1 - text.x0,
+      ).svg,
+    );
+  return {
+    svg: out.join(''),
+    focal: union(all, [text.x0, headTop, text.x1 - text.x0, headH]),
+  };
+}
+
+/**
+ * A tall frame's many bars: a row each inside the words' area, its name
+ * and value in a column at the left and its bar running on to the
+ * frame's edge (the picture may run past the words).
+ */
+function tallRows(
+  frame: Frame,
+  paint: Paint,
+  book: PartBook,
+  read: ChartRead,
+  bars: Bar[],
+  withUnit: boolean,
+): { svg: string; focal: ShotBox } {
+  const { text } = frame;
+  const floor = frame.size.label;
+  const out: string[] = [];
+  const unitRoom =
+    read.unit && !withUnit && !attachedUnit(read.unit) ? floor * 1.5 : 0;
+  if (unitRoom)
+    out.push(
+      unitLine(
+        book,
+        paint,
+        frame,
+        read.unit!,
+        text.x0,
+        text.y0 + floor * ASCENT,
+      ).svg,
+    );
+  const values = bars.map((b) => shown(b.value, read.unit, withUnit));
+  const valueW = Math.max(
+    ...values.map((v) => figuresWidth(v, floor, paint.figure)),
+  );
+  const width = text.x1 - text.x0;
+  const nameRoom = Math.min(width * 0.5, width - valueW - floor * 3);
+  const names = bars.map((b) => fit(b.label, nameRoom, floor, floor, 2, 600));
+  const nameW = Math.max(
+    ...names.map((nm) =>
+      Math.max(...nm.lines.map((l) => wordsWidth(l, floor, 600))),
+    ),
+  );
+  const valueX = text.x0 + Math.min(nameRoom, nameW) + floor * 0.5 + valueW;
+  const barX0 = valueX + floor * 0.5;
+  const barX1 = frame.pic.x1;
+  const sourceH = read.source ? frame.size.chip * 2.4 : 0;
+  const band = text.y1 - text.y0 - unitRoom - sourceH;
+  const heights = names.map((nm) => nm.lines.length * floor * 1.12);
+  const used = heights.reduce((a, b) => a + b, 0);
+  const gap = Math.max(
+    floor * 0.25,
+    Math.min(floor * 0.9, (band - used) / Math.max(1, bars.length)),
+  );
+  const { low, high } = scaleOf(bars.map((b) => b.value));
+  const span = high - low;
+  const zeroX = barX0 + ((0 - low) / span) * (barX1 - barX0);
+  const marks: string[] = [];
+  const boxes: ShotBox[] = [];
+  let y = text.y0 + unitRoom + gap / 2;
+  bars.forEach((bar, i) => {
+    const h = heights[i];
+    const base = y + floor * ASCENT;
+    const lbox = linesBox(
+      names[i].lines,
+      text.x0,
+      base,
+      floor,
+      'start',
+      1.12,
+      600,
+    );
+    book.add(bar.labelId, { box: lbox, role: 'ink' });
+    out.push(
+      textSvg(
+        names[i].lines,
+        text.x0,
+        base,
+        {
+          size: floor,
+          fill: paint.ink,
+          family: paint.text,
+          weight: 600,
+          leading: 1.12,
+        },
+        bar.labelId,
+      ),
+    );
+    const vbox = linesBox(
+      [values[i]],
+      valueX,
+      base,
+      floor,
+      'end',
+      1.15,
+      700,
+      'display',
+      paint.figure,
+    );
+    book.add(bar.valueId, { box: vbox, value: bar.value, role: 'ink' });
+    out.push(
+      textSvg(
+        [values[i]],
+        valueX,
+        base,
+        {
+          size: floor,
+          fill: paint.ink,
+          family: paint.display,
+          anchor: 'end',
+          tabular: true,
+        },
+        bar.valueId,
+      ),
+    );
+    // The bar level with the name's first line, as thick as the line.
+    const thick = floor * 0.8;
+    const by = base - floor * 0.66;
+    const end = barX0 + ((bar.value - low) / span) * (barX1 - barX0);
+    const box: ShotBox = [
+      Math.min(zeroX, end),
+      by,
+      Math.max(3, Math.abs(end - zeroX)),
+      thick,
+    ];
+    boxes.push(box);
+    book.add(bar.id, {
+      box,
+      value: bar.value,
+      role: bar.colour.role,
+      pivot: bar.value >= 0 ? [0, 0.5] : [1, 0.5],
+    });
+    marks.push(
+      partSvg(
+        bar.id,
+        `<rect x="${r1(box[0])}" y="${r1(by)}" width="${r1(box[2])}" height="${r1(thick)}" rx="${r1(thick * 0.12)}"/>`,
+        ` fill="${bar.colour.colour}"`,
+      ),
+    );
+    y += h + gap;
+  });
+  const all = union(...boxes);
+  book.add('bars', { box: all, pivot: [0, 0.5] });
+  out.unshift(partSvg('bars', marks.join('')));
+  const axisPath = `M${r1(zeroX)} ${r1(all[1] - floor * 0.3)}V${r1(all[1] + all[3] + floor * 0.3)}`;
+  book.add('axis', {
+    box: [zeroX - 2, all[1] - floor * 0.3, 4, all[3] + floor * 0.6],
+    path: axisPath,
+    role: 'ink',
+  });
+  out.push(
+    partSvg(
+      'axis',
+      `<path d="${axisPath}" stroke="${low < 0 ? paint.ink : paint.rule}" stroke-width="3" stroke-linecap="round"/>`,
+    ),
+  );
+  if (read.source)
+    out.push(
+      sourceSvg(
+        book,
+        paint,
+        frame,
+        read.source,
+        text.x0,
+        Math.min(text.y1 - frame.size.chip * 0.35, y + frame.size.chip * 0.8),
+        width,
+      ).svg,
+    );
+  const words = union(
+    ...bars.map((b) => book.parts[b.labelId].box),
+    ...bars.map((b) => book.parts[b.valueId].box),
+  );
+  return { svg: out.join(''), focal: union(all, words) };
+}
+
 /** A chart drawn to fill the frame, or null with fewer than two numbers. */
 export function barsAsset(
   raw: Record<string, unknown>,
@@ -996,7 +1429,28 @@ export function barsAsset(
     const drawn = lineChart(frame, paint, book, read, bars, withUnit);
     return assetOf(frame, paint, drawn.svg, book, drawn.focal);
   }
-  const labels = shape === 'wide' ? columnLabels(frame, bars) : null;
+  if (shape === 'tall') {
+    // A tall frame: a few bars as columns under a row of their words, more as rows.
+    const roomy = (frame.text.x1 - frame.text.x0) / bars.length;
+    const few =
+      bars.length <= 4 &&
+      bars.every((b) => wrap(b.label, roomy * 0.92, frame.size.label, 2, 600));
+    const valuesFit = (withUnit: boolean) =>
+      bars.every(
+        (b) =>
+          figuresWidth(
+            shown(b.value, read.unit, withUnit),
+            frame.size.label,
+            paint.figure,
+          ) <= (few ? roomy * 0.92 : frame.W * 0.3),
+      );
+    const withUnit = attached || valuesFit(true);
+    const drawn = few
+      ? tallColumns(frame, paint, book, read, bars, withUnit)
+      : tallRows(frame, paint, book, read, bars, withUnit);
+    return assetOf(frame, paint, drawn.svg, book, drawn.focal);
+  }
+  const labels = columnLabels(frame, bars);
   if (labels && bars.length <= 6) {
     const slot = (frame.text.x1 - frame.text.x0 - frame.W * 0.04) / bars.length;
     const fitsAt = (size: number, withUnit: boolean) =>
@@ -1029,7 +1483,7 @@ export function barsAsset(
     );
     return assetOf(frame, paint, drawn.svg, book, drawn.focal);
   }
-  const valueRoom = shape === 'tall' ? frame.W * 0.36 : frame.W * 0.2;
+  const valueRoom = frame.W * 0.2;
   const withUnit =
     attached ||
     bars.every(
@@ -1041,13 +1495,7 @@ export function barsAsset(
         ) <= valueRoom,
     );
   const drawn = rows(frame, paint, book, read, bars, withUnit);
-  // A tall chart longer than the words' area runs on down: the camera travels down it.
-  const { text } = frame;
-  const box: ShotBox =
-    shape === 'tall' && drawn.bottom > text.y1
-      ? [0, 0, frame.W, Math.ceil(drawn.bottom + (frame.H - text.y1))]
-      : [0, 0, frame.W, frame.H];
-  const focal: ShotBox =
-    box[3] > frame.H ? [0, 0, frame.W, frame.H] : drawn.focal;
+  const box: ShotBox = [0, 0, frame.W, frame.H];
+  const focal = drawn.focal;
   return assetOf(frame, paint, drawn.svg, book, focal, box);
 }

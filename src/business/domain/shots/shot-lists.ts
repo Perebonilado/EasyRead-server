@@ -167,6 +167,34 @@ export const SET_TOWNS: readonly NonNullable<PlanSetScene['town']>[] = [
   'town',
   'city',
 ];
+/** What a drawn set's place is for, with when the board names it. */
+export const SET_PLACE_USES: Record<NonNullable<PlanSetScene['place']>, string> = {
+  open: 'open land, a village or a town as its town says',
+  farm: 'a farm: barn, silo, fields',
+  port: 'a port across the water: cranes, warehouses, containers',
+  industry: 'a works and its terraces, chimneys smoking',
+  market: 'market stalls before houses',
+  city: 'a city of towers and blocks',
+  oilfield: 'an oil field: pump jacks and tanks',
+  'assembly-hall': 'inside an assembly or parliament: rows round the well, the chair on its dais',
+  'ceremony-ground': 'a ceremony ground: a stand with bunting, a flagpole, floodlights, chairs',
+  display: 'a clean studio backdrop for a machine or a thing shown on its own, big (a jet engine cut open, a pump, a ballot)',
+};
+export const SET_PLACES = Object.keys(SET_PLACE_USES) as NonNullable<PlanSetScene['place']>[];
+/** The states a drawn set's light can change to while a shot is on. */
+export const SET_STATES: readonly NonNullable<PlanSetScene['becomes']>['state'][] = [
+  'day',
+  'dusk',
+  'night',
+  'dawn',
+  'lights-on',
+];
+export const SET_CLIMATES: readonly NonNullable<PlanSetScene['climate']>[] = [
+  'temperate',
+  'arid',
+  'tropical',
+  'cold',
+];
 
 /** A push's or a pull's size. */
 export const AMOUNTS = ['small', 'medium', 'large'] as const;

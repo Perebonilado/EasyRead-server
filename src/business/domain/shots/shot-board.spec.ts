@@ -224,7 +224,7 @@ describe('the kit on the board', () => {
     expect(parts).toContain('The kit (pieces that may stand');
     expect(parts).toMatch(/- people\.crowd: .*Settings: .*count/);
     expect(parts).toMatch(/- vehicle\.train: /);
-    // The illustrated look: its own characters, never the silhouettes.
+    // The illustrated look: its own characters, never the silhouettes (the things are drawn in both looks).
     const other = shotParts({ ...input, look: 'illustrated' }, registry).join(
       '\n\n',
     );
@@ -233,6 +233,8 @@ describe('the kit on the board', () => {
     expect(other).not.toMatch(/- people\./);
     expect(parts).not.toMatch(/- character\./);
     expect(other).not.toContain('- people.crowd:');
+    expect(other).toMatch(/- building: .*Settings: kind/);
+    expect(other).toMatch(/- machine\.turbofan: /);
   });
 
   it('stands a counted crowd where the line says people gathered, its count the line’s own', async () => {

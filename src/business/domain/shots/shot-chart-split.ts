@@ -37,6 +37,7 @@ import {
   slugOf,
   textSvg,
   union,
+  wordsWithin,
 } from './shot-chart-kit';
 
 export function splitAsset(
@@ -44,7 +45,13 @@ export function splitAsset(
   look: ShotLookDto,
   shape: FilmShape,
 ): ShotSvgAssetDto | null {
-  const spec = readSplit(bodyOf('split', raw) as unknown as SplitDraft);
+  // Its words kept whole within the lengths the reader keeps them to.
+  const spec = readSplit(
+    wordsWithin(bodyOf('split', raw) as unknown as SplitDraft, {
+      label: 28,
+      '*': 32,
+    }),
+  );
   if (!spec) return null;
   const frame = frameOf(shape);
   const paint = paintOf(look);
@@ -70,12 +77,12 @@ export function splitAsset(
   const pad = floor * 0.8;
   // Each side's words laid out for its half's width.
   const halfW = tall ? text.x1 - text.x0 : (text.x1 - text.x0) / 2 - pad * 1.5;
-  const layoutOf = (i: 0 | 1) => {
+  const layoutOf = (i: 0 | 1, largest = frame.size.title * 1.2) => {
     const side = spec.sides[i];
     const head = fitBalanced(
       side.label,
       halfW,
-      frame.size.title * 1.2,
+      largest,
       floor,
       2,
       700,
@@ -94,7 +101,7 @@ export function splitAsset(
     );
     const headH = head.lines.length * head.size * 1.08;
     const itemsH = items.reduce(
-      (h, it) => h + it.lines.length * floor * 1.15 + floor * 0.5,
+      (h, it) => h + it.lines.length * floor * 1.15 + floor * 0.3,
       0,
     );
     return {
@@ -104,19 +111,29 @@ export function splitAsset(
       height: headH + (items.length ? floor * 0.7 + itemsH : 0),
     };
   };
-  const laid = [layoutOf(0), layoutOf(1)];
+  // A tall frame's two sides one over the other, both inside the safe
+  // band: their names a little smaller where both will not fit at a title's size.
+  const midGap = pad * 1.8;
+  const bandH = text.y1 - text.y0;
+  let laid = [layoutOf(0), layoutOf(1)];
+  if (tall && laid[0].height + laid[1].height + midGap > bandH)
+    laid = [layoutOf(0, floor * 1.15), layoutOf(1, floor * 1.15)];
   const ids = spec.sides.map((side, i) => ({
     side: i === 0 ? 'side-a' : 'side-b',
     label: book.id(`label-${slugOf(side.label) || String(i + 1)}`),
   }));
   // The halves: full bleed, left and right, or top and bottom.
+  // A tall frame's line between them where the first side's words end
+  // (the two together in the middle of the band), each side's wash running
+  // on to its edge of the frame.
+  const spare = Math.max(0, bandH - laid[0].height - laid[1].height - midGap);
   const mid = tall
-    ? Math.max(text.y0 + laid[0].height + pad * 2.5, frame.H * 0.42)
+    ? text.y0 + spare * 0.35 + laid[0].height + midGap / 2
     : frame.W / 2;
   const halves: ShotBox[] = tall
     ? [
         [0, 0, frame.W, mid],
-        [0, mid, frame.W, Math.max(frame.H - mid, laid[1].height + pad * 4)],
+        [0, mid, frame.W, frame.H - mid],
       ]
     : [
         [0, 0, mid, frame.H],
@@ -131,8 +148,13 @@ export function splitAsset(
     const [hx, hy, hw, hh] = halves[i];
     const x = tall ? text.x0 : i === 0 ? text.x0 : mid + pad * 1.5;
     // The words stand together in the middle of their half's words area.
-    const areaTop = tall ? (i === 0 ? text.y0 : mid + pad * 1.5) : text.y0;
-    const areaBottom = tall ? (i === 0 ? mid - pad : hy + hh - pad) : text.y1;
+    // A tall frame's first side ends at the line, its second starts from it.
+    const areaTop = tall
+      ? i === 0
+        ? mid - midGap / 2 - height
+        : mid + midGap / 2
+      : text.y0;
+    const areaBottom = tall ? (i === 0 ? mid - midGap / 2 : text.y1) : text.y1;
     const top = Math.max(
       areaTop,
       areaTop + (areaBottom - areaTop - height) * (tall ? 0 : 0.45),
@@ -192,7 +214,7 @@ export function splitAsset(
             }),
         ),
       );
-      y = tbox[1] + tbox[3] + floor * 0.5;
+      y = tbox[1] + tbox[3] + floor * 0.3;
     });
     book.add(ids[i].side, { box: halves[i], role: colour.role });
     out.push(partSvg(ids[i].side, inner.join('')));

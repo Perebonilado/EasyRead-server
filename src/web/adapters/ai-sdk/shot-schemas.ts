@@ -23,7 +23,10 @@ import {
   INFO_RECIPES,
   LIFE_EFFECTS,
   SET_KINDS,
+  SET_CLIMATES,
   SET_LANDS,
+  SET_PLACES,
+  SET_STATES,
   SET_TIMES,
   SET_TOWNS,
   SET_WEATHERS,
@@ -129,6 +132,13 @@ export const shotSetSchema = z.object({
   weather: oneOf(SET_WEATHERS),
   town: oneOf(SET_TOWNS),
   era: maybe(),
+  place: oneOf(SET_PLACES),
+  climate: oneOf(SET_CLIMATES),
+  // The light changing while the shot is on, and the exact words it changes on.
+  becomes: oneOf(SET_STATES),
+  becomesOn: maybe(),
+  // It stands for a real event: it carries an "Illustration" tag.
+  illustration: z.boolean().nullable().catch(null),
 });
 
 export const shotInfoSchema = z.object({

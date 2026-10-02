@@ -206,7 +206,11 @@ describe('the picture desk', () => {
     expect(sources.calls.filter((c) => c.startsWith('fetch:')).length).toBe(
       fetched + 1,
     );
-    expect(storage.files.size).toBe(1);
+    // The picture and its depth map, both made again.
+    expect([...storage.files.keys()].sort()).toEqual([
+      expect.stringMatching(/-depth\.png$/u) as unknown as string,
+      expect.stringMatching(/[0-9a-f]\.jpg$/u) as unknown as string,
+    ]);
   });
 
   it('stores two copies with the same bytes once', async () => {

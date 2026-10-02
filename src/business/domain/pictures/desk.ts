@@ -34,6 +34,7 @@ import type {
 import {
   chipOf,
   creditOf,
+  institutionOf,
   lifeOf,
   roleWords,
   sourceOf,
@@ -63,7 +64,8 @@ import type {
 export interface DeskDeps {
   sources: PictureSourcesPort;
   cache: PictureCacheRepository;
-  storage: Pick<StoragePort, 'put' | 'size'>;
+  storage: Pick<StoragePort, 'put' | 'size'> &
+    Partial<Pick<StoragePort, 'get'>>;
   pixels: PicturePixelsPort;
   /** Depth Anything V2 Small; absent or null, a picture is one plane. */
   depth?: DepthPort | null;
@@ -124,6 +126,20 @@ export function lookupKey(query: PictureQuery): string {
 }
 
 const extOf = (mime: string) => (mime === 'image/png' ? 'png' : 'jpg');
+
+/** How many of a question's years the desk looks through, a request or two each. */
+const YEARS_LOOKED = 6;
+
+/** The years to look through: all of them when few, else spread from first to last. */
+export function yearsToLook(years: readonly number[]): number[] {
+  const sorted = [...new Set(years)].sort((a, b) => a - b);
+  if (sorted.length <= YEARS_LOOKED) return sorted;
+  return Array.from(
+    { length: YEARS_LOOKED },
+    (_, i) =>
+      sorted[Math.round((i * (sorted.length - 1)) / (YEARS_LOOKED - 1))],
+  );
+}
 
 export class PictureDesk {
   private readonly now: () => Date;
@@ -189,11 +205,24 @@ export class PictureDesk {
           width,
         )
       : [];
-    const words = [
-      query.name,
-      ...[query.place ?? []].flat().slice(0, 1),
-      ...(query.years?.length ? [String(Math.min(...query.years))] : []),
-    ].join(' ');
+    // A place in its years: Commons files each year's pictures of a
+    // country under "<year> in <country>"; those that name the place are
+    // of it, then. Then a search by its words, its country with it.
+    const country = [query.place ?? []].flat()[0];
+    if (country && query.years?.length && query.kind !== 'document')
+      for (const year of yearsToLook(query.years))
+        files.push(
+          ...(await this.safely(
+            () =>
+              this.deps.sources.commonsCategory(
+                `${year} in ${country}`,
+                FROM_CATEGORY,
+                width,
+              ),
+            [],
+          )),
+        );
+    const words = [query.name, ...(country ? [country] : [])].join(' ');
     files.push(
       ...(await this.safely(
         () => this.deps.sources.commonsSearch(words, FROM_SEARCH, width),
@@ -330,7 +359,12 @@ export class PictureDesk {
       if (Math.max(file.width, file.height) < LEAST_PX[use]) continue;
       const focal = focalOf(file, qid);
       const { score, terms } = scoreOf({
-        file: { ...file, quality: file.quality ?? qualityOf(file.categories) },
+        file: {
+          ...file,
+          quality: file.quality ?? qualityOf(file.categories),
+          // An archive's or an agency's file ranks above a crowd upload.
+          institutional: file.institutional ?? institutionOf(file) !== null,
+        },
         use,
         tier: licence.tier,
         focal,
@@ -418,7 +452,7 @@ export class PictureDesk {
       !had.refusedReason &&
       (await this.stored(had.storageKey))
     ) {
-      const kept = await this.withDepth(had, opts.depth === true);
+      const kept = await this.withDepth(had, opts.depth ?? true);
       return this.recordOf(kept, candidate, opts);
     }
     const from =
@@ -489,7 +523,7 @@ export class PictureDesk {
       },
       refusedReason: null,
     });
-    const kept = await this.withDepth(row, opts.depth === true, got.bytes);
+    const kept = await this.withDepth(row, opts.depth ?? true, got.bytes);
     return this.recordOf(kept, candidate, opts);
   }
 
@@ -608,7 +642,7 @@ export class PictureDesk {
         !row.refusedReason &&
         (await this.stored(row.storageKey))
       ) {
-        const kept = await this.withDepthFromStore(row, opts.depth === true);
+        const kept = await this.withDepthFromStore(row, opts.depth ?? true);
         return this.recordOf(kept, null, {
           ...(meta.person ? { person: meta.person } : {}),
           ...(meta.role !== undefined ? { role: meta.role } : {}),
@@ -624,7 +658,7 @@ export class PictureDesk {
       ? await this.safely(
           () =>
             this.take(best, {
-              depth: opts.depth === true,
+              depth: opts.depth ?? true,
               ...('person' in result && result.person
                 ? { person: result.person }
                 : {}),

@@ -87,6 +87,20 @@ function nameLike(words: string): boolean {
   );
 }
 
+/** The archive or agency a file's credit, description or categories name, shortly; null for a crowd upload. */
+export function institutionOf(
+  file: Pick<SourceFile, 'artist' | 'credit' | 'description' | 'categories'>,
+): string | null {
+  const said = `${plainText(file.artist)} ${plainText(file.credit)} ${plainText(file.description)}`;
+  return (
+    INSTITUTIONS.find(([test]) => test.test(said))?.[1] ??
+    INSTITUTIONS.find(([test]) =>
+      file.categories.some((c) => test.test(c)),
+    )?.[1] ??
+    null
+  );
+}
+
 /**
  * The chip's middle: who holds or made the picture, shortly. The archive
  * when the credit names one (with the photographer before it when the

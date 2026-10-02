@@ -2,21 +2,27 @@ import { FakeLlmAdapter } from '../../../web/adapters/fake-llm.adapter';
 import type { LlmGatewayPort, StudioRevision } from '../../ports/llm.port';
 import { WALL_RESEARCH, WALL_ROWS, WALL_WORLD } from './__fixtures__/wall';
 import {
+  BERLIN_UNSAID,
+  REAGAN_AT_THE_GATE,
+  WALL_PICTURES,
+} from './__fixtures__/wall-pictures';
+import {
+  boardList,
   boardShots,
   safePlan,
   shotParts,
   withPace,
   withSafeShots,
 } from './shot-board';
-import { checkPlan, WHOLE_SET } from './shot-check';
+import { checkPlan, mapsOffPlace, WHOLE_SET } from './shot-check';
 import {
   lineSpans,
   narrationOf,
   phraseAt,
   sceneNarration,
 } from './shot-phrases';
-import { buildRegistry } from './shot-registry';
-import type { ShotPlan } from './types';
+import { buildRegistry, registryOf } from './shot-registry';
+import type { PlanShot, ShotPlan } from './types';
 
 const input = {
   rows: WALL_ROWS,
@@ -169,15 +175,22 @@ describe("a lesson scene's shots boarded", () => {
     expect(everyLineShown(made.plan)).toBe(true);
   });
 
-  it('boards by code alone when the board cannot be had: safe shots, never a card', () => {
+  it('boards by code alone when the board cannot be had: safe shots, never a card, never the map as a stand-in', () => {
     const { plan, registry } = safePlan(input);
     expect(checkPlan(plan, narration, registry, { map: true })).toEqual([]);
     expect(everyLineShown(plan)).toBe(true);
+    // Berlin and its year: the year's calendar before the map.
     expect(plan.shots[0]).toMatchObject({
       on: 'In 1961, Berlin',
-      set: { kind: 'map' },
-      focal: 'place:Berlin',
+      set: { kind: 'chart', chart: { kind: 'calendar' } },
     });
+    // The map only where a line names a place it shows: East Germany.
+    expect(
+      plan.shots.filter((s) => s.set.kind === 'map').map((s) => s.focal),
+    ).toEqual(['region:East Germany']);
+    expect(
+      mapsOffPlace(plan, narrationOf(narration), registry, WALL_ROWS),
+    ).toEqual([]);
     expect(JSON.stringify(plan)).not.toMatch(/"kind":"(?:words|plain)"/u);
   });
 
@@ -395,5 +408,254 @@ describe('something new every few words (withPace)', () => {
       target: 'region:East Germany',
       on: 'East Germany’s leader',
     });
+  });
+});
+
+describe('real pictures first on the board (Richard, 2026-10-02)', () => {
+  const plain = buildRegistry({
+    rows: WALL_ROWS,
+    research: WALL_RESEARCH,
+    world: WALL_WORLD,
+  });
+  const pictured = buildRegistry({
+    rows: WALL_ROWS,
+    research: WALL_RESEARCH,
+    world: WALL_WORLD,
+    pictures: WALL_PICTURES,
+  });
+  const counter = (on: string): PlanShot => ({
+    on,
+    set: {
+      kind: 'chart',
+      chart: {
+        kind: 'counter',
+        spec: {
+          value: 1393,
+          unit: 'km',
+          prefix: null,
+          label: null,
+          then: null,
+        },
+      },
+    },
+    actors: [],
+    info: [
+      {
+        recipe: 'count',
+        target: 'number:Length of the inner border',
+        on: '1,393 kilometres',
+      },
+    ],
+    life: [],
+    camera: [],
+    join: 'cut',
+    focal: WHOLE_SET,
+  });
+
+  it('tells the board what each photo shows, and which photos show each person and place', () => {
+    const list = boardList(
+      buildRegistry({
+        rows: WALL_ROWS,
+        research: WALL_RESEARCH,
+        world: WALL_WORLD,
+        pictures: [...WALL_PICTURES, BERLIN_UNSAID],
+      }),
+    );
+    expect(list).toContain(
+      '- person:Ronald Reagan [portrait]: President of the United States · more photos of them: photo:Reagan at the Brandenburg Gate 1987',
+    );
+    expect(list).toContain(
+      '- photo:Reagan at the Brandenburg Gate 1987: shows person:Ronald Reagan · Reagan speaking at the Brandenburg Gate, 1987',
+    );
+    expect(list).toContain(
+      '- photo:Crowds on the Wall 1989: shows event the Wall opened · people on the Wall',
+    );
+    expect(list).toMatch(
+      /- place:Berlin \[pin\]: .* · photos of it: photo:Berlin 1961, photo:Street in Berlin 1963/u,
+    );
+    // A photo that says nothing of what it shows is read by its words.
+    expect(list).toContain(
+      '- photo:Street in Berlin 1963: shows place:Berlin · an archive photo of Berlin',
+    );
+  });
+
+  it('shows a person with photos and no portrait by their photos, and never offers a place as their trace', () => {
+    const photoOnly = buildRegistry({
+      rows: WALL_ROWS,
+      research: WALL_RESEARCH,
+      world: WALL_WORLD,
+      pictures: [REAGAN_AT_THE_GATE],
+    });
+    expect(boardList(photoOnly)).toContain(
+      '- person:Ronald Reagan: President of the United States · photos of them: photo:Reagan at the Brandenburg Gate 1987 · no portrait: show them by their photos',
+    );
+    const traced = registryOf([
+      {
+        name: 'person:Ada Obi',
+        kind: 'person',
+        about: 'an engineer',
+        trace: { kind: 'place', ref: 'place:Kano' },
+      },
+      {
+        name: 'place:Kano',
+        kind: 'place',
+        about: 'a city',
+        geo: { lng: 8.52, lat: 12 },
+      },
+    ]);
+    expect(boardList(traced)).toContain(
+      '- person:Ada Obi: an engineer · no portrait, no trace: never on screen',
+    );
+    expect(boardList(traced)).not.toContain('their place');
+  });
+
+  it('tells the board its scene’s pictures come first, only where it has some', () => {
+    expect(
+      shotParts({ ...input, pictures: WALL_PICTURES }, pictured).join('\n'),
+    ).toContain('Real pictures first: this scene has 4 cleared pictures.');
+    expect(shotParts(input, plain).join('\n')).not.toContain(
+      'Real pictures first',
+    );
+  });
+
+  it('cuts to a photo of what the voice names where the shot on screen cannot show it, never the map in its stead', () => {
+    const rows = [WALL_ROWS[1], WALL_ROWS[0]];
+    const plan: ShotPlan = { shots: [counter('The inner border')] };
+    // Berlin named over the counter: Berlin's photo as it is named.
+    const paced = withPace(plan, rows, pictured, WALL_WORLD);
+    expect(paced.shots.map((s) => s.set.kind)).toEqual(['chart', 'photo']);
+    expect(paced.shots[1]).toMatchObject({
+      on: 'Berlin was cut',
+      set: { kind: 'photo', photo: 'photo:Berlin 1961' },
+    });
+    // With no photo of it: the year's calendar, still not the map.
+    const bare = withPace(plan, rows, plain, WALL_WORLD);
+    expect(bare.shots[1].set).toMatchObject({
+      kind: 'chart',
+      chart: { kind: 'calendar' },
+    });
+  });
+
+  it('cuts to a person’s photo as the voice names them over the map', () => {
+    const rows = [
+      WALL_ROWS[0],
+      WALL_ROWS[1],
+      {
+        ...WALL_ROWS[2],
+        say: 'Reagan later spoke at the Brandenburg Gate.',
+      },
+    ];
+    const plan: ShotPlan = {
+      shots: [
+        {
+          on: 'In 1961',
+          set: { kind: 'map', tilt: 'flat' },
+          actors: [],
+          info: [
+            { recipe: 'pin', target: 'place:Berlin', on: 'Berlin' },
+            {
+              recipe: 'seam',
+              target: 'seam:inner border',
+              on: 'inner border',
+            },
+          ],
+          life: [],
+          camera: [],
+          join: 'cut',
+          focal: 'place:Berlin',
+        },
+      ],
+    };
+    const paced = withPace(plan, rows, pictured, WALL_WORLD);
+    expect(paced.shots.map((s) => s.set.kind)).toEqual(['map', 'portrait']);
+    expect(paced.shots[1]).toMatchObject({
+      on: 'Reagan later spoke',
+      set: { kind: 'portrait', person: 'person:Ronald Reagan' },
+    });
+  });
+
+  it('brings in another picture of what a picture shows as the voice stays on it, once, else holds it', () => {
+    const rows = [
+      {
+        ...WALL_ROWS[2],
+        say: 'Reagan spoke at the Brandenburg Gate for a long time to a very large crowd of people.',
+      },
+    ];
+    const portrait: ShotPlan = {
+      shots: [
+        {
+          on: 'Reagan spoke at',
+          set: { kind: 'portrait', person: 'person:Ronald Reagan' },
+          actors: [],
+          info: [],
+          life: [],
+          camera: [{ move: 'push', on: 'Reagan spoke at', amount: 'small' }],
+          join: 'cut',
+          focal: 'person:Ronald Reagan',
+        },
+      ],
+    };
+    const paced = withPace(portrait, rows, pictured, WALL_WORLD);
+    expect(paced.shots.map((s) => s.set)).toEqual([
+      { kind: 'portrait', person: 'person:Ronald Reagan' },
+      { kind: 'photo', photo: REAGAN_AT_THE_GATE.name },
+    ]);
+    // His other photo held while the voice stays on him: no turns back to the first.
+    expect(paced.shots[1].camera.map((c) => c.move)).toEqual(['push', 'hold']);
+    // With one picture of him: it is held.
+    const one = buildRegistry({
+      rows: WALL_ROWS,
+      research: WALL_RESEARCH,
+      world: WALL_WORLD,
+      pictures: [WALL_PICTURES[0]],
+    });
+    const held = withPace(portrait, rows, one, WALL_WORLD);
+    expect(held.shots).toHaveLength(1);
+    expect(held.shots[0].camera.map((c) => c.move)).toEqual(['push', 'hold']);
+  });
+
+  it('never carries the map on over a line that names no place: the line gets its own picture', () => {
+    const rows = [WALL_ROWS[0], { ...WALL_ROWS[5], claims: [] }];
+    const plan: ShotPlan = {
+      shots: [
+        {
+          on: 'In 1961',
+          set: { kind: 'map', tilt: 'flat' },
+          actors: [],
+          info: [{ recipe: 'pin', target: 'place:Berlin', on: 'Berlin' }],
+          life: [],
+          camera: [],
+          join: 'cut',
+          focal: 'place:Berlin',
+        },
+      ],
+    };
+    const covered = withSafeShots(plan, rows, plain, WALL_WORLD);
+    expect(covered.shots.map((s) => s.set.kind)).toEqual(['map', 'chart']);
+    expect(covered.shots[0].camera).toEqual([]);
+    expect(covered.shots[1]).toMatchObject({
+      on: 'Two years later',
+      set: { kind: 'chart', chart: { kind: 'timeline' } },
+    });
+  });
+
+  it('boards with the fake and the desk’s pictures: real people by their photos, the map only for where', async () => {
+    const { llm } = board();
+    const made = await boardShots({ ...input, pictures: WALL_PICTURES }, llm);
+    expect(
+      checkPlan(made.plan, narration, made.registry, {
+        map: true,
+        lines: WALL_ROWS,
+      }),
+    ).toEqual([]);
+    expect(made.plan.shots).toContainEqual(
+      expect.objectContaining({
+        set: { kind: 'portrait', person: 'person:Ronald Reagan' },
+      }),
+    );
+    expect(
+      mapsOffPlace(made.plan, narrationOf(narration), made.registry, WALL_ROWS),
+    ).toEqual([]);
+    expect(everyLineShown(made.plan)).toBe(true);
   });
 });

@@ -39,7 +39,9 @@ import {
   sceneNarration,
   type Narration,
 } from './shot-phrases';
+import { onWords } from './shot-pace';
 import { looseKey, splitTarget } from './shot-registry';
+import { pictureOfSet } from './shot-subjects';
 import type {
   PlanCamera,
   PlanInfo,
@@ -196,17 +198,6 @@ function find(
   return nearestPhrase(n, words);
 }
 
-/** A shot moved onto other words: its own, and each of its changes that were on its words. */
-function onWords(shot: PlanShot, on: string): PlanShot {
-  const was = shot.on;
-  return {
-    ...shot,
-    on,
-    info: shot.info.map((i) => (i.on === was ? { ...i, on } : i)),
-    camera: shot.camera.map((c) => (c.on === was ? { ...c, on } : c)),
-  };
-}
-
 /** The set a critic's "to" names, as the board is told it: a set kind, or a chart's kind. */
 function setAsked(to: string | undefined): string | undefined {
   if (!to) return undefined;
@@ -219,7 +210,10 @@ function setAsked(to: string | undefined): string | undefined {
 /**
  * The critic's fixes applied to a plan, the worst first, each to the shot
  * it named as the critic saw it; the plan then mended (mendPlan) and
- * checked (checkPlan) for the log. What each fix came to is said.
+ * checked (checkPlan) for the log, by the scene's own lines (so a map a
+ * fix leaves over a line that names no place gives way to that line's
+ * stand-in, by the same ladder the board's lines have). What each fix
+ * came to is said.
  */
 export async function applyFixes(
   plan: ShotPlan,
@@ -228,7 +222,10 @@ export async function applyFixes(
 ): Promise<FixResult> {
   const narration = sceneNarration(ctx.rows);
   const n = narrationOf(narration);
-  const options = ctx.options ?? {};
+  const options: PlanOptions = {
+    ...(ctx.rows.length ? { lines: ctx.rows } : {}),
+    ...(ctx.options ?? {}),
+  };
   const mend = (shots: PlanShot[]) =>
     mendPlan({ shots }, narration, ctx.registry, options);
   // Each shot's words, as the critic saw the plan: [first key, key after its last].
@@ -305,14 +302,29 @@ export async function applyFixes(
     return mine.slice(0, 2).map(copy);
   };
 
-  /** The safe shot for a shot's words: the research's ladder (shot-check's safeShot), on its own words. */
+  /**
+   * The safe shot for a shot's words: the stand-in's ladder (shot-check's
+   * safeShot: a photo of what they name first, the next of a person's
+   * pictures; never the map on words that name no place), on its own words.
+   */
   const safeFor = (k: number): PlanShot => {
     const [from] = spanOf(k);
-    const previous = slots.slice(0, k).flat().at(-1) ?? null;
+    const before = slots.slice(0, k).flat();
+    const previous = before.at(-1) ?? null;
     const next = slots.slice(k + 1).flat()[0] ?? null;
     const shot = slots[k][0] ?? plan.shots[k];
     return onWords(
-      safeShot(rowAt(from), ctx.registry, ctx.world, { previous, next }),
+      safeShot(rowAt(from), ctx.registry, ctx.world, {
+        previous,
+        next,
+        used: before
+          .map((s) => pictureOfSet(s.set))
+          .filter((p): p is string => Boolean(p)),
+        kit: options.kit,
+        look: options.look,
+        ...(options.map !== undefined ? { map: options.map } : {}),
+        era: options.era ?? ctx.world?.era,
+      }),
       shot.on,
     );
   };

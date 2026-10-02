@@ -876,9 +876,15 @@ function targetIn(
     if (actor) return { kind: 'actor', name: `actor:${actor.id}` };
     // A part of an actor (a machine's combustor, its core flow): actor:<id>.<part>.
     const dot = rest.indexOf('.');
-    const owner = dot > 0 ? shot.actors.find((a) => a.id === rest.slice(0, dot)) : undefined;
+    const owner =
+      dot > 0
+        ? shot.actors.find((a) => a.id === rest.slice(0, dot))
+        : undefined;
     if (owner && rest.slice(dot + 1).trim())
-      return { kind: 'part', name: `actor:${owner.id}.${partKey(rest.slice(dot + 1))}` };
+      return {
+        kind: 'part',
+        name: `actor:${owner.id}.${partKey(rest.slice(dot + 1))}`,
+      };
     if (prefix === 'actor') return null;
   }
   const entry = registry.resolve(name);
@@ -908,7 +914,8 @@ function shownBy(shot: PlanShot, target: Target): boolean {
   if (target.kind === 'set') return true;
   if (target.kind === 'actor') return true;
   const set = shot.set;
-  if (target.kind === 'part') return set.kind === 'chart' || target.name.startsWith('actor:');
+  if (target.kind === 'part')
+    return set.kind === 'chart' || target.name.startsWith('actor:');
   const entry = target.entry;
   switch (set.kind) {
     case 'map':
@@ -1908,8 +1915,13 @@ function mendShot(
     // What changes the picture for good never lets go.
     if (LASTING.has(item.recipe)) delete item.until;
     // A label's words name what it is on: its own words when they do, else
-    // the name of what it labels; a field's name ("label") is no words.
-    if (item.text) item.text = clip(item.text, TEXT.labelWordsMax);
+    // the name of what it labels; a field's name ("label") is no words. A
+    // speech bubble keeps its own few words (SAY_WORDS).
+    if (item.text)
+      item.text = clip(
+        item.text,
+        item.recipe === 'say' ? SAY_WORDS : TEXT.labelWordsMax,
+      );
     if (item.text && roleOnly(item.text)) delete item.text;
     if (
       item.recipe === 'label' &&

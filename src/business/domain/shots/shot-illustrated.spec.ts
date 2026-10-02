@@ -208,6 +208,10 @@ describe('the board in an illustrated show', () => {
     // The bubble is from a character of its shot; the eyes only on the map's regions.
     const first = plan.shots[0];
     expect(first.info.filter((i) => i.recipe === 'say')).toHaveLength(1);
+    // Its six words kept through the mend, never cut to a label's three.
+    expect(
+      first.info.find((i) => i.recipe === 'say')?.text?.split(' '),
+    ).toHaveLength(6);
     expect(first.eyes?.every((e) => e.at.startsWith('region:'))).toBe(true);
   });
 });

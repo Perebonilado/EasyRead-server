@@ -58,6 +58,14 @@ export function criticPrompt(): string {
         ([axis, words]) => `- ${axis}: ${words}`,
       ),
     ].join('\n'),
+    [
+      'Hard limits, whatever else is good, for the stretch where you see them:',
+      '- Words as the picture: a frame whose picture is a slide of words (a heading with bullet or arrow lines, two side-by-side panels of words, a pill or box of words, a big bare number or percentage with only a caption) holds clarity and composition at 5 at most.',
+      '- People who are not in the story: cartoon figures labelled as a viewer or a stand-in ("Teen student", "Mechanic", "Student", "Workers", "Retail investor") hold truth at 3 at most.',
+      '- A box or card with only a place’s or a thing’s name in it, where its picture should be, holds truth and clarity at 2.',
+      '- A subject drawn small (under a third of the frame’s height) between other things, or on a big empty ground, holds composition at 5 at most.',
+      'An explainer of quality never needs any of these: their numbers sit on maps, in sourced charts or on labelled objects; their people are real portraits, characters of the story, or silhouettes.',
+    ].join('\n'),
     `The house rules every shot was made to:\n${RULES_PROMPT}`,
     'Never reward decoration that carries no information (glows, sparkles, particles), everything fading in, a centred title on a gradient, corner labels, frame borders, a stock figure for a real group, or the audience on screen.',
     [

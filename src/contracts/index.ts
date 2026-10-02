@@ -2399,6 +2399,21 @@ export interface ShotRigDto {
     >
   >;
   moves: string[];
+  /**
+   * The figures it is drawn with, to the kit's one standard (kit/rig.ts):
+   * each one's part prefix ("" for a piece of one, "f2." in a group) and
+   * the way it faces as drawn (1 right, -1 left, 0 toward the camera), so
+   * the stage can walk, point and wave any of them from its parts alone.
+   */
+  figures?: { prefix: string; facing: 1 | -1 | 0 }[];
+  /** A crowd's people and far rows, by part: each shifts a little on its own while it stands. */
+  idle?: string[];
+  /**
+   * A vehicle: how it goes (its wheels turn with the ground it covers, a
+   * ship rides the swell, a plane tilts into a climb, a rocket rises) and
+   * the way it faces as drawn.
+   */
+  vehicle?: { goes: 'road' | 'rail' | 'water' | 'air' | 'up'; facing: 1 | -1 };
 }
 
 /** An archive photo or a portrait, from the picture desk. */

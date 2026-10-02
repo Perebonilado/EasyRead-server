@@ -193,10 +193,20 @@ function finished(
  * pictures first, the map never in a person's stead): each photo says
  * what it shows; each person and place says which photos show them; a
  * person with photos and no portrait is shown by them; and a person's
- * trace is only their own words, never their place on the map.
+ * trace is only their own words, never their place on the map. What the
+ * registry's own list (shot-registry's promptList) says already of a
+ * photo or a person is never said twice.
  */
 export function boardList(registry: TargetRegistry): string {
   const all = registry.entries();
+  const plain = promptList(registry).split('\n');
+  /** The registry's own line for an entry: its name, then its mark, its "(shows …)" or its colon. */
+  const lineOf = (name: string) =>
+    plain.find(
+      (row) =>
+        row.startsWith(`- ${name}`) &&
+        /^[\s:([]/u.test(row.slice(name.length + 2)),
+    ) ?? '';
   const photosOf = new Map<string, string[]>();
   const view = all.map((e): RegistryEntry => {
     if (e.kind === 'person' && e.trace?.kind === 'place') {
@@ -215,11 +225,19 @@ export function boardList(registry: TargetRegistry): string {
         ...(photosOf.get(shown.entry.name) ?? []),
         e.name,
       ]);
-    return { ...e, about: `shows ${what} · ${e.about}` };
+    return /\bshows\b/u.test(lineOf(e.name))
+      ? e
+      : { ...e, about: `shows ${what} · ${e.about}` };
   });
+  const said = (e: RegistryEntry) =>
+    /\bphotos of (?:them|it)\b/u.test(lineOf(e.name));
   const named = view.map((e) => {
     const photos = photosOf.get(e.name);
-    if (!photos?.length || (e.kind !== 'person' && e.kind !== 'place'))
+    if (
+      !photos?.length ||
+      (e.kind !== 'person' && e.kind !== 'place') ||
+      said(e)
+    )
       return e;
     return {
       ...e,
@@ -229,7 +247,10 @@ export function boardList(registry: TargetRegistry): string {
   // A person with photos and no portrait is shown by them: their line says so.
   const own = new Map(
     named
-      .filter((e) => e.kind === 'person' && !e.picture && photosOf.has(e.name))
+      .filter(
+        (e) =>
+          e.kind === 'person' && !e.picture && photosOf.has(e.name) && !said(e),
+      )
       .map((e) => [
         `- ${e.name}:`,
         `- ${e.name}: ${e.about} · no portrait: show them by their photos`,

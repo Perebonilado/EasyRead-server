@@ -101,6 +101,7 @@ import { boardShots, safePlan } from '../../business/domain/shots/shot-board';
 import { pictureCredits } from '../../business/domain/shots/shot-pictures';
 import { registryOf } from '../../business/domain/shots/shot-registry';
 import {
+  countsOf,
   deskPass,
   picturesFor,
   withPictureCredits,
@@ -1278,7 +1279,15 @@ export class StudioEditorProcessor {
             this.deps.logger.warn(
               `studio ${episode.id} s${at + 1}: boarded plainly: ${(error as Error).message}`,
             );
-            await this.plainBoard(show, episode, bible, rows[at], at, shots);
+            await this.plainBoard(
+              show,
+              episode,
+              bible,
+              rows[at],
+              at,
+              shots,
+              pictures,
+            );
           }
           progressNow({ scene: at, done: true });
         }
@@ -1291,9 +1300,10 @@ export class StudioEditorProcessor {
 
   /**
    * The picture desk's pass for an episode (WP11): its people's portraits
-   * and its places' photos, cleared and kept; null when there is no desk,
-   * it is switched off (PICTURE_DESK=off), or it cannot be reached, which
-   * never holds a film up.
+   * and photos, its places' photos, its key events' and the things its
+   * lines name, cleared and kept; null when there is no desk, it is
+   * switched off (PICTURE_DESK=off), or it cannot be reached, which never
+   * holds a film up.
    */
   async pictureDesk(
     show: StudioShowRecord,
@@ -1324,8 +1334,9 @@ export class StudioEditorProcessor {
       );
       for (const usage of calls)
         await this.record(episode.id, usage, 'picture_focus');
+      const counts = countsOf(pictures);
       this.deps.logger.log(
-        `studio ${episode.id}: the picture desk cleared ${pictures.entries.length} picture${pictures.entries.length === 1 ? '' : 's'}`,
+        `studio ${episode.id}: the picture desk cleared ${pictures.entries.length} picture${pictures.entries.length === 1 ? '' : 's'} (${counts.portraits} portraits, ${counts.person} more of people, ${counts.place} of places, ${counts.event} of events, ${counts.thing} of things)`,
       );
       return pictures;
     } catch (error) {
@@ -1371,6 +1382,8 @@ export class StudioEditorProcessor {
     k: number,
     /** Lesson scenes are boarded as shots (EXPLAINER_SHOTS). */
     shots = false,
+    /** The episode's pictures (pictureDesk): a line's stand-in is its photo first. */
+    pictures: EpisodePictures | null = null,
   ): Promise<void> {
     const scene = episode.outline!.scenes[k];
     const lines = this.rowsOf(episode, scene);
@@ -1380,6 +1393,10 @@ export class StudioEditorProcessor {
         rows: lines,
         research: show.editor?.research ?? null,
         world: show.editor?.world ?? null,
+        look:
+          showLookStyle(show.brief, show.editor?.world, show.bible) ??
+          'editorial',
+        pictures: picturesFor(lines, pictures),
       });
       const sheet = shotsSheet(
         scene,

@@ -3173,6 +3173,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
   async pictureFocus(input: {
     png: Buffer;
     about: string;
+    asked?: string;
   }): Promise<LlmResult<Record<string, unknown>>> {
     const started = Date.now();
     const { generateObject } = await this.registry.modules();
@@ -3188,7 +3189,11 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
             { type: 'file' as const, data: input.png, mediaType: 'image/png' },
             {
               type: 'text' as const,
-              text: `The archive says this picture shows: ${input.about.slice(0, 200)}`,
+              text: `The archive says this picture shows: ${input.about.slice(0, 200)}${
+                input.asked
+                  ? `\nDoes it show ${input.asked.slice(0, 240)}?`
+                  : ''
+              }`,
             },
           ],
         },

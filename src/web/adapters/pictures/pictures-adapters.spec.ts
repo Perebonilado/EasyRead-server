@@ -1,7 +1,14 @@
+import { focusOf } from '../../../business/domain/pictures/focus';
+import { pictureFocusSchema } from '../ai-sdk/picture-schemas';
 import { fileOf, regionOf, structuredOf } from './commons.adapter';
 import { measureImage } from './measure';
 import { PoliteHttp, userAgentOf } from './polite-http';
-import { itemOf, personOf, type WikiEntity } from './wikidata.adapter';
+import {
+  itemOf,
+  personOf,
+  WikidataAdapter,
+  type WikiEntity,
+} from './wikidata.adapter';
 
 // What Commons said of the Oak Ridge photograph of Ahmadu Bello (2026-10-02), cut to the fields read.
 const PAGE = {
@@ -89,6 +96,53 @@ describe("the picture desk's adapters", () => {
     });
     expect(file.attribution).toBeUndefined();
     expect(fileOf({ title: 'File:Gone.jpg', missing: '' })).toBeNull();
+  });
+
+  it('keeps Commons’ JPEG of a TIFF at any width, the desk reading no TIFF', () => {
+    const tiff = fileOf({
+      pageid: 1,
+      title:
+        'File:ASC Leiden - NSAG - Crebolder 2 - 40 - Independence ceremony - Lagos, Nigeria - October 1, 1960.tif',
+      imageinfo: [
+        {
+          url: 'https://upload.wikimedia.org/wikipedia/commons/x/xx/Leiden.tif',
+          descriptionurl: 'https://commons.wikimedia.org/wiki/File:Leiden.tif',
+          thumburl:
+            'https://upload.wikimedia.org/wikipedia/commons/thumb/x/xx/Leiden.tif/lossy-page1-1533px-Leiden.tif.jpg',
+          thumbwidth: 1533,
+          thumbheight: 1095,
+          width: 1533,
+          height: 1095,
+          mime: 'image/tiff',
+          extmetadata: {},
+        },
+      ],
+    })!;
+    expect(tiff.thumb?.url).toMatch(/\.jpg$/u);
+    // A JPEG no wider than asked is fetched as it is.
+    const jpeg = fileOf({
+      ...PAGE,
+      imageinfo: [
+        {
+          ...PAGE.imageinfo[0],
+          thumbwidth: PAGE.imageinfo[0].width,
+          mime: 'image/jpeg',
+        },
+      ],
+    })!;
+    expect(jpeg.thumb).toBeUndefined();
+  });
+
+  it('reads the look’s answer leniently: a crowd of forty is thirty people, not none', () => {
+    const said = pictureFocusSchema.parse({
+      faces: ['A2', 'F4'],
+      subject: ['A1', 'F6'],
+      people: 40,
+      kind: 'photograph',
+      shows: 'yes',
+    });
+    expect(focusOf(said)).toMatchObject({ people: 30, shows: 'yes' });
+    expect(pictureFocusSchema.parse({ people: 'many' }).people).toBe(0);
   });
 
   it('reads IIIF regions and files with no structured data', () => {
@@ -220,6 +274,37 @@ describe("the picture desk's adapters", () => {
       mime: 'image/jpeg',
     });
     expect(measureImage(Buffer.from('GIF89a......'))).toBeNull();
+  });
+
+  it("asks Wikidata's full-text search for people by their words, and reads its ids", async () => {
+    const asked: string[] = [];
+    const http = new PoliteHttp({
+      userAgent: userAgentOf('https://easiread.com'),
+      minGapMs: 0,
+      fetch: (url: string) => {
+        asked.push(url);
+        // What it answered for "James Robertson Nigeria" on 2026-10-02.
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              query: { search: [{ title: 'Q6145713' }, { title: 'Talk:x' }] },
+            }),
+            { status: 200 },
+          ),
+        );
+      },
+    });
+    const hits = await new WikidataAdapter(http).searchText(
+      'James Robertson Nigeria',
+      { limit: 5, humans: true },
+    );
+    expect(hits).toEqual([{ qid: 'Q6145713' }]);
+    const url = new URL(asked[0]);
+    expect(url.searchParams.get('list')).toBe('search');
+    expect(url.searchParams.get('srsearch')).toBe(
+      'James Robertson Nigeria haswbstatement:P31=Q5',
+    );
+    expect(url.searchParams.get('srlimit')).toBe('5');
   });
 
   it('asks one request at a time, spaced, naming the app, and waits out a 429 as told', async () => {

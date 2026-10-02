@@ -60,6 +60,8 @@ const QUESTIONS: (PassQuestion & { depth: boolean })[] = [
   {
     for: 'portrait',
     depth: false,
+    shows: { kind: 'person', name: 'person:Ahmadu Bello' },
+    offer: { kind: 'person', name: 'Ahmadu Bello' },
     query: {
       name: 'Ahmadu Bello',
       kind: 'person',
@@ -73,6 +75,8 @@ const QUESTIONS: (PassQuestion & { depth: boolean })[] = [
     // the White House, July 1961 (a small copy: shown as a print on paper).
     for: 'photo',
     depth: false,
+    shows: { kind: 'person', name: 'person:Abubakar Tafawa Balewa' },
+    offer: { kind: 'person', name: 'Abubakar Tafawa Balewa' },
     query: {
       name: 'Abubakar Tafawa Balewa',
       kind: 'event',
@@ -86,6 +90,8 @@ const QUESTIONS: (PassQuestion & { depth: boolean })[] = [
     // Ridge, 1960.
     for: 'photo',
     depth: true,
+    shows: { kind: 'person', name: 'person:Ahmadu Bello' },
+    offer: { kind: 'person', name: 'Ahmadu Bello' },
     query: {
       name: 'Ahmadu Bello',
       kind: 'event',

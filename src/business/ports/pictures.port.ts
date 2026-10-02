@@ -17,6 +17,17 @@ export interface PictureSourcesPort {
     name: string,
     limit?: number,
   ): Promise<{ qid: string; label: string; description: string }[]>;
+  /**
+   * Wikidata items whose words (labels, descriptions and aliases, in any
+   * language) hold every one of these words: a person the name search does
+   * not reach (it gives the best-known holders of a name first: seven
+   * James Robertsons before Nigeria's last governor-general), asked by the
+   * name with a word of the research's. `humans`, people only.
+   */
+  searchText(
+    words: string,
+    opts: { limit: number; humans?: boolean },
+  ): Promise<{ qid: string }[]>;
   /** People by id, with their occupations, positions and places as labels. */
   people(qids: readonly string[]): Promise<WikiPerson[]>;
   /** Places and things by id. */

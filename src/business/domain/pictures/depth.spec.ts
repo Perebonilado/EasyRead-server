@@ -3,7 +3,11 @@ import {
   depthGrey,
   depthInputSize,
   depthTensor,
+  hueConcentration,
   isMono,
+  isMonochrome,
+  printOf,
+  printsAlike,
 } from './depth';
 
 const pixels = (
@@ -92,5 +96,51 @@ describe("a picture's depth", () => {
     expect(
       isMono(pixels(10, 10, (i) => (i % 2 ? [200, 40, 40] : [40, 90, 200]))),
     ).toBe(false);
+  });
+
+  it('knows a toned print (sepia, one hue) from a photograph in colour', () => {
+    // A strong sepia: every pixel's colour the same brown, lighter or darker.
+    const sepia = pixels(16, 16, (i) => {
+      const v = (i * 7) % 160;
+      return [80 + v, 55 + v * 0.8, 30 + v * 0.55];
+    });
+    expect(isMono(sepia)).toBe(false);
+    expect(hueConcentration(sepia)).toBeGreaterThan(0.95);
+    expect(isMonochrome(sepia)).toBe(true);
+    // Sky, brick and grass: a modern photograph of an old place.
+    const colour = pixels(16, 16, (i) =>
+      i % 3 === 0
+        ? [90, 150, 230]
+        : i % 3 === 1
+          ? [180, 90, 60]
+          : [70, 160, 70],
+    );
+    expect(hueConcentration(colour)).toBeLessThan(0.6);
+    expect(isMonochrome(colour)).toBe(false);
+    expect(isMonochrome(pixels(4, 4, () => [128, 128, 128]))).toBe(true);
+  });
+
+  it('knows one photograph under two files by its print, and two photographs apart', () => {
+    // A face-like blot on a light ground, and the same picture cropped a little.
+    const scene = (dx: number, dy: number) =>
+      pixels(64, 64, (i) => {
+        const x = (i % 64) + dx;
+        const y = Math.floor(i / 64) + dy;
+        const d = Math.hypot(x - 32, y - 26);
+        const v = d < 12 ? 60 : y > 44 ? 40 + (x % 9) * 6 : 210 - y;
+        return [v, v, v];
+      });
+    const other = pixels(64, 64, (i) => {
+      const x = i % 64;
+      const y = Math.floor(i / 64);
+      const v = x < 20 ? 30 : y < 30 ? 230 : 120 + ((x * y) % 50);
+      return [v, v, v];
+    });
+    const a = printOf(scene(0, 0));
+    expect(a).toHaveLength(512);
+    expect(printOf(scene(0, 0))).toBe(a);
+    expect(printsAlike(a, printOf(scene(3, 2)))).toBeGreaterThan(0.9);
+    expect(printsAlike(a, printOf(other))).toBeLessThan(0.6);
+    expect(printsAlike(a, '')).toBe(0);
   });
 });

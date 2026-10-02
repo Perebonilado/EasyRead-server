@@ -131,11 +131,22 @@ export function sourceOf(
     /^([\p{Lu}][\p{L}'’-]+),\s*((?:[\p{Lu}]\.?\s?){1,3}|[\p{Lu}][\p{L}'’-]+)\s*$/u.exec(
       artist,
     );
+  // A full stop after an initial ("Philo T. Farnsworth") does not end it.
   const first = turned
     ? `${turned[2].trim()} ${turned[1]}`
-    : (artist.split(/[.,;(]/u)[0]?.trim() ?? '');
+    : (artist.split(/(?<!\b\p{Lu})\.|[,;(]/u)[0]?.trim() ?? '');
   const person = nameLike(first) ? first : '';
-  if (archive && person && `${person}, ${archive}`.length <= SOURCE_MOST)
+  // An archive named as its own photographer is named once.
+  const same =
+    archive !== undefined &&
+    person.toLowerCase().replace(/\W/gu, '') ===
+      archive.toLowerCase().replace(/\W/gu, '');
+  if (
+    archive &&
+    person &&
+    !same &&
+    `${person}, ${archive}`.length <= SOURCE_MOST
+  )
     return `${person}, ${archive}`;
   if (archive) return archive;
   if (person) return clipWords(person, SOURCE_MOST);
@@ -186,13 +197,14 @@ export function creditOf(
       : source;
   const own = file.attribution ? plainText(file.attribution) : '';
   const licenceWords = licence.url
-    ? `${licence.short} (${licence.url})`
+    ? `${licence.short || 'Licence'} (${licence.url})`
     : licence.short;
   const by = own || `${author}`;
   const parts = [
     `“${title}” by ${by}`,
     `via ${SOURCE_NAMES[file.source]} (${file.pageUrl})`,
-    licenceWords,
+    // A file whose source names no licence is credited without one.
+    ...(licenceWords ? [licenceWords] : []),
   ];
   if (licence.attribution) parts.push('cropped');
   return `${parts.join(', ')}.`;
@@ -205,11 +217,19 @@ export function creditOf(
  * first year its description gives. Undefined when none can be trusted.
  */
 export function yearOf(
-  file: Pick<SourceFile, 'title' | 'date' | 'description' | 'uploaded'>,
+  file: Pick<SourceFile, 'title' | 'date' | 'description' | 'uploaded'> &
+    Partial<Pick<SourceFile, 'artist' | 'credit' | 'categories'>>,
 ): number | undefined {
+  // A span of years ("Governor-General (1955–1960)", a life's) says
+  // nothing of when the photograph was taken: it is left out.
   const years = (text: string) =>
     [
-      ...plainText(text).matchAll(/(?<![\d-])(1[5-9]\d\d|20[0-4]\d)(?![\d])/gu),
+      ...plainText(text)
+        .replace(
+          /(?:1[5-9]\d\d|20[0-4]\d)\s*[-–—]\s*(?:1[5-9]\d\d|20[0-4]\d)/gu,
+          ' ',
+        )
+        .matchAll(/(?<![\d-])(1[5-9]\d\d|20[0-4]\d)(?![\d])/gu),
     ].map((m) => Number(m[1]));
   const inTitle = [...new Set(years(file.title))];
   if (inTitle.length === 1) return inTitle[0];
@@ -225,7 +245,20 @@ export function yearOf(
       dated >= uploaded - 1 &&
       described !== undefined &&
       described < dated - 1;
-    if (!scan) return dated;
+    // An archive's photograph dated the year it went online is dated by
+    // its scan (a Navy print put on Flickr in 2015 is no photo of 2015).
+    const archived =
+      dated >= 2004 &&
+      uploaded !== undefined &&
+      Math.abs(dated - uploaded) <= 1 &&
+      file.categories !== undefined &&
+      institutionOf({
+        artist: file.artist ?? '',
+        credit: file.credit ?? '',
+        description: file.description,
+        categories: file.categories,
+      }) !== null;
+    if (!scan && !archived) return dated;
   }
   if (described !== undefined) return described;
   return inTitle.length ? Math.min(...inTitle) : undefined;

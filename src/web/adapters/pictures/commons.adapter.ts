@@ -141,10 +141,13 @@ export function fileOf(
     sourceId: page.title,
     title,
     url: info.url,
+    // Its copy at the asked width; for a TIFF, a GIF or a WebP, Commons'
+    // JPEG or PNG of it at any width (the desk reads no other kind).
     ...(info.thumburl &&
     info.thumbwidth &&
     info.thumbheight &&
-    info.thumbwidth < info.width
+    (info.thumbwidth < info.width ||
+      !/^image\/(?:jpeg|png)$/u.test(info.mime ?? ''))
       ? {
           thumb: {
             url: info.thumburl,

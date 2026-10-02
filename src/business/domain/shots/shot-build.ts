@@ -7,7 +7,9 @@
  *  - A set that cannot be drawn (a chart the kind does not know, a photo
  *    the picture desk has not cleared, a code-drawn set before the kit
  *    has them) is a safe shot: the set before it carried on with the
- *    camera moving, or the show's map. Never words in place of a picture.
+ *    camera moving, else the nearest set that can be drawn. The map
+ *    stands in for nothing: it is carried on, or taken, only for a shot
+ *    about where (Richard, 2026-10-02). Never words in place of a picture.
  *  - A target that cannot be resolved drops its piece of information; it
  *    never becomes text on the screen.
  *  - Actors are the kit's pieces (kit/registry) in the show's look, each
@@ -803,10 +805,9 @@ export function buildShots(
   /** What the scene's devices and cursor are left in, shot to shot (shot-ui). */
   const uiCarry = newUiCarry();
 
-  // Each shot's own set where it can be drawn; the first that can stands
-  // in for any before it.
+  // Each shot's own set where it can be drawn; the nearest that can
+  // stands in for one that cannot.
   const own = plan.shots.map((shot, i) => setOf(shot.set, i));
-  const firstDrawn = own.find((one): one is BuiltSet => one !== null) ?? null;
 
   const built: { shot: UntimedShot; asset: ShotAssetDto | null }[] = [];
   /** Where the camera was last aimed, for a travel's distance on a set carried on. */
@@ -818,7 +819,27 @@ export function buildShots(
     let safeMove: UntimedCamera | null = null;
     if (!set) {
       const before = built[built.length - 1];
-      if (before) {
+      // Only a shot about where may have the map (a place, a region, a
+      // border or a route it names); for any other, the map is passed by.
+      const aboutWhere = [
+        planned.focal,
+        ...planned.info.flatMap((item) => [item.target, item.to]),
+        ...planned.camera.map((move) => move.target),
+      ].some(
+        (name) =>
+          typeof name === 'string' &&
+          /^(?:place|region|seam|route):/u.test(name.trim()),
+      );
+      const mapOk = (kind: string) => kind !== 'map' || aboutWhere;
+      // The nearest set that can be drawn, after this shot first (the
+      // next picture begun early), else before it.
+      const nearest =
+        own.slice(i + 1).find((one) => one && mapOk(one.set.kind)) ??
+        [...own.slice(0, i)]
+          .reverse()
+          .find((one) => one && mapOk(one.set.kind)) ??
+        null;
+      if (before && mapOk(before.shot.set.kind)) {
         // The set before carried on, the camera moving in on its subject.
         set = {
           set: before.shot.set,
@@ -841,14 +862,16 @@ export function buildShots(
         notes.push(
           `shot ${i + 1}: safe shot, shot ${built.length}'s set carried on`,
         );
-      } else if (ctx.map) {
+      } else if (aboutWhere && ctx.map) {
         set = setOf({ kind: 'map' }, i);
         safeMove = { move: 'establish', on: planned.on };
-        notes.push(`shot ${i + 1}: safe shot, the show's map`);
-      } else if (firstDrawn) {
-        set = firstDrawn;
         notes.push(
-          `shot ${i + 1}: safe shot, the first set that could be drawn`,
+          `shot ${i + 1}: safe shot, the show's map on where it names`,
+        );
+      } else if (nearest) {
+        set = nearest;
+        notes.push(
+          `shot ${i + 1}: safe shot, the nearest set that could be drawn`,
         );
       } else {
         set = { set: { kind: 'plain' } };

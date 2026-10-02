@@ -62,6 +62,7 @@ export function pictureAssetOf(entry: RegistryEntry | null): {
       height: picture.height,
       ...(picture.depthUrl ? { depthUrl: picture.depthUrl } : {}),
       ...(picture.focal ? { focal: picture.focal } : {}),
+      ...(picture.crop ? { crop: picture.crop } : {}),
       credit,
     },
     credit,
@@ -77,11 +78,11 @@ export function photoTreatment(
 ): Treatment {
   if (asked) return asked;
   if (!picture.width || !picture.height) return 'cutout';
-  if (
-    coverScale({ width: picture.width, height: picture.height }, shape) >
-    FULL_BLEED_MOST
-  )
-    return 'cutout';
+  // What shows is its content inside its scan's border.
+  const shown = picture.crop
+    ? { width: picture.crop[2], height: picture.crop[3] }
+    : { width: picture.width, height: picture.height };
+  if (coverScale(shown, shape) > FULL_BLEED_MOST) return 'cutout';
   return picture.mono ? 'duotone' : 'natural';
 }
 

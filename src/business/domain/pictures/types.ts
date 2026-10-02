@@ -192,6 +192,8 @@ export interface PictureRecord {
   year?: number;
   /** Whether it has no colour of its own (a black-and-white photograph). */
   mono?: boolean;
+  /** Its own content inside its scan's border, in our copy's pixels; absent, the whole picture. */
+  crop?: PixelBox;
   /** For a portrait: the person's years ("1910–1966") and who they were (three words at most). */
   dates?: string;
   role?: string;

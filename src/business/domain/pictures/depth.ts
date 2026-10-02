@@ -100,6 +100,66 @@ export function isMono(pixels: PicturePixels): boolean {
   return coloured / n < 0.03;
 }
 
+/** The most of each edge a scan's border is taken to be. */
+const BORDER_MOST = 0.15;
+
+/**
+ * Where a picture's own content is, inside the border its scan may have
+ * (a negative holder's black edge, a mount's white card): each edge
+ * stepped in while its line is even and near black or near white. As
+ * shares of the picture: x, y, w, h. A crop is evidence's own treatment
+ * (research §3.4: crop, levels, grey), and a black edge across a
+ * full-bleed frame reads as a mistake.
+ */
+export function contentBox(
+  pixels: PicturePixels,
+): [number, number, number, number] {
+  const { data, width, height } = pixels;
+  const luma = (x: number, y: number) => {
+    const i = (y * width + x) * 4;
+    return (
+      (0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2]) / 255
+    );
+  };
+  /** Whether a line of pixels is border: even, and near black or near white. */
+  const border = (values: number[]) => {
+    const mean = values.reduce((n, v) => n + v, 0) / Math.max(1, values.length);
+    const spread = Math.sqrt(
+      values.reduce((n, v) => n + (v - mean) ** 2, 0) /
+        Math.max(1, values.length),
+    );
+    return spread < 0.07 && (mean < 0.16 || mean > 0.94);
+  };
+  const row = (y: number) =>
+    Array.from({ length: width }, (_, x) => luma(x, y));
+  let top = 0;
+  while (top < height * BORDER_MOST && border(row(top))) top += 1;
+  let bottom = 0;
+  while (bottom < height * BORDER_MOST && border(row(height - 1 - bottom)))
+    bottom += 1;
+  // A column is read between the top and bottom borders already found: a
+  // black edge at the side and a white mount below are each even alone.
+  const column = (x: number) =>
+    Array.from({ length: Math.max(1, height - top - bottom) }, (_, k) =>
+      luma(x, top + k),
+    );
+  let left = 0;
+  while (left < width * BORDER_MOST && border(column(left))) left += 1;
+  let right = 0;
+  while (right < width * BORDER_MOST && border(column(width - 1 - right)))
+    right += 1;
+  // A line or two more, past the border's soft inner edge.
+  const pad = (n: number) => (n ? n + 1 : 0);
+  const [x0, y0] = [pad(left), pad(top)];
+  const [x1, y1] = [width - pad(right), height - pad(bottom)];
+  return [
+    x0 / width,
+    y0 / height,
+    Math.max(1, x1 - x0) / width,
+    Math.max(1, y1 - y0) / height,
+  ];
+}
+
 /** The model's file: where it is kept, and its fingerprint (verified before use). */
 export const DEPTH_MODEL = {
   url: 'https://huggingface.co/onnx-community/depth-anything-v2-small/resolve/main/onnx/model.onnx',

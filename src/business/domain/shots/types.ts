@@ -176,6 +176,8 @@ export interface RegistryEntry {
     year?: number;
     /** No colour of its own: it may take the show's ink and paper. */
     mono?: boolean;
+    /** Its own content inside its scan's border, in its pixels. */
+    crop?: [number, number, number, number];
     /** A portrait's person: their years and who they were (three words at most). */
     dates?: string;
     role?: string;

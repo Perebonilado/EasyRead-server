@@ -40,7 +40,7 @@ import {
   sourceOf,
   yearOf,
 } from './credit';
-import { isMono } from './depth';
+import { contentBox, isMono } from './depth';
 import { licenceOf } from './licence';
 import { matchPerson, matchPlace, nameWords } from './match';
 import {
@@ -81,7 +81,7 @@ const LOOKUP_DAYS = 30;
  * again (a portrait that is a statue's photograph, once let through, is
  * not handed out for a month after the rule against it).
  */
-export const DESK_RULES = 3;
+export const DESK_RULES = 5;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** The width the desk asks a source for: a full frame's with room for a 12% push; a portrait's print; a page. */
@@ -99,7 +99,12 @@ const FROM_SEARCH = 15;
 /** The least score a picture is used at (house): under it, no picture is better. */
 export const PICK_LEAST = 0.4;
 
-/** A file's subject as shares of it: where its structured data says the person is, else its centre third. */
+/**
+ * A file's subject as shares of it: where its structured data says the
+ * person is; else its middle third, a little above the middle (people
+ * stand with their heads in a picture's upper half, so a wide crop of a
+ * tall photograph keeps their heads).
+ */
 function focalOf(
   file: SourceFile,
   qid: string | undefined,
@@ -109,7 +114,7 @@ function focalOf(
     : undefined;
   if (said?.box) return { box: said.box, from: 'depicts' };
   const third = 1 / 3;
-  return { box: [third, third, third, third], from: 'centre' };
+  return { box: [third, 0.42 - third / 2, third, third], from: 'centre' };
 }
 
 /** What a question is kept under: its kind, its name's words, its id, its years and places. */
@@ -133,6 +138,22 @@ export function lookupKey(query: PictureQuery): string {
 }
 
 const extOf = (mime: string) => (mime === 'image/png' ? 'png' : 'jpg');
+
+/** A content box (as shares) in a copy's pixels; none when it is the whole picture. */
+function cropOf(
+  share: [number, number, number, number],
+  size: { width: number; height: number },
+): PixelBox | undefined {
+  const box: PixelBox = [
+    Math.round(share[0] * size.width),
+    Math.round(share[1] * size.height),
+    Math.round(share[2] * size.width),
+    Math.round(share[3] * size.height),
+  ];
+  return box[0] || box[1] || box[2] < size.width || box[3] < size.height
+    ? box
+    : undefined;
+}
 
 /** How many of a question's years the desk looks through, a request or two each. */
 const YEARS_LOOKED = 6;
@@ -471,9 +492,20 @@ export class PictureDesk {
       (had.width ?? 0) >= wanted * 0.95 &&
       (await this.stored(had.storageKey))
     ) {
-      // Kept, its words as the desk writes them now.
+      // Kept, its words as the desk writes them now; looked at again
+      // (its colour, its border, its subject) when the desk's rules changed.
+      const stale =
+        (had.meta as { rules?: number } | null)?.rules !== DESK_RULES;
+      const storage = this.deps.storage as Partial<Pick<StoragePort, 'get'>>;
+      const bytes =
+        stale && storage.get
+          ? await this.safely(() => storage.get!(had.storageKey!), null)
+          : null;
+      const size = bytes ? this.deps.pixels.measure(bytes) : null;
+      const seen =
+        bytes && size ? await this.seen(candidate, bytes, size) : null;
       const fresh =
-        had.chip === candidate.chip && had.credit === candidate.credit
+        !seen && had.chip === candidate.chip && had.credit === candidate.credit
           ? had
           : await this.deps.cache.save({
               ...had,
@@ -481,6 +513,12 @@ export class PictureDesk {
               credit: candidate.credit,
               licence: candidate.licence.short,
               checkedAt: this.now(),
+              ...(seen
+                ? {
+                    focal: seen.focal,
+                    meta: { ...(had.meta ?? {}), ...seen.meta },
+                  }
+                : {}),
             });
       const kept = await this.withDepth(fresh, opts.depth ?? true);
       return this.recordOf(kept, candidate, opts);
@@ -507,17 +545,7 @@ export class PictureDesk {
       });
       storageKey = stored.ref;
     }
-    const small = await this.safely(
-      () => this.deps.pixels.pixels(got.bytes, 256),
-      null,
-    );
-    const [fx, fy, fw, fh] = candidate.focal.box;
-    const focal: PixelBox = [
-      Math.round(fx * size.width),
-      Math.round(fy * size.height),
-      Math.round(fw * size.width),
-      Math.round(fh * size.height),
-    ];
+    const seen = await this.seen(candidate, got.bytes, size);
     const row = await this.deps.cache.save({
       ...this.blank(file.source, file.sourceId),
       ...(had ? { id: had.id } : {}),
@@ -531,7 +559,7 @@ export class PictureDesk {
       chip: candidate.chip.slice(0, 255),
       width: size.width,
       height: size.height,
-      focal,
+      focal: seen.focal,
       sha1,
       mime: size.mime,
       storageKey,
@@ -540,11 +568,10 @@ export class PictureDesk {
         code: candidate.licence.code,
         tier: candidate.licence.tier,
         flags: candidate.licence.flags,
-        focalFrom: candidate.focal.from,
         score: candidate.score,
         notes: candidate.notes,
         ...(candidate.year !== undefined ? { year: candidate.year } : {}),
-        ...(small ? { mono: isMono(small) } : {}),
+        ...seen.meta,
         title: file.title,
         artist: file.artist,
         licenceName: file.licenceName,
@@ -554,6 +581,38 @@ export class PictureDesk {
     });
     const kept = await this.withDepth(row, opts.depth ?? true, got.bytes);
     return this.recordOf(kept, candidate, opts);
+  }
+
+  /**
+   * What the desk sees of a copy: whether it has colour, where its own
+   * content is inside its scan's border, and its subject's box in its
+   * pixels; with the rules' number they were seen under.
+   */
+  private async seen(
+    candidate: PictureCandidate,
+    bytes: Buffer,
+    size: { width: number; height: number },
+  ): Promise<{ focal: PixelBox; meta: Record<string, unknown> }> {
+    const small = await this.safely(
+      () => this.deps.pixels.pixels(bytes, 256),
+      null,
+    );
+    const [fx, fy, fw, fh] = candidate.focal.box;
+    const crop = small ? cropOf(contentBox(small), size) : undefined;
+    return {
+      focal: [
+        Math.round(fx * size.width),
+        Math.round(fy * size.height),
+        Math.round(fw * size.width),
+        Math.round(fh * size.height),
+      ],
+      meta: {
+        rules: DESK_RULES,
+        focalFrom: candidate.focal.from,
+        ...(small ? { mono: isMono(small) } : {}),
+        ...(crop ? { crop } : {}),
+      },
+    };
   }
 
   /** Its depth map beside it, made once (by the bytes' sha1, so a twin's is reused). */
@@ -631,6 +690,9 @@ export class PictureDesk {
           ? { year: candidate.year }
           : {}),
       ...(typeof meta.mono === 'boolean' ? { mono: meta.mono } : {}),
+      ...(Array.isArray(meta.crop) && meta.crop.length === 4
+        ? { crop: meta.crop as PixelBox }
+        : {}),
       ...(dates ? { dates } : {}),
       ...(role ? { role } : {}),
     };
@@ -667,9 +729,11 @@ export class PictureDesk {
         () => this.deps.cache.find(meta.picked!),
         null,
       );
+      // The picture as it was seen under these rules, and still kept.
       if (
         row?.storageKey &&
         !row.refusedReason &&
+        (row.meta as { rules?: number } | null)?.rules === DESK_RULES &&
         (await this.stored(row.storageKey))
       ) {
         const kept = await this.withDepthFromStore(row, opts.depth ?? true);

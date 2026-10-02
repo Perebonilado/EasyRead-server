@@ -129,8 +129,8 @@ describe('the picture desk', () => {
       source: 'commons',
       width: 1280,
       height: 1601,
-      // The centre third, in the copy's own pixels.
-      focal: [427, 534, 427, 534],
+      // The middle third a little above the middle, in the copy’s own pixels.
+      focal: [427, 406, 427, 534],
       mime: 'image/jpeg',
       licence: 'Public domain',
       mono: true,

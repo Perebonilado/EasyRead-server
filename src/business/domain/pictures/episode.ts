@@ -213,6 +213,7 @@ export function entryOf(
           : 'photo',
     ...(record.year !== undefined ? { year: record.year } : {}),
     ...(record.mono !== undefined ? { mono: record.mono } : {}),
+    ...(record.crop ? { crop: record.crop } : {}),
     ...(record.dates ? { dates: record.dates } : {}),
     ...(record.role ? { role: record.role } : {}),
   };

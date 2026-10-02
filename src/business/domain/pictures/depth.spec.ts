@@ -1,4 +1,10 @@
-import { depthGrey, depthInputSize, depthTensor, isMono } from './depth';
+import {
+  contentBox,
+  depthGrey,
+  depthInputSize,
+  depthTensor,
+  isMono,
+} from './depth';
 
 const pixels = (
   width: number,
@@ -42,6 +48,28 @@ describe("a picture's depth", () => {
     expect(grey[50]).toBeLessThan(145);
     // The same answer, the same map.
     expect(depthGrey(answer, 10, 10)).toEqual(grey);
+  });
+
+  it("finds a picture's own content inside its scan's black border, and leaves a borderless one whole", () => {
+    // A 100 × 60 scan: a black edge 4 wide all round, a white mount below, the photograph inside.
+    const scan = pixels(100, 60, (i) => {
+      const x = i % 100;
+      const y = Math.floor(i / 100);
+      if (y >= 56) return [250, 250, 250];
+      if (x < 4 || x >= 96 || y < 4 || y >= 52) return [12, 12, 12];
+      return [(x * 7) % 256, (y * 11) % 256, 128];
+    });
+    const [x, y, w, h] = contentBox(scan);
+    expect(x).toBeCloseTo(5 / 100, 5);
+    expect(y).toBeCloseTo(5 / 60, 5);
+    expect(x + w).toBeCloseTo(95 / 100, 5);
+    expect(y + h).toBeCloseTo(51 / 60, 5);
+    const plain = pixels(40, 30, (i) => [
+      (i * 13) % 256,
+      (i * 7) % 256,
+      (i * 3) % 256,
+    ]);
+    expect(contentBox(plain)).toEqual([0, 0, 1, 1]);
   });
 
   it('tells a black-and-white or sepia print from a colour photograph', () => {

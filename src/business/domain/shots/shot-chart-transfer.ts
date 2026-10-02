@@ -220,7 +220,7 @@ export function transferAsset(
     const size = floor;
     const at: [number, number] = tall
       ? [text.x0 + floor * 0.2, (a[1] + a[3] + b[1]) / 2]
-      : [frame.W / 2, arcBox[1] - floor * 0.5];
+      : [frame.W / 2, arcBox[1] - tokenSize / 2 - floor * 0.7];
     const anchor = tall ? 'start' : 'middle';
     const box = linesBox(
       [spec.label],

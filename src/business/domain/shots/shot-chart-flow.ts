@@ -41,6 +41,7 @@ import {
   textSvg,
   union,
   wordsWidth,
+  wrap,
   type Frame,
 } from './shot-chart-kit';
 
@@ -284,7 +285,10 @@ function layOut(
       const arrow = floor * 1.4;
       const slot = (width - arrow * (per - 1)) / per;
       const boxes = sized(frame, spec, slot);
-      const fits = boxes.every((b) => !b.lines.some((l) => l.endsWith('…')));
+      // Every word whole in its box: a word broken to fit wants another row.
+      const fits = spec.nodes.every(
+        (node) => wrap(node.label, slot - floor * 1.2, floor, 3, 700) !== null,
+      );
       const rowH = Math.max(...boxes.map((b) => b.h));
       const between = floor * 1.6;
       const total = rows * rowH + (rows - 1) * between;

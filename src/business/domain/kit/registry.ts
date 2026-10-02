@@ -14,6 +14,7 @@
  */
 import type { KitLook, KitStyle } from './style';
 import { validateRig, type KitPiece } from './rig';
+import { CHARACTER_KIT } from './characters';
 import { PEOPLE_KIT } from './people';
 import { VEHICLE_KIT } from './vehicles';
 
@@ -36,6 +37,8 @@ export interface KitParam {
   values?: readonly string[];
   /** Or the whole numbers it may be, least and most. */
   range?: readonly [number, number];
+  /** Or words of the board's own, at most this many characters: what someone wears, a person's name (kept as said, trimmed). */
+  text?: number;
   default: string | number;
   /** A few words for the board: what it sets. */
   about: string;
@@ -54,6 +57,8 @@ export interface KitEntry {
   people?: boolean;
   /** It shows a count of people, honest when a number is said (its `count` setting). */
   counts?: boolean;
+  /** It may stand for a named person of the scene's list, labelled with their name (the illustrated look's characters, tech §11). */
+  named?: boolean;
   make(params: KitParams, style: KitStyle, seed: number): KitPiece;
 }
 
@@ -61,6 +66,7 @@ export interface KitEntry {
 const FAMILIES: readonly Readonly<Record<string, KitEntry>>[] = [
   PEOPLE_KIT,
   VEHICLE_KIT,
+  CHARACTER_KIT,
 ];
 
 export const KIT: Readonly<Record<string, KitEntry>> = Object.assign(
@@ -103,7 +109,9 @@ export function paramsOf(
     const value = given.get(wordKey(name));
     out[name] = param.range
       ? numberIn(value, param.range, param.default as number)
-      : wordIn(value, param.values ?? [], param.default as string);
+      : param.text
+        ? textIn(value, param.text, param.default as string)
+        : wordIn(value, param.values ?? [], param.default as string);
   }
   return out;
 }
@@ -121,6 +129,19 @@ function numberIn(
         : NaN;
   if (!Number.isFinite(n)) return fallback;
   return Math.max(lo, Math.min(hi, Math.round(n)));
+}
+
+/** Words of the board's own, made sound: one line, no markup, cut at a word. */
+function textIn(raw: unknown, most: number, fallback: string): string {
+  if (typeof raw !== 'string') return fallback;
+  const line = raw
+    .replace(/[<>{}]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (line.length <= most) return line || fallback;
+  const cut = line.slice(0, most);
+  const space = cut.lastIndexOf(' ');
+  return (space > most * 0.6 ? cut.slice(0, space) : cut).trim();
 }
 
 function wordIn(
@@ -175,7 +196,9 @@ export function makeKit(
 const paramText = (name: string, param: KitParam): string =>
   param.range
     ? `${name} ${param.range[0]}–${param.range[1]} (${param.about})`
-    : `${name} ${(param.values ?? []).join(' | ')} (${param.about})`;
+    : param.text
+      ? `${name} in words (${param.about})`
+      : `${name} ${(param.values ?? []).join(' | ')} (${param.about})`;
 
 /**
  * The kit for the board's prompt, for a show's look: each id with what it

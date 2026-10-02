@@ -1,6 +1,7 @@
 import { KIT_IDS } from '../kit/registry';
 import { WALL_RESEARCH, WALL_ROWS, WALL_WORLD } from './__fixtures__/wall';
 import {
+  calendarShot,
   checkPlan,
   mendPlan,
   mostShots,
@@ -10,8 +11,8 @@ import {
   WHOLE_SET,
 } from './shot-check';
 import { sceneNarration } from './shot-phrases';
-import { buildRegistry } from './shot-registry';
-import type { PlanShot, ShotPlan } from './types';
+import { buildRegistry, registryOf } from './shot-registry';
+import type { PlanShot, RegistryEntry, ShotPlan } from './types';
 
 const registry = buildRegistry({
   rows: WALL_ROWS,
@@ -91,9 +92,35 @@ const good = (): ShotPlan => ({
         },
       },
       info: [{ recipe: 'mark', target: 'part:speaker', on: 'Reagan' }],
-      camera: [{ move: 'push', on: 'Tear down this wall', amount: 'small' }],
+      camera: [
+        {
+          move: 'push',
+          target: 'part:speaker',
+          on: 'Tear down this wall',
+          amount: 'small',
+        },
+      ],
       life: ['grain'],
       focal: WHOLE_SET,
+    }),
+    shot({
+      on: 'East Germany’s leader',
+      set: { kind: 'map', tilt: 'flat' },
+      info: [
+        {
+          recipe: 'fill',
+          target: 'region:East Germany',
+          on: 'East Germany’s leader',
+        },
+        {
+          recipe: 'label',
+          target: 'region:East Germany',
+          text: 'East Germany',
+          on: 'held on',
+        },
+        { recipe: 'mark', target: 'place:Berlin', on: 'the Wall opened' },
+      ],
+      focal: 'region:East Germany',
     }),
   ],
 });
@@ -198,15 +225,20 @@ describe("the board's answer made sound (planOf)", () => {
     });
   });
 
-  it('caps the shots at eight a minute of narration, dropping a set it does not know', () => {
+  it("caps the shots at twice the scene's share, dropping a set it does not know", () => {
+    // Eight a minute is the mend's cap, which keeps what the pace needs;
+    // the answer is read up to twice that.
     expect(mostShots(narration)).toBe(3);
     const plan = planOf(messy, narration);
-    expect(plan.shots).toHaveLength(3);
     expect(plan.shots.map((s) => s.on)).toEqual([
       'In 1961,',
       'The inner border',
       'he said',
+      'held on',
+      'the Wall opened',
     ]);
+    const more = { shots: [...messy.shots, ...messy.shots] };
+    expect(planOf(more, narration).shots).toHaveLength(6);
   });
 
   it('is the same every time it reads the same answer', () => {
@@ -429,7 +461,7 @@ describe("the board's plan mended (mendPlan)", () => {
       }),
     );
     const mended = mend(plan);
-    expect(mended.shots).toHaveLength(3);
+    expect(mended.shots).toHaveLength(4);
     expect(mended.shots[1].on).toBe('The inner border');
     // Not in its shot's words at all: on the shot's own words.
     expect(mended.shots[1].info[0].on).toBe('The inner border');
@@ -437,13 +469,14 @@ describe("the board's plan mended (mendPlan)", () => {
 
   it('puts the shots in the order of their words, and the first on the first words', () => {
     const plan = good();
-    plan.shots = [plan.shots[0], plan.shots[2], plan.shots[1]];
+    plan.shots = [plan.shots[0], plan.shots[2], plan.shots[1], plan.shots[3]];
     plan.shots[0].on = 'Berlin was cut';
     const mended = mend(plan);
     expect(mended.shots.map((s) => s.on)).toEqual([
       'In 1961, Berlin',
       'The inner border',
       'In 1987',
+      'East Germany’s leader',
     ]);
     expect(codes(mended)).toEqual([]);
   });
@@ -481,6 +514,7 @@ describe("the board's plan mended (mendPlan)", () => {
     expect(mend(plan).shots.map((s) => s.on)).toEqual([
       'In 1961',
       'The inner border',
+      'East Germany’s leader',
     ]);
   });
 
@@ -505,6 +539,7 @@ describe("the board's plan mended (mendPlan)", () => {
     expect(mend(plan).shots.map((s) => s.on)).toEqual([
       'In 1961',
       'The inner border',
+      'East Germany’s leader',
     ]);
   });
 
@@ -545,7 +580,11 @@ describe("the board's plan mended (mendPlan)", () => {
       },
     };
     bars.shots[1].info = [];
-    expect(mend(bars).shots.map((s) => s.on)).toEqual(['In 1961', 'In 1987']);
+    expect(mend(bars).shots.map((s) => s.on)).toEqual([
+      'In 1961',
+      'In 1987',
+      'East Germany’s leader',
+    ]);
   });
 
   it('cuts the words on the stage to the budget: labels first, then the chart’s own', () => {
@@ -596,9 +635,10 @@ describe("the board's plan mended (mendPlan)", () => {
     );
     expect(codes(plan)).toContain('0:label-names');
     const mended = mend(plan).shots[0];
+    // A year by itself names no place: the label names Berlin.
     expect(mended.info.slice(2).map((i) => i.text)).toEqual([
       'East Germany',
-      '1961',
+      'Berlin',
     ]);
     expect(codes(mend(plan))).toEqual([]);
   });
@@ -619,13 +659,21 @@ describe("the board's plan mended (mendPlan)", () => {
       kind: 'set',
       set: { land: 'city', time: 'night', era: 'Berlin, 1987' },
     };
-    const mended = mend(plan);
-    expect(mended.shots.map((s) => s.set.kind)).toEqual(['map', 'set']);
+    // Where code can draw a set: a kind of place, its real place's name gone.
+    const mended = mendPlan(plan, narration, registry, { drawnSets: true });
+    expect(mended.shots.map((s) => s.set.kind)).toEqual(['map', 'set', 'map']);
     expect(mended.shots[1].set).toEqual({
       kind: 'set',
       set: { land: 'city', time: 'night' },
     });
-    expect(codes(mended)).toEqual([]);
+    // Two shots gone leave stretches for the board's pace (withPace) to fill.
+    expect(codes(mended).filter((c) => !c.endsWith('gap-long'))).toEqual([]);
+    // With drawn sets turned off, a drawn set goes, for a picture that can be drawn.
+    expect(
+      mendPlan(plan, narration, registry, { drawnSets: false }).shots.map(
+        (s) => s.set.kind,
+      ),
+    ).toEqual(['map', 'map']);
   });
 
   it('leaves nothing for the check to find, whatever the board wrote', () => {
@@ -699,7 +747,10 @@ describe("the board's plan mended (mendPlan)", () => {
     ];
     for (const answer of answers) {
       const mended = mend(planOf(answer, narration));
-      const left = codes(mended).filter((c) => !c.endsWith('no-shots'));
+      // The pace is the board's to give (withPace): the mend leaves the rest clean.
+      const left = codes(mended).filter(
+        (c) => !c.endsWith('no-shots') && !c.endsWith('gap-long'),
+      );
       expect(left).toEqual([]);
       // Mending is done once: mended again, the same.
       expect(mend(mended)).toEqual(mended);
@@ -773,17 +824,57 @@ describe('a safe shot for a line with none', () => {
         kind: 'quote',
         spec: {
           text: 'Mr. Gorbachev, tear down this wall!',
-          speaker: null,
+          speaker: 'Ronald Reagan',
           when: null,
         },
       },
     });
   });
 
+  it('shows a line about when its date, named by what happened', () => {
+    expect(safeShot(WALL_ROWS[5], registry, WALL_WORLD)).toMatchObject({
+      on: 'Two years later',
+      set: {
+        kind: 'chart',
+        chart: {
+          kind: 'calendar',
+          spec: { calendars: [{ label: 'Wall opens', dates: ['1989'] }] },
+        },
+      },
+      camera: [{ move: 'establish', on: 'Two years later' }],
+    });
+  });
+
+  it('names a calendar by a short name of what happened, never a sentence cut short', () => {
+    const talks: RegistryEntry = {
+      name: 'date:1953',
+      kind: 'date',
+      about:
+        'Constitutional talks expose a split over the timing of self-government',
+    };
+    expect(calendarShot(talks, 'In 1953').set).toEqual({
+      kind: 'chart',
+      chart: {
+        kind: 'calendar',
+        spec: { calendars: [{ label: null, dates: ['1953'] }], merge: null },
+      },
+    });
+    expect(
+      calendarShot({ ...talks, about: 'The Wall opens' }, 'In 1953').set,
+    ).toMatchObject({
+      chart: {
+        spec: { calendars: [{ label: 'Wall opens', dates: ['1953'] }] },
+      },
+    });
+  });
+
+  /** The Wall's last line resting on nothing: no picture of its own. */
+  const bare = { ...WALL_ROWS[5], claims: [] };
+
   it('carries the shot before on with the camera moving, pushing, then pulling', () => {
     const world = { ...WALL_WORLD, base: null };
     const before = good().shots[1];
-    const carried = safeShot(WALL_ROWS[5], registry, world, {
+    const carried = safeShot(bare, registry, world, {
       previous: before,
     });
     expect(carried).toMatchObject({
@@ -794,7 +885,7 @@ describe('a safe shot for a line with none', () => {
       join: 'continue',
       focal: WHOLE_SET,
     });
-    const again = safeShot(WALL_ROWS[5], registry, world, {
+    const again = safeShot(bare, registry, world, {
       previous: carried,
     });
     expect(again.camera[0].move).toBe('pull');
@@ -803,14 +894,13 @@ describe('a safe shot for a line with none', () => {
   it('begins the next shot early, else the whole map, else the dates, else a quiet set', () => {
     const next = good().shots[2];
     expect(
-      safeShot(WALL_ROWS[5], registry, { ...WALL_WORLD, base: null }, { next })
-        .set,
+      safeShot(bare, registry, { ...WALL_WORLD, base: null }, { next }).set,
     ).toEqual(next.set);
-    expect(safeShot(WALL_ROWS[5], registry, WALL_WORLD).set).toEqual({
+    expect(safeShot(bare, registry, WALL_WORLD).set).toEqual({
       kind: 'map',
       tilt: 'flat',
     });
-    expect(safeShot(WALL_ROWS[5], registry, null).set).toMatchObject({
+    expect(safeShot(bare, registry, null).set).toMatchObject({
       kind: 'chart',
       chart: { kind: 'timeline' },
     });
@@ -819,7 +909,7 @@ describe('a safe shot for a line with none', () => {
       research: null,
       world: null,
     });
-    expect(safeShot(WALL_ROWS[5], empty, null).set.kind).toBe('set');
+    expect(safeShot(bare, empty, null).set.kind).toBe('set');
   });
 
   it('is never a word card: every safe shot passes the check', () => {
@@ -831,6 +921,298 @@ describe('a safe shot for a line with none', () => {
         checkPlan(plan, words, registry).map((p) => `${k}:${p.code}`),
       ).toEqual([]);
     });
+  });
+});
+
+describe('the plan across its lines', () => {
+  const lines = WALL_ROWS;
+  const check = (plan: ShotPlan, opening = false) =>
+    checkPlan(plan, narration, registry, { lines, opening }).map(
+      (p) => `${p.shot}:${p.code}`,
+    );
+  const mend = (plan: ShotPlan, opening = false) =>
+    mendPlan(plan, narration, registry, { lines, opening });
+
+  it('finds nothing wrong with the good plan, line by line', () => {
+    expect(check(good())).toEqual([]);
+    expect(mend(good())).toEqual(good());
+  });
+
+  it('counts only a number its own line says, resting on its claims', () => {
+    // The border's length said on a line resting on another claim is no count of it.
+    const elsewhere = WALL_ROWS.map((row, k) =>
+      k === 1 ? { ...row, claims: ['c4'] } : row,
+    );
+    const plan = good();
+    const found = checkPlan(plan, narration, registry, {
+      lines: elsewhere,
+    }).map((p) => `${p.shot}:${p.code}`);
+    expect(found).toEqual(['1:count-unsaid', '1:count-unsaid']);
+    const mended = mendPlan(plan, narration, registry, { lines: elsewhere });
+    expect(mended.shots.map((s) => s.on)).toEqual([
+      'In 1961',
+      'In 1987',
+      'East Germany’s leader',
+    ]);
+  });
+
+  it('shows a counter once, never again for a line that never says it', () => {
+    const plan = good();
+    plan.shots.push(
+      shot({
+        on: 'the Wall opened',
+        set: plan.shots[1].set,
+        info: [
+          {
+            recipe: 'count',
+            target: 'number:Length of the inner border',
+            on: 'the Wall opened',
+          },
+        ],
+        focal: WHOLE_SET,
+      }),
+    );
+    plan.shots[3].info = plan.shots[3].info.slice(0, 2);
+    expect(check(plan)).toEqual(['4:count-unsaid', '4:count-repeat']);
+    expect(mend(plan).shots).toHaveLength(4);
+  });
+
+  it('lets nothing meant for the board reach the stage', () => {
+    const plan = good();
+    plan.shots[1].info[0].until = 'kilometres';
+    plan.shots[3].info[1].text = 'label';
+    const counter = plan.shots[1].set as Extract<
+      PlanShot['set'],
+      { kind: 'chart' }
+    >;
+    counter.chart.spec.source = 'c2';
+    plan.shots[2] = shot({
+      on: 'In 1987',
+      set: {
+        kind: 'chart',
+        chart: {
+          kind: 'timeline',
+          spec: {
+            events: [
+              { when: '1961', name: '1961' },
+              { when: '1987', name: 'Reagan speaks' },
+            ],
+          },
+        },
+      },
+      info: [{ recipe: 'mark', target: 'part:1987', on: 'Reagan' }],
+      camera: [
+        { move: 'push', target: 'part:1987', on: 'Tear down this wall' },
+      ],
+      focal: WHOLE_SET,
+    });
+    expect(check(plan)).toEqual([
+      '1:leak-until',
+      '1:leak-source',
+      '2:leak-date',
+      '3:leak-label',
+    ]);
+    const mended = mend(plan);
+    expect(mended.shots[1].info[0].until).toBeUndefined();
+    expect(mended.shots[1].set).toMatchObject({
+      chart: { spec: { source: 'The Wall, part 2' } },
+    });
+    expect(mended.shots[2].set).toMatchObject({
+      chart: {
+        spec: {
+          events: [
+            { when: '1961', name: 'Wall goes up' },
+            { when: '1987', name: 'Reagan speaks' },
+          ],
+        },
+      },
+    });
+    expect(mended.shots[3].info[1].text).toBe('East Germany');
+    expect(check(mended)).toEqual([]);
+  });
+
+  it('fills a region as the voice first names it', () => {
+    const plan = good();
+    plan.shots[3].info = [
+      {
+        recipe: 'label',
+        target: 'region:East Germany',
+        text: 'East',
+        on: 'Erich Honecker',
+      },
+      { recipe: 'fill', target: 'region:East Germany', on: 'held on' },
+      { recipe: 'mark', target: 'place:Berlin', on: 'the Wall opened' },
+    ];
+    expect(check(plan)).toContain('3:fill-late');
+    const fill = mend(plan).shots[3].info.find((i) => i.recipe === 'fill');
+    expect(fill).toEqual({
+      recipe: 'fill',
+      target: 'region:East Germany',
+      on: 'East Germany’s leader',
+    });
+  });
+
+  it('fills the regions a side of the map names, as it is named', () => {
+    const regions = registryOf([
+      {
+        name: 'region:North Region',
+        kind: 'region',
+        about: 'a region of the show’s map',
+        geo: { lng: 8.67, lat: 10.39 },
+        aliases: ['north'],
+      },
+      {
+        name: 'region:West Region',
+        kind: 'region',
+        about: 'a region of the show’s map',
+        geo: { lng: 4.7, lat: 7.08 },
+        aliases: ['west'],
+      },
+      {
+        name: 'region:East Region',
+        kind: 'region',
+        about: 'a region of the show’s map',
+        geo: { lng: 7.55, lat: 5.6 },
+        aliases: ['east'],
+      },
+    ]);
+    const said =
+      'Southern leaders wanted self-government sooner. The North would not fix a date too soon.';
+    const plan: ShotPlan = {
+      shots: [
+        shot({
+          on: 'Southern leaders',
+          set: { kind: 'map', tilt: 'flat' },
+          info: [
+            {
+              recipe: 'fill',
+              target: 'region:North Region',
+              on: 'The North would',
+            },
+          ],
+          focal: WHOLE_SET,
+        }),
+      ],
+    };
+    const late = checkPlan(plan, said, regions, { map: true }).map(
+      (p) => p.code,
+    );
+    expect(late.filter((c) => c === 'fill-late')).toHaveLength(2);
+    const fills = mendPlan(plan, said, regions, { map: true })
+      .shots[0].info.filter((i) => i.recipe === 'fill')
+      .map((i) => `${i.target} on ${i.on}`);
+    expect(fills).toEqual([
+      'region:North Region on The North would',
+      'region:West Region on Southern leaders wanted',
+      'region:East Region on Southern leaders wanted',
+    ]);
+  });
+
+  it('never labels a thing with a date by itself', () => {
+    const plan = good();
+    plan.shots[3].info[1] = {
+      recipe: 'label',
+      target: 'region:East Germany',
+      text: '1961',
+      on: 'held on',
+    };
+    expect(check(plan)).toContain('3:label-names');
+    // Renamed by what it labels.
+    expect(mend(plan).shots[3].info[1]).toMatchObject({
+      recipe: 'label',
+      target: 'region:East Germany',
+      text: 'East Germany',
+    });
+    // On a calendar's own date, a label of the date is dropped.
+    const calendar = good();
+    calendar.shots[2] = {
+      ...calendar.shots[2],
+      set: {
+        kind: 'chart',
+        chart: {
+          kind: 'calendar',
+          spec: {
+            calendars: [{ label: 'Reagan speaks', dates: ['1987'] }],
+            merge: null,
+          },
+        },
+      },
+      info: [
+        { recipe: 'label', target: 'part:1987', text: '1987', on: 'In 1987' },
+      ],
+      camera: [{ move: 'establish', on: 'In 1987' }],
+      focal: WHOLE_SET,
+    };
+    expect(check(calendar)).toContain('2:label-names');
+    expect(mend(calendar).shots[2].info).toEqual([]);
+  });
+
+  it('fills a region where the shot already shows it, when it has no room', () => {
+    const plan = good();
+    plan.shots[3].info = [
+      {
+        recipe: 'spotlight',
+        target: 'region:East Germany',
+        on: 'Erich Honecker',
+      },
+      { recipe: 'mark', target: 'place:Berlin', on: 'held on' },
+      { recipe: 'mark', target: 'place:Berlin', on: 'Two years later' },
+      { recipe: 'mark', target: 'place:Berlin', on: 'the Wall opened' },
+    ];
+    expect(check(plan)).toContain('-1:fill-late');
+    const mended = mend(plan);
+    expect(mended.shots[3].info[0]).toEqual({
+      recipe: 'fill',
+      target: 'region:East Germany',
+      on: 'East Germany’s leader',
+    });
+    expect(check(mended)).not.toContain('-1:fill-late');
+  });
+
+  it('else goes on from the region’s name as the shot’s continuation, filled', () => {
+    const plan = good();
+    plan.shots[3] = {
+      ...plan.shots[3],
+      on: 'he said',
+      info: [
+        { recipe: 'mark', target: 'place:Berlin', on: 'he said' },
+        { recipe: 'mark', target: 'place:Berlin', on: 'Erich Honecker' },
+        { recipe: 'mark', target: 'place:Berlin', on: 'Two years later' },
+        { recipe: 'mark', target: 'place:Berlin', on: 'the Wall opened' },
+      ],
+    };
+    expect(check(plan)).toContain('-1:fill-late');
+    const mended = mend(plan);
+    expect(mended.shots[3].join).toBe('continue');
+    expect(mended.shots[4]).toMatchObject({
+      on: 'East Germany’s leader',
+      set: { kind: 'map' },
+      focal: 'region:East Germany',
+    });
+    expect(mended.shots[4].info[0]).toEqual({
+      recipe: 'fill',
+      target: 'region:East Germany',
+      on: 'East Germany’s leader',
+    });
+    expect(check(mended)).not.toContain('-1:fill-late');
+  });
+
+  it("changes the episode's opening by its third or fourth word", () => {
+    const plan = good();
+    plan.shots[0].info = [
+      { recipe: 'pin', target: 'place:Berlin', on: 'In 1961' },
+      { recipe: 'seam', target: 'seam:inner border', on: 'overnight' },
+    ];
+    expect(check(plan, true)).toContain('0:first-late');
+    expect(check(plan, false)).not.toContain('0:first-late');
+    const mended = mend(plan, true);
+    // The pin lands where Berlin is named, the third word.
+    expect(mended.shots[0].info[0]).toEqual({
+      recipe: 'pin',
+      target: 'place:Berlin',
+      on: 'Berlin was cut',
+    });
+    expect(check(mended, true)).not.toContain('0:first-late');
   });
 });
 
@@ -965,5 +1347,58 @@ describe('people and vehicles on the stage (the kit)', () => {
     expect(mended.shots[0].actors[0].moves).toEqual([
       { move: 'enter', on: 'cut in two' },
     ]);
+  });
+});
+
+describe("a calendar's words", () => {
+  it('never names a calendar, or what its sheets merge into, by dates alone', () => {
+    const read = planOf(
+      {
+        shots: [
+          {
+            on: 'In 1987',
+            set: {
+              kind: 'chart',
+              chart: {
+                kind: 'calendar',
+                spec: {
+                  calendars: [
+                    { label: '1961', dates: ['1987'] },
+                    { label: 'Wall opens', dates: ['1989'] },
+                  ],
+                  merge: '1987 and 1989',
+                },
+              },
+            },
+            focal: 'set',
+          },
+        ],
+      },
+      narration,
+    );
+    expect(read.shots[0].set).toEqual({
+      kind: 'chart',
+      chart: {
+        kind: 'calendar',
+        spec: {
+          calendars: [
+            { label: null, dates: ['1987'] },
+            { label: 'Wall opens', dates: ['1989'] },
+          ],
+          merge: null,
+        },
+      },
+    });
+  });
+});
+
+describe('a plan as stored, read again', () => {
+  it('reads its charts as they are kept ({kind, spec}), and mends to the same plan', () => {
+    const plan = good();
+    const again = planOf(JSON.parse(JSON.stringify(plan)), narration);
+    expect(again.shots.map((s) => s.set)).toEqual(plan.shots.map((s) => s.set));
+    expect(mendPlan(again, narration, registry)).toEqual(
+      mendPlan(plan, narration, registry),
+    );
   });
 });

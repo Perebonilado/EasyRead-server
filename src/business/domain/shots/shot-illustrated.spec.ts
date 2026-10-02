@@ -242,9 +242,13 @@ describe('the build in an illustrated show', () => {
   it('makes the eyes on the regions, each glancing at another', () => {
     const eyes = built.shots[0].life.filter((l) => l.effect === 'eyes');
     expect(eyes).toHaveLength(2);
+    // On the map the shot shows (its own copy when a region waits for its fill).
+    const set = built.shots[0].set;
+    const map = set.kind === 'map' ? set.asset : undefined;
+    expect(map).toMatch(/^map/);
     expect(eyes[0]).toMatchObject({
-      at: { kind: 'asset', asset: 'map', part: 'group-west-region' },
-      to: { kind: 'asset', asset: 'map', part: 'group-east-region' },
+      at: { kind: 'asset', asset: map, part: 'group-west-region' },
+      to: { kind: 'asset', asset: map, part: 'group-east-region' },
       face: 'angry',
     });
   });
@@ -284,9 +288,12 @@ describe('the build in an illustrated show', () => {
   });
 
   it('turns a character’s face at a word, in a blink, to a state of its rig', () => {
+    // In whichever shot the pace leaves that word.
     const bello = built.shots
       .flatMap((one) => one.actors)
-      .find((a) => a.id === 'bello')!;
+      .find(
+        (a) => a.id === 'bello' && a.moves.some((m) => m.move === 'surprised'),
+      )!;
     const face = bello.moves.find((m) => m.move === 'surprised');
     expect(face).toMatchObject({ state: 'surprised', durMs: 160 });
     const svg = built.assets[bello.asset];

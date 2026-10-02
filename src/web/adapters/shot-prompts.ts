@@ -15,6 +15,7 @@ import { RULES_PROMPT } from '../../business/domain/studio/explainer-rules';
 import {
   CHART_KINDS,
   CHART_USES,
+  DRAWN_SETS,
   JOIN_USES,
   LIFE_USES,
   MOVE_USES,
@@ -122,7 +123,12 @@ const HOW = [
   '- A shot lasts while its set stays: inside it, information and camera moves come on their own exact words ("on", and "until" when they leave). A new shot only for a new set; at most eight shots a minute.',
   '- Each shot: one set, up to four information items and two camera moves, life only for what the place really has, and one subject ("focal"): a name of the list, a part of its chart, or "set" for the whole chart or map.',
   '- Names only from the list, written as it writes them (place:…, region:…, number:…); a chart’s own parts as part:<its words>. Never a place, a person, a number, a date or a picture the list does not give.',
+  '- Something new every few words, on the words that name it: never more than about eight words of the voice without a new change (a pin, a fill, a label, a mark, a count, a move to what is named). When a shot has nothing more of what the voice is saying to show, cut to a new shot of it: the map on the place or the region it names, a timeline or a calendar for its dates, a quote for someone’s own words. Never hold one picture while the voice talks about something else.',
   '- One change at a time: each information item on its own words, three or four words after the one before; never several on the same words.',
+  '- Fill a region on the words that first name it (by its name, as "northern" for the North, or as the side of the map it is on), never later.',
+  '- A counter only for a number its own line says, from the list: a number the voice never says is never counted, and a counter comes once, never again.',
+  '- "until" only on what lets go (a label, a pin, a mark, a spotlight, a fill as a highlight, a flow, an ask); never on a count, a grow, a draw, a morph, a strike, a stamp or an enter, which stay.',
+  '- Words on the stage are for the viewer: a source says where the numbers come from as the claim’s source does, never a claim’s id ("c7"); an event of a timeline is named by what happened, never by its own date; never a field’s name ("label", "number") as words.',
   '- At most eight words on the stage in a shot, one to three to a label. A label names what it is on (a place’s name, a year, a part’s name), always pinned to it (its target); it never repeats what the voice says. Code writes every number from the list.',
   `- ${KIT_GUIDE}`,
   '- join: how the shot hands over to the next: continue for the same set, cut for a new one, dissolve when time passes, zoom-through into a pin or a part, dip after a grave fact.',
@@ -293,7 +299,9 @@ export function shotBoardPrompt(
     uses(
       'The sets (one a shot):',
       Object.fromEntries(
-        SET_KINDS.filter((k) => k !== 'plain').map((k) => [k, SET_USES[k]]),
+        SET_KINDS.filter(
+          (k) => k !== 'plain' && (DRAWN_SETS || k !== 'set'),
+        ).map((k) => [k, SET_USES[k]]),
       ),
     ),
     [
@@ -322,5 +330,7 @@ export function shotBoardPrompt(
     howFor(look),
     EXAMPLES,
     'Answer with the plan only.',
-  ].join('\n\n');
+  ]
+    .filter(Boolean)
+    .join('\n\n');
 }

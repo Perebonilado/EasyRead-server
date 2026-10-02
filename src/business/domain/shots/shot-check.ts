@@ -1244,17 +1244,53 @@ export const partWords = (part: string): string => {
   return words.charAt(0).toUpperCase() + words.slice(1);
 };
 
+/** Words of a name that tell nothing apart. */
+const NAME_FILLER = ['the', 'of', 'region', 'state', 'and'];
+
+/**
+ * Whether words on an actor name someone or somewhere of the list: a
+ * person, a place, a region, a seam or a side, by a word of their name
+ * (the generic ones aside). A group of the kit labelled "Kaduna" or "North
+ * Region" says whose it is; "set the pace" only repeats the voice.
+ */
+function namesListed(words: readonly string[], registry: TargetRegistry) {
+  return registry
+    .entries()
+    .filter((e) =>
+      ['person', 'place', 'region', 'seam', 'side'].includes(e.kind),
+    )
+    .some((e) =>
+      [splitTarget(e.name).rest, ...(e.aliases ?? [])]
+        .flatMap((n) => keysOf(n))
+        .filter((k) => !NAME_FILLER.includes(k))
+        .some((k) => words.includes(k)),
+    );
+}
+
 /**
  * Whether a label names what it is on: a word of its target's name (the
- * generic ones aside), or numbers the scene gives (a year on a place). A
- * label never repeats what the voice says.
+ * generic ones aside), or numbers the scene gives (a year on a place); on
+ * a piece of the kit, someone or somewhere of the list (a device's own
+ * small labels, "Before" and "After", are its own). A label never repeats
+ * what the voice says.
  */
 function labelNames(
   text: string,
   target: Target | null,
   given: ReadonlySet<number>,
+  on?: { shot: PlanShot; registry: TargetRegistry },
 ): boolean {
-  if (!target || target.kind === 'set' || target.kind === 'actor') return true;
+  if (!target || target.kind === 'set') return true;
+  if (target.kind === 'actor') {
+    if (!on) return true;
+    const id = target.name.replace(/^actor:/u, '');
+    const actor = on.shot.actors.find((a) => a.id === id);
+    if (!actor || actor.kit.startsWith('ui.')) return true;
+    const words = keysOf(text);
+    if (words.length && words.every((w) => /^\d+$/u.test(w)))
+      return numbersIn(text).every((n) => given.has(n));
+    return words.length > 0 && namesListed(words, on.registry);
+  }
   const words = keysOf(text);
   if (!words.length) return false;
   // A date by itself names nothing: the calendar or the timeline shows it.
@@ -1267,7 +1303,7 @@ function labelNames(
       ...(target.kind === 'entry' ? (target.entry.aliases ?? []) : []),
     ]
       .flatMap((n) => keysOf(n))
-      .filter((k) => !['the', 'of', 'region', 'state', 'and'].includes(k)),
+      .filter((k) => !NAME_FILLER.includes(k)),
   );
   return words.some((w) => own.has(w));
 }
@@ -1629,7 +1665,10 @@ export function checkPlan(
         info.recipe === 'label' &&
         info.text &&
         !roleOnly(info.text) &&
-        !labelNames(info.text, targetIn(shot, info.target, registry), given)
+        !labelNames(info.text, targetIn(shot, info.target, registry), given, {
+          shot,
+          registry,
+        })
       )
         say(
           k,
@@ -2093,7 +2132,8 @@ function mendShot(
     if (
       item.recipe === 'label' &&
       target &&
-      (!item.text || !labelNames(item.text, target, given))
+      (!item.text ||
+        !labelNames(item.text, target, given, { shot: out, registry }))
     ) {
       const name = clip(nameOf(target), TEXT.labelWordsMax);
       if (name && !roleOnly(name) && !dateOnly(name)) item.text = name;

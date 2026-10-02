@@ -1405,6 +1405,68 @@ describe('people and vehicles on the stage (the kit)', () => {
   });
 });
 
+describe('words on a piece of the kit', () => {
+  const kit = KIT_IDS;
+  const scene = (
+    label: string,
+    actor: PlanShot['actors'][number],
+  ): ShotPlan => {
+    const plan = good();
+    plan.shots[3] = shot({
+      on: 'East Germany’s leader',
+      set: { kind: 'set', set: { land: 'city', time: 'day' } },
+      actors: [actor],
+      info: [
+        {
+          recipe: 'label',
+          target: `actor:${actor.id}`,
+          text: label,
+          on: 'held on',
+        },
+      ],
+      focal: WHOLE_SET,
+    });
+    return plan;
+  };
+  const crowd = { id: 'leaders', kit: 'people.crowd', place: 'centre' };
+
+  it('names someone or somewhere of the list on a group, never repeats the voice', () => {
+    const echo = scene('held on', crowd);
+    expect(
+      checkPlan(echo, narration, registry, { kit }).map((p) => p.code),
+    ).toContain('label-names');
+    expect(mendPlan(echo, narration, registry, { kit }).shots[3].info).toEqual(
+      [],
+    );
+    // Whose they are: a region or a side of the list.
+    const whose = scene('East Germany', crowd);
+    expect(
+      checkPlan(whose, narration, registry, { kit }).map((p) => p.code),
+    ).not.toContain('label-names');
+    expect(mendPlan(whose, narration, registry, { kit }).shots[3].info).toEqual(
+      [
+        {
+          recipe: 'label',
+          target: 'actor:leaders',
+          text: 'East Germany',
+          on: 'held on',
+        },
+      ],
+    );
+  });
+
+  it('keeps a device’s own small labels: a before and an after', () => {
+    const device = scene('Before', {
+      id: 'old',
+      kit: 'ui.phone',
+      place: 'left',
+    });
+    expect(
+      checkPlan(device, narration, registry, { kit }).map((p) => p.code),
+    ).not.toContain('label-names');
+  });
+});
+
 describe("a calendar's words", () => {
   it('never names a calendar, or what its sheets merge into, by dates alone', () => {
     const read = planOf(

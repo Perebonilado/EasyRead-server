@@ -1782,6 +1782,8 @@ function groupPiece(
 export const CROWD_MOST = 400;
 /** The fewest people a crowd is: fewer is a group. */
 export const CROWD_LEAST = 13;
+/** How many a crowd draws when no number was given: a crowd, claiming none. */
+const UNCOUNTED = 90;
 const ROUND = [
   1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 2500, 5000, 10000,
   20000, 25000, 50000, 100000,
@@ -1985,7 +1987,10 @@ function crowdPiece(
   seed: number,
 ): KitPiece {
   const r = rand(seed);
-  const count = Math.max(CROWD_LEAST, Math.round(Number(params.count) || 120));
+  // A crowd no number was given for is not counted: it draws a crowd, and claims no number.
+  const said = Math.round(Number(params.count) || 0);
+  const counted = said >= CROWD_LEAST;
+  const count = counted ? said : UNCOUNTED;
   const per = perFigure(count);
   const total = figuresFor(count);
   const era = eraParam(params);
@@ -2105,12 +2110,13 @@ function crowdPiece(
   }
   const box = unionBox(boxes);
   const near = parts.filter((p) => p.id.startsWith('p-')).map((p) => p.box!);
-  const notes =
-    per > 1
+  const notes = !counted
+    ? [`${drawn} figures: a crowd, no number given, none claimed`]
+    : per > 1
       ? [`${drawn} figures for ${count} people: 1 figure = ${per} people`]
       : [`${drawn} figures, one for each of ${count} people`];
   return piece(
-    `people.crowd:${pose}:${count}`,
+    `people.crowd:${pose}:${counted ? count : 'uncounted'}`,
     parts,
     shadows,
     box,
@@ -2216,9 +2222,9 @@ export const PEOPLE_KIT: Readonly<Record<string, KitEntry>> = {
         about: 'what they do',
       },
       count: {
-        range: [CROWD_LEAST, 10_000_000],
-        default: 120,
-        about: 'only a number the list or the line gives',
+        range: [0, 10_000_000],
+        default: 0,
+        about: 'only a number the list or the line gives; 0 when none is',
       },
       era: ERA_PARAM,
       who: WHO_PARAM,

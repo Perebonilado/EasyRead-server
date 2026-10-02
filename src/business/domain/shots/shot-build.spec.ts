@@ -83,7 +83,11 @@ describe('the plan built', () => {
       's4',
       's5',
     ]);
-    expect(Object.keys(built.assets).sort()).toEqual(['chart-1', 'map']);
+    expect(Object.keys(built.assets).sort()).toEqual([
+      'actor-3-1',
+      'chart-1',
+      'map',
+    ]);
     expect(built.shots[0].set).toEqual({
       kind: 'map',
       asset: 'map',
@@ -191,9 +195,27 @@ describe('the plan built', () => {
     expect(bare.notes.join(' ')).toContain('no picture could be drawn');
   });
 
-  it('leaves actors out until the kit has them, and says so', () => {
-    expect(built.shots[2].actors).toEqual([]);
-    expect(built.notes.join('\n')).toContain(
+  it('stands the kit’s pieces on the set: a crowd on its place on the map, as a marker, counting no one', () => {
+    const [crowd] = built.shots[2].actors;
+    expect(crowd).toMatchObject({ id: 'crowd', asset: 'actor-3-1' });
+    const asset = built.assets['actor-3-1'];
+    expect(asset.kind).toBe('svg');
+    expect(asset.kind === 'svg' && asset.rig?.idle?.length).toBeGreaterThan(0);
+    // On Kano's point, about a fourteenth of the map tall.
+    const [px, py] = MAP.project!(8.52, 12.0)!;
+    expect('x' in crowd.at && Math.abs(crowd.at.x - px)).toBeLessThan(40);
+    expect('y' in crowd.at && Math.abs(crowd.at.y - py)).toBeLessThan(40);
+    expect(crowd.size / 700).toBeCloseTo(0.07, 2);
+    expect(crowd.moves).toEqual([
+      { move: 'enter', on: 'regional fight', durMs: 2000 },
+    ]);
+    expect(built.notes.join('\n')).toContain('no number given, none claimed');
+  });
+
+  it('leaves out a piece the show’s look has not, and says so', () => {
+    const other = buildShots(PLAN, registry, { ...ctx, look: 'illustrated' });
+    expect(other.shots[2].actors).toEqual([]);
+    expect(other.notes.join('\n')).toContain(
       'actor crowd (people.crowd) left out',
     );
   });

@@ -243,6 +243,14 @@ export interface RegistryEntry {
   aliases?: string[];
   /** A person's described likeness from the look notes: an illustrated show draws their character from it. */
   likeness?: string;
+  /**
+   * What a photo entry shows (Richard, 2026-10-02: real pictures first, the
+   * map only for geography): a person (another photo of them), a place, a
+   * thing or an event, by its name in this registry where it has one (a
+   * person's or a place's), else the research's words. The board cuts to
+   * it when the voice names what it shows, and the stand-in takes it first.
+   */
+  shows?: { kind: 'person' | 'place' | 'thing' | 'event'; name: string };
 }
 
 /** What the board may name in a scene, built from the research log, the world, the show map and the picture desk. */

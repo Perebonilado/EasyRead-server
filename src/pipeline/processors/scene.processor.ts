@@ -2115,7 +2115,7 @@ export class SceneProcessor {
         thing.id,
         await drawByCode(thing, shape).catch((error: unknown) => {
           this.logger.warn(
-            `${who}: "${thing.id}" (${thing.kind}) is set as a card: ${(error as Error).message}`,
+            `${who}: "${thing.id}" (${thing.kind}) could not be drawn (a book's page sets it as a card, an explainer leaves it out): ${(error as Error).message}`,
           );
           return null;
         }),
@@ -2138,7 +2138,7 @@ export class SceneProcessor {
           faceRig: true,
         }).catch((error: unknown) => {
           this.logger.warn(
-            `${who}: "${thing.id}" (a person) is set as a card: ${(error as Error).message}`,
+            `${who}: "${thing.id}" (a person) could not be drawn (a book's page sets it as a card, an explainer leaves it out): ${(error as Error).message}`,
           );
           return null;
         }),
@@ -2432,7 +2432,7 @@ export class SceneProcessor {
     }
     if (!best?.drawing)
       this.logger.warn(
-        `${who}: "${thing.name}" is set as a card: no drawing came through`,
+        `${who}: "${thing.name}" could not be drawn (a book's page sets it as a card, an explainer leaves it out): no drawing came through`,
       );
     return best?.drawing ?? null;
   }

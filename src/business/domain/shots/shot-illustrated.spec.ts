@@ -12,6 +12,7 @@ import { EMPTY_BRIEF, type StudioBrief } from '../studio/studio';
 import { lookStyleFor, showLookStyle } from '../studio/studio-look';
 import { MAP, PALETTE, REGISTRY } from './__fixtures__/regional-turn';
 import { buildShots, shotLook, type BuildContext } from './shot-build';
+import { namedIn } from './shot-compose';
 import { mendPlan, planOf } from './shot-check';
 import { registryOf } from './shot-registry';
 import { SAY_LINGER_MS, timeShots } from './shot-time';
@@ -264,6 +265,22 @@ describe('the build in an illustrated show', () => {
     const svg = built.assets[bello.asset];
     // A white turban: the likeness's.
     expect(svg.kind === 'svg' && svg.svg).toContain('data-part="hat"');
+  });
+
+  it('labels a named character once an episode: not again in a later scene', () => {
+    // The names a scene's plan shows, as the board's answer was mended: a person of the list only.
+    expect(namedIn(plan)).toEqual(['Ahmadu Bello']);
+    expect(namedIn(null)).toEqual([]);
+    const later = buildShots(plan, registry, { ...ctx, named: namedIn(plan) });
+    expect(
+      later.shots
+        .flatMap((s) => s.info)
+        .filter((i) => i.recipe === 'label' && i.text === 'Ahmadu Bello'),
+    ).toHaveLength(0);
+    // The character is still drawn: only the label is left out.
+    expect(
+      later.shots.flatMap((s) => s.actors).some((a) => a.id === 'bello'),
+    ).toBe(true);
   });
 
   it('turns a character’s face at a word, in a blink, to a state of its rig', () => {

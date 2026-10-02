@@ -55,6 +55,19 @@ export interface ShotsInput {
   seed: string;
   /** How the show draws its people (tech §11): silhouettes or characters. Editorial when absent. */
   look?: KitLook;
+  /** The named characters the episode's scenes before this one showed: each is labelled once an episode. */
+  named?: string[];
+}
+
+/** The named characters a scene's plan shows (a person of its list, as the board's answer was mended): those its build labels. */
+export function namedIn(plan: ShotPlan | null | undefined): string[] {
+  const names = (plan?.shots ?? []).flatMap((shot) =>
+    (shot.actors ?? []).flatMap((actor) => {
+      const name = actor.params?.name;
+      return typeof name === 'string' && name ? [name] : [];
+    }),
+  );
+  return [...new Set(names)];
 }
 
 /** A shots sheet's make: its plan and the show's world, or null for a sheet of today's storyboard. */
@@ -64,6 +77,8 @@ export function shotsInputOf(
   first: boolean,
   seed: string,
   look?: KitLook | null,
+  /** The named characters the episode's scenes before it showed (namedIn of each). */
+  named?: readonly string[],
 ): ShotsInput | null {
   if (sheet.engine !== 'shots' || !sheet.shots) return null;
   return {
@@ -83,6 +98,7 @@ export function shotsInputOf(
     first,
     seed,
     ...(look ? { look } : {}),
+    ...(named?.length ? { named: [...new Set(named)] } : {}),
   };
 }
 
@@ -162,6 +178,7 @@ export function composeShotScene(
     map: made.map,
     seed: input.seed,
     ...(input.look ? { look: input.look } : {}),
+    ...(input.named?.length ? { named: input.named } : {}),
   });
   const notes = [...built.notes];
   const timed = timeShots(built.shots, beats, durationMs, { notes });

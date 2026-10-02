@@ -104,6 +104,8 @@ export interface BuildContext {
   seed: string;
   /** The show's look (tech §11): editorial silhouettes, or illustrated characters. Editorial when absent. */
   look?: KitLook;
+  /** The named characters the episode's scenes before this one showed (namedIn): each is labelled once an episode. */
+  named?: readonly string[];
 }
 
 /** The show's look as the shots draw it: its theme's paper and ink, its accent, its held colour and each side's colour. */
@@ -591,8 +593,8 @@ export function buildShots(
   const look = shotLook(ctx);
   const assets: Record<string, ShotAssetDto> = {};
   const notes: string[] = [];
-  /** The named characters labelled already in this scene: each only the first time. */
-  const namesShown = new Set<string>();
+  /** The named characters labelled already in this episode: each only the first time. */
+  const namesShown = new Set<string>(ctx.named ?? []);
   /** Each chart drawn, by its kind and spec: drawn once, shown by every shot that asks for it. */
   const charts = new Map<string, { id: string; dto: ShotSvgAssetDto }>();
   const pictures = new Map<string, string>();
@@ -1225,7 +1227,7 @@ export function buildShots(
     });
 
     // A named character is labelled with their name the first time the
-    // scene shows them (WP17), on the words that bring them on.
+    // episode shows them (WP17), on the words that bring them on.
     for (const one of planned.actors ?? []) {
       const name = one.params?.name;
       if (typeof name !== 'string' || !name || !actorIds.has(one.id)) continue;

@@ -261,6 +261,7 @@ import {
   worldColours,
 } from '../../business/domain/studio/studio-editor-world';
 import {
+  namedIn,
   shotsInputOf,
   shotsScriptOf,
 } from '../../business/domain/shots/shot-compose';
@@ -403,6 +404,15 @@ export function studioMakeOf(
           row.id,
           // How the show draws its people: characters or silhouettes.
           showLookStyle(show.brief, world, bible),
+          // A named character is labelled once an episode: not again
+          // when a scene before this one showed them.
+          rows
+            .filter((r) => r.position < row.position)
+            .flatMap((r) =>
+              r.sheet?.kind === 'explainer' && r.sheet.engine === 'shots'
+                ? namedIn(r.sheet.shots)
+                : [],
+            ),
         )
       : null;
   const lesson = {

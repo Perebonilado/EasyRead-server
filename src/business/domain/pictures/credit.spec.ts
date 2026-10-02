@@ -178,6 +178,17 @@ describe("a picture's words", () => {
     expect(
       yearOf(file({ title: 'Lagos street', date: '', description: '' })),
     ).toBeUndefined();
+    // A span of years is someone's term, not the photograph's year.
+    expect(
+      yearOf(
+        file({
+          title: 'Sir James Robertson arriving for the state banquet',
+          date: '',
+          description:
+            'Sir James Robertson, the last colonial Governor General of Nigeria (1955 -1960), arriving for state banquet, October 1960.',
+        }),
+      ),
+    ).toBe(1960);
     // A Navy print put on Flickr in 2015, dated by its scan: no year.
     expect(
       yearOf(

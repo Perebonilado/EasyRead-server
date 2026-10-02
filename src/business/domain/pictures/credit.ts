@@ -220,9 +220,16 @@ export function yearOf(
   file: Pick<SourceFile, 'title' | 'date' | 'description' | 'uploaded'> &
     Partial<Pick<SourceFile, 'artist' | 'credit' | 'categories'>>,
 ): number | undefined {
+  // A span of years ("Governor-General (1955–1960)", a life's) says
+  // nothing of when the photograph was taken: it is left out.
   const years = (text: string) =>
     [
-      ...plainText(text).matchAll(/(?<![\d-])(1[5-9]\d\d|20[0-4]\d)(?![\d])/gu),
+      ...plainText(text)
+        .replace(
+          /(?:1[5-9]\d\d|20[0-4]\d)\s*[-–—]\s*(?:1[5-9]\d\d|20[0-4]\d)/gu,
+          ' ',
+        )
+        .matchAll(/(?<![\d-])(1[5-9]\d\d|20[0-4]\d)(?![\d])/gu),
     ].map((m) => Number(m[1]));
   const inTitle = [...new Set(years(file.title))];
   if (inTitle.length === 1) return inTitle[0];

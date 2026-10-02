@@ -5,10 +5,14 @@
  * the build for a set of kind `set`.
  */
 import { BUILDING_KIT } from './buildings';
+import { DOCUMENT_KIT } from './documents';
 import { MACHINE_KIT } from './machines';
+import { OBJECT_KIT } from './objects';
 import type { KitEntry } from './registry';
 
 export const THINGS_KIT: Readonly<Record<string, KitEntry>> = {
   ...BUILDING_KIT,
+  ...DOCUMENT_KIT,
+  ...OBJECT_KIT,
   ...MACHINE_KIT,
 };

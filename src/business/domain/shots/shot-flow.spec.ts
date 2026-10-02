@@ -156,7 +156,7 @@ describe('a scene of shots from the board to the stage', () => {
     });
   });
 
-  it('times everything inside its shot, lets words go with their shot, and gives the pin its tick', () => {
+  it('times everything inside its shot, lets words go with their shot, and gives the pin its pop', () => {
     for (const shot of scene.shots!.shots)
       for (const item of shot.info) {
         expect(item.atMs).toBeGreaterThanOrEqual(shot.startMs);
@@ -164,7 +164,7 @@ describe('a scene of shots from the board to the stage', () => {
         if (item.recipe === 'label' || item.recipe === 'mark')
           expect(item.untilMs).toBeLessThanOrEqual(shot.endMs);
       }
-    expect(scene.shots!.sounds.some((s) => s.sound === 'tick')).toBe(true);
+    expect(scene.shots!.sounds.some((s) => s.sound === 'pop')).toBe(true);
     expect(problems.map((p) => p.code)).not.toContain('first-change');
   });
 });

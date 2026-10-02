@@ -105,6 +105,16 @@ const MADE_BY_AI =
 const US_REASON =
   /^PD[ -]US\b|^PD[ -]US[ -]|^PD[ -]USGov|^PD US |^PD[ -](?:1923|1929|1996)\b|^PD[ -](?:old[ -](?:auto|70|80|90|100)[ -])?expired\b|^PD[ -]old[ -]auto[ -]1996|^PD[ -]old[ -]auto[ -]expired|^Public domain in the United States|^PD[ -]US[ -]no notice|^PD[ -]US[ -]not renewed/iu;
 
+/**
+ * Commons' bare "PD-US" tag: public domain in the US because it was
+ * published before 1930. On a later work it gives no reason at all, so
+ * it counts only for a work made by then.
+ */
+const BARE_US = /^PD[ -]US$/iu;
+
+/** Commons' upkeep categories that name a tag without being one ("PD-US missing SDC copyright status"). */
+const UPKEEP = /missing|\bSDC\b|needing|needs|review|check|unclear|unknown/iu;
+
 /** A work of the US government (no copyright at all). */
 const US_GOVERNMENT =
   /^PD[ -]USGov|^PD[ -]US[ -](?:Gov|Government)\b|^PD US (?:Government|DOE|Army|Navy|Air ?Force|Military|Marines?|Marine Corps|NASA|NOAA|NPS|Coast ?Guard|Congress|State Department|FWS|USGS|USDA|FBI|CIA|EPA|DOD|DoD|White House|President|Census|Federal)\b|^PD[ -]US[ -](?:DOE|Army|Navy|Air ?Force|Military|Marines?|NASA|NOAA|NPS|Congress|FWS|USGS|USDA|White House|President)\b/iu;
@@ -303,6 +313,8 @@ export function licenceOf(file: LicenceInput): LicenceVerdict {
   };
 
   const { named, alternatives } = offeredOf(file);
+  // The licence tags themselves, not Commons' upkeep lists that name them.
+  const tags = categories.filter((c) => !UPKEEP.test(c));
   if (/\bnc\b|non[- ]?commercial|\bnd\b|no ?deriv/iu.test(named))
     return refuse('its licence forbids commercial use or changes');
 
@@ -314,14 +326,16 @@ export function licenceOf(file: LicenceInput): LicenceVerdict {
   } else if (
     /public domain|^pd\b|\bpd\b|\bpdm\b|public domain mark/iu.test(named)
   ) {
-    const usGov = categories.some((c) => US_GOVERNMENT.test(c));
-    const usReason = categories.some((c) => US_REASON.test(c));
-    const pdOld = categories.some((c) => PD_OLD.test(c));
-    const pdArt = categories.some((c) => PD_ART.test(c));
-    const ineligible = categories.some((c) => INELIGIBLE.test(c));
-    const selfReleased = categories.some((c) => SELF_RELEASED.test(c));
-    const country = categories.find((c) => PD_COUNTRY.test(c));
+    const usGov = tags.some((c) => US_GOVERNMENT.test(c));
     const longAgo = file.year !== undefined && file.year <= US_EXPIRED_BY;
+    const usReason = tags.some(
+      (c) => US_REASON.test(c) && (!BARE_US.test(c) || longAgo),
+    );
+    const pdOld = tags.some((c) => PD_OLD.test(c));
+    const pdArt = tags.some((c) => PD_ART.test(c));
+    const ineligible = tags.some((c) => INELIGIBLE.test(c));
+    const selfReleased = tags.some((c) => SELF_RELEASED.test(c));
+    const country = tags.find((c) => PD_COUNTRY.test(c));
     if (file.source !== 'commons') code = usGov || usReason ? 'PD-USGov' : 'PD';
     else if (usGov) code = 'PD-USGov';
     else if (pdArt && (usReason || longAgo)) code = 'PD-art';

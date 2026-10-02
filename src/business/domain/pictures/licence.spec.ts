@@ -246,6 +246,27 @@ describe('the licence screen', () => {
       ).toMatch(/copyright in the US/u);
     });
 
+    it("refuses Commons' bare PD-US tag on a work made after 1930 (a 1937 photograph), and takes it on an older one", () => {
+      expect(
+        refusedFor({
+          artist: 'Duckworth, E.H',
+          credit: 'https://dc.library.northwestern.edu/items/d2fa1a6b',
+          categories: [
+            'Nigeria',
+            'PD US',
+            'PD-US missing SDC copyright status',
+          ],
+          structured: null,
+          year: 1937,
+        }),
+      ).toMatch(/no reason given/u);
+      expect(
+        licenceOf(
+          file({ categories: ['PD US'], structured: null, year: 1921 }),
+        ),
+      ).toMatchObject({ ok: true, code: 'PD' });
+    });
+
     it('refuses public domain claimed with no reason at all', () => {
       expect(refusedFor({ categories: ['Lagos'] })).toMatch(/no reason given/u);
     });

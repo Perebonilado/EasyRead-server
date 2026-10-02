@@ -92,8 +92,9 @@ function targetKey(target?: ShotTargetDto): string {
   }
 }
 
-/** The words a piece of information puts on screen, for how long it must stay. */
+/** The words a piece of information puts on screen, for how long it must stay. An entrance's or an exit's text is its way in or out, not words. */
 export function wordsShown(item: ShotInfoDto): number {
+  if (item.recipe === 'enter' || item.recipe === 'exit') return 0;
   const count = (text?: string) =>
     text ? text.trim().split(/\s+/).filter(Boolean).length : 0;
   return (
@@ -140,14 +141,18 @@ function landings(shots: readonly ShotDto[]): (Landing & { sub: boolean })[] {
   });
   all.sort((a, b) => a.at - b.at);
   // A sub-step is part of the event before it: the label of the pin just
-  // dropped, the first fact of a set just cut to.
+  // dropped, the first fact of a set just cut to, a part brought on by the
+  // change it belongs to (a strike's new words).
   return all.map((one, k) => {
     const before = all[k - 1];
     const sub =
       !!before &&
       !one.cut &&
       one.at - before.at < PACE.subStepMs &&
-      (before.cut ? before.shot === one.shot : before.target === one.target);
+      (before.cut
+        ? before.shot === one.shot
+        : before.target === one.target ||
+          (one.item?.recipe === 'enter' && before.shot === one.shot));
     return { ...one, sub };
   });
 }

@@ -99,6 +99,14 @@ describe("where a picture's subject is, as a model that sees names it", () => {
       `the look does not see ${asked} in it (no)`,
     );
     expect(agreeDoubt(seen({ shows: 'unsure' }), asked)).toMatch(/unsure/u);
+    // A place's photo will do unless the look sees something else.
+    const place = 'a place: London, itself';
+    expect(
+      agreeDoubt(seen({ shows: 'unsure' }), place, { unsure: true }),
+    ).toBeNull();
+    expect(agreeDoubt(seen({ shows: 'no' }), place, { unsure: true })).toMatch(
+      /\(no\)/u,
+    );
     // A print of it on a museum wall is no photo of it, whatever it shows.
     expect(
       agreeDoubt(seen({ shows: 'yes', kind: 'photograph-of-a-print' }), asked),

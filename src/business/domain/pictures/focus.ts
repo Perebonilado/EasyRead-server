@@ -166,7 +166,7 @@ export function personPhotoDoubt(focus: Focus): string | null {
 export function agreeDoubt(
   focus: Focus,
   asked: string,
-  opts: { photograph?: boolean } = {},
+  opts: { photograph?: boolean; unsure?: boolean } = {},
 ): string | null {
   const doubt = photoDoubt(focus);
   if (doubt) return doubt;
@@ -177,7 +177,10 @@ export function agreeDoubt(
       focus.kind === 'other')
   )
     return `it is no photograph (${focus.kind})`;
-  return focus.shows === 'yes'
+  // A place's photo, its name and year already the file's own, will do
+  // unless the look sees something else; an event's and a thing's need it
+  // to see them.
+  return focus.shows === 'yes' || (opts.unsure && focus.shows === 'unsure')
     ? null
     : `the look does not see ${asked} in it (${focus.shows})`;
 }

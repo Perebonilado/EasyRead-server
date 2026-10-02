@@ -128,7 +128,7 @@ const LOOKUP_DAYS = 30;
  * again (a portrait that is a statue's photograph, once let through, is
  * not handed out for a month after the rule against it).
  */
-export const DESK_RULES = 20;
+export const DESK_RULES = 21;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** The width the desk asks a source for: a full frame's with room for a 12% push; a portrait's print; a page. */
@@ -1304,6 +1304,7 @@ export class PictureDesk {
       if (!focus || !agreed) return 'no look has said it shows what was asked';
       return agreeDoubt({ ...focus, shows: agreed }, asked, {
         photograph: candidate.kind !== 'object',
+        unsure: candidate.kind === 'place',
       });
     }
     if (!focus) return null;

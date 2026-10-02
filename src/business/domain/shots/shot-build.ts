@@ -42,7 +42,7 @@ import {
   type ThemeId,
 } from '../scene-themes';
 import { placeActor } from '../kit/place';
-import { KIT, makeKit } from '../kit/registry';
+import { KIT, actorMove, makeKit } from '../kit/registry';
 import { toAsset } from '../kit/rig';
 import { kitStyle, type KitLook } from '../kit/style';
 import { chartAsset } from './shot-charts';
@@ -196,34 +196,6 @@ function kitPiece(
     parts: Object.keys(made.piece.parts),
   };
 }
-
-/** The moves the board may name for an actor, as the stage plays them (a walk's synonyms, a vehicle's). */
-const MOVE_NAMES: Readonly<Record<string, string>> = {
-  arrive: 'enter',
-  appear: 'enter',
-  'come-in': 'enter',
-  go: 'walk',
-  move: 'walk',
-  march: 'walk',
-  'walk-to': 'walk',
-  depart: 'leave',
-  'walk-off': 'leave',
-  'drive-off': 'leave',
-  disappear: 'exit',
-  drive: 'travel-to',
-  sail: 'travel-to',
-  fly: 'travel-to',
-  travel: 'travel-to',
-  'sail-to': 'travel-to',
-  'fly-to': 'travel-to',
-  halt: 'stop',
-  'sit-down': 'sit',
-  'stand-up': 'stand',
-  'raise-hand': 'raise-hand',
-  'hand-up': 'raise-hand',
-  cheers: 'cheer',
-  'turn-around': 'turn',
-};
 
 /** How long a move takes when it goes somewhere: by how far, a walk slower than a drive. */
 function moveMs(
@@ -566,7 +538,7 @@ export function buildShots(
       // starts from standing, a walk is as long as its way.
       const moves: UntimedMove[] = [];
       for (const move of one.moves ?? []) {
-        const name = MOVE_NAMES[move.move] ?? move.move;
+        const name = actorMove(move.move);
         if (!made.moves.includes(name)) {
           notes.push(
             `shot ${i + 1}: actor ${one.id} cannot ${move.move}; left out`,

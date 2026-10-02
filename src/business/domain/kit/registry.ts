@@ -194,3 +194,36 @@ export function kitGuide(look: KitLook): string {
     })
     .join('\n');
 }
+
+/** The moves the board may name for an actor, as the stage plays them: a walk's synonyms, a vehicle's. */
+const MOVE_NAMES: Readonly<Record<string, string>> = {
+  arrive: 'enter',
+  appear: 'enter',
+  'come-in': 'enter',
+  go: 'walk',
+  move: 'walk',
+  march: 'walk',
+  'walk-to': 'walk',
+  depart: 'leave',
+  'walk-off': 'leave',
+  'drive-off': 'leave',
+  disappear: 'exit',
+  drive: 'travel-to',
+  sail: 'travel-to',
+  fly: 'travel-to',
+  travel: 'travel-to',
+  'sail-to': 'travel-to',
+  'fly-to': 'travel-to',
+  halt: 'stop',
+  'sit-down': 'sit',
+  'stand-up': 'stand',
+  'hand-up': 'raise-hand',
+  cheers: 'cheer',
+  'turn-around': 'turn',
+};
+
+/** A move as the board named it, as the stage plays it. */
+export const actorMove = (name: string): string => {
+  const key = wordKey(name);
+  return MOVE_NAMES[key] ?? key;
+};

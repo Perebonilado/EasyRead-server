@@ -1156,6 +1156,10 @@ function recipeMisfit(
     return `"${info.target}" is not in the list of what you may name`;
   if (!target && rule.needs)
     return `"${info.recipe}" needs a target: what it acts on`;
+  // A strike, a stamp or a flow with nothing named acts on its chart's own
+  // parts; on any other set it has nothing to act on (the build drops it).
+  if (!target && info.recipe !== 'ask' && shot.set.kind !== 'chart')
+    return `"${info.recipe}" needs a target here: on ${setWords(shot.set)} it has nothing of its own to act on`;
   if (target && target.kind !== 'set') {
     if (!rule.kinds.includes(kindOf(target)))
       return `"${info.recipe}" cannot act on ${target.name}`;
@@ -3140,6 +3144,7 @@ function mendLines(
         };
       } else {
         const focal = targetIn(first, first.focal, registry);
+        const actor = first.actors.find((a) => `actor:${a.id}` !== first.focal);
         if (
           focal &&
           focal.kind !== 'set' &&
@@ -3159,6 +3164,21 @@ function mendLines(
                       : 'mark',
                 target: focal.name,
                 on,
+              },
+            ],
+          };
+        // A drawn set of the moment: the camera in on its people (or its
+        // thing) as the opening's change, where it has a move to spare.
+        else if (actor && first.camera.length < SHOT_LIMITS.camera)
+          shots[0] = {
+            ...first,
+            camera: [
+              ...first.camera,
+              {
+                move: 'push',
+                target: `actor:${actor.id}`,
+                on,
+                amount: 'small',
               },
             ],
           };

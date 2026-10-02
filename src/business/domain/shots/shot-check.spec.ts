@@ -1455,6 +1455,46 @@ describe('words on a piece of the kit', () => {
     );
   });
 
+  it('lets nothing act on a drawn set with no target: a flow there has nothing to run along', () => {
+    const plan = scene('East Germany', crowd);
+    plan.shots[3].info.push({ recipe: 'flow', on: 'leader, Erich Honecker' });
+    expect(
+      checkPlan(plan, narration, registry, { kit }).map(
+        (p) => `${p.shot}:${p.code}`,
+      ),
+    ).toContain('3:wrong-target');
+    expect(
+      mendPlan(plan, narration, registry, { kit }).shots[3].info.map(
+        (i) => i.recipe,
+      ),
+    ).toEqual(['label']);
+  });
+
+  it('opens a scene on a drawn set with the camera going in on its people by the fourth word', () => {
+    const plan = good();
+    plan.shots[0] = shot({
+      on: 'In 1961',
+      set: { kind: 'set', set: { land: 'city', time: 'day', place: 'city' } },
+      actors: [crowd],
+      camera: [{ move: 'establish', on: 'In 1961' }],
+      focal: WHOLE_SET,
+    });
+    const options = { kit, lines: WALL_ROWS, opening: true };
+    expect(
+      checkPlan(plan, narration, registry, options).map((p) => p.code),
+    ).toContain('first-late');
+    const mended = mendPlan(plan, narration, registry, options);
+    expect(mended.shots[0].camera).toContainEqual({
+      move: 'push',
+      target: 'actor:leaders',
+      on: 'was cut in',
+      amount: 'small',
+    });
+    expect(
+      checkPlan(mended, narration, registry, options).map((p) => p.code),
+    ).not.toContain('first-late');
+  });
+
   it('keeps a device’s own small labels: a before and an after', () => {
     const device = scene('Before', {
       id: 'old',

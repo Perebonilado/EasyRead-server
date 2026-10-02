@@ -98,6 +98,12 @@ const CHART_GUIDE = [
   'On any chart, source (where its numbers come from, a claim’s source) and colour (a colour of the list) or null.',
 ].join('\n');
 
+/** When the board names life: a set's own comes by itself; the board names only what a resting line makes matter. */
+const LIFE_GUIDE = [
+  'A set’s own life comes with it by itself: its chimneys smoke, its water shimmers, its lit windows waver, its rain falls, its flag stirs, the map’s clouds pass and the paper’s grain turns. Never name those.',
+  'Name life (at most two a shot) only where a line rests on a mood or a hold: wind for a storm, dust for a quiet room or a shaft of light, crowd for people waiting, steam from a kettle or a vent, drift for a hold or an ask. Fire, sparks or a splash only when the voice speaks of one. On a chart, a document or a portrait, at most drift.',
+].join(' ');
+
 /** The decision table (research §3.2's defaults by row kind). */
 const DECIDE = [
   'Choose each line’s shot by what it is about. Each line comes with what the editor wants seen: take its idea, never a place, a person or a picture the list does not give.',
@@ -172,7 +178,7 @@ const EXAMPLES = [
             },
           ],
           camera: [{ move: 'establish', on: 'In 1946' }],
-          life: ['cloud-shadows'],
+          life: [],
           join: 'zoom-through',
           focal: 'place:Lagos',
         },
@@ -181,7 +187,7 @@ const EXAMPLES = [
           set: { kind: 'portrait', target: 'person:Herbert Macaulay' },
           info: [],
           camera: [{ move: 'push', amount: 'small', on: 'engineer' }],
-          life: ['grain'],
+          life: [],
           join: 'zoom-through',
           focal: 'person:Herbert Macaulay',
         },
@@ -202,7 +208,7 @@ const EXAMPLES = [
             { move: 'return', on: 'set out across' },
             { move: 'cut-to', target: 'place:Kano', on: 'In Kano' },
           ],
-          life: ['cloud-shadows'],
+          life: [],
           join: 'cut',
           focal: 'place:Kano',
         },
@@ -317,10 +323,13 @@ export function shotBoardPrompt(
       MOVE_USES,
     ),
     uses('The joins:', JOIN_USES),
-    uses(
-      'Life (quiet, never over a label; only what the place really has):',
-      life,
-    ),
+    [
+      uses(
+        'Life (quiet, never over a label; only what the place really has):',
+        life,
+      ),
+      LIFE_GUIDE,
+    ].join('\n'),
     illustrated
       ? DECIDE.replace(
           '- many people (a crowd, workers, voters, migrants): the kit’s silhouettes in their side’s colour, on the map at their place or on a drawn set, counted only by a number the list or the line gives.',

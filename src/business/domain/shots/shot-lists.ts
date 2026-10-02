@@ -75,25 +75,33 @@ export const JOIN_USES: Record<ShotJoin, string> = {
 };
 export const SHOT_JOINS = Object.keys(JOIN_USES) as ShotJoin[];
 
-/** The life layer's effects: motion that carries no information, only what the place really has. */
+/**
+ * The life layer's effects: motion that carries no information, only what
+ * the place really has. A set's own life comes with it by itself
+ * (shot-life: its chimneys smoke, its water shimmers, its lights waver
+ * once lit, its rain falls, its flag stirs, the map's clouds pass, the
+ * grain turns), so the board names only what a line makes matter.
+ */
 export const LIFE_USES: Record<ShotLifeEffect, string> = {
-  clouds: 'clouds drifting across a sky',
-  'cloud-shadows': 'cloud shadows crossing the land of a map',
+  clouds: 'clouds drifting across a sky that has none of its own',
+  'cloud-shadows': 'cloud shadows crossing the land of a map or a drawn set',
   rain: 'rain',
   snow: 'snow',
-  wind: 'wind in grass, trees or cloth',
+  wind: 'wind: streaks in the air, smoke bending, flags flying hard (a stormy or windy line)',
   smoke: 'smoke from a chimney, a fire, an engine',
   steam: 'steam from a kettle, a vent, an engine',
-  dust: 'dust in a shaft of light',
+  dust: 'dust in a shaft of light (a hall, a workshop, a quiet room)',
   shimmer: 'light on water',
-  flicker: 'lights flickering',
-  crowd: 'a crowd shifting (silhouettes; none yet)',
-  flags: 'flags stirring',
-  grain: 'paper grain on a document',
-  drift: 'a slow drift of the whole picture',
-  fire: 'a real fire the voice speaks of',
-  sparks: 'real sparks: welding, a furnace, a spark plug',
-  splash: 'a real splash of water',
+  flicker: 'lights wavering in their windows at dusk or night',
+  crowd:
+    'people standing in a crowd or a group, shifting their weight while they wait',
+  flags: 'flags stirring on their poles',
+  grain: 'the paper’s grain moving',
+  drift: 'a slow drift of the whole picture, for a hold or an ask',
+  fire: 'a real fire the voice speaks of (only where the effects have one)',
+  sparks:
+    'real sparks: welding, a furnace, a spark plug (only where the effects have one)',
+  splash: 'a real splash of water (only where the effects have one)',
   eyes: 'a region of the map made a character by a pair of eyes glancing at another: written in the shot’s "eyes" (at, to, face), never in its life; an illustrated show only, sparingly',
 };
 export const LIFE_EFFECTS = Object.keys(LIFE_USES) as ShotLifeEffect[];
@@ -177,7 +185,10 @@ export const SET_TOWNS: readonly NonNullable<PlanSetScene['town']>[] = [
   'city',
 ];
 /** What a drawn set's place is for, with when the board names it. */
-export const SET_PLACE_USES: Record<NonNullable<PlanSetScene['place']>, string> = {
+export const SET_PLACE_USES: Record<
+  NonNullable<PlanSetScene['place']>,
+  string
+> = {
   open: 'open land, a village or a town as its town says',
   farm: 'a farm: barn, silo, fields',
   port: 'a port across the water: cranes, warehouses, containers',
@@ -185,19 +196,20 @@ export const SET_PLACE_USES: Record<NonNullable<PlanSetScene['place']>, string> 
   market: 'market stalls before houses',
   city: 'a city of towers and blocks',
   oilfield: 'an oil field: pump jacks and tanks',
-  'assembly-hall': 'inside an assembly or parliament: rows round the well, the chair on its dais',
-  'ceremony-ground': 'a ceremony ground: a stand with bunting, a flagpole, floodlights, chairs',
-  display: 'a clean studio backdrop for a machine or a thing shown on its own, big (a jet engine cut open, a pump, a ballot)',
+  'assembly-hall':
+    'inside an assembly or parliament: rows round the well, the chair on its dais',
+  'ceremony-ground':
+    'a ceremony ground: a stand with bunting, a flagpole, floodlights, chairs',
+  display:
+    'a clean studio backdrop for a machine or a thing shown on its own, big (a jet engine cut open, a pump, a ballot)',
 };
-export const SET_PLACES = Object.keys(SET_PLACE_USES) as NonNullable<PlanSetScene['place']>[];
+export const SET_PLACES = Object.keys(SET_PLACE_USES) as NonNullable<
+  PlanSetScene['place']
+>[];
 /** The states a drawn set's light can change to while a shot is on. */
-export const SET_STATES: readonly NonNullable<PlanSetScene['becomes']>['state'][] = [
-  'day',
-  'dusk',
-  'night',
-  'dawn',
-  'lights-on',
-];
+export const SET_STATES: readonly NonNullable<
+  PlanSetScene['becomes']
+>['state'][] = ['day', 'dusk', 'night', 'dawn', 'lights-on'];
 export const SET_CLIMATES: readonly NonNullable<PlanSetScene['climate']>[] = [
   'temperate',
   'arid',

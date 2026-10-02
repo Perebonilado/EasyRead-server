@@ -108,8 +108,21 @@ export const SAFE = {
   },
 } as const;
 
-/** The life layer's cap (research §3.6): small, slow, never across a label. */
-export const LIFE = { maxLuminanceChange: 0.15, maxHz: 1 } as const;
+/**
+ * The life layer's cap (research §3.6): small, slow, never across a label.
+ * The picture's luma (Y′, 0 to 1) moves by at most maxLuminanceChange
+ * anywhere; nothing swings quicker than maxHz (falling rain and snow
+ * aside, which are low contrast); never across a label, number, chip or
+ * caption. Paper grain: four plates in turn at grainFps, at most grainLuma
+ * of luma. The camera's drift: at most `drift` of the view.
+ */
+export const LIFE = {
+  maxLuminanceChange: 0.15,
+  maxHz: 1,
+  grainLuma: 0.02,
+  grainFps: 10,
+  drift: 0.01,
+} as const;
 
 /**
  * The frame checks' own values (shots/frame-checks.ts; house, to be tuned

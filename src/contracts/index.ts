@@ -2374,6 +2374,30 @@ export interface ShotSvgAssetDto {
   rig?: ShotRigDto;
   /** What the camera frames by default. Absent, the whole box. */
   focal?: ShotBox;
+  /** A code-drawn set's light and weather over time (kit/sets): how its parts look in each state it can be in. */
+  scenery?: ShotSceneryDto;
+}
+
+/**
+ * A code-drawn set's light and weather (kit/sets): how each part that
+ * changes looks in each state the set can be in (day, dusk, night, dawn,
+ * lights-on), mixed from one to the next as the shot's set changes
+ * (ShotSetDto `changes`); and the parts that drift on their own.
+ */
+export interface ShotSceneryDto {
+  /** The state it is drawn in, as it opens. */
+  state: string;
+  /**
+   * Each state's look, by part: a fill (a shape's, or a gradient stop's
+   * colour), mixed in OKLab; a turn about the part's pivot in degrees
+   * (the sun along its arc, its pivot the arc's middle); an opacity (the
+   * stars, a glow); and for a part whose children are lights (a town's
+   * windows), the share of them lit, 0 to 1, lit one by one in an order
+   * of their own.
+   */
+  states: Record<string, Record<string, { fill?: string; rotate?: number; opacity?: number; lit?: number }>>;
+  /** Parts that drift on their own, in the set's units a second (clouds across, rain down), each round again within `wrap` units. */
+  drift?: Record<string, { dx?: number; dy?: number; wrap?: number }>;
 }
 
 /** A part of a drawn asset that recipes and the camera can address. */
@@ -2383,7 +2407,11 @@ export interface ShotPartDto {
   pivot?: [number, number];
   /** A route's or a stroke's path, in the asset's units, for draw, flow and transfer. */
   path?: string;
-  /** The number it shows, for count and grow. */
+  /**
+   * The number it shows, for count and grow; a machine's turning part's
+   * ratio to its shaft (run; negative turns the other way); a flow path's
+   * share at which its squeeze ends (flow "compress").
+   */
   value?: number;
   /** A colour role from the look: 'ink', 'muted', 'accent', 'held', or a side's name. */
   role?: string;
@@ -2394,6 +2422,12 @@ export interface ShotPartDto {
    * part is there from the shot's start.
    */
   later?: boolean;
+  /**
+   * How far it moves with the camera, for parallax: 1 (or absent) on the
+   * set's own plane, less for what is farther (a far range of hills 0.3,
+   * the sky 0, which stays), more for what is nearer.
+   */
+  depth?: number;
 }
 
 /** A kit piece's states (each a pose per part) and the moves it can make. */
@@ -2421,6 +2455,22 @@ export interface ShotRigDto {
    * the way it faces as drawn.
    */
   vehicle?: { goes: 'road' | 'rail' | 'water' | 'air' | 'up'; facing: 1 | -1 };
+  /**
+   * A machine (kit/machines): its shaft's turns a second at full speed,
+   * and how each moving part goes with it, for the `run` recipe. A `spin`
+   * turns about its pivot at its part's `value` turns to the shaft's; a
+   * `belt` runs its dashes along its path, `value` units a turn; a
+   * `slide` goes back and forth along `axis` by `stroke` units; a `rock`
+   * turns to and fro by `stroke` degrees; a `press` comes down `stroke`
+   * units once a turn. `phase` (radians) sets where in its turn it starts.
+   */
+  machine?: {
+    turns: number;
+    parts: Record<
+      string,
+      { move: 'spin' | 'belt' | 'slide' | 'rock' | 'press'; axis?: [number, number]; stroke?: number; phase?: number }
+    >;
+  };
 }
 
 /** An archive photo or a portrait, from the picture desk. */
@@ -2506,7 +2556,12 @@ export type ShotSetDto =
       treatment?: 'natural' | 'duotone' | 'halftone' | 'cutout';
     }
   | { kind: 'document'; asset: string }
-  | { kind: 'set'; asset: string }
+  | {
+      kind: 'set';
+      asset: string;
+      /** A code-drawn set's changes of state while the shot is on (the sun setting, the lights coming on): each from its moment, over its length. */
+      changes?: { state: string; atMs: number; durMs: number }[];
+    }
   | { kind: 'chart'; asset: string }
   | { kind: 'plain' };
 

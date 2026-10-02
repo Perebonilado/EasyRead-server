@@ -40,7 +40,10 @@ import {
   INFO_RECIPES,
   LIFE_EFFECTS,
   SET_KINDS,
+  SET_CLIMATES,
   SET_LANDS,
+  SET_PLACES,
+  SET_STATES,
   SET_TIMES,
   SET_TOWNS,
   SET_WEATHERS,
@@ -223,6 +226,51 @@ const townOf = nearestOf(SET_TOWNS, {
   metropolis: 'city',
   empty: 'none',
 });
+const placeOf = nearestOf(SET_PLACES, {
+  barn: 'farm',
+  fields: 'farm',
+  harbour: 'port',
+  harbor: 'port',
+  docks: 'port',
+  quay: 'port',
+  factory: 'industry',
+  factories: 'industry',
+  mill: 'industry',
+  works: 'industry',
+  bazaar: 'market',
+  stalls: 'market',
+  skyline: 'city',
+  towers: 'city',
+  oil: 'oilfield',
+  parliament: 'assembly-hall',
+  assembly: 'assembly-hall',
+  chamber: 'assembly-hall',
+  legislature: 'assembly-hall',
+  stadium: 'ceremony-ground',
+  parade: 'ceremony-ground',
+  ceremony: 'ceremony-ground',
+});
+const climateOf = nearestOf(SET_CLIMATES, {
+  dry: 'arid',
+  desert: 'arid',
+  hot: 'arid',
+  humid: 'tropical',
+  rainforest: 'tropical',
+  snowy: 'cold',
+  polar: 'cold',
+  mild: 'temperate',
+});
+const stateOf = nearestOf(SET_STATES, {
+  sunset: 'dusk',
+  evening: 'dusk',
+  nightfall: 'night',
+  midnight: 'night',
+  sunrise: 'dawn',
+  morning: 'dawn',
+  lights: 'lights-on',
+  lit: 'lights-on',
+  noon: 'day',
+});
 
 /** A set as the board gave it, made sound; null for one it may not ask for. */
 function setOf(raw: unknown): PlanSet | null {
@@ -279,6 +327,11 @@ function setOf(raw: unknown): PlanSet | null {
       const weather = weatherOf(scene.weather);
       const town = townOf(scene.town);
       const era = line(scene.era, 40);
+      const place = placeOf(scene.place);
+      const climate = climateOf(scene.climate);
+      // A change of light, on its words; a state the set opens in is no change.
+      const becomes = stateOf(record(scene.becomes).state ?? scene.becomes);
+      const becomesOn = line(record(scene.becomes).on ?? scene.becomesOn, 120);
       return {
         kind: 'set',
         set: {
@@ -286,6 +339,12 @@ function setOf(raw: unknown): PlanSet | null {
           ...(weather ? { weather } : {}),
           ...(town ? { town } : {}),
           ...(era ? { era } : {}),
+          ...(place ? { place } : {}),
+          ...(climate ? { climate } : {}),
+          ...(becomes && becomesOn && becomes !== set.time
+            ? { becomes: { state: becomes, on: becomesOn } }
+            : {}),
+          ...(scene.illustration === true ? { illustration: true } : {}),
         },
       };
     }
@@ -651,6 +710,11 @@ function targetIn(
   if (prefix === 'actor' || !prefix) {
     const actor = shot.actors.find((a) => a.id === rest);
     if (actor) return { kind: 'actor', name: `actor:${actor.id}` };
+    // A part of an actor (a machine's combustor, its core flow): actor:<id>.<part>.
+    const dot = rest.indexOf('.');
+    const owner = dot > 0 ? shot.actors.find((a) => a.id === rest.slice(0, dot)) : undefined;
+    if (owner && rest.slice(dot + 1).trim())
+      return { kind: 'part', name: `actor:${owner.id}.${partKey(rest.slice(dot + 1))}` };
     if (prefix === 'actor') return null;
   }
   const entry = registry.resolve(name);
@@ -680,7 +744,7 @@ function shownBy(shot: PlanShot, target: Target): boolean {
   if (target.kind === 'set') return true;
   if (target.kind === 'actor') return true;
   const set = shot.set;
-  if (target.kind === 'part') return set.kind === 'chart';
+  if (target.kind === 'part') return set.kind === 'chart' || target.name.startsWith('actor:');
   const entry = target.entry;
   switch (set.kind) {
     case 'map':
@@ -844,10 +908,30 @@ export function colourName(
 
 /** A target's own name, as a label writes it: "North Region", "Lagos", "1951". */
 function nameOf(target: Target): string {
+  if (target.kind === 'part' && target.name.startsWith('actor:'))
+    return partWords(target.name.slice(target.name.indexOf('.') + 1));
   return target.kind === 'entry' || target.kind === 'part'
     ? splitTarget(target.name).rest
     : '';
 }
+
+/** A kit piece's part as the board may write it: lower case, words joined by hyphens ("HP compressor" is hp-compressor). */
+export const partKey = (words: string): string =>
+  words
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
+
+/** A kit piece's part in words, for its label: "hp-compressor-3" is "HP compressor". */
+export const partWords = (part: string): string => {
+  const words = part
+    .replace(/-\d+$/u, '')
+    .split('-')
+    .map((w) => (w === 'lp' || w === 'hp' ? w.toUpperCase() : w))
+    .join(' ');
+  return words.charAt(0).toUpperCase() + words.slice(1);
+};
 
 /**
  * Whether a label names what it is on: a word of its target's name (the
@@ -1377,7 +1461,33 @@ export const shows = (shot: PlanShot) =>
 /** Whether two shots show one set: the show's map is one map whatever its tilt; any other set, the same in every field. */
 export const sameSet = (a: PlanSet, b: PlanSet) =>
   a.kind === b.kind &&
-  (a.kind === 'map' || JSON.stringify(a) === JSON.stringify(b));
+  (a.kind === 'map' ||
+    (a.kind === 'set' && b.kind === 'set'
+      ? JSON.stringify(placeOfSet(a.set)) === JSON.stringify(placeOfSet(b.set))
+      : JSON.stringify(a) === JSON.stringify(b)));
+
+/** A drawn set's place, without what changes while it is on (its light's change, its tag): one place for two shots that show it. */
+export const placeOfSet = (set: PlanSetScene): PlanSetScene => {
+  const { becomes: _b, illustration: _i, ...place } = set;
+  void _b;
+  void _i;
+  return place;
+};
+
+/** Two shots' set made one: the first's, keeping a change of light or a tag the second had. */
+function mergedSet(a: PlanSet, b: PlanSet): PlanSet {
+  if (a.kind !== 'set' || b.kind !== 'set') return a;
+  const becomes = a.set.becomes ?? b.set.becomes;
+  const illustration = a.set.illustration || b.set.illustration;
+  return {
+    kind: 'set',
+    set: {
+      ...a.set,
+      ...(becomes ? { becomes } : {}),
+      ...(illustration ? { illustration: true } : {}),
+    },
+  };
+}
 
 /**
  * A person's portrait set with no portrait, shown by their trace: their
@@ -1738,13 +1848,19 @@ export function mendPlan(
   // show fits in one: a new shot only for a new set.
   for (let k = kept.length - 1; k > 0; k -= 1) {
     const [a, b] = [kept[k - 1].shot, kept[k].shot];
+    // Two shots whose light each changes stay two: one change a shot.
+    const changes = [a.set, b.set].filter(
+      (set) => set.kind === 'set' && set.set.becomes,
+    ).length;
     if (
       sameSet(a.set, b.set) &&
+      changes < 2 &&
       a.info.length + b.info.length <= SHOT_LIMITS.info &&
       a.camera.length + b.camera.length <= SHOT_LIMITS.camera
     ) {
       kept[k - 1].shot = {
         ...a,
+        set: mergedSet(a.set, b.set),
         info: [...a.info, ...b.info],
         camera: [...a.camera, ...b.camera],
         actors: [
@@ -1799,6 +1915,25 @@ export function mendPlan(
       const spot = within(move.on) ?? { at: start, length: own.length };
       return { ...move, on: said(spot) };
     });
+    // A drawn set's change of light, on words inside its shot.
+    const set: PlanSet =
+      p.shot.set.kind === 'set' && p.shot.set.set.becomes
+        ? {
+            kind: 'set',
+            set: {
+              ...p.shot.set.set,
+              becomes: {
+                ...p.shot.set.set.becomes,
+                on: said(
+                  within(p.shot.set.set.becomes.on) ?? {
+                    at: start,
+                    length: own.length,
+                  },
+                ),
+              },
+            },
+          }
+        : p.shot.set;
     const named = personNamed(n, registry, start, end);
     const actors = p.shot.actors
       .map((actor) => soundActor(actor, registry, counts, named))
@@ -1816,6 +1951,7 @@ export function mendPlan(
       );
     return {
       ...p.shot,
+      set,
       on: phraseText(n, own.at, own.length),
       info,
       camera,

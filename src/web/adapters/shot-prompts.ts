@@ -19,8 +19,11 @@ import {
   LIFE_USES,
   MOVE_USES,
   RECIPE_USES,
+  SET_CLIMATES,
   SET_KINDS,
   SET_LANDS,
+  SET_PLACE_USES,
+  SET_STATES,
   SET_TIMES,
   SET_TOWNS,
   SET_USES,
@@ -49,6 +52,9 @@ export const KIT_GUIDE = [
   '  - A vehicle carries what the line says moves (goods, people, an army), of its era.',
   '  - Each actor: id (your name for it), kit, place (a place of the list on the map, a part of the set, or left, centre, right, foreground, background), side, its settings as fields (pose, kind, count, era, who, dress, facing, wagons: only those its kit has), and moves, each on its own exact words, with to (a place, a part, or left, right, off).',
   '  - For example: {"id": "marchers", "kit": "people.crowd", "place": "place:<a place>", "side": "<a side>", "pose": "protest", "count": <the number said>, "moves": [{"move": "enter", "on": "<exact words>"}]}',
+  '  - A building (kit building, its kind a field) stands on a drawn set or the map as a kind of building of its era and climate, never a named one: a factory for industry, a hall for a legislature in general.',
+  '  - A machine (machine.turbofan, or machine with its kind) is a shot\u2019s subject on a display set: name its parts as actor:<its id>.<part> (actor:engine.combustor) to label, spotlight or push to them; a flow on actor:<its id>.core-flow (text "compress": the air squeezed and heated) or .bypass-flow; run on the machine starts it.',
+  '  - An object or a document (kits object and document, their kind a field) is a prop: on a display when the line is about the thing itself, in a drawn set\u2019s scene otherwise. A document shows no words of its own.',
 ].join('\n');
 
 /** A chart's fields, by kind: the scene writer's own names, and how its parts are named. */
@@ -83,6 +89,9 @@ const DECIDE = [
   '- many people (a crowd, workers, voters, migrants): the kit’s silhouettes in their side’s colour, on the map at their place or on a drawn set, counted only by a number the list or the line gives.',
   '- what moves people or goods (a train, a ship, a lorry): the kit’s vehicle of its era, travelling on the map or across a drawn set.',
   '- a scene (a moment of people in a place), a feeling, an atmosphere: the place on the map when the line names one the list gives; else a drawn set of a kind of place (a coast at dusk, a city at night), never a named one, with life; or the shot before carried on with a slow push.',
+  '- how a machine works: a display set with the kit\u2019s machine as the subject (a jet engine cut open, gears, a pump), its parts labelled one at a time on the words that name them, a flow along its path, the camera pushing to the part the line asks about.',
+  '- a thing or a paper the line is about (coins, an oil barrel, a ballot, a treaty): the kit\u2019s object or document, big, on a display.',
+  '- time passing in a place (night falling, a town waking): the drawn set carried on, its light changing on the words (becomes).',
 ].join('\n');
 
 /** How the plan is written. */
@@ -164,49 +173,33 @@ const EXAMPLES = [
       shots: [
         {
           on: 'The air is packed',
-          set: {
-            kind: 'chart',
-            chart: {
-              kind: 'flow',
-              flow: {
-                direction: 'across',
-                nodes: [
-                  { label: 'Fan', kind: 'start' },
-                  { label: 'Compressor', kind: 'step' },
-                  { label: 'Combustor', kind: 'step' },
-                  { label: 'Turbine', kind: 'step' },
-                  { label: 'Nozzle', kind: 'end' },
-                ],
-                edges: null,
-              },
-            },
-          },
+          set: { kind: 'set', place: 'display' },
+          actors: [{ id: 'engine', kit: 'machine.turbofan', place: 'centre', moves: [] }],
           info: [
+            { recipe: 'run', target: 'actor:engine', on: 'The air is packed' },
             {
               recipe: 'flow',
-              target: 'part:Fan',
-              to: 'part:Compressor',
+              target: 'actor:engine.core-flow',
+              text: 'compress',
               on: 'packed tight and hot',
             },
-            {
-              recipe: 'spotlight',
-              target: 'part:Combustor',
-              on: 'What lights it',
-            },
-            { recipe: 'ask', target: 'part:Combustor', on: 'What lights it' },
+            { recipe: 'label', target: 'actor:engine.compressor', on: 'tight and hot' },
+            { recipe: 'spotlight', target: 'actor:engine.combustor', on: 'What lights it' },
+            { recipe: 'label', target: 'actor:engine.combustor', on: 'lights it' },
+            { recipe: 'ask', target: 'actor:engine.combustor', on: 'What lights it' },
           ],
           camera: [
             { move: 'establish', on: 'The air is packed' },
             {
               move: 'push',
-              target: 'part:Combustor',
+              target: 'actor:engine.combustor',
               amount: 'medium',
               on: 'What lights it',
             },
           ],
           life: [],
           join: 'continue',
-          focal: 'part:Combustor',
+          focal: 'actor:engine',
         },
       ],
     }),
@@ -229,7 +222,12 @@ export function shotBoardPrompt(): string {
         SET_KINDS.filter((k) => k !== 'plain').map((k) => [k, SET_USES[k]]),
       ),
     ),
-    `A drawn set’s settings: land ${quoted(SET_LANDS)}; time ${quoted(SET_TIMES)}; weather ${quoted(SET_WEATHERS)}; town ${quoted(SET_TOWNS)}; era (a period in words, never a place).`,
+    [
+      `A drawn set’s settings: land ${quoted(SET_LANDS)}; time ${quoted(SET_TIMES)}; weather ${quoted(SET_WEATHERS)}; town ${quoted(SET_TOWNS)}; climate ${quoted(SET_CLIMATES)} or null (never a country); era (a period in words, never a place); place, what stands there:`,
+      ...Object.entries(SET_PLACE_USES).map(([k, v]) => `- ${k}: ${v}`),
+      `becomes ${quoted(SET_STATES)} or null, with becomesOn its exact words: the light changing while the shot is on (the sun setting, the lights coming on).`,
+      'A drawn set is a kind of place, never a named one: no name of a real place, building or event on it, and its words never say it is one. illustration: true only when the set stands for a real event the line tells (a real queue to vote, a real strike), so it carries an "Illustration" tag; null for a mood or a kind of place.',
+    ].join('\n'),
     `The charts (${CHART_KINDS.length}):\n${CHART_GUIDE}`,
     uses('The information recipes (each on its exact words):', RECIPE_USES),
     uses(

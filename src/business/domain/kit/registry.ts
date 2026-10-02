@@ -15,6 +15,7 @@
 import type { KitLook, KitStyle } from './style';
 import { validateRig, type KitPiece } from './rig';
 import { PEOPLE_KIT } from './people';
+import { THINGS_KIT } from './things';
 import { VEHICLE_KIT } from './vehicles';
 
 /** The families of the kit (plan §7.2). */
@@ -39,6 +40,10 @@ export interface KitParam {
   default: string | number;
   /** A few words for the board: what it sets. */
   about: string;
+  /** Other words people use for its values ("laptop" for a computer). */
+  aliases?: Readonly<Record<string, string>>;
+  /** It says what the piece is (a building's or an object's kind): a word that names none of its values makes no piece, never its default. */
+  strict?: boolean;
 }
 
 export interface KitEntry {
@@ -61,6 +66,7 @@ export interface KitEntry {
 const FAMILIES: readonly Readonly<Record<string, KitEntry>>[] = [
   PEOPLE_KIT,
   VEHICLE_KIT,
+  THINGS_KIT,
 ];
 
 export const KIT: Readonly<Record<string, KitEntry>> = Object.assign(
@@ -103,9 +109,39 @@ export function paramsOf(
     const value = given.get(wordKey(name));
     out[name] = param.range
       ? numberIn(value, param.range, param.default as number)
-      : wordIn(value, param.values ?? [], param.default as string);
+      : wordIn(
+          value,
+          param.values ?? [],
+          param.default as string,
+          param.aliases,
+        );
   }
   return out;
+}
+
+/**
+ * The settings that say what a piece is (strict) given in words that name
+ * none of their values: a "padlock" is a lock, but a "power station" is
+ * no building the kit draws, and is never drawn as its default house.
+ */
+export function unknownOf(
+  id: string,
+  raw: Readonly<Record<string, unknown>> = {},
+): string[] {
+  const entry = KIT[id];
+  if (!entry) return [];
+  const given = new Map(
+    Object.entries(raw).map(([k, v]) => [wordKey(k), v] as const),
+  );
+  const none = '\u0000';
+  return Object.entries(entry.params)
+    .filter(([name, param]) => {
+      if (!param.strict || param.range) return false;
+      const value = given.get(wordKey(name));
+      if (value === undefined || value === null || value === '') return false;
+      return wordIn(value, param.values ?? [], none, param.aliases) === none;
+    })
+    .map(([name]) => name);
 }
 
 function numberIn(
@@ -127,15 +163,24 @@ function wordIn(
   raw: unknown,
   values: readonly string[],
   fallback: string,
+  aliases?: Readonly<Record<string, string>>,
 ): string {
   if (typeof raw !== 'string' && typeof raw !== 'number') return fallback;
   const key = wordKey(String(raw));
   if (!key) return fallback;
-  // The same word; its singular; a word it starts or ends; its stem ("points", "pointing").
+  // The same word; its singular; another word for it; a word it starts or ends; its stem ("points", "pointing").
   const stem = key.replace(/(?:ing|ed|es|s)$/, '');
+  const alias = aliases
+    ? Object.entries(aliases).find(
+        ([word]) =>
+          wordKey(word) === key || wordKey(word) === key.replace(/s$/, ''),
+      )?.[1]
+    : undefined;
   return (
     values.find((v) => wordKey(v) === key) ??
     values.find((v) => wordKey(v) === key.replace(/s$/, '')) ??
+    values.find((v) => wordKey(v) === key.replace(/ies$/, 'y')) ??
+    (alias && values.includes(alias) ? alias : undefined) ??
     values.find(
       (v) => key.startsWith(wordKey(v)) || wordKey(v).startsWith(key),
     ) ??
@@ -161,7 +206,7 @@ export function makeKit(
   colour?: string,
 ): { piece: KitPiece; params: KitParams } | null {
   const entry = KIT[id];
-  if (!entry) return null;
+  if (!entry || unknownOf(id, raw).length) return null;
   const params = paramsOf(id, raw);
   const piece = entry.make(
     colour ? { ...params, colour } : params,

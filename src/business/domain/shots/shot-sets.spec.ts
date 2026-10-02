@@ -1,5 +1,5 @@
 import { BEATS, DURATION_MS, MAP, PALETTE, REGISTRY, wordAt } from './__fixtures__/regional-turn';
-import { buildShots, type BuildContext } from './shot-build';
+import { buildShots, type BuildContext, withSetDefaults } from './shot-build';
 import { checkPlan, mendPlan, planOf, sameSet } from './shot-check';
 import { registryOf } from './shot-registry';
 import { SETTLE_LEAD_MS, timeShots } from './shot-time';
@@ -99,6 +99,33 @@ describe('a drawn set built from the plan', () => {
     // A person about a third of the set's height: its scale, not the subject's.
     expect(workers.size / 1000).toBeGreaterThan(0.25);
     expect(workers.size / 1000).toBeLessThan(0.45);
+  });
+
+  it('gives a piece its set’s era and climate where the plan leaves them out, never over what the plan says', () => {
+    const stage = { era: '1900-1945', climate: 'arid' };
+    expect(withSetDefaults('building', { kind: 'factory' }, stage)).toEqual({ kind: 'factory', era: '1900-1945', climate: 'arid' });
+    expect(withSetDefaults('building', { kind: 'house', era: 'today' }, stage)).toEqual({ kind: 'house', era: 'today', climate: 'arid' });
+    // People take an era and no climate; a piece on a set with neither keeps its own.
+    expect(withSetDefaults('people.group', { count: 5 }, stage)).toEqual({ count: 5, era: '1900-1945' });
+    expect(withSetDefaults('building', { kind: 'house' }, undefined)).toEqual({ kind: 'house' });
+    // Built: a works on a set of the 1900s is a brick works of its time.
+    const built = buildShots(
+      { shots: [shot('After the 1945 strikes,', { actors: [{ id: 'works', kit: 'building', params: { kind: 'factory' }, place: 'centre' }] })] },
+      registry,
+      ctx,
+    );
+    expect(built.shots[0].actors).toHaveLength(1);
+    expect(built.notes.join(' | ')).toMatch(/actor works: brick, temperate, 1900-1945/);
+  });
+
+  it('leaves out a thing of a kind the kit does not draw, and says so, rather than draw another', () => {
+    const built = buildShots(
+      { shots: [shot('After the 1945 strikes,', { actors: [{ id: 'scope', kit: 'object', params: { kind: 'microscope' }, place: 'centre' }] })] },
+      registry,
+      ctx,
+    );
+    expect(built.shots[0].actors).toHaveLength(0);
+    expect(built.notes.join(' | ')).toMatch(/actor scope \(object\) left out: the kit draws no kind "microscope"/);
   });
 });
 

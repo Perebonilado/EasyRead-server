@@ -101,6 +101,7 @@ import {
 import { describeEditorForProducer } from '../../domain/studio/studio-editor-words';
 import {
   editorDto,
+  editorCredits,
   editorPlay,
   editorialDto,
 } from '../../domain/studio/studio-editor-views';
@@ -231,6 +232,10 @@ const lookStyleOfShow = (show: StudioShowRecord) => {
   );
   return lookStyle ? { lookStyle } : {};
 };
+
+/** A scene the shots engine draws: its map is shaded from the terrain, whose sources the description credits. */
+const drawnByShots = (scene: StudioSceneRecord): boolean =>
+  scene.sheet?.kind === 'explainer' && scene.sheet.engine === 'shots';
 
 @Injectable()
 export class StudioService {
@@ -442,6 +447,7 @@ export class StudioService {
               durationMs: s.durationMs,
               made: Boolean(s.sceneKey),
             })),
+            editorCredits(show.editor, scenes.some(drawnByShots)),
           ),
         }
       : made;
@@ -2599,6 +2605,7 @@ export class StudioService {
               durationMs: one.durationMs,
               made: Boolean(one.sceneKey),
             })),
+            editorCredits(show.editor, scenes.some(drawnByShots)),
           )
         : {}),
       scenes: made.map((s, i) => {

@@ -223,8 +223,8 @@ export interface BuiltShots {
   notes: string[];
 }
 
-/** A map's tilt when the plan asks for one and the map can tilt (WP8). */
-const MAP_TILT = 35;
+/** A map's tilt when the plan asks for one and the map can tilt (a geo map): the brief's 45–55°, steep enough to read as ground. */
+export const MAP_TILT = 50;
 
 /** A place pinned on a drawn map is this share of the map's shorter side across. */
 const PLACE_BOX_SHARE = 0.03;
@@ -331,6 +331,34 @@ const assetOf = (set: ShotSetDto): string | null =>
 
 const sameSet = (a: ShotSetDto, b: ShotSetDto) =>
   a.kind === b.kind && assetOf(a) === assetOf(b);
+
+/** Whether the show's map has a part (a drawn map) or a feature (a geo map) of this id. */
+function mapHas(map: ShotMapSet, id: string): boolean {
+  if (map.asset.kind === 'svg') return Boolean(map.asset.parts[id]);
+  return (
+    map.asset.features.features as { properties?: { id?: unknown } }[]
+  ).some((one) => one.properties?.id === id);
+}
+
+/** A part of the show's map as a target: a drawn map's part, a geo map's feature. */
+function mapPart(map: ShotMapSet, id: string): ShotTargetDto {
+  return map.asset.kind === 'svg'
+    ? { kind: 'asset', asset: map.id, part: id }
+    : { kind: 'feature', asset: map.id, id };
+}
+
+/** A geo map's feature's name (a region's, a seam's), by id. */
+function featureName(map: ShotMapSet, id: string): string | undefined {
+  if (map.asset.kind !== 'geo') return undefined;
+  const found = (
+    map.asset.features.features as {
+      properties?: { id?: unknown; name?: unknown };
+    }[]
+  ).find((one) => one.properties?.id === id);
+  return typeof found?.properties?.name === 'string'
+    ? found.properties.name
+    : undefined;
+}
 
 const centre = (box: ShotBox): [number, number] => [
   box[0] + box[2] / 2,
@@ -716,7 +744,11 @@ export function buildShots(
     const asset = shotSet.asset?.dto ?? null;
     const svg = asset?.kind === 'svg' ? asset : null;
     const onMap = shotSet.set.kind === 'map' && ctx.map ? ctx.map : null;
+    /** The map the player draws itself: places stay points on the earth, regions and seams its features. */
+    const geoMap = onMap && onMap.asset.kind === 'geo' ? onMap : null;
     const assetId = assetOf(shotSet.set);
+    /** The set's own box, in its units: a drawing's viewBox, a geo map's frame in Web Mercator pixels. */
+    const setBox: ShotBox | null = svg?.box ?? geoMap?.box ?? null;
     // The chart the plan asked for, when it is the one drawn: its parts are
     // named by what they show ("part:1951"), as the board names them.
     const chart =
@@ -733,7 +765,6 @@ export function buildShots(
     // subject and what its labels sit on; one scale for the whole shot.
     const actors: UntimedActor[] = [];
     const actorIds = new Set<string>();
-    const setBox = svg?.box ?? null;
     const boxNamed = (name?: string): ShotBox | null => {
       const target = name ? targetOf(name) : null;
       return target ? boxOf(target) : null;
@@ -829,11 +860,16 @@ export function buildShots(
       const firstSeat = moves.find(
         (m) => m.move === 'sit' || m.move === 'stand',
       );
+      // On a geo map a piece stands on the earth, a marker of its place
+      // whose height is its share of the frame's (the contract's map form).
+      const earth = geoMap?.earthAt?.(placed.at.x, placed.at.y);
       actors.push({
         id: one.id,
         asset: pieceId,
-        at: placed.at,
-        size: placed.size,
+        at: earth ? { lng: earth[0], lat: earth[1] } : placed.at,
+        size: earth
+          ? Math.round((placed.size / setBox[3]) * 1000) / 1000
+          : placed.size,
         z: placed.z,
         ...(firstSeat?.move === 'sit' ? { state: 'standing' } : {}),
         ...(side ? { side } : {}),
@@ -842,7 +878,10 @@ export function buildShots(
       actorIds.add(one.id);
     });
 
-    /** A word for where a move goes (left, right, off), as a point on the ground of the set. */
+    /**
+     * A word for where a move goes (left, right, off), as a point on the
+     * ground of the set; on a geo map, that point on the earth.
+     */
     function wordTarget(word: string, y: number): ShotTargetDto | null {
       if (!setBox) return null;
       const [sx, , W] = setBox;
@@ -858,8 +897,10 @@ export function buildShots(
               : /cent|middle/.test(w)
                 ? sx + W / 2
                 : null;
-      return x === null
-        ? null
+      if (x === null) return null;
+      const earth = geoMap?.earthAt?.(x, y);
+      return earth
+        ? { kind: 'geo', lng: earth[0], lat: earth[1] }
         : { kind: 'box', box: [Math.round(x), Math.round(y) - 1, 1, 1] };
     }
 
@@ -876,23 +917,38 @@ export function buildShots(
 
     /** A target's box in its set's units, where it has one. */
     function boxOf(target: ShotTargetDto): ShotBox | null {
+      if (geoMap && target.kind !== 'actor')
+        return geoMap.boxOf?.(target) ?? null;
       if (target.kind === 'box') return target.box;
       if (target.kind === 'asset' && target.asset === assetId && svg)
         return target.part ? (svg.parts[target.part]?.box ?? null) : svg.box;
       return null;
     }
 
-    /** A place on the map: a part the map draws for it, else a small box round its point. */
+    /**
+     * A place on the map: a part the map draws for it; else, on a geo map,
+     * its point on the earth (while the map's land reaches it); else a small
+     * box round its point on the drawing.
+     */
     function placeOnMap(entry: RegistryEntry): ShotTargetDto | null {
       if (!onMap) return null;
       const part =
-        (entry.feature && onMap.asset.parts[entry.feature.id]
+        (entry.feature && mapHas(onMap, entry.feature.id)
           ? entry.feature.id
           : null) ?? partNamed(entry.name);
-      if (part) return { kind: 'asset', asset: onMap.id, part };
+      if (part) return mapPart(onMap, part);
       if (!entry.geo) return null;
-      if (!onMap.project)
-        return { kind: 'geo', lng: entry.geo.lng, lat: entry.geo.lat };
+      if (!onMap.project || onMap.asset.kind !== 'svg') {
+        // A geo map has land as far as its sea reaches: a place past it is off the map.
+        const reach = onMap.geoBoxes?.sea;
+        const { lng, lat } = entry.geo;
+        if (
+          reach &&
+          (lng < reach[0] || lng > reach[2] || lat < reach[1] || lat > reach[3])
+        )
+          return null;
+        return { kind: 'geo', lng, lat };
+      }
       const point = onMap.project(entry.geo.lng, entry.geo.lat);
       if (!point) return null;
       const [, , W, H] = onMap.asset.box;
@@ -970,6 +1026,7 @@ export function buildShots(
       if ((prefix === 'part' || !prefix) && assetId) {
         const part = partOf(rest);
         if (part) return { kind: 'asset', asset: assetId, part };
+        if (geoMap && mapHas(geoMap, rest)) return mapPart(geoMap, rest);
         if (prefix === 'part') return null;
       }
       if (prefix === 'actor' || !prefix) {
@@ -979,7 +1036,7 @@ export function buildShots(
       const entry = registry.resolve(name);
       if (!entry) {
         const part = partNamed(name);
-        return part && onMap ? { kind: 'asset', asset: onMap.id, part } : null;
+        return part && onMap ? mapPart(onMap, part) : null;
       }
       const words = splitTarget(entry.name).rest;
       const onAsset = (part: string | null): ShotTargetDto | null =>
@@ -992,10 +1049,10 @@ export function buildShots(
         case 'route': {
           if (!onMap) return null;
           const part =
-            (entry.feature && onMap.asset.parts[entry.feature.id]
+            (entry.feature && mapHas(onMap, entry.feature.id)
               ? entry.feature.id
               : null) ?? partNamed(entry.name);
-          return part ? { kind: 'asset', asset: onMap.id, part } : null;
+          return part ? mapPart(onMap, part) : null;
         }
         case 'number': {
           if (!svg) return null;
@@ -1123,11 +1180,12 @@ export function buildShots(
       // A fill with no colour of its own lands on its part's: a region in
       // its side's colour, never the accent the recipe would choose.
       const role =
-        one.recipe === 'fill' &&
-        !one.until &&
-        target?.kind === 'asset' &&
-        target.part
-          ? svg?.parts[target.part]?.role
+        one.recipe === 'fill' && !one.until
+          ? target?.kind === 'asset' && target.part
+            ? svg?.parts[target.part]?.role
+            : target?.kind === 'feature' && geoMap
+              ? (sideOf(featureName(geoMap, target.id) ?? '') ?? undefined)
+              : undefined
           : undefined;
       const colour = one.colour ? sideOf(one.colour) : (role ?? null);
       const replace = wordsUpTo(one.replace, TEXT.labelWordsMax);
@@ -1277,11 +1335,7 @@ export function buildShots(
         ? lastView.box
         : null;
     let from: ShotBox | null =
-      (focal ? boxOf(focal) : null) ??
-      carried ??
-      svg?.focal ??
-      svg?.box ??
-      null;
+      (focal ? boxOf(focal) : null) ?? carried ?? svg?.focal ?? setBox ?? null;
     const camera: UntimedCamera[] = safeMove ? [safeMove] : [];
     /** Where the camera was aimed before each of its moves. */
     const before: (ShotBox | null)[] = safeMove ? [from] : [];
@@ -1299,8 +1353,8 @@ export function buildShots(
         on: one.on,
         ...(target ? { target } : {}),
         ...(amount !== undefined ? { amount } : {}),
-        ...(one.move === 'travel' && from && to && svg
-          ? { durMs: travelMs(from, to, svg.box[2]) }
+        ...(one.move === 'travel' && from && to && setBox
+          ? { durMs: travelMs(from, to, setBox[2]) }
           : {}),
       });
       if (to) from = to;

@@ -157,8 +157,16 @@ export function plotAsset(
   // The plotting area: the words' area less the figures and names round it.
   const ax0 = text.x0 + tickW;
   const ax1 = text.x1 - floor * 0.4;
-  const ay0 = text.y0 + (yLabel ? floor * 1.6 : floor * 0.4);
-  const ay1 = text.y1 - floor * 1.5 - (xLabel ? floor * 1.4 : 0) - sourceH;
+  // A wide frame's graph inside the words' area; a tall one's runs large
+  // down the frame (a picture may run past the words), its words kept in
+  // the band: the axes' names and the x figures over it, the y figures
+  // only where they fall inside the band, and the source under its names.
+  const ay0 = tall
+    ? text.y0 + (yLabel || xLabel ? floor * 1.5 : 0) + sourceH + floor * 1.6
+    : text.y0 + (yLabel ? floor * 1.6 : floor * 0.4);
+  const ay1 = tall
+    ? frame.H * 0.86
+    : text.y1 - floor * 1.5 - (xLabel ? floor * 1.4 : 0) - sourceH;
   const px = (x: number) => ax0 + ((x - x0) / (x1 - x0)) * (ax1 - ax0);
   const py = (y: number) => ay1 - ((y - y0) / (y1 - y0)) * (ay1 - ay0);
   const out: string[] = [];
@@ -206,14 +214,15 @@ export function plotAsset(
       anchor,
       tabular: true,
     });
+  const xFigureY = tall
+    ? ay0 - floor * 0.45
+    : ay1 + floor * 0.35 + floor * ASCENT;
   out.push(
     `<g>${[
-      ...xt.map((x) =>
-        figure(x, px(x), ay1 + floor * 0.35 + floor * ASCENT, 'middle'),
-      ),
-      ...yt.map((y) =>
-        figure(y, ax0 - floor * 0.3, py(y) + floor * 0.34, 'end'),
-      ),
+      ...xt.map((x) => figure(x, px(x), xFigureY, 'middle')),
+      ...yt
+        .filter((y) => !tall || py(y) + floor * 0.6 <= text.y1)
+        .map((y) => figure(y, ax0 - floor * 0.3, py(y) + floor * 0.34, 'end')),
     ].join('')}</g>`,
   );
   // The curve, broken where it has no value or leaves the view in a jump.
@@ -245,7 +254,11 @@ export function plotAsset(
   );
   // The named points, each a dot on the curve and its name beside it.
   const f = compileExpression(read.fn);
-  const taken: ShotBox[] = [];
+  // The names keep off the axes, and off each other.
+  const taken: ShotBox[] = [
+    [ax0, axisY - 3, ax1 - ax0, 6],
+    [axisX - 3, ay0, 6, ay1 - ay0],
+  ];
   // How much a name's box would cover of those already set, a gap round each.
   const clash = (b: ShotBox) =>
     taken.reduce((sum, t) => {
@@ -260,7 +273,7 @@ export function plotAsset(
     b[0] >= text.x0 &&
     b[0] + b[2] <= text.x1 &&
     b[1] >= text.y0 &&
-    b[1] + b[3] <= ay1;
+    b[1] + b[3] <= Math.min(ay1, text.y1);
   read.points.forEach((point, i) => {
     let y: number;
     try {
@@ -286,24 +299,65 @@ export function plotAsset(
       `<circle data-part="${pid}" cx="${r1(cx)}" cy="${r1(cy)}" r="${r1(r)}" fill="${esc(paint.ink)}" stroke="${esc(paint.paper)}" stroke-width="${r1(r * 0.4)}"/>`,
     );
     // Over to the right, over to the left, under them: the first clear of the rest and inside.
-    const tries: [number, number, 'start' | 'end'][] = [
+    const tries: [number, number, 'start' | 'end' | 'middle'][] = [
       [cx + r * 1.6, cy - r * 1.6, 'start'],
       [cx - r * 1.6, cy - r * 1.6, 'end'],
       [cx + r * 1.6, cy + r * 1.6 + floor * ASCENT, 'start'],
       [cx - r * 1.6, cy + r * 1.6 + floor * ASCENT, 'end'],
     ];
+    // A point below a tall frame's band is named from the band's foot (or a
+    // row above it), a dotted line down to it: the name centred on its
+    // line, else ending or starting at it; by a point on an axis, the line
+    // just beside the axis and the name beyond the line.
+    const under = tall && cy - r * 1.6 > text.y1 - floor * 0.4;
+    const side = Math.abs(cx - axisX) < r * 3 ? r * 2.2 : 0;
+    const lines: number[] = [];
+    if (under) {
+      tries.splice(0, tries.length);
+      for (const row of [0, 1]) {
+        const y2 = text.y1 - floor * 0.3 - row * floor * 1.3;
+        const at: [number, number, 'start' | 'end' | 'middle', number][] = side
+          ? [
+              [cx + side, y2, 'start', cx + side * 0.6],
+              [cx - side, y2, 'end', cx - side * 0.6],
+            ]
+          : [
+              [cx, y2, 'middle', cx],
+              [cx - floor * 0.15, y2, 'end', cx],
+              [cx + floor * 0.15, y2, 'start', cx],
+            ];
+        for (const [x2, y3, anchor, line] of at) {
+          tries.push([x2, y3, anchor]);
+          lines.push(line);
+        }
+      }
+    }
     const boxes = tries.map(([x, y2, anchor]) =>
       linesBox([point.name], x, y2, floor, anchor, 1.15, 700),
     );
+    // The line from a name down to its point, as far as the band's foot.
+    const lineOf = (j: number): ShotBox => [
+      lines[j] - 3,
+      tries[j][1] + floor * 0.3,
+      6,
+      Math.max(0, text.y1 - (tries[j][1] + floor * 0.3)),
+    ];
+    const cover = (j: number) =>
+      clash(boxes[j]) + (under ? clash(lineOf(j)) : 0);
     // The first inside and clear; else the one inside that covers least.
-    const ok = boxes.findIndex((b) => inArea(b) && clash(b) === 0);
+    const ok = boxes.findIndex((b, j) => inArea(b) && cover(j) === 0);
     const inside = boxes
-      .map((b, j) => ({ j, cover: inArea(b) ? clash(b) : Infinity }))
+      .map((b, j) => ({ j, cover: inArea(b) ? cover(j) : Infinity }))
       .sort((p, q) => p.cover - q.cover);
     const k = ok >= 0 ? ok : inside[0].j;
     const [lx, ly, anchor] = tries[k];
     taken.push(boxes[k]);
+    if (under) taken.push(lineOf(k));
     book.add(lid, { box: boxes[k], role: 'ink' });
+    if (under)
+      out.push(
+        `<path d="M${r1(lines[k])} ${r1(ly + floor * 0.3)}V${r1(cy - r * 1.4)}" stroke="${esc(paint.muted)}" stroke-width="3" stroke-dasharray="${r1(floor * 0.12)} ${r1(floor * 0.18)}" stroke-linecap="round"/>`,
+      );
     out.push(
       textSvg(
         [point.name],
@@ -337,7 +391,10 @@ export function plotAsset(
     );
   }
   if (xLabel) {
-    const base = ay1 + floor * 1.5 + floor * ASCENT;
+    // Under the x figures in a wide frame; over the graph, at the right, in a tall one.
+    const base = tall
+      ? text.y0 + floor * ASCENT
+      : ay1 + floor * 1.5 + floor * ASCENT;
     const box = linesBox(xLabel.lines, ax1, base, floor, 'end', 1.15, 600);
     book.add('x-label', { box, role: 'ink' });
     out.push(
@@ -364,7 +421,11 @@ export function plotAsset(
         frame,
         read.source,
         text.x0,
-        text.y1 - frame.size.chip * 0.35,
+        tall
+          ? text.y0 +
+              (yLabel || xLabel ? floor * 1.5 : 0) +
+              frame.size.chip * 1.1
+          : text.y1 - frame.size.chip * 0.35,
         text.x1 - text.x0,
       ).svg,
     );

@@ -32,6 +32,7 @@ import {
   textSvg,
   union,
   wordsWidth,
+  wordsWithin,
 } from './shot-chart-kit';
 
 export function strikeAsset(
@@ -40,8 +41,13 @@ export function strikeAsset(
   shape: FilmShape,
 ): ShotSvgAssetDto | null {
   const extra = extraOf('strike', raw);
+  // Its words kept whole within the lengths the reader keeps them to.
   const read = readStrike(
-    bodyOf('strike', raw) as unknown as StrikeDraft,
+    wordsWithin(bodyOf('strike', raw) as unknown as StrikeDraft, {
+      from: 40,
+      to: 40,
+      label: 32,
+    }),
     extra,
   );
   if (!read) return null;

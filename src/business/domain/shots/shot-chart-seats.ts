@@ -47,6 +47,7 @@ import {
   textSvg,
   union,
   wordsWidth,
+  wordsWithin,
 } from './shot-chart-kit';
 
 /** The most dots a chamber draws: past this, each stands for more members. */
@@ -60,8 +61,12 @@ export function seatsAsset(
   shape: FilmShape,
 ): ShotSvgAssetDto | null {
   const extra = extraOf('seats', raw);
+  // Its words kept whole within the lengths the reader keeps them to.
   const spec = readSeats(
-    bodyOf('seats', raw) as unknown as SeatsDraft,
+    wordsWithin(bodyOf('seats', raw) as unknown as SeatsDraft, {
+      name: 28,
+      label: 60,
+    }),
     extra.name,
     extra,
   );
@@ -116,7 +121,7 @@ export function seatsAsset(
   let rowW = 0;
   entries.forEach((e, i) => {
     const w = entryW(e);
-    if (rows[rows.length - 1].length && (tall || rowW + w > width)) {
+    if (rows[rows.length - 1].length && rowW + w > width) {
       rows.push([]);
       rowW = 0;
     }
@@ -136,16 +141,25 @@ export function seatsAsset(
   let centre = { x: frame.W / 2, y: 0 };
   let inner = 0;
   let R = 0;
-  const top = text.y0 + labelH + majorityH;
+  // A tall frame's words all stand over the chamber, inside the safe band
+  // (its caption, its key, its total, its source, its majority), and the
+  // chamber spans the picture under them; a wide frame's key goes under it.
+  const hemi = spec.layout === 'hemicycle';
+  const over = hemi || tall;
+  const totalH = hemi ? frame.size.title * 1.35 : 0;
+  const keyTop = text.y0 + labelH;
+  const top = over
+    ? keyTop + keyH + totalH + sourceH + majorityH
+    : text.y0 + labelH + majorityH;
   if (spec.layout === 'hemicycle') {
     const arc = hemicycle(n);
     // A tall frame's chamber spans the picture, its key running on under it.
-    const room = tall
-      ? frame.W * 0.44
-      : Math.min(
-          frame.W * 0.36,
-          (text.y1 - top - keyH - sourceH - floor * 0.8) / (1 + arc.dot),
-        );
+    // The chamber under its words, as large as the picture lets it be,
+    // running on under the captions' band (a picture may).
+    const room = Math.min(
+      frame.W * (tall ? 0.47 : 0.4),
+      (frame.pic.y1 - top) / (1 + arc.dot),
+    );
     R = Math.max(floor * 2, room);
     const dot = arc.dot * R;
     centre = { x: frame.W / 2, y: top + R * (1 + arc.dot) };
@@ -204,13 +218,63 @@ export function seatsAsset(
       return partSvg(ids[gi], dots, ` fill="${esc(colours[gi].colour)}"`);
     });
     out.push(partSvg('chamber', groups.join('')));
-    // The total in the hollow, "seats" under it where there is room.
+    // The total in the hollow, "seats" under it where there is room (a
+    // tall frame's over the chamber, with its words).
     const total = grouped(members);
     const size = Math.min(
       inner * 0.72,
       (inner * 1.55) / Math.max(1, figuresWidth(total, 1, paint.figure)),
     );
-    if (size >= floor) {
+    if (over) {
+      // "312 seats": from the words' left edge in a tall frame, centred over a wide one's chamber.
+      const tsize = frame.size.title;
+      const base = keyTop + keyH + tsize * ASCENT;
+      const tw = linesBox(
+        [total],
+        0,
+        base,
+        tsize,
+        'start',
+        1.15,
+        700,
+        'display',
+        paint.figure,
+      )[2];
+      const sw = wordsWidth('seats', floor, 600);
+      const tx = tall ? text.x0 : frame.W / 2 - (tw + floor * 0.3 + sw) / 2;
+      const box = linesBox(
+        [total],
+        tx,
+        base,
+        tsize,
+        'start',
+        1.15,
+        700,
+        'display',
+        paint.figure,
+      );
+      book.add('total', { box, value: members, role: 'ink' });
+      out.push(
+        textSvg(
+          [total],
+          tx,
+          base,
+          {
+            size: tsize,
+            fill: paint.ink,
+            family: paint.display,
+            tabular: true,
+          },
+          'total',
+        ) +
+          textSvg(['seats'], tx + tw + floor * 0.3, base, {
+            size: floor,
+            fill: paint.muted,
+            family: paint.text,
+            weight: 600,
+          }),
+      );
+    } else if (size >= floor) {
       const word = inner * 0.45 >= floor * 1.1;
       const base = centre.y - (word ? floor * 0.95 : size * 0.1);
       const box = linesBox(
@@ -286,25 +350,39 @@ export function seatsAsset(
       );
     }
   } else {
-    // Two benches facing across the floor, each group a block of columns.
+    // Two benches facing across the floor, each group a block of columns:
+    // across a wide frame; in a tall one turned to face each other across
+    // a floor that runs down the frame, under their key.
     const bench = benches(n);
     const down = bench.rows * 2 + 1.6;
-    const pitch = Math.min(
-      (text.x1 - text.x0) / bench.cols,
-      (text.y1 - top - keyH - sourceH - floor) / down,
-      floor * 2.2,
-    );
+    const pitch = tall
+      ? Math.min(
+          (frame.pic.x1 - frame.pic.x0) / down,
+          (frame.pic.y1 - top - floor * 0.5) / bench.cols,
+          floor * 2.2,
+        )
+      : Math.min(
+          (text.x1 - text.x0) / bench.cols,
+          (text.y1 - top - keyH - sourceH - floor) / down,
+          floor * 2.2,
+        );
     const dot = pitch * 0.4;
-    const x0 = (frame.W - bench.cols * pitch) / 2 + pitch / 2;
+    const along = bench.cols * pitch;
+    const across = down * pitch;
+    const x0 = tall
+      ? (frame.W - across) / 2 + pitch / 2
+      : (frame.W - along) / 2 + pitch / 2;
     const y0 = top + pitch / 2;
-    const at = (s: { x: number; y: number }) => ({
-      x: x0 + s.x * pitch,
-      y: y0 + s.y * pitch,
-    });
+    const at = (seat: { x: number; y: number }) =>
+      tall
+        ? { x: x0 + seat.y * pitch, y: y0 + seat.x * pitch }
+        : { x: x0 + seat.x * pitch, y: y0 + seat.y * pitch };
     // The floor between the benches.
-    const floorY = top + pitch * (bench.rows + 0.25);
+    const floorAt = pitch * (bench.rows + 0.25);
     out.push(
-      `<rect x="${r1(x0 - pitch * 0.2)}" y="${r1(floorY + pitch * 0.15)}" width="${r1(bench.cols * pitch - pitch * 0.6)}" height="${r1(pitch * 0.8)}" rx="${r1(pitch * 0.2)}" fill="${esc(paint.faint)}"/>`,
+      tall
+        ? `<rect x="${r1(x0 - pitch / 2 + floorAt + pitch * 0.15)}" y="${r1(y0 - pitch * 0.2)}" width="${r1(pitch * 0.8)}" height="${r1(along - pitch * 0.6)}" rx="${r1(pitch * 0.2)}" fill="${esc(paint.faint)}"/>`
+        : `<rect x="${r1(x0 - pitch * 0.2)}" y="${r1(top + floorAt + pitch * 0.15)}" width="${r1(along - pitch * 0.6)}" height="${r1(pitch * 0.8)}" rx="${r1(pitch * 0.2)}" fill="${esc(paint.faint)}"/>`,
     );
     const ordered = [...bench.seats].sort((a, b) => a.order - b.order);
     out.push(
@@ -332,7 +410,9 @@ export function seatsAsset(
         .join('');
       return { dots, gi };
     });
-    chamber = [x0 - pitch / 2, top, bench.cols * pitch, pitch * down];
+    chamber = tall
+      ? [x0 - pitch / 2, top, across, along]
+      : [x0 - pitch / 2, top, along, across];
     out.push(
       partSvg(
         'chamber',
@@ -375,7 +455,7 @@ export function seatsAsset(
     );
   }
   // The key under it: each group's dot, name and seats.
-  let y = chamber[1] + chamber[3] + floor * 0.9;
+  let y = over ? keyTop : chamber[1] + chamber[3] + floor * 0.9;
   const keyItems: string[] = [];
   const keyBoxes: ShotBox[] = [];
   for (const row of rows) {
@@ -433,14 +513,23 @@ export function seatsAsset(
       frame,
       source,
       tall ? text.x0 : frame.W / 2,
-      y + frame.size.chip * 0.9,
+      over
+        ? keyTop + keyH + totalH + frame.size.chip * 1.1
+        : y + frame.size.chip * 0.9,
       width,
       tall ? 'start' : 'middle',
     );
     out.push(drawn.svg);
     bottom = drawn.box[1] + drawn.box[3];
   }
-  const focal = union(chamber, book.parts.total?.box, book.parts.majority?.box);
+  const focal = over
+    ? union(
+        chamber,
+        book.parts.key?.box,
+        book.parts.label?.box,
+        book.parts.total?.box,
+      )
+    : union(chamber, book.parts.total?.box, book.parts.majority?.box);
   // A tall chamber whose key runs past the words' area runs on down.
   const long = tall && bottom > text.y1;
   const box: ShotBox = long

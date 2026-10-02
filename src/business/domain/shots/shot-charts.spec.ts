@@ -7,7 +7,10 @@ import {
   fit,
   frameOf,
   paintOf,
+  said,
   slugOf,
+  wholeWords,
+  wordsWithin,
   wrap,
 } from './shot-chart-kit';
 import { CHART_KINDS, chartAsset, chartPartIds, mapAsset } from './shot-charts';
@@ -139,6 +142,31 @@ describe('chartAsset', () => {
             y >= SAFE.wide.y0 * H - 2 &&
             y + h <= SAFE.wide.y1 * H + 2,
         ]).toEqual([id, true]);
+      }
+    },
+  );
+
+  it.each(each)(
+    "%s: keeps every word out of the captions' band at the foot",
+    (_, { asset, shape }) => {
+      const { H } = frameOf(shape);
+      const foot = SAFE[shape].captionY0 * H + 1;
+      const top = SAFE[shape].y0 * H - 1;
+      for (const m of asset.svg.matchAll(/<text([^>]*)>(.*?)<\/text>/g)) {
+        const size = Number(/font-size="([\d.]+)"/.exec(m[1])?.[1] ?? 0);
+        const ys = [
+          Number(/ y="([-\d.]+)"/.exec(m[1])?.[1] ?? NaN),
+          ...[...m[2].matchAll(/<tspan[^>]* y="([-\d.]+)"/g)].map((t) =>
+            Number(t[1]),
+          ),
+        ].filter((y) => Number.isFinite(y));
+        const words = m[2].replace(/<[^>]+>/g, '');
+        // A tall list in pages of a frame's height each: each word against its own page's band.
+        for (const y of ys) {
+          const page = Math.floor((y - size * 0.75) / H) * H;
+          expect([words, y - page + size * 0.2 <= foot]).toEqual([words, true]);
+          expect([words, y - page - size * 0.75 >= top]).toEqual([words, true]);
+        }
       }
     },
   );
@@ -295,6 +323,65 @@ describe('chartAsset', () => {
     expect(asset.svg).toContain('Saturday');
   });
 
+  it("names a graph's points apart from each other and off its axes, in either shape", () => {
+    const apart = (a: number[], b: number[]) =>
+      a[0] + a[2] <= b[0] ||
+      b[0] + b[2] <= a[0] ||
+      a[1] + a[3] <= b[1] ||
+      b[1] + b[3] <= a[1];
+    for (const shape of SHAPES) {
+      const asset = chartAsset(
+        'plot',
+        CHART_SPECS.plot.parabola,
+        LIGHT_LOOK,
+        shape,
+      )!;
+      const names = Object.entries(asset.parts).filter(([id]) =>
+        /^label-/.test(id),
+      );
+      expect(names.length).toBeGreaterThanOrEqual(2);
+      names.forEach(([id, { box }], i) => {
+        for (const [other, part] of names.slice(i + 1))
+          expect([id, other, shape, apart(box, part.box)]).toEqual([
+            id,
+            other,
+            shape,
+            true,
+          ]);
+        for (const axis of ['axis-x', 'axis-y'])
+          expect([id, axis, shape, apart(box, asset.parts[axis].box)]).toEqual([
+            id,
+            axis,
+            shape,
+            true,
+          ]);
+      });
+    }
+  });
+
+  it("turns a document's stamp clear of its headline, inside the words' area and out of the captions' band", () => {
+    for (const shape of SHAPES) {
+      const { text, size } = frameOf(shape);
+      const asset = chartAsset(
+        'document',
+        CHART_SPECS.document.report,
+        LIGHT_LOOK,
+        shape,
+      )!;
+      const [x, y, w, h] = asset.parts.stamp.box;
+      const headline = asset.parts.headline.box;
+      expect([shape, y + h <= text.y1 + 1]).toEqual([shape, true]);
+      expect([shape, x >= text.x0 - 1 && x + w <= text.x1 + 1]).toEqual([
+        shape,
+        true,
+      ]);
+      expect([
+        shape,
+        y >= headline[1] + headline[3] - size.label * 0.3,
+      ]).toEqual([shape, true]);
+    }
+  });
+
   it('lights a chamber by party, what is left over muted', () => {
     const asset = chartAsset(
       'seats',
@@ -411,6 +498,70 @@ describe('the kit', () => {
     ]);
   });
 
+  it('cuts words it must shorten only between whole words, or with a hyphen', () => {
+    const long = 'The fears of minorities and the means of allaying them';
+    const cut = said(long, 40);
+    expect(cut.length).toBeLessThanOrEqual(40);
+    expect(cut).toBe('The fears of minorities and the means…');
+    expect(said('Constitutionalisation', 10)).toBe('Constitut-');
+    expect(said('  short  words ', 40)).toBe('short words');
+    expect(wholeWords('One two three', 9)).toBe('One two…');
+    expect(
+      wordsWithin(
+        { label: long, groups: [{ name: long }] },
+        { label: 30, name: 20 },
+      ),
+    ).toEqual({
+      label: 'The fears of minorities and…',
+      groups: [{ name: 'The fears of…' }],
+    });
+    // Words past the fitter's last line are let go at a whole word.
+    const set = fit(long, 300, 50, 50, 2);
+    expect(set.lines).toHaveLength(2);
+    expect(set.lines[1].endsWith('…')).toBe(true);
+    for (const word of set.lines.join(' ').replace('…', '').split(' '))
+      expect(long.split(' ')).toContain(word);
+  });
+
+  it("keeps a reader's own cut out of the middle of a word", () => {
+    const label =
+      'people who lived in the colony when the census was taken that year';
+    const asset = chartAsset(
+      'counter',
+      { counter: { value: 45, unit: 'million', label } },
+      LIGHT_LOOK,
+      'wide',
+    )!;
+    const words = [
+      ...asset.svg.matchAll(/data-part="label"[^>]*>(.*?)<\/text>/g),
+    ]
+      .map((m) => m[1].replace(/<[^>]+>/g, ' '))
+      .join(' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    expect(words.endsWith('…')).toBe(true);
+    for (const word of words.replace('…', '').split(' '))
+      expect(label.split(' ')).toContain(word);
+    // A document's title taken from its name, longer than the reader keeps.
+    const name = 'Report of the Commission appointed to enquire into the fears';
+    const paper = chartAsset(
+      'document',
+      { name, document: { headline: 'Not recommended' } },
+      LIGHT_LOOK,
+      'wide',
+    )!;
+    const title = [
+      ...paper.svg.matchAll(/data-part="title"[^>]*>(.*?)<\/text>/g),
+    ]
+      .map((m) => m[1].replace(/<[^>]+>/g, ' '))
+      .join(' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    expect(title.endsWith('…')).toBe(true);
+    for (const word of title.replace('…', '').split(' '))
+      expect(name.split(' ')).toContain(word);
+  });
+
   it('colours several things apart, what is left over muted', () => {
     const paint = paintOf(LIGHT_LOOK);
     const colours = coloursFor(paint, [
@@ -481,6 +632,51 @@ describe('mapAsset', () => {
     );
     expect(asset!.parts['place-kano']).toBeDefined();
     expect(asset!.parts['label-kano']).toBeDefined();
+  });
+
+  it("keeps its names, its key and a past map's note inside the words' area, out of the captions' band", async () => {
+    const past = { ...base, year: 1959 };
+    const tour = {
+      region: 'Nigeria',
+      highlight: null,
+      places: ['Kano', 'Lagos'],
+      routes: [{ from: 'Lagos', to: 'Kano', name: 'The tour north' }],
+      groups: base.groups.map((g) => ({ name: g.name })),
+      base: past,
+    };
+    const europe = {
+      region: 'Europe',
+      highlight: [
+        { name: 'France', label: true, group: 'Founders' },
+        { name: 'Germany', label: true, group: 'Founders' },
+        { name: 'Poland', label: true, group: 'Joined later' },
+      ],
+      places: ['Brussels'],
+      routes: null,
+    };
+    for (const shape of SHAPES) {
+      const { text } = frameOf(shape);
+      const assets = await Promise.all(
+        [past, tour, europe].map((input) => mapAsset(input, LIGHT_LOOK, shape)),
+      );
+      expect(assets[0]!.parts.period).toBeDefined();
+      expect(assets[1]!.parts['label-kano']).toBeDefined();
+      expect(assets[2]!.parts.key).toBeDefined();
+      for (const asset of assets)
+        for (const [id, part] of Object.entries(asset!.parts)) {
+          if (!/^label-|^key$|^period$/.test(id)) continue;
+          const [x, y, w, h] = part.box;
+          expect({
+            id,
+            shape,
+            inside:
+              x >= text.x0 - 1 &&
+              y >= text.y0 - 1 &&
+              x + w <= text.x1 + 1 &&
+              y + h <= text.y1 + 1,
+          }).toEqual({ id, shape, inside: true });
+        }
+    }
   });
 
   it('draws nothing for a map of nowhere code knows', async () => {

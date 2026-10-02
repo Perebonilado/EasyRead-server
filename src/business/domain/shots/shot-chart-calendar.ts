@@ -48,6 +48,7 @@ import {
   type Colour,
   type Frame,
   type Paint,
+  wordsWithin,
 } from './shot-chart-kit';
 
 const MONTHS = [
@@ -152,12 +153,14 @@ function monthGrid(
     : `${MONTHS[month - 1]} ${year}`;
   const weekday = dated ? WEEKDAYS[weekdayOf(year, month, page.day!)] : null;
   const titleW = tall ? text.x1 - text.x0 : frame.W * 0.36;
+  // Large beside a wide frame's grid; a tall frame's at a title's size,
+  // so the grid under it keeps room for its days inside the band.
   const title = fitBalanced(
     words,
     titleW,
-    frame.size.hero,
+    tall ? frame.size.title : frame.size.hero,
     floor,
-    3,
+    tall ? 2 : 3,
     700,
     'display',
   );
@@ -165,12 +168,13 @@ function monthGrid(
   const titleH =
     (kicker ? floor * 1.4 : 0) + title.lines.length * title.size * 1.08;
   // The grid's area: the right of a wide frame, under the words in a tall one.
+  // A tall frame's grid under the date, inside the safe band: its days are words.
   const area = tall
     ? {
-        x0: frame.pic.x0,
-        x1: frame.pic.x1,
-        y0: text.y0 + titleH + floor * 0.7,
-        y1: frame.pic.y1,
+        x0: text.x0,
+        x1: text.x1,
+        y0: text.y0 + titleH + floor * 0.5,
+        y1: text.y1,
       }
     : {
         x0: text.x0 + titleW + floor * 1.5,
@@ -180,26 +184,26 @@ function monthGrid(
       };
   const cols = 7;
   const rows = weeks + 1;
-  const cell = Math.min(
-    (area.x1 - area.x0) / cols,
-    (area.y1 - area.y0) / (rows + 0.2),
-    floor * 3,
-  );
-  const gw = cell * cols;
-  const gh = cell * rows;
+  // Cells as wide as the area allows and as tall as its height does: a
+  // tall frame's are wider than they are tall, its rows inside the band.
+  const cellW = Math.min((area.x1 - area.x0) / cols, floor * 3);
+  const cellH = Math.min(cellW, (area.y1 - area.y0) / (rows + 0.2));
+  const cell = Math.min(cellW, cellH);
+  const gw = cellW * cols;
+  const gh = cellH * rows;
   const gx = area.x0 + (area.x1 - area.x0 - gw) / 2;
   const gy = tall ? area.y0 : area.y0 + (area.y1 - area.y0 - gh) / 2;
   const size = Math.max(floor, Math.min(cell * 0.46, floor * 1.25));
   // The weekdays' letters over the columns.
   const letters = WEEKDAYS.map((d) => d[0]);
-  const wbase = gy + cell * 0.5 + size * 0.34;
-  book.add('weekdays', { box: [gx, gy, gw, cell], role: 'muted' });
+  const wbase = gy + cellH * 0.5 + size * 0.34;
+  book.add('weekdays', { box: [gx, gy, gw, cellH], role: 'muted' });
   out.push(
     partSvg(
       'weekdays',
       letters
         .map((l, i) =>
-          textSvg([l], gx + cell * (i + 0.5), wbase, {
+          textSvg([l], gx + cellW * (i + 0.5), wbase, {
             size,
             fill: paint.muted,
             family: paint.text,
@@ -214,15 +218,15 @@ function monthGrid(
   const at = (d: number) => {
     const k = first + d - 1;
     return {
-      cx: gx + cell * ((k % 7) + 0.5),
-      cy: gy + cell * (Math.floor(k / 7) + 1.5),
+      cx: gx + cellW * ((k % 7) + 0.5),
+      cy: gy + cellH * (Math.floor(k / 7) + 1.5),
     };
   };
   for (let d = 1; d <= days; d += 1) {
     const { cx, cy } = at(d);
     const id = `day-${d}`;
     book.add(id, {
-      box: [cx - cell / 2, cy - cell / 2, cell, cell],
+      box: [cx - cellW / 2, cy - cellH / 2, cellW, cellH],
       value: d,
       role: 'ink',
     });
@@ -243,7 +247,7 @@ function monthGrid(
       ),
     );
   }
-  const gridBox: ShotBox = [gx, gy + cell, gw, cell * weeks];
+  const gridBox: ShotBox = [gx, gy + cellH, gw, cellH * weeks];
   book.add('grid', { box: gridBox, role: 'ink' });
   out.push(partSvg('grid', cells.join('')));
   // The day marked: a disc in the colour, its number on it.
@@ -411,10 +415,27 @@ function sheets(
     pages.push({ page: spec.merge, label: null, merge: true });
   const n = pages.length;
   const labelled = pages.some((p) => p.label);
-  const labelH = labelled ? floor * (tall ? 1.5 : 2.6) : 0;
+  // Room over each row for its calendars' names, as many lines as the longest takes.
+  const labelLines = Math.max(
+    0,
+    ...pages
+      .filter((p) => p.label)
+      .map(
+        (p) =>
+          fit(
+            p.label!,
+            (text.x1 - text.x0) / (tall ? Math.min(n, 2) : Math.min(n, 4)),
+            floor,
+            floor,
+            2,
+            600,
+          ).lines.length,
+      ),
+  );
+  const labelH = labelled ? floor * (labelLines * 1.15 + 0.45) : 0;
   // A tall frame's sheets one under another, each the words' width; a
   // wide frame's side by side.
-  const cols = tall ? 1 : Math.min(n, 4);
+  const cols = tall ? Math.min(n, 2) : Math.min(n, 4);
   const rows = Math.ceil(n / cols);
   const gap = floor * 0.8;
   const width = text.x1 - text.x0;
@@ -422,12 +443,11 @@ function sheets(
     (width - gap * (cols - 1)) / cols,
     tall ? width : frame.W * 0.24,
   );
-  const ratio = tall ? 0.5 : 1.1;
+  const ratio = tall ? 1 : 1.1;
+  // As tall as the band lets every row be: its words stay inside it.
   const h = Math.min(
     w * ratio,
-    tall
-      ? w * ratio
-      : (text.y1 - text.y0 - labelH * rows - gap * (rows - 1)) / rows,
+    (text.y1 - text.y0 - labelH * rows - gap * (rows - 1)) / rows,
   );
   const cellH = h + labelH;
   const totalW = cols * w + (cols - 1) * gap;
@@ -482,7 +502,11 @@ export function calendarAsset(
   shape: FilmShape,
 ): ShotSvgAssetDto | null {
   const extra = extraOf('calendar', raw);
-  const spec = readCalendar(draftOf(raw), extra);
+  // Its words kept whole within the lengths the reader keeps them to.
+  const spec = readCalendar(
+    wordsWithin(draftOf(raw), { label: 32, '*': 32 }),
+    extra,
+  );
   if (!spec) return null;
   const frame = frameOf(shape);
   const paint = paintOf(look);

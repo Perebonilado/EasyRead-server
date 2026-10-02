@@ -439,7 +439,15 @@ function across(
   };
 }
 
-/** Down the frame: the spine at the left, one event a row beside it. */
+/**
+ * Down the frame: a spine at the left of each column and its events in
+ * rows beside it, every word inside the safe band: one column where the
+ * events fit it, two (read down the first, then the second) where they do
+ * not, and where even two will not hold them, pages: each a frame's
+ * height of one column, its events inside that frame's band, the spine
+ * running on down through them all for the camera to travel. The spine
+ * runs up and down the frame past the words, a picture.
+ */
 function down(
   frame: Frame,
   paint: Paint,
@@ -447,99 +455,210 @@ function down(
   events: Event[],
   colour: { colour: string; role?: string },
   source: string | null,
-): { svg: string; focal: ShotBox; bottom: number } {
+): { svg: string; focal: ShotBox; bottom: number; pages: number } {
   const { text } = frame;
   const floor = frame.size.label;
   const ids = idsOf(book, events);
+  const n = events.length;
   const r = floor * 0.26;
-  const spineX = text.x0 + r;
-  const x = spineX + r + floor * 0.35;
-  const width = text.x1 - x;
-  let dateSize = floor;
-  for (let s = frame.size.title; s >= floor; s -= 1)
-    if (
-      events.every(
-        (e) => !e.when || wordsWidth(e.when, s, 700, 'display') <= width,
-      )
-    ) {
-      dateSize = r1(s);
-      break;
+  const sourceH = source ? frame.size.chip * 2.6 : 0;
+  const band = text.y1 - text.y0 - sourceH;
+  const colGap = floor * 0.8;
+  const minGap = floor * 0.45;
+  /** Each event's block laid out for a column of a width: its date's size, its words' lines and its height. */
+  const laidFor = (width: number) => {
+    let dateSize = floor;
+    for (let s = frame.size.title; s >= floor; s -= 1)
+      if (
+        events.every(
+          (e) => !e.when || wordsWidth(e.when, s, 700, 'display') <= width,
+        )
+      ) {
+        dateSize = r1(s);
+        break;
+      }
+    const blocks = events.map((e) => {
+      const lines = e.name
+        ? fit(e.name, width, floor, floor, 3, 600).lines
+        : [];
+      return {
+        lines,
+        h: (e.when ? dateSize * 1.08 : 0) + lines.length * floor * 1.12,
+      };
+    });
+    return { dateSize, blocks };
+  };
+  const fits = (blocks: { h: number }[]) =>
+    blocks.reduce((sum, b) => sum + b.h, 0) + (blocks.length - 1) * minGap <=
+    band;
+  const full = text.x1 - text.x0 - r * 2 - floor * 0.35;
+  const half = (text.x1 - text.x0 - colGap) / 2 - r * 2 - floor * 0.35;
+  // The columns (or pages) and which events each holds.
+  let laid = laidFor(full);
+  let groups: number[][] = [events.map((_, i) => i)];
+  let paged = false;
+  if (!fits(laid.blocks)) {
+    const two = laidFor(half);
+    const per = Math.ceil(n / 2);
+    const a = two.blocks.slice(0, per);
+    const b = two.blocks.slice(per);
+    if (fits(a) && fits(b)) {
+      laid = two;
+      groups = [
+        events.slice(0, per).map((_, i) => i),
+        events.slice(per).map((_, i) => per + i),
+      ];
+    } else {
+      // Pages of one column: as many events on each as its band holds.
+      paged = true;
+      groups = [];
+      let page: number[] = [];
+      let used = 0;
+      laid.blocks.forEach((block, i) => {
+        const more = (page.length ? minGap : 0) + block.h;
+        if (page.length && used + more > band) {
+          groups.push(page);
+          page = [];
+          used = 0;
+        }
+        page.push(i);
+        used += page.length > 1 ? more : block.h;
+      });
+      if (page.length) groups.push(page);
+      // As even as the pages allow: the same count on each where they fit.
+      const per = Math.ceil(n / groups.length);
+      const even = groups
+        .map((_, g) =>
+          events.slice(g * per, (g + 1) * per).map((_, i) => g * per + i),
+        )
+        .filter((group) => group.length);
+      if (even.every((group) => fits(group.map((i) => laid.blocks[i]))))
+        groups = even;
     }
+  }
+  const cols = paged ? 1 : groups.length;
+  const colW = (text.x1 - text.x0 - colGap * (cols - 1)) / cols;
   const out: string[] = [];
   const boxes: ShotBox[] = [];
-  let y = text.y0 + floor * 0.2;
-  const first = y;
-  const dots: number[] = [];
-  events.forEach((e, i) => {
-    const date = e.when
-      ? {
-          lines: [e.when],
-          size: dateSize,
-          x,
-          y: y + dateSize * ASCENT,
-          anchor: 'start' as const,
-        }
-      : null;
-    let below = y + (e.when ? dateSize * 1.08 : 0);
-    const lines = e.name ? fit(e.name, width, floor, floor, 3, 600).lines : [];
-    const name = lines.length
-      ? {
-          lines,
-          size: floor,
-          x,
-          y: below + floor * ASCENT,
-          anchor: 'start' as const,
-        }
-      : null;
-    below += lines.length * floor * 1.12;
-    // The dot level with the date (or the words' first line).
-    const dotY = y + (e.when ? dateSize : floor) * 0.42;
-    dots.push(dotY);
-    const drawn = eventSvg(
-      book,
-      paint,
-      colour,
-      ids[i],
-      [spineX, dotY],
-      r,
-      null,
-      date,
-      name,
+  const spines: string[] = [];
+  const spineBoxes: ShotBox[] = [];
+  let bottom = 0;
+  groups.forEach((group, g) => {
+    const c = paged ? 0 : g;
+    const oy = paged ? g * frame.H : 0;
+    const spineX = text.x0 + c * (colW + colGap) + r;
+    const x = spineX + r + floor * 0.35;
+    // The rows spread down the band, a little air between them.
+    const used = group.reduce((sum, i) => sum + laid.blocks[i].h, 0);
+    const gap = Math.min(
+      floor * 1.6,
+      Math.max(minGap, (band - used) / Math.max(1, group.length)),
     );
-    out.push(drawn.svg);
-    boxes.push(drawn.box);
-    y = below + floor * 0.75;
+    let y = oy + text.y0 + Math.min(gap * 0.3, floor * 0.3);
+    const dots: number[] = [];
+    for (const i of group) {
+      const e = events[i];
+      const { lines, h } = laid.blocks[i];
+      const date = e.when
+        ? {
+            lines: [e.when],
+            size: laid.dateSize,
+            x,
+            y: y + laid.dateSize * ASCENT,
+            anchor: 'start' as const,
+          }
+        : null;
+      const nameTop = y + (e.when ? laid.dateSize * 1.08 : 0);
+      const name = lines.length
+        ? {
+            lines,
+            size: floor,
+            x,
+            y: nameTop + floor * ASCENT,
+            anchor: 'start' as const,
+          }
+        : null;
+      // The dot level with the date (or the words' first line).
+      const dotY = y + (e.when ? laid.dateSize : floor) * 0.42;
+      dots.push(dotY);
+      const drawn = eventSvg(
+        book,
+        paint,
+        colour,
+        ids[i],
+        [spineX, dotY],
+        r,
+        null,
+        date,
+        name,
+      );
+      out.push(drawn.svg);
+      boxes.push(drawn.box);
+      y += h + gap;
+    }
+    bottom = Math.max(bottom, y - gap);
+    if (paged) return;
+    // The spine: down the whole frame for one column; for two, from the
+    // frame's top to past the first's last event, and from before the
+    // second's first event to the frame's foot.
+    const top = c === 0 ? frame.pic.y0 : dots[0] - floor * 1.2;
+    const foot =
+      c === cols - 1 ? frame.pic.y1 : dots[dots.length - 1] + floor * 1.2;
+    spines.push(`M${r1(spineX)} ${r1(top)}V${r1(foot)}`);
+    spineBoxes.push([spineX - 2, top, 4, foot - top]);
   });
-  // The spine from over the first event to under the last.
-  const spineTop = Math.max(frame.pic.y0, first - floor * 1.2);
-  const spineBottom = dots[dots.length - 1] + floor * 1.2;
-  const spinePath = `M${r1(spineX)} ${r1(spineTop)}V${r1(spineBottom)}`;
+  const pages = paged ? groups.length : 1;
+  if (paged) {
+    // One spine down through every page.
+    const spineX = text.x0 + r;
+    const foot = (pages - 1) * frame.H + frame.pic.y1;
+    spines.push(`M${r1(spineX)} ${r1(frame.pic.y0)}V${r1(foot)}`);
+    spineBoxes.push([spineX - 2, frame.pic.y0, 4, foot - frame.pic.y0]);
+  }
+  const spinePath = spines.join('');
   book.add('spine', {
-    box: [spineX - 2, spineTop, 4, spineBottom - spineTop],
+    box: union(...spineBoxes),
     path: spinePath,
     role: 'ink',
   });
   out.unshift(
     partSvg(
       'spine',
-      `<path d="${spinePath}" stroke="${paint.ink}" stroke-width="${r1(Math.max(4, frame.W * 0.006))}" stroke-linecap="round"/>`,
+      `<path d="${spinePath}" stroke="${paint.ink}" stroke-width="${r1(Math.max(4, floor * 0.1))}" stroke-linecap="round"/>`,
     ),
   );
-  let bottom = Math.max(y, spineBottom);
   if (source) {
+    // Under the first frame's words, inside its band.
+    const firstBottom = Math.max(
+      ...groups
+        .filter((_, g) => (paged ? g === 0 : true))
+        .flat()
+        .map((i) => book.parts[ids[i].event].box)
+        .map((b) => b[1] + b[3]),
+    );
+    // Set where the events' words start, clear of the spine (and, in two
+    // columns, under the first).
+    const indent = r * 2 + floor * 0.35;
     const drawn = sourceSvg(
       book,
       paint,
       frame,
       source,
-      text.x0,
-      bottom + frame.size.chip * 0.8,
-      text.x1 - text.x0,
+      text.x0 + indent,
+      Math.min(
+        text.y1 - frame.size.chip * 0.4,
+        firstBottom + frame.size.chip * 1.6,
+      ),
+      (cols === 2 ? colW : text.x1 - text.x0) - indent,
     );
     out.push(drawn.svg);
-    bottom = drawn.box[1] + drawn.box[3];
   }
-  return { svg: out.join(''), focal: union(...boxes), bottom };
+  return {
+    svg: out.join(''),
+    focal: union(...boxes, ...spineBoxes),
+    bottom,
+    pages,
+  };
 }
 
 /** A timeline drawn to fill the frame, or null with fewer than two events. */
@@ -560,11 +679,9 @@ export function timelineAsset(
     return assetOf(frame, paint, drawn.svg, book, drawn.focal);
   }
   const drawn = down(frame, paint, book, events, colour, source);
-  // Longer than the words' area: it runs on down, and the camera travels down it.
-  const long = drawn.bottom > frame.text.y1;
-  const box: ShotBox = long
-    ? [0, 0, frame.W, Math.ceil(drawn.bottom + (frame.H - frame.text.y1))]
-    : [0, 0, frame.W, frame.H];
+  // Pages of a frame's height each: the camera travels down from one to the next.
+  const long = drawn.pages > 1;
+  const box: ShotBox = [0, 0, frame.W, frame.H * drawn.pages];
   return assetOf(
     frame,
     paint,

@@ -41,6 +41,7 @@ import {
   sourceSvg,
   textSvg,
   union,
+  wordsWithin,
 } from './shot-chart-kit';
 
 /** The most icons a grid draws, in either shape: past this each stands for more (a hundred makes a grid of percentages). */
@@ -67,7 +68,12 @@ export function iconsAsset(
   shape: FilmShape,
 ): ShotSvgAssetDto | null {
   const extra = extraOf('icons', raw);
-  const spec = readIcons(draftOf(raw), extra.name, extra);
+  // Its words kept whole within the lengths the reader keeps them to.
+  const spec = readIcons(
+    wordsWithin(draftOf(raw), { unit: 24, label: 60, highlightLabel: 40 }),
+    extra.name,
+    extra,
+  );
   if (!spec) return null;
   const frame = frameOf(shape);
   const paint = paintOf(look);

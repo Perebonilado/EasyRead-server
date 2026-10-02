@@ -658,8 +658,17 @@ describe('the picture desk', () => {
           'Baird demonstrates television to members of the Royal Institution',
         ),
       ).toEqual({
-        names: ['Baird', 'Royal Institution'],
-        plain: ['television', 'members'],
+        // A sentence's first word alone is searched as a word, not a name.
+        names: ['Royal Institution'],
+        plain: ['Baird', 'television', 'members'],
+      });
+      expect(
+        searchWordsOf(
+          'Resumed constitutional conference sets out the path to independence',
+        ),
+      ).toEqual({
+        names: [],
+        plain: ['constitutional', 'conference', 'independence'],
       });
       expect(
         searchWordsOf("RCA introduces television at the New York World's Fair"),
@@ -678,8 +687,8 @@ describe('the picture desk', () => {
           'Nigeria becomes independent by act and constitutional order',
         ),
       ).toEqual({
-        names: ['Nigeria'],
-        plain: ['independent', 'act', 'constitutional'],
+        names: [],
+        plain: ['Nigeria', 'independent', 'act'],
       });
     });
 

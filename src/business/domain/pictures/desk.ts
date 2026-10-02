@@ -128,7 +128,7 @@ const LOOKUP_DAYS = 30;
  * again (a portrait that is a statue's photograph, once let through, is
  * not handed out for a month after the rule against it).
  */
-export const DESK_RULES = 14;
+export const DESK_RULES = 15;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** The width the desk asks a source for: a full frame's with room for a 12% push; a portrait's print; a page. */
@@ -229,9 +229,19 @@ export function searchWordsOf(text: string): {
     if (run.length) names.push(run.join(' '));
     run = [];
   };
-  for (const word of words) {
+  for (const [i, word] of words.entries()) {
     const lower = word.toLowerCase();
-    if (/^\p{Lu}/u.test(word) && !(SEARCH_STOP.has(lower) && !run.length)) {
+    // A sentence's first word alone is no name ("Resumed constitutional
+    // conference…"), unless in capitals or one of several.
+    const first =
+      i === 0 &&
+      !/^\p{Lu}{2,}$/u.test(word) &&
+      !/^\p{Lu}/u.test(words[1] ?? '');
+    if (
+      /^\p{Lu}/u.test(word) &&
+      !first &&
+      !(SEARCH_STOP.has(lower) && !run.length)
+    ) {
       run.push(word);
       continue;
     }
@@ -240,6 +250,8 @@ export function searchWordsOf(text: string): {
       word.length >= 3 &&
       !SEARCH_STOP.has(lower) &&
       !EVENT_VERBS.has(lower) &&
+      // "resumed", "renamed": how it was done, never what a photo shows.
+      !/ed$/u.test(lower) &&
       !/^\d+$/u.test(word)
     )
       plain.push(word.replace(/['’]s$/u, ''));
@@ -652,8 +664,10 @@ export class PictureDesk {
       ?.trim();
     const lead = names[0] ?? plain[0];
     const asks = [
-      // A name and what happened: "Baird television 1926".
-      names.length ? [names[0], plain[0]] : plain.slice(0, 2),
+      // What happened, in its first words: "Baird television 1926".
+      plain.slice(0, 2),
+      // A name and what happened: "RCA television 1939".
+      ...(names.length ? [[names[0], plain[0]]] : []),
       // Its names together: "RCA New York World's Fair 1939".
       ...(names.length >= 2 ? [names.slice(0, 2)] : []),
       // Its place and what happened: "Alexandra Palace BBC Television Service 1936".
@@ -662,7 +676,15 @@ export class PictureDesk {
         : []),
     ]
       .map((words) => [...words.filter(Boolean), year].join(' '))
-      .filter((ask) => ask !== String(year));
+      .filter(
+        (ask, at, all) => ask !== String(year) && all.indexOf(ask) === at,
+      );
+    // And without its year, for a file dated only in its date's field
+    // (its year is then checked as ever): "Nigeria constitutional conference".
+    const loose = [place, ...names.slice(0, 1), ...plain.slice(0, 2)]
+      .filter(Boolean)
+      .join(' ');
+    if (loose.split(' ').length >= 2) asks.push(loose);
     const files: SourceFile[] = [];
     for (const words of [...new Set(asks)])
       files.push(

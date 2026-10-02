@@ -11,7 +11,8 @@
  *       of television, pictures/__fixtures__/television.ts)
  *   npx ts-node --transpile-only scripts/pictures-desk.ts --person "Ahmadu Bello" [--years 1957,1960] [--place Nigeria] [--role "…"]
  *   npx ts-node --transpile-only scripts/pictures-desk.ts --place-photo Lagos --years 1957,1960 [--country Nigeria]
- *       one question: every candidate it cleared, ranked, and the one it takes
+ *   npx ts-node --transpile-only scripts/pictures-desk.ts --event "Nigeria becomes independent" --years 1960 [--country Nigeria] [--where Lagos]
+ *       one question: every candidate it cleared, ranked, and the ones it takes
  *
  * It asks the sources politely (one request at a time) and keeps what it
  * takes in the picture cache and the storage the settings name (set
@@ -28,6 +29,8 @@ import type { PictureDesk } from '../src/business/domain/pictures/desk';
 import {
   countsOf,
   deskPass,
+  eventName,
+  eventNames,
   passQuestions,
 } from '../src/business/domain/pictures/episode';
 import type { PictureQuery } from '../src/business/domain/pictures/types';
@@ -89,12 +92,12 @@ async function one(desk: PictureDesk, query: PictureQuery): Promise<void> {
     console.log(
       `  ${i + 1}. ${c.score.toFixed(3)}  ${c.file.sourceId}\n      ${c.chip}\n      ${c.licence.code} (tier ${c.licence.tier}) · ${c.file.width}×${c.file.height} · focal ${c.focal.from} · ${c.notes.join(' · ')}\n      ${c.file.pageUrl}`,
     );
-  const picked = await desk.lookup(query, { onUsage });
-  console.log(
-    picked
-      ? `Taken: ${picked.id} ${picked.width}×${picked.height} ${picked.storageKey}${picked.depthKey ? ` + ${picked.depthKey}` : ''}\n  ${picked.credit}`
-      : 'Taken: none',
-  );
+  const taken = await desk.lookupAll(query, { onUsage });
+  if (!taken.length) console.log('Taken: none');
+  for (const picked of taken)
+    console.log(
+      `Taken (${picked.use ?? 'photo'}): ${picked.id} ${picked.width}×${picked.height} ${picked.storageKey}${picked.depthKey ? ` + ${picked.depthKey}` : ''}\n  ${picked.chip}\n  ${picked.credit}`,
+    );
   console.log(`Spend: ${spend()}`);
 }
 
@@ -129,6 +132,23 @@ async function main(): Promise<void> {
         kind: 'place',
         ...(years().length ? { years: years() } : {}),
         ...(option('--country') ? { place: [option('--country')!] } : {}),
+        asked: `a place: ${place}${option('--country') ? `, ${option('--country')}` : ''}, itself (its streets, buildings, skyline or landscape)`,
+      });
+      return;
+    }
+    const event = option('--event');
+    if (event) {
+      const where = option('--where');
+      const country = option('--country');
+      const names = eventNames(event, []);
+      await one(desk, {
+        name: eventName(event),
+        kind: 'event',
+        years: years(),
+        place: [where, country].filter((p): p is string => Boolean(p)),
+        words: [event, ...(where ? [where] : [])],
+        ...(names.length ? { names } : {}),
+        asked: `an event: ${event} (${years().join(', ')}${where ? `, ${where}` : ''})`,
       });
       return;
     }

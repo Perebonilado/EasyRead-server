@@ -177,6 +177,10 @@ export function eventName(text: string): string {
   return clip(out.join(' '), 6);
 }
 
+/** Capitalised words that name nothing alone: a direction, a kind of body ("East and West", "Federal"). */
+const GENERIC_NAMES =
+  /^(?:north|south|east|west|northern|southern|eastern|western|central|federal|national|regional|government|parliament|constitution|republic|kingdom|empire|colony|protectorate|state|states|region|regions|party|council|house|assembly|congress|army|navy|court)$/iu;
+
 /**
  * An event's own names, a photo of it must carry one of: the research's
  * people its words name (by surname), its short names in capitals (BBC,
@@ -195,7 +199,12 @@ export function eventNames(text: string, people: readonly string[]): string[] {
   let run: string[] = [];
   let first = true;
   const close = () => {
-    if (run.length && (!first || run.length >= 2)) out.add(run.join(' '));
+    if (
+      run.length &&
+      (!first || run.length >= 2) &&
+      !(run.length === 1 && GENERIC_NAMES.test(run[0]))
+    )
+      out.add(run.join(' '));
     if (run.length) first = false;
     run = [];
   };

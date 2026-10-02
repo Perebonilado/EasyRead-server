@@ -181,8 +181,14 @@ export function quoteAsset(
   const top = Math.max(text.y0, text.y0 + (text.y1 - text.y0 - blockH) * 0.45);
   const out: string[] = [];
   // The opening mark: hung in the margin before the first line, or over it in a tall frame.
-  const markSize = Math.max(size * 2.2, frame.size.title * 1.6);
-  const markX = tall ? x : x - markRoom * 0.92;
+  // The mark no wider than the margin it hangs in (a wide frame's), a gap before the words.
+  const markSize = tall
+    ? Math.max(size * 2.2, frame.size.title * 1.6)
+    : Math.min(
+        Math.max(size * 2.2, frame.size.title * 1.6),
+        (markRoom * 0.8) / 0.5,
+      );
+  const markX = tall ? x : x - markSize * 0.5 - size * 0.12;
   const markY = tall
     ? top + markSize * 0.62
     : top + size * ASCENT + markSize * 0.42;

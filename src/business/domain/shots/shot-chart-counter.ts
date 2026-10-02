@@ -85,11 +85,12 @@ function layAt(
   const attached = read.unit ? ATTACHED.test(read.unit) : false;
   const { label: floor, title } = frame.size;
   const signW = read.sign
-    ? wordsWidth(read.sign, size * 0.6, 700, 'display') + size * 0.05
+    ? wordsWidth(read.sign, Math.max(floor, size * 0.6), 700, 'display') +
+      size * 0.05
     : 0;
   const unitSize = read.unit
     ? attached
-      ? size * 0.55
+      ? Math.max(floor, size * 0.55)
       : under
         ? Math.max(floor, Math.min(title, size * 0.3))
         : Math.max(floor, size * 0.28)
@@ -225,7 +226,7 @@ export function counterAsset(
   const figuresW = figuresWidth(read.figures, S, paint.figure);
   const right = x + laid.signW + figuresW;
   if (sign) {
-    const size = S * 0.6;
+    const size = Math.max(frame.size.label, S * 0.6);
     const base = baseline - S * 0.14;
     const box = linesBox([sign], x, base, size, 'start', 1.15, 700, 'display');
     book.add('prefix', { box, role: colour.role });

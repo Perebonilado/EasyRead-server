@@ -280,4 +280,131 @@ export const CHART_SPECS: Record<
       },
     },
   },
+  split: {
+    systems: {
+      split: {
+        sides: [
+          {
+            label: 'Federal',
+            items: ['Regions run schools', 'Regions keep taxes', 'One army'],
+            icon: 'government',
+          },
+          {
+            label: 'Unitary',
+            items: ['One parliament decides', 'Taxes go to the centre'],
+            icon: 'government',
+          },
+        ],
+        change: null,
+      },
+    },
+    before: {
+      split: {
+        sides: [
+          {
+            label: 'Before',
+            items: ['Paper ballots', 'Counted by hand'],
+            icon: null,
+          },
+          {
+            label: 'After',
+            items: ['Machines', 'Results in hours'],
+            icon: null,
+          },
+        ],
+        change: null,
+      },
+    },
+  },
+  transfer: {
+    taxes: {
+      transfer: {
+        from: 'Eastern Region',
+        to: 'Federal treasury',
+        token: 'coin',
+        label: 'oil revenue',
+        shut: false,
+      },
+    },
+    people: {
+      transfer: {
+        from: 'Villages',
+        to: 'Cities',
+        token: 'person',
+        label: null,
+        shut: false,
+      },
+    },
+  },
+  plot: {
+    parabola: {
+      plot: {
+        fn: 'x^2 - 4',
+        xFrom: -3,
+        xTo: 3,
+        yFrom: null,
+        yTo: null,
+        xLabel: 'Time (s)',
+        yLabel: 'Height (m)',
+        points: [
+          { x: 2, name: 'Lands' },
+          { x: 0, name: 'Lowest' },
+        ],
+      },
+    },
+    growth: {
+      plot: {
+        fn: '100 * 1.07^x',
+        xFrom: 0,
+        xTo: 30,
+        yFrom: null,
+        yTo: null,
+        xLabel: 'Years',
+        yLabel: null,
+        points: [{ x: 10, name: 'Doubled' }],
+      },
+      source: 'Compound interest at 7%',
+    },
+  },
+  flow: {
+    water: {
+      flow: {
+        direction: 'cycle',
+        nodes: [
+          { label: 'Evaporation', kind: 'step' },
+          { label: 'Clouds form', kind: 'step' },
+          { label: 'Rain falls', kind: 'step' },
+          { label: 'Rivers to the sea', kind: 'step' },
+        ],
+        edges: null,
+      },
+    },
+    law: {
+      flow: {
+        direction: 'across',
+        nodes: [
+          { label: 'Bill drafted', kind: 'start' },
+          { label: 'Assembly votes', kind: 'step' },
+          { label: 'Senate agrees', kind: 'step' },
+          { label: 'President signs', kind: 'step' },
+          { label: 'Law', kind: 'end' },
+        ],
+        edges: null,
+      },
+    },
+    choice: {
+      flow: {
+        direction: 'down',
+        nodes: [
+          { label: 'Majority?', kind: 'decision' },
+          { label: 'Form a government', kind: 'step' },
+          { label: 'Seek a coalition', kind: 'step' },
+        ],
+        edges: [
+          { from: 'Majority?', to: 'Form a government', label: 'Yes' },
+          { from: 'Majority?', to: 'Seek a coalition', label: 'No' },
+        ],
+      },
+    },
+  },
 };

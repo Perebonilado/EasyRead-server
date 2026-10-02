@@ -223,9 +223,7 @@ export function documentAsset(
     // The stamp: a double-ruled box of words, turned, over the body, below
     // the headline it would hide (a tall frame's as wide as its picture).
     const colour = colourOf(paint, null, spec.colour ?? 'bad', 0);
-    const room = tall
-      ? frame.pic.x1 - frame.pic.x0 - floor * 1.2
-      : pageW * 0.78;
+    const room = tall ? (frame.pic.x1 - frame.pic.x0) * 0.8 : pageW * 0.78;
     const words = fit(
       spec.stamp.toUpperCase(),
       room,

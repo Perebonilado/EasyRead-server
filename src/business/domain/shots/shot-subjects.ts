@@ -408,8 +408,7 @@ const PLACES: readonly {
     pose: { silhouettes: 'protest', characters: 'marching' },
   },
   {
-    words:
-      /^(?:ports?|harbou?rs?|docks?|dockers|ships?|cargo|sailors?)$/u,
+    words: /^(?:ports?|harbou?rs?|docks?|dockers|ships?|cargo|sailors?)$/u,
     place: 'port',
     land: 'coast',
     life: ['shimmer'],

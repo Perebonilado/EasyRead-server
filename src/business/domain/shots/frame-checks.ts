@@ -421,12 +421,19 @@ const ROLE_WORDS =
 
 /**
  * Which ban a kit person in a lesson breaks, from what it is called: a
- * group drawn as figures is a stock figure; a role ("Student", "Mechanic")
- * is a stand-in for the audience; a name is a drawn likeness of someone real.
+ * group ("Workers", "Northern leaders", "Delegates") is a stock figure; a
+ * role ("Student", "Retail investor") is a stand-in for the audience; a
+ * name ("Nnamdi Azikiwe") is a drawn likeness of someone real.
  */
 export function personBan(name: string): BannedThing {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return 'audience-on-screen';
   if (GROUP_WORDS.test(name)) return 'stock-figure-for-group';
-  if (ROLE_WORDS.test(name) || !name.trim()) return 'audience-on-screen';
+  // Every word capitalised, as a name is; a plural's last word ends in s (but a name's may: "King Charles").
+  const titled = words.every((word) => /^\p{Lu}/u.test(word));
+  const plural = /[^s']s$/i.test(words[words.length - 1]);
+  if (plural && !(titled && words.length > 1)) return 'stock-figure-for-group';
+  if (ROLE_WORDS.test(name) || !titled) return 'audience-on-screen';
   return 'drawn-likeness';
 }
 

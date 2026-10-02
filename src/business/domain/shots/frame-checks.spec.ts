@@ -699,6 +699,13 @@ describe('what an explainer never shows', () => {
     ]);
     expect(personShareOf(scene)).toBe(1);
     expect(personBan('Mechanic')).toBe('audience-on-screen');
+    // As the baselines named them.
+    expect(personBan('Delegates')).toBe('stock-figure-for-group');
+    expect(personBan('Northern leaders')).toBe('stock-figure-for-group');
+    expect(personBan('Retail investor')).toBe('audience-on-screen');
+    expect(personBan('Nnamdi Azikiwe')).toBe('drawn-likeness');
+    expect(personBan('Tafawa Balewa')).toBe('drawn-likeness');
+    expect(personBan('King Charles')).toBe('drawn-likeness');
     // A story's people act: they are no lesson's stand-ins.
     const story = {
       ...scene,

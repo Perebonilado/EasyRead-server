@@ -344,6 +344,50 @@ export function colourOf(
   return { colour: order[i % order.length] ?? paint.accent };
 }
 
+/** A name for what is left over ("Others"): drawn in the muted ink, standing back. */
+const LEFT_OVER =
+  /^(?:others?|the rest|rest|remainder|independents?|other parties)$/i;
+
+/**
+ * The colours of several things drawn together (a chart's bars, a
+ * chamber's parties, two sides): each the show's side of its name or the
+ * token the writer gave; what is left over ("Others") muted; the rest the
+ * next colours neither the show nor this picture has given yet.
+ */
+export function coloursFor(
+  paint: Paint,
+  items: { name: string | null | undefined; token?: unknown }[],
+): Colour[] {
+  const near = (a: string, b: string) => {
+    const x = rgbOf(a);
+    const y = rgbOf(b);
+    return Boolean(
+      x && y && Math.hypot(x[0] - y[0], x[1] - y[1], x[2] - y[2]) < 40,
+    );
+  };
+  const out: (Colour | null)[] = items.map((item) => {
+    if (LEFT_OVER.test((item.name ?? '').trim()))
+      return { colour: paint.muted, role: 'muted' };
+    const side = sideFor(paint, item.name);
+    if (side) return { colour: side.colour, role: side.name };
+    if (typeof item.token === 'string' && item.token.trim())
+      return colourOf(paint, null, item.token, 0);
+    return null;
+  });
+  const used = out.filter((c): c is Colour => c !== null).map((c) => c.colour);
+  const free = [
+    ...paint.sides.map((side) => side.colour),
+    ...paint.series.filter((c) => contrast(c, paint.paper) >= 2.2),
+  ].filter((c, i, all) => all.findIndex((d) => near(c, d)) === i);
+  return out.map((c) => {
+    if (c) return c;
+    const next =
+      free.find((f) => !used.some((u) => near(u, f))) ?? paint.accent;
+    used.push(next);
+    return { colour: next };
+  });
+}
+
 /** One colour for a whole picture: a token the writer gave, else the accent. */
 export function mainColour(paint: Paint, token: unknown): Colour {
   const t = typeof token === 'string' ? token.toLowerCase() : '';
@@ -479,7 +523,31 @@ export function fit(
   const size = least;
   const lines: string[] = [];
   let current = '';
-  for (const piece of piecesOf(said)) {
+  // A word too long for the line even at the floor is broken with a
+  // hyphen, its pieces three letters or more: a cut word loses letters, a
+  // broken one keeps them. Only past the last line are words cut short.
+  const pieces = piecesOf(said).flatMap((piece) => {
+    const out: { word: string; glued: boolean }[] = [];
+    let rest = piece.word;
+    let glued = piece.glued;
+    while (
+      wordsWidth(rest, size, weight, face) > width * LONG_WORD &&
+      rest.length >= 7
+    ) {
+      let cut = rest.length - 3;
+      while (
+        cut > 3 &&
+        wordsWidth(`${rest.slice(0, cut)}-`, size, weight, face) > width
+      )
+        cut -= 1;
+      out.push({ word: `${rest.slice(0, cut)}-`, glued });
+      rest = rest.slice(cut);
+      glued = true;
+    }
+    out.push({ word: rest, glued });
+    return out;
+  });
+  for (const piece of pieces) {
     let word = piece.word;
     if (wordsWidth(word, size, weight, face) > width * LONG_WORD) {
       while (
@@ -506,6 +574,34 @@ export function fit(
     lines.splice(most - 1, lines.length, `${last.trimEnd()}…`);
   }
   return { size: r1(size), lines };
+}
+
+/**
+ * Words set as `fit` sets them, but on fewer lines where that costs
+ * little size: a title of two lines a little smaller reads better than
+ * three lines with a word standing alone ("1" / "October" / "1960").
+ */
+export function fitBalanced(
+  text: string,
+  width: number,
+  largest: number,
+  least: number,
+  most: number,
+  weight: 600 | 700 = 700,
+  face: Face = 'text',
+): { size: number; lines: string[] } {
+  let best: { size: number; lines: string[] } | null = null;
+  let score = -1;
+  for (let lines = 1; lines <= most; lines += 1) {
+    const set = fit(text, width, largest, least, lines, weight, face);
+    if (set.lines.some((l) => l.endsWith('…'))) continue;
+    const s = set.size * (1 - 0.14 * (set.lines.length - 1));
+    if (s > score + 0.01) {
+      best = set;
+      score = s;
+    }
+  }
+  return best ?? fit(text, width, largest, least, most, weight, face);
 }
 
 /** How far above its baseline a line's capitals and figures reach, and below it its descenders, as shares of its size. */

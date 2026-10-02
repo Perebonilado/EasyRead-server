@@ -158,4 +158,126 @@ export const CHART_SPECS: Record<
       ],
     },
   },
+  quote: {
+    rivonia: {
+      quote:
+        'I have cherished the ideal of a democratic and free society in which all persons live together in harmony and with equal opportunities.',
+      speaker: 'Nelson Mandela',
+      when: '1964',
+      phrases: [{ name: 'equal', phrase: 'equal opportunities' }],
+    },
+    step: {
+      quote: "That's one small step for man, one giant leap for mankind.",
+      speaker: 'Neil Armstrong',
+      when: '1969',
+    },
+  },
+  strike: {
+    motion: { strike: { from: 'IF', to: 'HOW', label: 'The motion' } },
+    date: {
+      strike: {
+        from: '1956',
+        to: 'As soon as practicable',
+        label: 'Self-government',
+      },
+    },
+  },
+  document: {
+    report: {
+      document: {
+        style: 'paper',
+        title: 'Report of the Commission',
+        headline: 'The fears of minorities and the means of allaying them',
+        stamp: 'Not recommended',
+      },
+    },
+    paper: {
+      document: {
+        style: 'newspaper',
+        title: 'The Evening Gazette',
+        headline: 'Independence on 1 October',
+        stamp: null,
+      },
+    },
+  },
+  icons: {
+    school: {
+      icons: {
+        icon: 'child',
+        count: 100,
+        per: null,
+        unit: 'children',
+        label: 'children of primary school age',
+        highlight: 30,
+        highlightLabel: 'not in school',
+      },
+      source: 'UNESCO Institute for Statistics',
+    },
+    troops: {
+      icons: {
+        icon: 'soldier',
+        count: '45,000',
+        per: null,
+        unit: 'soldiers',
+        label: 'soldiers sent overseas',
+        highlight: null,
+        highlightLabel: null,
+      },
+    },
+    schools: {
+      icons: {
+        icon: 'school',
+        count: 7,
+        per: null,
+        unit: 'schools',
+        label: null,
+        highlight: null,
+        highlightLabel: null,
+      },
+    },
+  },
+  seats: {
+    house: {
+      seats: {
+        layout: 'hemicycle',
+        groups: [
+          { name: 'NPC', seats: 134 },
+          { name: 'NCNC', seats: 89 },
+          { name: 'Action Group', seats: 73 },
+          { name: 'Others', seats: 16 },
+        ],
+        majority: true,
+        label: 'House of Representatives, 1959',
+      },
+      source: 'Post, The Nigerian Federal Election of 1959',
+    },
+    commons: {
+      seats: {
+        layout: 'chamber',
+        groups: [
+          { name: 'Government', seats: 52 },
+          { name: 'Opposition', seats: 38 },
+        ],
+        majority: false,
+        label: null,
+      },
+    },
+  },
+  calendar: {
+    day: {
+      calendar: {
+        calendars: [{ label: null, dates: ['1 October 1960'] }],
+        merge: null,
+      },
+    },
+    years: {
+      calendar: {
+        calendars: [
+          { label: 'Eastern Region', dates: ['1957'] },
+          { label: 'Northern Region', dates: ['1959'] },
+        ],
+        merge: '1 October 1960',
+      },
+    },
+  },
 };

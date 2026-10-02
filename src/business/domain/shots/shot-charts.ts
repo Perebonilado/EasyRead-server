@@ -19,11 +19,27 @@ import type {
   ShotSvgAssetDto,
 } from '../../../contracts';
 import { barsAsset } from './shot-chart-bars';
+import { calendarAsset } from './shot-chart-calendar';
 import { counterAsset } from './shot-chart-counter';
+import { documentAsset } from './shot-chart-document';
+import { iconsAsset } from './shot-chart-icons';
+import { quoteAsset } from './shot-chart-quote';
+import { seatsAsset } from './shot-chart-seats';
+import { strikeAsset } from './shot-chart-strike';
 import { timelineAsset } from './shot-chart-timeline';
 
 /** The kinds drawn here, as the board names them. */
-export const CHART_KINDS = ['counter', 'chart', 'timeline'] as const;
+export const CHART_KINDS = [
+  'counter',
+  'chart',
+  'timeline',
+  'quote',
+  'strike',
+  'document',
+  'icons',
+  'seats',
+  'calendar',
+] as const;
 export type ChartKind = (typeof CHART_KINDS)[number];
 
 type Draw = (
@@ -36,6 +52,12 @@ const DRAW: Record<ChartKind, Draw> = {
   counter: counterAsset,
   chart: barsAsset,
   timeline: timelineAsset,
+  quote: quoteAsset,
+  strike: strikeAsset,
+  document: documentAsset,
+  icons: iconsAsset,
+  seats: seatsAsset,
+  calendar: calendarAsset,
 };
 
 /** Whether a kind is one drawn here. */

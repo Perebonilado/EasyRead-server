@@ -27,7 +27,7 @@ import {
   PartBook,
   assetOf,
   bodyOf,
-  colourOf,
+  coloursFor,
   extraOf,
   figuresWidth,
   fit,
@@ -37,6 +37,7 @@ import {
   partSvg,
   r1,
   said,
+  sideFor,
   slugOf,
   sourceLine,
   sourceSvg,
@@ -108,14 +109,19 @@ const attachedUnit = (unit: string | null) =>
 
 /** Each bar's colour: a side the show names, a token the writer gave; else one colour for all, the accent. */
 function coloursOf(paint: Paint, read: ChartRead): Colour[] {
-  const own = read.bars.map((b, i) => {
-    const side = colourOf(paint, b.label, b.colour, i);
-    return side.role || b.colour ? side : null;
-  });
-  if (own.every((c) => c === null))
+  const own = read.bars.map(
+    (b) => Boolean(sideFor(paint, b.label)) || Boolean(b.colour),
+  );
+  if (!own.some(Boolean))
     return read.bars.map(() => ({ colour: paint.accent, role: 'accent' }));
   // Some have their own colour: the rest stand back in the muted ink.
-  return own.map((c) => c ?? { colour: paint.muted, role: 'muted' });
+  const given = coloursFor(
+    paint,
+    read.bars.map((b) => ({ name: b.label, token: b.colour })),
+  );
+  return given.map((c, i) =>
+    own[i] ? c : { colour: paint.muted, role: 'muted' },
+  );
 }
 
 /** The parts' ids of each bar, from its name. */

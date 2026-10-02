@@ -138,6 +138,8 @@ import { AuthController } from './web/controllers/auth.controller';
 import { DocumentsController } from './web/controllers/documents.controller';
 import { EventsController } from './web/controllers/events.controller';
 import { HealthController } from './web/controllers/health.controller';
+import { TilesController } from './web/controllers/tiles.controller';
+import { TerrainTilesService } from './business/handlers/studio/terrain-tiles.service';
 import { ExportsController } from './web/controllers/exports.controller';
 import { HighlightController } from './web/controllers/highlight.controller';
 import { ChatController } from './web/controllers/chat.controller';
@@ -416,6 +418,7 @@ const queries = [
     TutorsController,
     EventsController,
     HealthController,
+    TilesController,
   ],
   providers: [
     ...handlers,
@@ -423,6 +426,7 @@ const queries = [
     StudioService,
     StudioDocumentsService,
     StudioExportService,
+    TerrainTilesService,
     StudioDocumentsQuery,
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: AuthGuard },

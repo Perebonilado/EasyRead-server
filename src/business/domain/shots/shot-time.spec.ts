@@ -6,6 +6,7 @@ import {
 } from './__fixtures__/regional-turn';
 import {
   CAMERA_MS,
+  CUE_HOLD_MS,
   CUT_LEAD_MS,
   DRIFT_MS,
   JOIN_MS,
@@ -209,6 +210,35 @@ describe('the shots on the voice', () => {
     expect(drift.durMs).toBeLessThan(DRIFT_MS);
     const push = timed[1].camera[0];
     expect(push.atMs + push.durMs + SETTLE_LEAD_MS).toBe(wordAt(1, 11));
+  });
+
+  it('lets a cue go a few seconds after it has drawn the eye, and a label with its shot', () => {
+    const long = timeShots(
+      [
+        shot('s1', 'After the 1945 strikes', {
+          info: [
+            {
+              id: 'ring',
+              recipe: 'mark',
+              target: region('group-north-region'),
+              on: 'colonial Nigeria',
+            },
+            {
+              id: 'name',
+              recipe: 'label',
+              target: region('group-north-region'),
+              text: 'North',
+              on: 'colonial Nigeria',
+            },
+          ],
+        }),
+      ],
+      BEATS,
+      DURATION_MS,
+    );
+    const [ring, name] = long[0].info;
+    expect(ring.untilMs).toBe(ring.atMs + ring.durMs + CUE_HOLD_MS);
+    expect(name.untilMs).toBe(long[0].endMs);
   });
 
   it('is the same every time, and leaves what it was given as it was', () => {

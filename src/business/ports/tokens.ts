@@ -5,6 +5,8 @@
  */
 export const CLOCK = Symbol('ClockPort');
 export const STORAGE = Symbol('StoragePort');
+/** How the terrain-tile proxy fetches a tile it has not kept yet (fetch, or a test's own). */
+export const TERRAIN_TILE_FETCH = Symbol('TerrainTileFetch');
 export const STARTER_LIBRARY = Symbol('StarterLibraryPort');
 export const CONVERTER = Symbol('ConverterPort');
 export const PDF_TOOLKIT = Symbol('PdfToolkitPort');

@@ -2406,6 +2406,21 @@ export interface ShotRigDto {
     >
   >;
   moves: string[];
+  /**
+   * The figures it is drawn with, to the kit's one standard (kit/rig.ts):
+   * each one's part prefix ("" for a piece of one, "f2." in a group) and
+   * the way it faces as drawn (1 right, -1 left, 0 toward the camera), so
+   * the stage can walk, point and wave any of them from its parts alone.
+   */
+  figures?: { prefix: string; facing: 1 | -1 | 0 }[];
+  /** A crowd's people and far rows, by part: each shifts a little on its own while it stands. */
+  idle?: string[];
+  /**
+   * A vehicle: how it goes (its wheels turn with the ground it covers, a
+   * ship rides the swell, a plane tilts into a climb, a rocket rises) and
+   * the way it faces as drawn.
+   */
+  vehicle?: { goes: 'road' | 'rail' | 'water' | 'air' | 'up'; facing: 1 | -1 };
 }
 
 /** An archive photo or a portrait, from the picture desk. */
@@ -2577,6 +2592,26 @@ export interface ShotSoundDto {
   sound: string;
   /** 0 to 1, where 1 is the library's level. */
   gain: number;
+  /**
+   * How long it sounds, for one that lasts as its motion does: a pencil
+   * along its stroke, a whoosh over its move, a swell under its flow, a
+   * count's ticks over its count. Absent, the effect's own length.
+   */
+  durMs?: number;
+  /**
+   * What makes it: an info item's id (a count's ticks follow its count),
+   * or `<shot id>:camera:<n>`, `<shot id>:join`, `<shot id>:set`,
+   * `<info id>:reveal`.
+   */
+  of?: string;
+  /**
+   * How far either way (ms) the player may move it onto the music's beat;
+   * absent or 0, it stays on its motion. The picture never moves, so a
+   * landing's is small and a soft sound's wider.
+   */
+  snapMs?: number;
+  /** A big reveal's: rather on a bar's first beat, within `snapMs`. */
+  downbeat?: boolean;
 }
 
 export interface VisualSceneDto {

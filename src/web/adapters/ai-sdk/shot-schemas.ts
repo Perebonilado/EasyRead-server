@@ -12,7 +12,8 @@
  * its chart, plot, timeline and flow), so the readers each kind already
  * has read them; a name card is not among them: a person is shown by a
  * verified portrait or a trace of them, never a card of their name.
- * There are no actors while the kit has none (WP9 adds them here).
+ * Actors are kit pieces (kit/registry), each setting a field of its own
+ * (the kit's settings are closed lists; code reads each as the nearest).
  */
 import { z } from 'zod';
 import {
@@ -147,12 +148,32 @@ export const shotCameraSchema = z.object({
   amount: oneOf(AMOUNTS),
 });
 
+/** A kit piece on the set: its id, where it stands, its side, its settings, its moves on their words. */
+export const shotActorSchema = z.object({
+  id: words(),
+  kit: maybe(),
+  place: maybe(),
+  side: maybe(),
+  pose: maybe(),
+  kind: maybe(),
+  count: looseNumber(),
+  era: maybe(),
+  who: maybe(),
+  dress: maybe(),
+  facing: maybe(),
+  wagons: looseNumber(),
+  moves: z
+    .array(z.object({ move: words(), on: words(), to: maybe() }))
+    .catch([]),
+});
+
 export const shotBoardSchema = z.object({
   shots: z
     .array(
       z.object({
         on: words(),
         set: shotSetSchema,
+        actors: z.array(shotActorSchema).catch([]),
         info: z.array(shotInfoSchema).catch([]),
         camera: z.array(shotCameraSchema).catch([]),
         life: z.array(oneOf(LIFE_EFFECTS)).catch([]),

@@ -212,6 +212,22 @@ const OUT_OF_VIEW: ReadonlySet<ShotInfoRecipe> = new Set<ShotInfoRecipe>([
   'enter',
 ]);
 
+/**
+ * What makes the picture what it is from then on: a number counted, bars
+ * grown, a line drawn, a part brought on, a strike, a stamp. It stays when
+ * the plan says it lets go: without it the set would be left as it was
+ * (a counter with no number), the words saying what is no longer shown.
+ */
+const STAYS: ReadonlySet<ShotInfoRecipe> = new Set<ShotInfoRecipe>([
+  'draw',
+  'count',
+  'grow',
+  'morph',
+  'strike',
+  'stamp',
+  'enter',
+]);
+
 /** A strike's new words come in this long after the line through the old ones has landed. */
 const NEW_WORDS_LAG_MS = 400;
 
@@ -944,7 +960,9 @@ export function buildShots(
         ...(colour ? { colour } : {}),
         ...(replace ? { replace } : {}),
         on: one.on,
-        ...(one.until ? { until: one.until } : {}),
+        // What points at the picture lets go on its words; what the picture
+        // becomes (a number counted, a line drawn, a part brought on) stays.
+        ...(one.until && !STAYS.has(one.recipe) ? { until: one.until } : {}),
       });
     });
 
@@ -998,12 +1016,29 @@ export function buildShots(
         notes.push(
           `shot ${i + 1}: ${planned.move} on "${planned.target}" frames the subject instead`,
         );
-      // A follow is of something that moves: on what stands still it is a travel to it.
-      const one: PlanCamera =
-        planned.move === 'follow' && target?.kind !== 'actor'
-          ? { ...planned, move: 'travel' }
-          : planned;
-      return { one, target: target ? inContext(target) : null };
+      // A follow is of something that moves: on what stands still it is a
+      // travel to it, and when a flow runs from it, to the flow's whole way.
+      const still = planned.move === 'follow' && target?.kind !== 'actor';
+      const one: PlanCamera = still ? { ...planned, move: 'travel' } : planned;
+      const runs = still
+        ? info.find(
+            (x) =>
+              x.recipe === 'flow' &&
+              x.to &&
+              JSON.stringify(x.target) === JSON.stringify(target),
+          )
+        : undefined;
+      const starts = target ? boxOf(target) : null;
+      const ends = runs?.to ? boxOf(runs.to) : null;
+      return {
+        one,
+        target:
+          starts && ends
+            ? inContext({ kind: 'box', box: around(starts, ends) })
+            : target
+              ? inContext(target)
+              : null,
+      };
     });
     // A shot that travels to its subject opens where the camera was, not
     // already there: its subject is where the travel ends.
@@ -1023,7 +1058,10 @@ export function buildShots(
       svg?.box ??
       null;
     const camera: UntimedCamera[] = safeMove ? [safeMove] : [];
+    /** Where the camera was aimed before each of its moves. */
+    const before: (ShotBox | null)[] = safeMove ? [from] : [];
     for (const { one, target } of moves) {
+      before.push(from);
       const amount =
         one.move === 'push' ||
         one.move === 'pull' ||
@@ -1044,9 +1082,11 @@ export function buildShots(
     }
     // What the shot shows that the camera would leave out of the frame (a
     // region filled away from the one it is on, the far end of a flow):
-    // the camera travels once to take it in with what it was showing.
+    // the camera travels once to take it in with what it was showing, on
+    // the words it is shown on; a move already on those words becomes that
+    // travel, never two moves landing at once.
     const view = from;
-    if (svg && view && camera.length < 3) {
+    if (svg && view) {
       const out = info.flatMap((x) => {
         if (!OUT_OF_VIEW.has(x.recipe)) return [];
         const boxes = [x.target, x.to]
@@ -1063,16 +1103,24 @@ export function buildShots(
           box: whole.map((n) => Math.round(n * 10) / 10) as ShotBox,
         });
         const wholeBox = boxOf(target) ?? whole;
-        camera.push({
+        const on = out[0].x.on;
+        const same = camera.findIndex((c) => c.on === on && c !== safeMove);
+        const travel = (was: ShotBox | null): UntimedCamera => ({
           move: 'travel',
-          on: out[0].x.on,
+          on,
           target,
-          durMs: travelMs(view, wholeBox, svg.box[2]),
+          durMs: travelMs(was ?? view, wholeBox, svg.box[2]),
         });
-        from = wholeBox;
-        notes.push(
-          `shot ${i + 1}: the camera takes in ${out.length === 1 ? 'what it would leave out' : `${out.length} things it would leave out`}`,
-        );
+        const taken = same >= 0 || camera.length < 3;
+        if (same >= 0) camera[same] = travel(before[same]);
+        else if (taken) camera.push(travel(view));
+        if (taken) {
+          // Taken in at the last move, it is where the camera ends.
+          if (same < 0 || same === camera.length - 1) from = wholeBox;
+          notes.push(
+            `shot ${i + 1}: the camera takes in ${out.length === 1 ? 'what it would leave out' : `${out.length} things it would leave out`}`,
+          );
+        }
       }
     }
     if (from) lastView = { asset: assetId, box: from };

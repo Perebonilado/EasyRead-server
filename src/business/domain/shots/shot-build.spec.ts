@@ -813,4 +813,128 @@ describe('the camera and the fills, as the stage plays them', () => {
     expect(x + w).toBeGreaterThanOrEqual(800);
     expect(y + h).toBeGreaterThanOrEqual(650);
   });
+
+  it('makes a move already on the words of what it would leave out that travel, never two moves at once', () => {
+    const made = buildShots(
+      {
+        shots: [
+          shot({
+            focal: 'region:East Region',
+            info: [
+              {
+                recipe: 'fill',
+                target: 'region:North Region',
+                on: 'regional legislatures',
+              },
+            ],
+            camera: [
+              {
+                move: 'push',
+                target: 'region:East Region',
+                on: 'regional legislatures',
+              },
+            ],
+          }),
+        ],
+      },
+      entries,
+      ctx,
+    );
+    const camera = made.shots[0].camera;
+    expect(camera.filter((c) => c.on === 'regional legislatures')).toEqual([
+      expect.objectContaining({ move: 'travel' }),
+    ]);
+    const [x, y] = (camera[0].target as { box: number[] }).box;
+    expect(x).toBeLessThanOrEqual(100);
+    expect(y).toBeLessThanOrEqual(50);
+  });
+
+  it('follows a flow from a part that stands still by travelling once to take in its whole way', () => {
+    const made = buildShots(
+      {
+        shots: [
+          shot({
+            set: {
+              kind: 'chart',
+              chart: {
+                kind: 'timeline',
+                spec: {
+                  events: [
+                    { when: '1951', name: '1951' },
+                    { when: '1954', name: '1954' },
+                  ],
+                },
+              },
+            },
+            focal: 'part:1951',
+            info: [
+              {
+                recipe: 'flow',
+                target: 'part:1951',
+                to: 'part:1954',
+                on: 'colonial Nigeria',
+              },
+            ],
+            camera: [
+              { move: 'establish', on: 'After the 1945 strikes' },
+              { move: 'follow', target: 'part:1951', on: 'colonial Nigeria' },
+            ],
+          }),
+        ],
+      },
+      entries,
+      ctx,
+    );
+    const travels = made.shots[0].camera.filter((c) => c.move === 'travel');
+    expect(travels).toHaveLength(1);
+    const [x, , w] = (travels[0].target as { box: number[] }).box;
+    // 1951 (300 to 400) and 1954 (800 to 900) both in the frame.
+    expect(x).toBeLessThanOrEqual(300);
+    expect(x + w).toBeGreaterThanOrEqual(900);
+  });
+
+  it('keeps what a change makes to the picture when the plan lets it go: a count stays, a cue and a highlight leave', () => {
+    const made = buildShots(
+      {
+        shots: [
+          shot({
+            set: { kind: 'chart', chart: { kind: 'counter', spec: {} } },
+            info: [
+              {
+                recipe: 'count',
+                target: 'part:number',
+                value: 3,
+                on: 'colonial Nigeria',
+                until: 'began shifting',
+              },
+              {
+                recipe: 'mark',
+                target: 'part:number',
+                on: 'began shifting',
+                until: 'regional legislatures',
+              },
+            ],
+          }),
+          shot({
+            on: 'Then the fight changed',
+            info: [
+              {
+                recipe: 'fill',
+                target: 'region:North Region',
+                on: 'independence',
+                until: 'but three',
+              },
+            ],
+          }),
+        ],
+      },
+      entries,
+      ctx,
+    );
+    expect(made.shots[0].info.map((i) => [i.recipe, i.until])).toEqual([
+      ['count', undefined],
+      ['mark', 'regional legislatures'],
+    ]);
+    expect(made.shots[1].info[0].until).toBe('but three');
+  });
 });

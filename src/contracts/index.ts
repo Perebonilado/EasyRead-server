@@ -2291,7 +2291,13 @@ export type ShotInfoRecipe =
   | 'exit'
   | 'ask'
   /** A speech bubble of a few words from an actor's head (the illustrated look's, sparingly). */
-  | 'say';
+  | 'say'
+  /** The UI kit's (tech §11, WP18): a numbered dot on a leader to a part, in the order the voice counts them. */
+  | 'callout'
+  /** A part changing to another of its states (a toggle on, a button loading, a slider moved, a screen scrolled or turned dark), behind a short blur where its content changes. */
+  | 'swap'
+  /** Words typed into an input, a character at a time, with its caret. */
+  | 'type';
 
 /** How a shot hands over to the next. */
 export type ShotJoin =
@@ -2302,7 +2308,9 @@ export type ShotJoin =
   | 'zoom-through'
   | 'dissolve'
   | 'dip'
-  | 'push';
+  | 'push'
+  /** A chapter break (WP18): the frame frosts with the chapter's number big on it, then clears into the next shot. */
+  | 'frost';
 
 /** The life layer's effects: motion that carries no information, capped so it never competes with what does. */
 export type ShotLifeEffect =
@@ -2367,10 +2375,7 @@ export interface ShotLookDto {
 }
 
 export type ShotAssetDto =
-  | ShotSvgAssetDto
-  | ShotImageAssetDto
-  | ShotGeoAssetDto
-  | ShotLottieAssetDto;
+  ShotSvgAssetDto | ShotImageAssetDto | ShotGeoAssetDto | ShotLottieAssetDto;
 
 /** Drawn by code: a chart, a document, a set, a kit piece. */
 export interface ShotSvgAssetDto {
@@ -2446,7 +2451,13 @@ export interface ShotRigDto {
     string,
     Record<
       string,
-      { rotate?: number; dx?: number; dy?: number; scale?: number; opacity?: number }
+      {
+        rotate?: number;
+        dx?: number;
+        dy?: number;
+        scale?: number;
+        opacity?: number;
+      }
     >
   >;
   moves: string[];
@@ -2481,6 +2492,12 @@ export interface ShotRigDto {
       { move: 'spin' | 'belt' | 'slide' | 'rock' | 'press'; axis?: [number, number]; stroke?: number; phase?: number }
     >;
   };
+  /**
+   * The UI kit's cursor (WP18): its hot spot (the arrow's tip, the hand's
+   * fingertip) in the piece's units, the point that sits on what it acts
+   * on; it moves to a part, clicks, drags, scrolls and types.
+   */
+  cursor?: { tip: [number, number] };
 }
 
 /** An archive photo or a portrait, from the picture desk. */
@@ -2543,6 +2560,8 @@ export interface ShotDto {
   chip?: ShotCreditDto;
   /** A drawn picture of a real event or place: it carries an "Illustration" tag. */
   illustration?: boolean;
+  /** The chapter a frost join into this shot opens, its number shown big while the frame is frosted; absent, the frost's own count in the scene. */
+  chapter?: number;
 }
 
 export type ShotSetDto =
@@ -2555,7 +2574,11 @@ export type ShotSetDto =
       bearing: number;
       terrain: boolean;
     }
-  | { kind: 'photo'; asset: string; treatment: 'natural' | 'duotone' | 'halftone' | 'cutout' }
+  | {
+      kind: 'photo';
+      asset: string;
+      treatment: 'natural' | 'duotone' | 'halftone' | 'cutout';
+    }
   | {
       kind: 'portrait';
       asset: string;
@@ -4011,6 +4034,43 @@ export interface StudioSceneDto {
   canUndo: boolean;
   /** What is being done to it now, while it is; null otherwise. */
   activity: StudioActivityDto | null;
+  /** What the critic's loop made of a scene of shots, for the Studio's admin and debug views only (never shown to makers); absent or null before it looked. */
+  frames?: StudioSceneFramesDto | null;
+}
+
+/**
+ * The critic's loop on a scene of shots (explainer-animation-plan §9.3):
+ * the last critic's scores from 1 to 10 by axis (the rules' CRITIC_AXES),
+ * whether they pass, how many rounds it ran and how it ended, what the
+ * code checks measured on its last look (0 to 10), and what it cost.
+ */
+export interface StudioSceneFramesDto {
+  scores: Partial<
+    Record<
+      | 'clarity'
+      | 'readability'
+      | 'composition'
+      | 'motion'
+      | 'depth'
+      | 'truth'
+      | 'polish'
+      | 'hook',
+      number
+    >
+  >;
+  pass: boolean;
+  rounds: number;
+  /** passed, rounds, budget, time, unjudged, unchanged, error or running. */
+  ended: string;
+  checks: {
+    readability: number;
+    composition: number;
+    pace: number;
+    truth: number;
+    overall: number;
+  } | null;
+  costUsd: number;
+  at: string;
 }
 
 export interface StudioEpisodeDto {
@@ -4317,7 +4377,8 @@ export type StudioTurnLine =
 // script (what is said, what is shown) before anything is drawn.
 
 /** How far a show's planning has come: the question offered, researched, planned, its world drawn up, ready for episodes. */
-export type StudioEditorStage = 'angles' | 'research' | 'plan' | 'world' | 'ready';
+export type StudioEditorStage =
+  'angles' | 'research' | 'plan' | 'world' | 'ready';
 
 /** One question a video on the topic could answer, scored 1 to 5 on the playbook's four tests. */
 export interface StudioAngleDto {
@@ -4338,12 +4399,7 @@ export interface StudioSourceDto {
 
 /** What kind of fact a claim is: each is checked as its kind needs. */
 export type StudioClaimKind =
-  | 'date'
-  | 'number'
-  | 'quote'
-  | 'name'
-  | 'event'
-  | 'claim';
+  'date' | 'number' | 'quote' | 'name' | 'event' | 'claim';
 
 /** One fact from the research log, with where it came from. */
 export interface StudioClaimDto {
@@ -4443,13 +4499,7 @@ export interface StudioScriptRowDto {
 
 /** How far an episode's editing has come. */
 export type StudioEditorialStage =
-  | 'beats'
-  | 'hooks'
-  | 'script'
-  | 'read'
-  | 'facts'
-  | 'board'
-  | 'ready';
+  'beats' | 'hooks' | 'script' | 'read' | 'facts' | 'board' | 'ready';
 
 /** What goes with an episode when it is shared: its title, thumbnail, description and chapters. */
 export interface StudioPackageDto {

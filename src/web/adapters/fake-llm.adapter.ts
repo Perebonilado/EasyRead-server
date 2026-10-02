@@ -40,6 +40,7 @@ import type {
   EditorWriteStep,
 } from '../../business/ports/llm.port';
 import { fakeEditorAnswer, fakeFound, fakeTopic } from './fake-editor';
+import { fakeCriticAnswer } from './fake-critic';
 import { fakeShotsAnswer } from './fake-shots';
 import type {
   DrawingThing,
@@ -2629,6 +2630,23 @@ export class FakeLlmAdapter implements LlmGatewayPort {
       value: fakeShotsAnswer(input.parts, input.look),
       usage: this.usage(started, 6000, 900),
     };
+  }
+
+  /**
+   * The critic (fake-critic): a scene the code checks found nothing wrong
+   * with passes at 8.5 on every axis; one they found problems in scores 6
+   * on motion and asks for a camera move on its first shot.
+   */
+  async shotsCritic(input: {
+    image: Buffer;
+    mediaType?: 'image/png' | 'image/jpeg';
+    parts: string[];
+  }): Promise<LlmResult<Record<string, unknown>>> {
+    const started = Date.now();
+    return Promise.resolve({
+      value: fakeCriticAnswer(input.parts),
+      usage: this.usage(started, 4000, 400),
+    });
   }
 
   /** A picture's subject in its middle, one person's face above it: a plain photograph. */

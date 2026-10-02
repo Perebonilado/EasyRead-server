@@ -18,6 +18,7 @@ import { CHARACTER_KIT } from './characters';
 import { PEOPLE_KIT } from './people';
 import { THINGS_KIT } from './things';
 import { VEHICLE_KIT } from './vehicles';
+import { UI_KIT } from './ui';
 
 /** The families of the kit (plan §7.2). */
 export type KitFamily =
@@ -27,7 +28,9 @@ export type KitFamily =
   | 'buildings'
   | 'documents'
   | 'objects'
-  | 'machines';
+  | 'machines'
+  /** Devices with screens built by code, and the cursor (ui.ts, WP18). */
+  | 'ui';
 
 /** A piece's settings as code reads them: each a value of its list, or a number in its range. */
 export type KitParams = Record<string, string | number>;
@@ -38,7 +41,7 @@ export interface KitParam {
   values?: readonly string[];
   /** Or the whole numbers it may be, least and most. */
   range?: readonly [number, number];
-  /** Or words of the board's own, at most this many characters: what someone wears, a person's name (kept as said, trimmed). */
+  /** Or words of the board's own, at most this many characters: what someone wears, a person's name, a screen's title or a button's words (kept as said, trimmed). */
   text?: number;
   /** Set by code, never named by the board (a named person's likeness from the look notes): left out of its guide. */
   code?: boolean;
@@ -66,6 +69,8 @@ export interface KitEntry {
   counts?: boolean;
   /** It may stand for a named person of the scene's list, labelled with their name (the illustrated look's characters, tech §11). */
   named?: boolean;
+  /** Its own words for its moves, before the kit's (a cursor's "tap" is a click). */
+  synonyms?: Readonly<Record<string, string>>;
   make(params: KitParams, style: KitStyle, seed: number): KitPiece;
 }
 
@@ -75,6 +80,7 @@ const FAMILIES: readonly Readonly<Record<string, KitEntry>>[] = [
   VEHICLE_KIT,
   CHARACTER_KIT,
   THINGS_KIT,
+  UI_KIT,
 ];
 
 export const KIT: Readonly<Record<string, KitEntry>> = Object.assign(
@@ -171,8 +177,8 @@ function numberIn(
 
 /** Words of the board's own, made sound: one line, no markup, cut at a word. */
 function textIn(raw: unknown, most: number, fallback: string): string {
-  if (typeof raw !== 'string') return fallback;
-  const line = raw
+  if (typeof raw !== 'string' && typeof raw !== 'number') return fallback;
+  const line = String(raw)
     .replace(/[<>{}]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
@@ -293,8 +299,10 @@ const MOVE_NAMES: Readonly<Record<string, string>> = {
   'turn-around': 'turn',
 };
 
-/** A move as the board named it, as the stage plays it. */
-export const actorMove = (name: string): string => {
+/** A move as the board named it, as the stage plays it: the piece's own word for it first (a cursor's), then the kit's. */
+export const actorMove = (name: string, kit?: string): string => {
   const key = wordKey(name);
-  return MOVE_NAMES[key] ?? key;
+  const own = kit ? KIT[kit]?.synonyms : undefined;
+  if (own && kit && KIT[kit].moves.includes(key)) return key;
+  return own?.[key] ?? MOVE_NAMES[key] ?? key;
 };

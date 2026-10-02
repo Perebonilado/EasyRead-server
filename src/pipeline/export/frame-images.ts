@@ -9,6 +9,7 @@ import { readFile } from 'node:fs/promises';
 import { PNG } from 'pngjs';
 import type { StillImage } from '../../business/domain/shots/frame-checks';
 import {
+  criticSheetSvg,
   sheetSvg,
   type SheetInput,
 } from '../../business/domain/shots/frame-sheet';
@@ -39,5 +40,13 @@ export async function readStill(file: string): Promise<StillImage> {
 /** A scene's contact sheet as a PNG. */
 export async function contactSheet(input: SheetInput): Promise<Buffer> {
   const { svg, width } = sheetSvg(input);
+  return rasterise(svg, width);
+}
+
+/** The critic's contact sheet as a PNG (frame-sheet's criticSheetSvg). */
+export async function criticSheet(
+  input: Parameters<typeof criticSheetSvg>[0],
+): Promise<Buffer> {
+  const { svg, width } = criticSheetSvg(input);
   return rasterise(svg, width);
 }

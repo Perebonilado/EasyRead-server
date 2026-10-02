@@ -136,6 +136,11 @@ export const RECIPE_SOUND: Readonly<Partial<Record<ShotInfoRecipe, Heard>>> = {
   enter: { sound: 'pop', gain: 0.6, on: 'land', rank: 3 },
   label: { sound: 'tick', gain: 0.7, on: 'land', rank: 2 },
   say: { sound: 'pop', gain: 0.55, on: 'land', rank: 3 },
+  // The UI kit's: a numbered dot pops on; a click's change ticks at its
+  // press; letters typed tick as they come.
+  callout: { sound: 'pop', gain: 0.8, on: 'land', rank: 7 },
+  swap: { sound: 'tick', gain: 0.6, on: 'start', rank: 5 },
+  type: { sound: 'ticks', gain: 0.45, on: 'span', rank: 4 },
 };
 
 /** The camera's moves that move air (more than a drift), and a dive through. The rest are silent. */
@@ -155,6 +160,8 @@ const JOIN_SOUND: Readonly<Partial<Record<ShotJoin, Heard>>> = {
   push: { sound: 'whoosh', gain: 0.7, on: 'span', rank: 5 },
   match: { sound: 'whoosh', gain: 0.5, on: 'span', rank: 4 },
   morph: { sound: 'whoosh', gain: 0.5, on: 'span', rank: 4 },
+  // A chapter break: air as the frame frosts and clears.
+  frost: { sound: 'air', gain: 0.8, on: 'span', rank: 6 },
 };
 
 /** A document coming in: paper. */

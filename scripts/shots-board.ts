@@ -43,6 +43,7 @@ import { kitIdsFor } from '../src/business/domain/kit/registry';
 import { sceneNarration } from '../src/business/domain/shots/shot-phrases';
 import { promptList } from '../src/business/domain/shots/shot-registry';
 import type { PlanSet, PlanShot } from '../src/business/domain/shots/types';
+import { showLookStyle } from '../src/business/domain/studio/studio-look';
 import { shotsSheet } from '../src/pipeline/processors/studio-editor.processor';
 import { sceneFingerprint } from '../src/business/handlers/studio/studio-views';
 
@@ -72,6 +73,8 @@ function setWords(set: PlanSet): string {
       return `document ${set.document}`;
     case 'set':
       return `drawn set ${JSON.stringify(set.set)}`;
+    case 'screen':
+      return 'a device on its desk';
     case 'plain':
       return 'paper';
   }
@@ -118,6 +121,9 @@ async function main() {
       throw new Error(`No editor's episode ${episodeId} with a script`);
     const research = show.editor?.research ?? null;
     const world = show.editor?.world ?? null;
+    // The show's look, as the worker's board takes it: characters or silhouettes.
+    const look =
+      showLookStyle(show.brief, world, show.bible ?? null) ?? 'editorial';
     console.log(
       `"${outline.title}" (${show.title}): ${outline.scenes.length} scenes${save ? ', saved' : ', printed only'}\n`,
     );
@@ -172,6 +178,7 @@ async function main() {
             episode: outline.title,
           },
           audience: show.brief.audience,
+          look,
         },
         gateway,
       );
@@ -190,7 +197,7 @@ async function main() {
       dollars += cost;
       const left = checkPlan(board.plan, sceneNarration(rows), board.registry, {
         map: Boolean(world?.base),
-        kit: kitIdsFor('editorial'),
+        kit: kitIdsFor(look),
         lines: rows,
         opening: k === 0,
       });

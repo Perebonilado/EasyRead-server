@@ -12,7 +12,7 @@ import type {
   StudioSceneRecord,
   StudioShowRecord,
 } from '../../business/repositories/studio.repository';
-import { explainerScripts, studioMakeOf } from './studio.processor';
+import { criticEyes, explainerScripts, studioMakeOf } from './studio.processor';
 
 /**
  * An editor's episode with one scene the board wrote as shots and one as
@@ -200,5 +200,27 @@ describe('the make of an editor’s scene of shots', () => {
     expect(
       studioMakeOf(show, episode, row, [row, rows[1]], bible).shots,
     ).toBeUndefined();
+  });
+});
+
+describe("the critic's eyes (the render page)", () => {
+  const settings =
+    (given: Record<string, string>) =>
+    (name: string): string | undefined =>
+      given[name];
+
+  it('look only where a render page is named, and the critic is not off', () => {
+    expect(criticEyes(settings({}))).toBeNull();
+    expect(
+      criticEyes(
+        settings({
+          RENDER_WEB_URL: 'http://localhost:3001',
+          EXPLAINER_CRITIC: 'off',
+        }),
+      ),
+    ).toBeNull();
+    expect(
+      criticEyes(settings({ RENDER_WEB_URL: 'http://localhost:3001/' })),
+    ).not.toBeNull();
   });
 });

@@ -2,10 +2,13 @@
  * The shot board, offline (FakeLlmAdapter): a plan read from the call's
  * own parts (shot-board's), the same every time, nothing spent. Each line
  * gets the shot the decision table gives it where the scene's list has
- * what it needs: a count of a number the line rests on, the map with a
- * pin on a place it names (or a region filling), a quote of a quote claim
- * for exact words, a flow for a "why"; any other line carries the shot
- * before it on. Code holds it to the rules, as it holds a model's.
+ * what it needs: the portrait of a person it names, or a photo the list
+ * says shows what it names (real pictures first); a count of a number the
+ * line rests on; the map with a pin on a place it names (or a region
+ * filling); a quote of a quote claim for exact words; the calendar of the
+ * date a line about when rests on; a flow for a "why"; any other line
+ * carries the shot before it on. Code holds it to the rules, as it holds
+ * a model's.
  */
 
 interface FakeLine {
@@ -72,8 +75,47 @@ export function fakeShotsAnswer(
       text: /[“"]([^”"]{8,})(?:[”"]|$)/u.exec(m[2])?.[1] ?? m[2],
     }),
   );
+  const portraits = [...all.matchAll(/^- person:(.+?) \[portrait\]/gmu)].map(
+    (m) => m[1],
+  );
+  const photos = [
+    ...all.matchAll(/^- (photo:.+?): shows (?:person|place):(.+?) · /gmu),
+  ].map((m) => ({ name: m[1], shows: m[2] }));
+  const dates = [...all.matchAll(/^- date:(.+?): .+? · (.+)$/gmu)].map((m) => ({
+    when: m[1],
+    claims: m[2].split(/,\s*/u),
+  }));
   const shots = lines.flatMap((line): Record<string, unknown>[] => {
     const on = first(line.say);
+    // Real pictures first: a person's portrait, else a photo of what the line names.
+    const person = portraits.find(
+      (p) => says(line.say, p) || says(line.say, p.split(' ').pop() ?? p),
+    );
+    if (person)
+      return [
+        {
+          on,
+          set: { kind: 'portrait', person: `person:${person}` },
+          info: [],
+          camera: [{ move: 'push', amount: 'small', on }],
+          life: [],
+          join: 'cut',
+          focal: `person:${person}`,
+        },
+      ];
+    const photo = photos.find((p) => says(line.say, p.shows));
+    if (photo)
+      return [
+        {
+          on,
+          set: { kind: 'photo', photo: photo.name },
+          info: [],
+          camera: [{ move: 'push', amount: 'small', on }],
+          life: [],
+          join: 'cut',
+          focal: 'set',
+        },
+      ];
     const number = numbers.find(
       (n) =>
         Number.isFinite(n.value) &&
@@ -160,6 +202,30 @@ export function fakeShotsAnswer(
         },
       ];
     }
+    const date = dates.find((d) =>
+      d.claims.some((c) => line.claims.includes(c)),
+    );
+    if (line.about === 'when' && date)
+      return [
+        {
+          on,
+          set: {
+            kind: 'chart',
+            chart: {
+              kind: 'calendar',
+              calendar: {
+                calendars: [{ label: null, dates: [date.when] }],
+                merge: null,
+              },
+            },
+          },
+          info: [],
+          camera: [{ move: 'establish', on }],
+          life: [],
+          join: 'cut',
+          focal: 'set',
+        },
+      ];
     const quote = quotes.find((q) => line.claims.includes(q.id));
     if (line.about === 'exact-words' && quote)
       return [

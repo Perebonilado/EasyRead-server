@@ -145,7 +145,8 @@ export function frameOf(shape: FilmShape): Frame {
       x0: r1(s.x0 * W),
       x1: r1(s.x1 * W),
       y0: r1(s.y0 * H),
-      y1: r1(s.y1 * H),
+      // The foot is the captions' (SAFE.wide.captionY0): words stop above it.
+      y1: r1(s.captionY0 * H),
     },
     pic: { x0: 64, x1: W - 64, y0: 40, y1: H - 40 },
   };
@@ -505,9 +506,10 @@ export function wrap(
 
 /**
  * Words set as large as fit a width on at most `most` lines, between the
- * largest and the least size; at the least, any word too long is cut
- * short and the lines past the last are folded into it with an ellipsis.
- * Never smaller than the least: the floor a viewer must be able to read.
+ * largest and the least size; at the least, a word too long for a line is
+ * broken with a hyphen, and the words past the last line are let go at a
+ * whole word, with an ellipsis. Never smaller than the least: the floor a
+ * viewer must be able to read.
  */
 export function fit(
   text: string,
@@ -568,13 +570,29 @@ export function fit(
   }
   if (current) lines.push(current);
   if (lines.length > most) {
-    let last = lines.slice(most - 1).join(' ');
-    while (
-      last.length > 1 &&
-      wordsWidth(`${last}…`, size, weight, face) > width
-    )
-      last = last.slice(0, -1);
-    lines.splice(most - 1, lines.length, `${last.trimEnd()}…`);
+    // The words past the last line are let go at a whole word, an ellipsis
+    // after it; where not even the last line's first word leaves room for
+    // one, the line before ends them instead.
+    const ended = (line: string) => {
+      const words = line.split(' ');
+      for (let n = words.length; n >= 1; n -= 1) {
+        const kept = `${words
+          .slice(0, n)
+          .join(' ')
+          .replace(/[\s,;:.\-–—]+$/, '')}…`;
+        if (wordsWidth(kept, size, weight, face) <= width) return kept;
+      }
+      return null;
+    };
+    const last = ended(lines.slice(most - 1).join(' '));
+    if (last) lines.splice(most - 1, lines.length, last);
+    else {
+      const before = most > 1 ? ended(lines[most - 2]) : null;
+      lines.splice(most - 1, lines.length);
+      if (before) lines[most - 2] = before;
+      // One line, one word that fills it: the word, whole.
+      else if (!lines.length) lines.push(pieces[0]?.word ?? '');
+    }
   }
   return { size: r1(size), lines };
 }
@@ -816,9 +834,48 @@ export function bodyOf(
 
 /** A field as text, tidied and cut short; '' for anything not text. */
 export function said(value: unknown, most = 120): string {
-  return typeof value === 'string' || typeof value === 'number'
-    ? String(value).replace(/\s+/g, ' ').trim().slice(0, most)
-    : '';
+  if (typeof value !== 'string' && typeof value !== 'number') return '';
+  return wholeWords(String(value), most);
+}
+
+/**
+ * Words tidied and kept to at most `most` characters, cut only between
+ * words with an ellipsis after the last kept; a first word longer than
+ * that alone is broken with a hyphen, as the fitter breaks one, never cut
+ * mid-letter without a mark.
+ */
+export function wholeWords(text: string, most: number): string {
+  const tidy = text.replace(/\s+/g, ' ').trim();
+  if (tidy.length <= most) return tidy;
+  const room = Math.max(1, most - 1);
+  const cut = tidy.slice(0, room + 1);
+  const space = cut.lastIndexOf(' ');
+  if (space > 0)
+    return `${tidy.slice(0, space).replace(/[\s,;:.\-–—]+$/, '')}…`;
+  return `${tidy.slice(0, Math.max(1, most - 1))}-`;
+}
+
+/**
+ * A spec's own text fields kept to whole words within the lengths the
+ * scene readers keep them to, so a reader's own cut never falls inside a
+ * word. `limits` names each field and its length; a list's fields too.
+ */
+export function wordsWithin<T>(body: T, limits: Record<string, number>): T {
+  if (!body || typeof body !== 'object') return body;
+  if (Array.isArray(body))
+    return (body as unknown[]).map((one): unknown =>
+      typeof one === 'string' && limits['*']
+        ? wholeWords(one, limits['*'])
+        : wordsWithin(one, limits),
+    ) as T;
+  const out: Record<string, unknown> = { ...(body as Record<string, unknown>) };
+  for (const [key, value] of Object.entries(out)) {
+    if (typeof value === 'string' && limits[key])
+      out[key] = wholeWords(value, limits[key]);
+    else if (value && typeof value === 'object')
+      out[key] = wordsWithin(value, limits);
+  }
+  return out as T;
 }
 
 /** What a spec gives about itself beside its kind's fields: its colour token, its source, its name. */

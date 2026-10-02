@@ -99,6 +99,19 @@ describe("a picture's words", () => {
     ).toBe('NASA');
   });
 
+  it('turns a catalogue’s "Surname, Initials" round, and names a university’s library', () => {
+    expect(
+      sourceOf(
+        file({
+          artist: 'Duckworth, E.H',
+          credit: 'https://dc.library.northwestern.edu/items/d2fa1a6b',
+          description: 'Nnamdi Azikiwe in Office, 1937',
+          categories: ['Nigeria', 'PD US'],
+        }),
+      ),
+    ).toBe('E.H Duckworth, Northwestern University');
+  });
+
   it('writes the chip as subject and year, source, licence', () => {
     expect(
       chipOf({
@@ -120,7 +133,7 @@ describe("a picture's words", () => {
 
   it('writes the full credit: title, author, where from, licence; a CC BY picture as cropped, its own credit line word for word', () => {
     expect(creditOf(file(), PD, 'US Department of Energy')).toBe(
-      '“Ahmadu Bello Premier of the Northern Region of Nigeria 1960 Oak Ridge (24578438519)” by doe-oakridge, via Wikimedia Commons (https://commons.wikimedia.org/wiki/File:Ahmadu_Bello.jpg), Public domain.',
+      '“Ahmadu Bello Premier of the Northern Region of Nigeria 1960 Oak Ridge (24578438519)” by US Department of Energy, via Wikimedia Commons (https://commons.wikimedia.org/wiki/File:Ahmadu_Bello.jpg), Public domain.',
     );
     expect(
       creditOf(

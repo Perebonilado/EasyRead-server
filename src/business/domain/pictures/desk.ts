@@ -81,7 +81,7 @@ const LOOKUP_DAYS = 30;
  * again (a portrait that is a statue's photograph, once let through, is
  * not handed out for a month after the rule against it).
  */
-export const DESK_RULES = 2;
+export const DESK_RULES = 3;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** The width the desk asks a source for: a full frame's with room for a 12% push; a portrait's print; a page. */
@@ -462,16 +462,30 @@ export class PictureDesk {
   ): Promise<PictureRecord | null> {
     const { file } = candidate;
     const had = await this.deps.cache.bySource(file.source, file.sourceId);
+    // The copy this use wants: the source's sized one where it made one.
+    const sized = Boolean(file.thumb && file.thumb.width < file.width);
+    const wanted = sized ? file.thumb!.width : file.width;
     if (
       had?.storageKey &&
       !had.refusedReason &&
+      (had.width ?? 0) >= wanted * 0.95 &&
       (await this.stored(had.storageKey))
     ) {
-      const kept = await this.withDepth(had, opts.depth ?? true);
+      // Kept, its words as the desk writes them now.
+      const fresh =
+        had.chip === candidate.chip && had.credit === candidate.credit
+          ? had
+          : await this.deps.cache.save({
+              ...had,
+              chip: candidate.chip.slice(0, 255),
+              credit: candidate.credit,
+              licence: candidate.licence.short,
+              checkedAt: this.now(),
+            });
+      const kept = await this.withDepth(fresh, opts.depth ?? true);
       return this.recordOf(kept, candidate, opts);
     }
-    const from =
-      file.thumb && file.thumb.width < file.width ? file.thumb.url : file.url;
+    const from = sized ? file.thumb!.url : file.url;
     const got = await this.safely(() => this.deps.sources.fetch(from), null);
     if (!got) return null;
     const size = this.deps.pixels.measure(got.bytes);

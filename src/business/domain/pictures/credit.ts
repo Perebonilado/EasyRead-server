@@ -35,6 +35,10 @@ const INSTITUTIONS: readonly [RegExp, string][] = [
   [/voice of america|\bVOA\b/u, 'VOA'],
   [/\bDVIDS\b/u, 'DVIDS'],
   [/new york public library|\bNYPL\b|digitalcollections\.nypl/iu, 'NYPL'],
+  [
+    /northwestern university|library\.northwestern\.edu/iu,
+    'Northwestern University',
+  ],
   [/\bU\.?\s?S\.? army\b|^PD US Army$/iu, 'US Army'],
   [/\bU\.?\s?S\.? navy\b|^PD US Navy$/iu, 'US Navy'],
   [/\bU\.?\s?S\.? air force\b|^PD US Air ?Force$/iu, 'US Air Force'],
@@ -45,7 +49,7 @@ const INSTITUTIONS: readonly [RegExp, string][] = [
 
 /** The words a chip's subject and source are cut to. */
 const SUBJECT_MOST = 40;
-const SOURCE_MOST = 34;
+const SOURCE_MOST = 40;
 
 /** Words cut to a length at a word's end, with nothing dangling. */
 export function clipWords(text: string, most: number): string {
@@ -121,8 +125,15 @@ export function sourceOf(
     INSTITUTIONS.find(([test]) =>
       file.categories.some((c) => test.test(c)),
     )?.[1];
-  // The photographer: the artist's first sentence or clause ("Abbie Rowe. White House…").
-  const first = artist.split(/[.,;(]/u)[0]?.trim() ?? '';
+  // The photographer: the artist's first sentence or clause ("Abbie Rowe.
+  // White House…"), or a catalogue's "Surname, Initials" turned round.
+  const turned =
+    /^([\p{Lu}][\p{L}'’-]+),\s*((?:[\p{Lu}]\.?\s?){1,3}|[\p{Lu}][\p{L}'’-]+)\s*$/u.exec(
+      artist,
+    );
+  const first = turned
+    ? `${turned[2].trim()} ${turned[1]}`
+    : (artist.split(/[.,;(]/u)[0]?.trim() ?? '');
   const person = nameLike(first) ? first : '';
   if (archive && person && `${person}, ${archive}`.length <= SOURCE_MOST)
     return `${person}, ${archive}`;
@@ -167,8 +178,12 @@ export function creditOf(
 ): string {
   const title = clipWords(plainText(file.title), 140);
   const artist = plainText(file.artist);
+  // An account's handle ("doe-oakridge") is no author: the archive it is of is named instead.
+  const handle = /^[\p{Ll}\d][\p{Ll}\d._-]*$/u.test(artist);
   const author =
-    artist && !/^unknown/iu.test(artist) ? clipWords(artist, 120) : source;
+    artist && !/^unknown/iu.test(artist) && !handle
+      ? clipWords(artist, 120)
+      : source;
   const own = file.attribution ? plainText(file.attribution) : '';
   const licenceWords = licence.url
     ? `${licence.short} (${licence.url})`

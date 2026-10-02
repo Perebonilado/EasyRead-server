@@ -93,7 +93,9 @@ describe('chartAsset', () => {
   it.each(each)(
     '%s: sets no words under the floor a viewer must read (the source at the chip size)',
     (_, { asset, shape }) => {
-      const H = frameOf(shape).H;
+      // Text is a share of the frame's short side (the rules file).
+      const { W, H: frameH } = frameOf(shape);
+      const H = Math.min(W, frameH);
       const sizes = [
         ...asset.svg.matchAll(/<text[^>]*font-size="([\d.]+)"/g),
       ].map((m) => Number(m[1]));
@@ -383,7 +385,7 @@ describe('chartAsset', () => {
 describe('the kit', () => {
   it("sizes words by the rules, as shares of the frame's height", () => {
     expect(frameOf('wide').size.label).toBeCloseTo(TEXT.mustRead * 900, 1);
-    expect(frameOf('tall').size.label).toBeCloseTo(TEXT.mustRead * 1600, 1);
+    expect(frameOf('tall').size.label).toBeCloseTo(TEXT.mustRead * 900, 1);
     expect(frameOf('tall').text.y1).toBeCloseTo(SAFE.tall.captionY0 * 1600, 1);
   });
 

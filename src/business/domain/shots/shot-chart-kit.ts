@@ -110,11 +110,14 @@ export interface Frame {
 /** The frame of a shape: 1600 × 900 wide, 900 × 1600 tall (scene-shape STAGES). */
 export function frameOf(shape: FilmShape): Frame {
   const { w: W, h: H } = STAGES[shape];
+  // Text is a share of the frame's short side (the rules file): the same
+  // size on a phone whether the film was made wide or tall.
+  const S = Math.min(W, H);
   const size = {
-    hero: r1(TEXT.hero * H),
-    title: r1(TEXT.title * H),
-    label: r1(TEXT.mustRead * H),
-    chip: r1(TEXT.chip * H),
+    hero: r1(TEXT.hero * S),
+    title: r1(TEXT.title * S),
+    label: r1(TEXT.mustRead * S),
+    chip: r1(TEXT.chip * S),
   };
   if (shape === 'tall') {
     const s = SAFE.tall;

@@ -251,6 +251,10 @@ import {
   withWorldPlaces,
   worldColours,
 } from '../../business/domain/studio/studio-editor-world';
+import {
+  shotsInputOf,
+  shotsScriptOf,
+} from '../../business/domain/shots/shot-compose';
 
 /** How wide a still the picture check looks at is: enough to tell a bus from an ark, at about 0.4 cents a look. */
 const STILL_PX = 960;
@@ -290,7 +294,9 @@ const FAILED: Record<
 
 /**
  * An explainer's scenes as the stage plays them, by position: each sheet
- * put right and checked as it is made. Null where a scene is not written.
+ * put right and checked as it is made. Null where a scene is not written,
+ * and for a scene of shots, whose picture is its plan, not a board's
+ * things: no continuous build carries anything into or out of it.
  */
 export function explainerScripts(
   show: StudioShowRecord,
@@ -313,7 +319,7 @@ export function explainerScripts(
       ...worldColours(world),
     };
     const script =
-      row?.sheet?.kind === 'explainer'
+      row?.sheet?.kind === 'explainer' && row.sheet.engine !== 'shots'
         ? checkExplainer(
             repairExplainer(onShowMap(row.sheet, world), lesson),
             lesson,
@@ -375,6 +381,14 @@ export function studioMakeOf(
   const stage = stageOf(show.brief);
   // An editor's show: its lessons in its world's colours, on its one map.
   const world = show.editor?.world ?? null;
+  // An editor's scene of shots (explainer-animation-tech §9): its picture
+  // is the board's plan, built, timed and composed by the shots engine,
+  // and its voice and beats are a lesson's. Decided at the board and kept
+  // on its sheet, so a remake, a twin and a change of pace make it alike.
+  const shots =
+    row.sheet?.kind === 'explainer'
+      ? shotsInputOf(row.sheet, world, row.position === 0, row.id)
+      : null;
   const lesson = {
     teach: episode.outline?.scenes[row.position]?.teach ?? null,
     source: show.brief.source,
@@ -425,27 +439,39 @@ export function studioMakeOf(
     : bible;
   // The lesson after a clip opens on it as a card (studio-clip): the
   // clip's last frame, shrunk onto its stage, the diagram built round it.
-  const clipBefore = !story
-    ? rows.find(
-        (r) =>
-          r.position === row.position - 1 &&
-          r.sheet?.kind === 'story' &&
-          !isIllustrated(episode.outline?.scenes[r.position]),
-      )
-    : undefined;
+  // A scene of shots opens on its own first shot.
+  const clipBefore =
+    !story && !shots
+      ? rows.find(
+          (r) =>
+            r.position === row.position - 1 &&
+            r.sheet?.kind === 'story' &&
+            !isIllustrated(episode.outline?.scenes[r.position]),
+        )
+      : undefined;
   // An explainer's scene in a continuous build is laid out on the board
   // the scenes of its section before it left (studio-build).
-  const lessons = sheet ? null : explainerScripts(show, episode, rows, bible);
+  const lessons =
+    sheet || shots ? null : explainerScripts(show, episode, rows, bible);
   const built = lessons
     ? buildScript(episode.outline?.scenes ?? [], row.position, lessons)
     : null;
+  // A scene of shots is voiced from its lines alone: no things to check.
   const lessonScript = sheet
     ? null
-    : (built?.script ??
-      checkExplainer(
-        repairExplainer(onShowMap(row.sheet as ExplainerSheet, world), lesson),
-        lesson,
-      ).script);
+    : shots
+      ? shotsScriptOf(row.sheet as ExplainerSheet, {
+          stage,
+          maths: bible.maths,
+        })
+      : (built?.script ??
+        checkExplainer(
+          repairExplainer(
+            onShowMap(row.sheet as ExplainerSheet, world),
+            lesson,
+          ),
+          lesson,
+        ).script);
   const script = sheet
     ? styled(stageStory(sheet, staged, { before, painted, gestures }))
     : clipBefore
@@ -552,6 +578,9 @@ export function studioMakeOf(
     script,
     kept: new Map(),
     ...(recheck ? { recheck } : {}),
+    // A scene of shots: its plan, what it may name and the show's world,
+    // composed by the shots engine on the voice its lines are given.
+    ...(shots ? { shots } : {}),
     // An explainer's voice at its audience's rate and the maker's pace.
     ...(story ? {} : { pace: studioPaceBrief(show.brief) }),
     // A clip holds still at its idea, its label set; the lesson after it
@@ -3111,12 +3140,24 @@ export class StudioProcessor {
       ? await this.boardDrawings(show.id, shared)
       : new Map<string, GatedDrawing>();
     // The Studio's own try again, its words as voiced: staged again on the
-    // voice it was made with, nothing voiced, nothing spent.
+    // voice it was made with, nothing voiced, nothing spent. A scene of
+    // shots is built again from its plan as it is now, on that voice.
     const voiced =
-      ask?.tries === 2 && row.sceneKey && row.audioKey && of.story
+      ask?.tries === 2 && row.sceneKey && row.audioKey && (of.story || of.shots)
         ? await this.storedScene(row.sceneKey)
         : null;
     const onVoice = voiced && of.script ? onItsVoice(of.script, voiced) : null;
+    const shotsAgain = of.shots
+      ? {
+          shots: of.shots,
+          theme: showTheme(show.brief, bible) ?? undefined,
+          reading: studioReading(show.brief),
+          ...(of.finish ? { finish: of.finish } : {}),
+          ...(voiced?.voicePace !== undefined
+            ? { voicePace: voiced.voicePace }
+            : {}),
+        }
+      : {};
     const made =
       voiced && onVoice && row.audioKey
         ? await this.scenes
@@ -3127,12 +3168,13 @@ export class StudioProcessor {
               durationMs: voiced.durationMs,
               timing: voiced.timing,
               profile: of.profile,
-              story: of.story!,
+              story: of.story ?? null,
               base,
               who,
               keepAs: `studio-${row.id}`,
               ...(of.recheck ? { recheck: of.recheck } : {}),
               ...(shape !== 'wide' ? { shape } : {}),
+              ...shotsAgain,
             })
             .then(async (again) => ({
               fit: 'good' as const,
@@ -3154,12 +3196,13 @@ export class StudioProcessor {
                         durationMs: voiced.durationMs,
                         timing: voiced.timing,
                         profile: of.profile,
-                        story: of.story!,
+                        story: of.story ?? null,
                         base: twinBase,
                         who: `${who} (${twinned.twin.shape})`,
                         keepAs: `studio-${row.id}-${twinned.twin.shape}`,
                         ...(of.recheck ? { recheck: of.recheck } : {}),
                         shape: episodeShape(twinned.twin),
+                        ...shotsAgain,
                       })
                       .catch(() => null)
                   : undefined,
@@ -3750,6 +3793,8 @@ export class StudioProcessor {
         who,
         keepAs: `studio-${row.id}`,
         ...finishing,
+        // A scene of shots: its assets built again for the twin's frame.
+        ...(of.shots ? { shots: of.shots } : {}),
       });
     else {
       // Made before its parts were kept: a story's staged again on its

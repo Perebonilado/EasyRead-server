@@ -408,6 +408,8 @@ export function faceFront(
         `<path d="${half}" fill="${EYE}"/>` +
         stroked(lid, ink.colour, ink.thin * 1.3);
     } else {
+      // A thin white round the dark eye, so it reads on every skin.
+      out += `<path d="${ellipse([ex + shift * 0.5, eyeY + up], erx * k * wide * 1.32, ery * wide * 1.2).d}" fill="#ffffff"/>`;
       out += `<path d="${e.d}" fill="${EYE}"/>`;
       out += `<circle cx="${n1(ex + shift - erx * 0.38 * k)}" cy="${n1(eyeY + up - ery * 0.42 * wide)}" r="${n1(erx * 0.42)}" fill="#ffffff"/>`;
     }
@@ -524,6 +526,7 @@ export function faceSide(
       ink.thin * 1.3,
     );
   } else {
+    out += `<path d="${ellipse([ex, ey], r * 0.13 * wide, h * 0.19 * wide).d}" fill="#ffffff"/>`;
     out += `<path d="${ellipse([ex, ey], r * 0.1 * wide, h * 0.16 * wide).d}" fill="${EYE}"/>`;
     out += `<circle cx="${n1(ex - r * 0.03)}" cy="${n1(ey - h * 0.07 * wide)}" r="${n1(r * 0.045)}" fill="#ffffff"/>`;
   }
@@ -886,6 +889,8 @@ export interface Hat {
   lines: { d: string; width: number; colour?: string }[];
   hidesHair: boolean;
   hidesEars: boolean;
+  /** A cloth woven in red checks (a checked keffiyeh): its paint is a pattern. */
+  checked?: boolean;
   /** How far above the head's top it reaches, in head heights (for the piece's box). */
   reach: number;
 }
@@ -1278,42 +1283,43 @@ export function hatOf(
         hat.behind.push([
           blob(
             [
-              [c[0] - r * 1.16, c[1] - h * 0.5],
-              [c[0], c[1] - h * 1.12],
-              [c[0] + r * 1.16, c[1] - h * 0.5],
-              [c[0] + r * 1.3, fall],
-              [c[0] + r * 0.5, fall + h * 0.06],
-              [c[0] - r * 0.5, fall + h * 0.06],
-              [c[0] - r * 1.3, fall],
+              [c[0] - r * 1.1, c[1] - h * 0.5],
+              [c[0], c[1] - h * 1.1],
+              [c[0] + r * 1.1, c[1] - h * 0.5],
+              [c[0] + r * 1.2, fall],
+              [c[0] + r * 0.55, fall + h * 0.05],
+              [c[0] - r * 0.55, fall + h * 0.05],
+              [c[0] - r * 1.2, fall],
             ],
             0.8,
           ),
-          { fill: shadeOk(cloth, 0.06) },
+          { fill: cloth },
         ]);
         // The front: over the crown, the edge round the face.
         hat.over.push([
           blob(
             [
-              [c[0] - r * 1.18, c[1] + h * 0.62],
-              [c[0] - r * 1.2, c[1] - h * 0.45],
-              [c[0] - r * 0.6, c[1] - h * 1.05],
-              [c[0], c[1] - h * 1.13],
-              [c[0] + r * 0.6, c[1] - h * 1.05],
-              [c[0] + r * 1.2, c[1] - h * 0.45],
-              [c[0] + r * 1.18, c[1] + h * 0.62],
-              [c[0] + r * 0.86, c[1] + h * 0.35],
-              [c[0] + r * 0.82, c[1] - h * 0.3],
-              [c[0] + r * 0.45, c[1] - h * 0.6],
-              [c[0], c[1] - h * 0.66],
-              [c[0] - r * 0.45, c[1] - h * 0.6],
-              [c[0] - r * 0.82, c[1] - h * 0.3],
-              [c[0] - r * 0.86, c[1] + h * 0.35],
+              [c[0] - r * 1.1, c[1] + h * 0.7],
+              [c[0] - r * 1.14, c[1] - h * 0.45],
+              [c[0] - r * 0.6, c[1] - h * 1.04],
+              [c[0], c[1] - h * 1.12],
+              [c[0] + r * 0.6, c[1] - h * 1.04],
+              [c[0] + r * 1.14, c[1] - h * 0.45],
+              [c[0] + r * 1.1, c[1] + h * 0.7],
+              [c[0] + r * 0.9, c[1] + h * 0.5],
+              [c[0] + r * 0.9, c[1] - h * 0.25],
+              [c[0] + r * 0.5, c[1] - h * 0.56],
+              [c[0], c[1] - h * 0.62],
+              [c[0] - r * 0.5, c[1] - h * 0.56],
+              [c[0] - r * 0.9, c[1] - h * 0.25],
+              [c[0] - r * 0.9, c[1] + h * 0.5],
             ],
             0.6,
           ),
           { fill: cloth },
         ]);
       }
+      if (outfit.head === 'keffiyeh' && outfit.headPattern) hat.checked = true;
       if (outfit.head === 'keffiyeh') {
         // The agal: a dark double cord round the crown.
         const agal = side
@@ -1920,9 +1926,13 @@ export function propShapes(
   side: string,
   facing: 1 | -1,
 ): [Shape, Paint][] {
+  // Held down, a blade rests out and low, its point ahead of the feet; a load hangs straight.
+  const blade = ['sword', 'curved-sword', 'axe', 'hammer'].includes(prop);
   const up: Pt =
     hold === 'down'
-      ? [facing * 0.35, 1]
+      ? blade
+        ? [facing, 0.55]
+        : [facing * 0.15, 1]
       : hold === 'across'
         ? [facing, -0.15]
         : hold === 'raised'
@@ -1981,9 +1991,9 @@ export function propShapes(
         rounded(
           [
             at(0.02, -0.018),
-            at(0.42, -0.016),
-            at(0.47),
-            at(0.42, 0.016),
+            at(0.34, -0.016),
+            at(0.39),
+            at(0.34, 0.016),
             at(0.02, 0.018),
           ],
           1,
@@ -2005,11 +2015,11 @@ export function propShapes(
         blob(
           [
             at(0.02, -0.02),
-            at(0.2, -0.02 + bend * 0.3),
-            at(0.38, bend),
-            at(0.46, bend * 1.6),
-            at(0.4, bend * 1.2 + 0.02),
-            at(0.2, bend * 0.45 + 0.02),
+            at(0.16, -0.02 + bend * 0.3),
+            at(0.3, bend),
+            at(0.37, bend * 1.6),
+            at(0.32, bend * 1.2 + 0.02),
+            at(0.16, bend * 0.45 + 0.02),
             at(0.02, 0.02),
           ],
           0.6,

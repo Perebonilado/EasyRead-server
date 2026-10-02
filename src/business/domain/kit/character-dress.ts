@@ -29,6 +29,9 @@ import type { Outfit, Top } from './wardrobe';
 import { CLOTH } from './wardrobe';
 
 const n = (v: number) => Math.round(v * 10) / 10;
+
+/** How deep a body is seen in profile, as a share of its width across the shoulders. */
+const DEPTH = 0.62;
 const p2 = (p: Pt) => `${n(p[0])} ${n(p[1])}`;
 
 /** How far a garment reaches below the hips, how much it flares, and its sleeves. */
@@ -94,7 +97,7 @@ export function torsoShape(f: Frame, view: View): Shape {
   const sh = f.shoulderY;
   const mid = (sh + f.hipY) / 2 + 3;
   if (view === 'side') {
-    const d = f.chest * 0.5;
+    const d = f.chest * DEPTH;
     return rounded(
       [
         [-d * 0.7, top],
@@ -131,7 +134,7 @@ function bandAt(f: Frame, view: View, y: number, h: number, inset = 0): Shape {
   const sh = f.shoulderY;
   const mid = (sh + f.hipY) / 2 + 3;
   const half = (yy: number) => {
-    if (view === 'side') return f.chest * 0.5;
+    if (view === 'side') return f.chest * DEPTH;
     if (yy <= sh + 13) return f.chest - 0.8;
     if (yy <= mid)
       return (
@@ -621,7 +624,7 @@ export function skirtMarkup(
   const side = view === 'side';
   const g = GARMENT[outfit.top];
   const y0 = f.hipY - 3;
-  const top = side ? f.chest * 0.48 : f.hips + 0.4;
+  const top = side ? f.chest * DEPTH * 0.96 : f.hips + 0.4;
   const bottom = top + g.flare * (side ? 0.8 : 1);
   const fill =
     outfit.top === 'kilt'

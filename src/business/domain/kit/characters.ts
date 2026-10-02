@@ -542,8 +542,16 @@ export function drawCharacter(
     head += painted(behind.d, { fill: hairColour }, ink);
     headBoxes.push(behind.box);
   }
+  // A checked cloth: red checks woven over its white, as a pattern the cloth is filled with.
+  const checks = hat?.checked ? ink.id() : null;
+  const cloth = (p: { fill: string }) =>
+    checks && p.fill === outfit.headColour
+      ? { ...p, fill: `url(#${checks})` }
+      : p;
+  if (checks)
+    head += `<defs><pattern id="${checks}" width="7" height="7" patternUnits="userSpaceOnUse"><rect width="7" height="7" fill="${outfit.headColour}"/><path d="M0 1.75H7M0 5.25H7M1.75 0V7M5.25 0V7" stroke="#c43b3b" stroke-width="1.6" opacity="0.85"/></pattern></defs>`;
   for (const [s, p] of hat?.behind ?? []) {
-    head += painted(s.d, p, ink);
+    head += painted(s.d, cloth(p), ink);
     headBoxes.push(s.box);
   }
   const skinShape = view === 'side' ? ellipse(c, r, h) : ellipse(c, r, h);
@@ -641,7 +649,7 @@ export function drawCharacter(
       top += `<circle cx="${n1(c[0] + r * 0.46)}" cy="${n1(gy)}" r="${n1(r * 0.19)}" fill="none" stroke="${ink.colour}" stroke-width="${n1(ink.thin)}"/>`;
   }
   for (const [s, p] of hat?.over ?? []) {
-    top += painted(s.d, p, ink);
+    top += painted(s.d, cloth(p), ink);
     topBoxes.push(s.box);
   }
   for (const l of hat?.lines ?? [])
@@ -768,31 +776,37 @@ export function drawCharacter(
   }
 
   // What is held, under the fist; a shield over the other arm.
+  const gesture = sideOfGaze(spec.gaze);
+  const other: 'l' | 'r' = gesture === 'l' ? 'r' : 'l';
   const propHand: 'l' | 'r' =
     view === 'side'
       ? outfit.shield !== 'none'
         ? 'r'
         : 'l'
-      : posingOf(spec.pose, f, spec.gaze, spec.phase).hands.r === 'fist' ||
+      : spec.pose === 'holding-up' || spec.pose === 'thinking'
+        ? // The raised hand holds it up; a thinker holds it in the hand away from the chin.
           spec.pose === 'holding-up'
-        ? spec.pose === 'holding-up'
-          ? spec.gaze >= 0
-            ? 'r'
-            : 'l'
-          : 'r'
-        : sideOfGaze(spec.gaze) === 'l'
-          ? 'r'
-          : 'l';
+          ? other
+          : gesture
+        : spec.pose === 'pointing' || spec.pose === 'waving'
+          ? other
+          : 'r';
   if (outfit.prop !== 'none') {
     const wr = joints[`wrist-${propHand}`];
     const fi = joints[`fingers-${propHand}`];
     const m = lerp(wr, fi, 0.42);
     const facingSign: 1 | -1 = view === 'side' ? 1 : propHand === 'l' ? 1 : -1;
     const hangs = ['pouch', 'basket', 'lantern'].includes(outfit.prop);
+    // A blade rests pointing down at the side unless it is held up.
+    const blade = ['sword', 'curved-sword', 'axe', 'hammer'].includes(
+      outfit.prop,
+    );
+    const hold: Hold =
+      hangs || (blade && posing.hold === 'upright') ? 'down' : posing.hold;
     const shapes = propShapes(
       outfit.prop,
       m,
-      hangs ? 'down' : posing.hold,
+      hold,
       f.H,
       outfit.shieldColour,
       facingSign,
@@ -817,10 +831,18 @@ export function drawCharacter(
     const wr = joints[`wrist-${s}`];
     const el = joints[`elbow-${s}`];
     const m = lerp(el, wr, 0.6);
-    const size = f.H * (outfit.shield === 'scutum' ? 0.5 : 0.42);
+    const size =
+      f.H *
+      (view === 'side'
+        ? outfit.shield === 'scutum'
+          ? 0.4
+          : 0.36
+        : outfit.shield === 'scutum'
+          ? 0.5
+          : 0.42);
     const centre: Pt =
       view === 'side'
-        ? [m[0] + 5, m[1] - 4]
+        ? [joints.hip[0] + f.H * 0.15, (f.shoulderY + f.hipY) / 2 + f.H * 0.02]
         : [m[0] + (s === 'l' ? 2 : -2), m[1] - 2];
     const face = shieldShape(outfit.shield, centre, size);
     const colour = outfit.shieldColour;
@@ -980,14 +1002,17 @@ function looksFor(
   age: Age | null,
   build: BuildKind | null,
   skinBase: number | null,
-  given: { facial?: FacialHair; hair?: HairStyle },
+  given: { facial?: FacialHair; hair?: HairStyle; men?: boolean },
 ): Looks {
   const said = hairOf(words);
+  // Anyone may be a woman unless the words or the role's history say a man
+  // (a legion, a king, a monk); the words saying a woman always win.
   const woman =
     womanIn(words) ||
-    (!/\b(?:he|him|his|man|men|king|soldiers?|knights?|monks?|vikings?)\b/u.test(
-      words.toLowerCase(),
-    ) &&
+    (!given.men &&
+      !/\b(?:he|him|his|man|men|king|soldiers?|knights?|monks?|vikings?|legionar(?:y|ies)|officers?)\b/u.test(
+        words.toLowerCase(),
+      ) &&
       r.chance(0.3));
   const a: Age = age ?? ageOf(words) ?? (r.chance(0.12) ? 'elder' : 'adult');
   const skin = skinOf(words) ?? skinBase ?? Math.floor(r() * SKIN.length);
@@ -1097,7 +1122,13 @@ export function characterSpec(
     options.age ?? (params.age ? oneOf(AGES, params.age, 'adult') : null),
     params.build ? oneOf(BUILDS, params.build, 'average') : null,
     options.skinBase ?? null,
-    { facial: dressed.facial, hair: dressed.hair },
+    {
+      facial: dressed.facial,
+      hair: dressed.hair,
+      men:
+        (dressed.role === 'soldier' || dressed.role === 'ruler') &&
+        !['1945-1975', '1975-2000', 'today'].includes(era),
+    },
   );
   const pose = options.pose ?? oneOf(CHARACTER_POSES, params.pose, 'standing');
   const expression = oneOf(EXPRESSIONS, params.expression, 'neutral');

@@ -1235,6 +1235,31 @@ const ROLE_COLOURS: Readonly<Record<Role, readonly Cloth[]>> = {
   official: ['black', 'navy', 'purple', 'grey'],
 };
 
+/** The colours a hat is chosen from when the words leave it open, by its kind. */
+const HEAD_COLOURS: Partial<Record<Headwear, readonly Cloth[]>> = {
+  turban: ['white', 'cream', 'crimson', 'navy', 'gold'],
+  'turban-helmet': ['white', 'cream'],
+  keffiyeh: ['white', 'cream'],
+  headscarf: ['cream', 'blue', 'crimson', 'green', 'gold'],
+  hood: ['brown', 'grey', 'navy'],
+  'crested-helmet': ['red', 'crimson'],
+  crown: ['gold'],
+  fez: ['crimson'],
+  kufi: ['white', 'cream', 'navy', 'crimson'],
+  beret: ['black', 'navy', 'crimson'],
+  'flat-cap': ['grey', 'brown', 'tan'],
+  cap: ['navy', 'red', 'grey'],
+  'top-hat': ['black'],
+  bowler: ['black', 'brown'],
+  fedora: ['brown', 'grey', 'black'],
+  bicorne: ['black'],
+  tricorne: ['black', 'brown'],
+  kepi: ['navy', 'crimson', 'olive'],
+  'fur-hat': ['brown', 'grey'],
+  headband: ['red', 'crimson', 'gold'],
+  nemes: ['blue'],
+};
+
 /** A seeded pick of a list. */
 type Pick = <T>(list: readonly T[]) => T;
 
@@ -1283,7 +1308,12 @@ export function outfitOf(
     head: look.head ?? 'none',
     headColour: own(
       look.headColour,
-      () => CLOTH[pick<Cloth>(['brown', 'black', 'grey', 'beige'])],
+      () =>
+        CLOTH[
+          pick<Cloth>(
+            HEAD_COLOURS[look.head ?? 'none'] ?? ['brown', 'black', 'beige'],
+          )
+        ],
     ),
     headPattern: look.headPattern ?? false,
     cape:
@@ -1311,9 +1341,16 @@ export function outfitOf(
   }
   const head = first(text, HEAD_PHRASES);
   if (head) {
+    const was = outfit.head;
     outfit.head = head.name as Headwear;
     const c = colourBefore(text, head.index);
     if (c) outfit.headColour = c;
+    // Another hat than its kind's, its colour unsaid: one that hat comes in.
+    else if (outfit.head !== was && !look.headColour)
+      outfit.headColour =
+        CLOTH[
+          pick<Cloth>(HEAD_COLOURS[outfit.head] ?? ['brown', 'black', 'beige'])
+        ];
     if (
       /\b(?:checked|chequered|checkered|red-and-white|red and white)\b/u.test(
         text,

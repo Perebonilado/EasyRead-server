@@ -8,6 +8,7 @@
 import type { ShotDto, ShotInfoDto, ShotSvgAssetDto } from '../../../contracts';
 import type { TimedBeat } from '../scene-timing';
 import { buildShots, type BuildContext } from './shot-build';
+import { planOf, stageWords } from './shot-check';
 import { registryOf } from './shot-registry';
 import { timeShots } from './shot-time';
 import {
@@ -468,5 +469,73 @@ describe('the camera on a device', () => {
     expect(travel).toBeDefined();
     expect(Math.abs(travel.atMs - callout.atMs)).toBeLessThanOrEqual(450);
     expect(made('wide').camera.some((c) => c.move === 'travel')).toBe(false);
+  });
+});
+
+describe('the board’s plan of a screen, made sound', () => {
+  it('keeps a swap’s state and the words typed off the stage’s budget, and leaves the callouts’ numbers to code', () => {
+    const plan = planOf(
+      {
+        shots: [
+          {
+            on: 'Open the settings',
+            set: { kind: 'device' },
+            actors: [
+              {
+                id: 'phone',
+                kit: 'ui.phone',
+                screen: 'login',
+                items: 'Email, Password',
+              },
+              {
+                id: 'cursor',
+                kit: 'ui.cursor',
+                moves: [
+                  {
+                    move: 'type',
+                    on: 'type your email',
+                    to: 'phone.input-email',
+                    text: 'ana at mail dot org',
+                  },
+                ],
+              },
+            ],
+            info: [
+              {
+                recipe: 'swap',
+                target: 'phone.btn-primary',
+                on: 'First turn on',
+                text: 'loading',
+              },
+              {
+                recipe: 'swap',
+                target: 'phone.slider-1',
+                on: 'Then slide',
+                text: '90%',
+              },
+              {
+                recipe: 'callout',
+                target: 'phone.input-email',
+                on: 'Now type',
+                value: 7,
+              },
+            ],
+            join: 'chapter',
+          },
+        ],
+      },
+      LINES.map(([text]) => text).join(' '),
+      { kit: ['ui.phone', 'ui.cursor'] },
+    );
+    const [shot] = plan.shots;
+    expect(shot.set).toEqual({ kind: 'screen' });
+    expect(shot.join).toBe('frost');
+    expect(shot.info.map((i) => i.text)).toEqual(['loading', '0.9', undefined]);
+    expect(shot.info[2].value).toBeUndefined();
+    expect(shot.actors[1].moves?.[0]).toMatchObject({
+      move: 'type',
+      text: 'ana at mail dot',
+    });
+    expect(stageWords(shot)).toBe(0);
   });
 });

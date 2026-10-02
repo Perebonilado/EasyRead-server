@@ -319,7 +319,8 @@ function infoOf(raw: unknown): PlanInfo | null {
         : recipe === 'type'
           ? clip(said.text, UI_TYPED_WORDS)
           : '';
-  const value = numberIn(said.value);
+  // A callout's number is code's (the order its words come in), never the board's.
+  const value = recipe === 'callout' ? undefined : numberIn(said.value);
   const from = numberIn(said.from);
   const unit = clip(said.unit, 2);
   const colour = line(said.colour, 60);
@@ -964,10 +965,17 @@ function labelNames(
 
 // ── What a shot puts on the stage ─────────────────────────────────────────
 
-/** The words a shot puts on the stage: its labels' and its chart's. */
+/**
+ * The words a shot puts on the stage: its labels' and its chart's. A
+ * swap's text is a part's state, never shown; words typed into a device's
+ * field are its small print, not words to read off the stage.
+ */
 export function stageWords(shot: PlanShot): number {
   const labels = shot.info.reduce(
-    (n, i) => n + wordsIn(i.text) + wordsIn(i.replace),
+    (n, i) =>
+      i.recipe === 'swap' || i.recipe === 'type'
+        ? n
+        : n + wordsIn(i.text) + wordsIn(i.replace),
     0,
   );
   return labels + (shot.set.kind === 'chart' ? chartWords(shot.set.chart) : 0);
@@ -977,12 +985,17 @@ export function stageWords(shot: PlanShot): number {
 function stageNumbers(shot: PlanShot): number[] {
   return [
     ...(shot.set.kind === 'chart' ? chartNumbers(shot.set.chart) : []),
-    ...shot.info.flatMap((i) => [
-      ...(i.value !== undefined ? [i.value] : []),
-      ...(i.from !== undefined && i.from !== 0 ? [i.from] : []),
-      ...numbersIn(i.text ?? ''),
-      ...numbersIn(i.replace ?? ''),
-    ]),
+    // A swap's value is a part's state (a slider's place), not a figure on the stage.
+    ...shot.info.flatMap((i) =>
+      i.recipe === 'swap'
+        ? []
+        : [
+            ...(i.value !== undefined ? [i.value] : []),
+            ...(i.from !== undefined && i.from !== 0 ? [i.from] : []),
+            ...numbersIn(i.text ?? ''),
+            ...numbersIn(i.replace ?? ''),
+          ],
+    ),
   ];
 }
 

@@ -225,14 +225,17 @@ describe('a scene of shots on the stage a Studio scene is made on', () => {
     expect(scene.steps).toEqual([]);
     expect(scene.voicePace).toBe(1);
     expect(scene.ideas).toEqual([{ beat: 0, label: 'Regions' }]);
-    expect(scene.shots!.assets.map).toBeDefined();
-    expect(scene.shots!.assets.map.kind).toBe('svg');
-    expect(scene.shots!.shots[0].set.kind).toBe('map');
+    const first = scene.shots!.shots[0].set as { kind: string; asset: string };
+    expect(first.kind).toBe('map');
+    // The run that fills the North first has its own copy of the map.
+    expect(first.asset).toMatch(/^map~/);
+    const map = scene.shots!.assets[first.asset];
+    expect(map.kind).toBe('svg');
     // The regions the plan fills are the drawn map's own parts.
     const fill = scene.shots!.shots[0].info.find((i) => i.recipe === 'fill');
     expect(fill?.target).toEqual({
       kind: 'asset',
-      asset: 'map',
+      asset: first.asset,
       part: 'group-north-region',
     });
     // Its card's still was made, and its parts kept for a twin made later.
@@ -247,11 +250,10 @@ describe('a scene of shots on the stage a Studio scene is made on', () => {
     expect(twin.engine).toBe('shots');
     expect(twin.shape).toBe('tall');
     expect(twin.stagings.wide).toEqual({ w: 900, h: 1600, places: [] });
-    expect(
-      twin.shots!.assets.map.kind === 'svg' && twin.shots!.assets.map.svg,
-    ).not.toBe(
-      scene.shots!.assets.map.kind === 'svg' && scene.shots!.assets.map.svg,
-    );
+    const twinMap =
+      twin.shots!.assets[(twin.shots!.shots[0].set as { asset: string }).asset];
+    expect(twinMap.kind === 'svg' && twinMap.box).toEqual([0, 0, 900, 1600]);
+    expect(map.kind === 'svg' && map.box).toEqual([0, 0, 1600, 900]);
     expect(twin.beats).toEqual(scene.beats);
   }, 60_000);
 

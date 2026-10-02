@@ -59,7 +59,8 @@
     "pace:bench": "ts-node --transpile-only -r tsconfig-paths/register scripts/pace-bench.ts",
     "theme:bench": "ts-node --transpile-only -r tsconfig-paths/register scripts/theme-bench.ts",
     "kinds:fixtures": "ts-node --transpile-only -r tsconfig-paths/register scripts/kinds-fixtures.ts",
-    "frames": "ts-node --transpile-only -r tsconfig-paths/register scripts/frames.ts"
+    "frames": "ts-node --transpile-only -r tsconfig-paths/register scripts/frames.ts",
+    "shots:remake": "ts-node --transpile-only -r tsconfig-paths/register scripts/shots-remake.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.38",

@@ -906,6 +906,38 @@ function train(s: Sketch, era: EraId, kind: string, wagons: number): void {
 
 // ── Water ─────────────────────────────────────────────────────────────────
 
+/** A ship's wake: foam on the water behind its stern (x = 0), below the waterline, thinning away, with a streak in it. */
+function wakeOf(length: number, thick: number): [Shape, string][] {
+  const foam = '#F4F7F8';
+  return [
+    [
+      blob(
+        [
+          [40, 4],
+          [-length * 0.35, thick * 0.55],
+          [-length, thick * 0.25],
+          [-length * 0.6, thick * 0.05],
+          [20, -4],
+        ],
+        0.5,
+      ),
+      foam,
+    ],
+    [
+      blob(
+        [
+          [-length * 0.1, thick * 0.75],
+          [-length * 0.7, thick * 1.05],
+          [-length * 0.68, thick * 0.92],
+          [-length * 0.12, thick * 0.62],
+        ],
+        0.5,
+      ),
+      foam,
+    ],
+  ];
+}
+
 /** A ship, its waterline on y = 0: under sail, under steam, or carrying containers; its wake behind its stern. */
 function ship(s: Sketch, era: EraId, kind: string, r: Rand): void {
   const p = s.paint;
@@ -920,25 +952,7 @@ function ship(s: Sketch, era: EraId, kind: string, r: Rand): void {
   const sail = mixOk(s.paint.pale, '#ffffff', 0.35);
   if (which === 'sail') {
     const L = 3800;
-    s.part(
-      'wake',
-      null,
-      [
-        [
-          blob(
-            [
-              [0, 0],
-              [-900, 0],
-              [-700, -30],
-              [0, -60],
-            ],
-            0.5,
-          ),
-          mixOk(p.pale, '#ffffff', 0.5),
-        ],
-      ],
-      [0, -20],
-    );
+    s.part('wake', null, wakeOf(1400, 70), [0, 10]);
     const masts: [Shape, string][] = [];
     for (const [i, mx] of [1000, 1900, 2800].entries()) {
       const h = [2600, 3100, 2500][i];
@@ -992,25 +1006,7 @@ function ship(s: Sketch, era: EraId, kind: string, r: Rand): void {
   }
   if (which === 'steam') {
     const L = 8000;
-    s.part(
-      'wake',
-      null,
-      [
-        [
-          blob(
-            [
-              [0, 0],
-              [-1800, 0],
-              [-1400, -45],
-              [0, -90],
-            ],
-            0.5,
-          ),
-          mixOk(p.pale, '#ffffff', 0.5),
-        ],
-      ],
-      [0, -30],
-    );
+    s.part('wake', null, wakeOf(2800, 120), [0, 10]);
     s.part(
       'body',
       null,
@@ -1073,25 +1069,7 @@ function ship(s: Sketch, era: EraId, kind: string, r: Rand): void {
     return;
   }
   const L = 22000;
-  s.part(
-    'wake',
-    null,
-    [
-      [
-        blob(
-          [
-            [0, 0],
-            [-4000, 0],
-            [-3000, -80],
-            [0, -160],
-          ],
-          0.5,
-        ),
-        mixOk(p.pale, '#ffffff', 0.5),
-      ],
-    ],
-    [0, -50],
-  );
+  s.part('wake', null, wakeOf(7000, 260), [0, 10]);
   const boxes: [Shape, string][] = [];
   const tints = [
     p.body,

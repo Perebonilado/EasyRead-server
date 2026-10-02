@@ -69,6 +69,7 @@ import {
   pictureOfSet,
   pictureShot,
   photoShows,
+  picturesOf,
 } from './shot-subjects';
 import type {
   PlanInfo,
@@ -866,10 +867,37 @@ export function withPace(
     // 6. Last, the set itself in turn: on the map, the subject the voice
     // is on marked again, while its line names a place (else the map is
     // off its place, and the mend gives those words the stand-in's
-    // picture); on a chart, its next part.
+    // picture); on a chart, its next part; a picture (a photo, a
+    // portrait, a document, a drawn set) has nothing of its own to bring
+    // on, so another picture of what it shows comes in as the voice stays
+    // on it (one not shown yet), else it is held while it sinks in (a
+    // declared hold).
     const at = Math.min(reach, Math.max(lo, gap.from + 5));
     if (shot.set.kind === 'map' && !placeful(at)) continue;
     const on = wordsAt(n, at);
+    if (!['map', 'chart', 'screen'].includes(shot.set.kind)) {
+      const current = pictureOfSet(shot.set);
+      const entry = current ? registry.resolve(current) : null;
+      const shown =
+        entry?.kind === 'person'
+          ? entry
+          : entry
+            ? (photoShows(entry, registry)?.entry ?? null)
+            : null;
+      // One not shown yet: never two pictures taking turns.
+      const used = picturesBefore(shots, k + 1);
+      const another = shown
+        ? (picturesOf(shown, registry).find((p) => !used.includes(p.name)) ??
+          null)
+        : null;
+      if (another && cutIn(shots, at, pictureShot(another, on), n)) continue;
+      if (
+        shot.camera.length < SHOT_LIMITS.camera &&
+        !shot.camera.some((c) => c.move === 'hold')
+      )
+        shot.camera.push({ move: 'hold', on });
+      continue;
+    }
     // Its subject: the place or the region it pointed at last (brought on,
     // or moved to), else what it is framed on, else the one the voice
     // named last.

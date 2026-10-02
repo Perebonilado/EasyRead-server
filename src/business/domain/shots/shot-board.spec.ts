@@ -574,6 +574,46 @@ describe('real pictures first on the board (Richard, 2026-10-02)', () => {
     });
   });
 
+  it('brings in another picture of what a picture shows as the voice stays on it, once, else holds it', () => {
+    const rows = [
+      {
+        ...WALL_ROWS[2],
+        say: 'Reagan spoke at the Brandenburg Gate for a long time to a very large crowd of people.',
+      },
+    ];
+    const portrait: ShotPlan = {
+      shots: [
+        {
+          on: 'Reagan spoke at',
+          set: { kind: 'portrait', person: 'person:Ronald Reagan' },
+          actors: [],
+          info: [],
+          life: [],
+          camera: [{ move: 'push', on: 'Reagan spoke at', amount: 'small' }],
+          join: 'cut',
+          focal: 'person:Ronald Reagan',
+        },
+      ],
+    };
+    const paced = withPace(portrait, rows, pictured, WALL_WORLD);
+    expect(paced.shots.map((s) => s.set)).toEqual([
+      { kind: 'portrait', person: 'person:Ronald Reagan' },
+      { kind: 'photo', photo: REAGAN_AT_THE_GATE.name },
+    ]);
+    // His other photo held while the voice stays on him: no turns back to the first.
+    expect(paced.shots[1].camera.map((c) => c.move)).toEqual(['push', 'hold']);
+    // With one picture of him: it is held.
+    const one = buildRegistry({
+      rows: WALL_ROWS,
+      research: WALL_RESEARCH,
+      world: WALL_WORLD,
+      pictures: [WALL_PICTURES[0]],
+    });
+    const held = withPace(portrait, rows, one, WALL_WORLD);
+    expect(held.shots).toHaveLength(1);
+    expect(held.shots[0].camera.map((c) => c.move)).toEqual(['push', 'hold']);
+  });
+
   it('never carries the map on over a line that names no place: the line gets its own picture', () => {
     const rows = [WALL_ROWS[0], { ...WALL_ROWS[5], claims: [] }];
     const plan: ShotPlan = {

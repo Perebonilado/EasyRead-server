@@ -409,7 +409,7 @@ const PLACES: readonly {
   },
   {
     words:
-      /^(?:ports?|harbou?rs?|docks?|dockers|ships?|shipping|cargo|sailors?)$/u,
+      /^(?:ports?|harbou?rs?|docks?|dockers|ships?|cargo|sailors?)$/u,
     place: 'port',
     land: 'coast',
     life: ['shimmer'],

@@ -133,9 +133,35 @@ export interface PlanGap {
 }
 
 /**
+ * The plan's declared rests, on the narration's keys: each camera hold,
+ * from its words to the shot's next camera move or the shot's end, as the
+ * timing runs it (shot-time) and the frames checker excuses it
+ * (frame-checks' shotHolds).
+ */
+export function planHolds(plan: ShotPlan, n: Narration): [number, number][] {
+  const starts = shotStarts(plan, n);
+  return plan.shots.flatMap((shot, k) => {
+    const from = starts[k];
+    if (from < 0) return [];
+    const end = starts.slice(k + 1).find((s) => s > from) ?? n.keys.length;
+    const moves = shot.camera
+      .map((c) => ({ move: c.move, at: landingOf(n, c.on, from) }))
+      .filter((c) => c.at >= from && c.at < end)
+      .sort((a, b) => a.at - b.at);
+    return moves.flatMap((c): [number, number][] => {
+      if (c.move !== 'hold') return [];
+      const next = moves.find((m) => m.at > c.at)?.at ?? end;
+      return [[c.at, next]];
+    });
+  });
+}
+
+/**
  * The plan's stretches with nothing new longer than the pace allows:
  * between one event and the next, and from the last to the narration's
- * end. `lineStarts` are the keys each line after the first starts at.
+ * end, but for one a declared hold runs through at least half of (the
+ * rules' "unless it is a declared hold", as the frames checker reads it).
+ * `lineStarts` are the keys each line after the first starts at.
  */
 export function planGaps(
   plan: ShotPlan,
@@ -144,6 +170,11 @@ export function planGaps(
   most: number = PLAN_PACE.maxWords,
 ): PlanGap[] {
   const events = planEvents(plan, n);
+  const holds = planHolds(plan, n);
+  const held = (from: number, to: number) =>
+    holds.some(
+      ([a, b]) => Math.min(b, to) - Math.max(a, from) >= (to - from) / 2,
+    );
   const marks = [...events.map((e) => e.at), n.keys.length];
   const out: PlanGap[] = [];
   for (let k = 0; k + 1 < marks.length; k += 1) {
@@ -152,7 +183,8 @@ export function planGaps(
       to -
       from +
       PLAN_PACE.lineWords * lineStarts.filter((s) => s > from && s < to).length;
-    if (words > most) out.push({ from, to, words, shot: events[k].shot });
+    if (words > most && !held(from, to))
+      out.push({ from, to, words, shot: events[k].shot });
   }
   return out;
 }

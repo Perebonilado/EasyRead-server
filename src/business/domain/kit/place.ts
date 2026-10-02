@@ -26,6 +26,8 @@ const MAP_SIZE: Record<string, { height?: number; length?: number }> = {
   people: { height: 0.075 },
   crowd: { height: 0.07 },
   vehicles: { length: 0.11 },
+  // The illustrated look's characters read at a glance, faces and all, as the reference's do on its maps.
+  characters: { height: 0.24 },
 };
 
 /** How big the shot's subject stands on a set with no scale: a person's height, a crowd's width, a vehicle's length, as shares of the set. */

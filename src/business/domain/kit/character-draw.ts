@@ -50,7 +50,7 @@ import {
   turn,
   unionBox,
 } from './shape';
-import { mixOk, shadeOk } from './style';
+import { luminance, mixOk, shadeOk } from './style';
 import type { Expression, Looks, Outfit } from './wardrobe';
 import { CLOTH } from './wardrobe';
 
@@ -432,10 +432,16 @@ export function faceFront(
     ];
     // A little arch for the calm and the glad.
     const arch: Pt = [mid[0], mid[1] - (face.brow[i] < 8 ? h * 0.03 : 0)];
+    // Brows read on every skin: near black on a dark one, and a little heavier.
+    const deep = luminance(colours.skin) < 0.12;
     out += stroked(
       `M${pt(inner)}Q${pt(arch)} ${pt(outer)}`,
-      colours.hair === '#eeece8' ? '#8f8a86' : mixOk(colours.hair, EYE, 0.5),
-      h * 0.085,
+      colours.hair === '#eeece8'
+        ? '#8f8a86'
+        : deep
+          ? '#120d0e'
+          : mixOk(colours.hair, EYE, 0.5),
+      h * (deep ? 0.1 : 0.085),
     );
   });
   // The nose: a small curve, toward where the head is turned.

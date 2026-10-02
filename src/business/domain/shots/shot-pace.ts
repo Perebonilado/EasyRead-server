@@ -44,8 +44,12 @@ export const PLAN_PACE = {
   roomWords: 3,
   /** The soonest after a change another may come, in words (about a second). */
   nextWords: 2,
-  /** The latest word the opening's first change may land on (about 1.5 seconds in). */
-  openingWords: 4,
+  /**
+   * The latest word the opening's first change may land on, counted from
+   * 0: its fourth word, which the voices (150 to 160 words a minute) begin
+   * by about 1.2 seconds, so the change has settled by 1.5.
+   */
+  openingWords: 3,
   /** Seconds a word takes, for messages. */
   secondsPerWord: 0.5,
 } as const;

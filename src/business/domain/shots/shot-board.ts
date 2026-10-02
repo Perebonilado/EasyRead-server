@@ -20,6 +20,7 @@ import {
   SERIOUS,
   SHOT_LIMITS,
   WHOLE_SET,
+  calendarShot,
   carryMove,
   checkPlan,
   fitsShot,
@@ -408,26 +409,7 @@ function pictureOf(
     life: [],
     join: 'cut' as const,
   };
-  if (entry.kind === 'date') {
-    const when = splitTarget(entry.name).rest;
-    const name = clip(entry.about.replace(/^(?:the|a|an)\s+/iu, ''), 3);
-    return {
-      ...base,
-      set: {
-        kind: 'chart',
-        chart: {
-          kind: 'calendar',
-          spec: {
-            calendars: [{ label: name || null, dates: [when] }],
-            merge: null,
-          },
-        },
-      },
-      info: [],
-      camera: [{ move: 'establish', on }],
-      focal: WHOLE_SET,
-    };
-  }
+  if (entry.kind === 'date') return calendarShot(entry, on);
   if (entry.kind === 'person' && entry.trace?.kind === 'quote') {
     const claim = registry.resolve(entry.trace.ref);
     const text = claim ? quotedWords(claim.about) : '';

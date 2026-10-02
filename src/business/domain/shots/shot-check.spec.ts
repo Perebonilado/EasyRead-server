@@ -1,6 +1,7 @@
 import { KIT_IDS } from '../kit/registry';
 import { WALL_RESEARCH, WALL_ROWS, WALL_WORLD } from './__fixtures__/wall';
 import {
+  calendarShot,
   checkPlan,
   mendPlan,
   mostShots,
@@ -11,7 +12,7 @@ import {
 } from './shot-check';
 import { sceneNarration } from './shot-phrases';
 import { buildRegistry, registryOf } from './shot-registry';
-import type { PlanShot, ShotPlan } from './types';
+import type { PlanShot, RegistryEntry, ShotPlan } from './types';
 
 const registry = buildRegistry({
   rows: WALL_ROWS,
@@ -837,6 +838,29 @@ describe('a safe shot for a line with none', () => {
         },
       },
       camera: [{ move: 'establish', on: 'Two years later' }],
+    });
+  });
+
+  it('names a calendar by a short name of what happened, never a sentence cut short', () => {
+    const talks: RegistryEntry = {
+      name: 'date:1953',
+      kind: 'date',
+      about:
+        'Constitutional talks expose a split over the timing of self-government',
+    };
+    expect(calendarShot(talks, 'In 1953').set).toEqual({
+      kind: 'chart',
+      chart: {
+        kind: 'calendar',
+        spec: { calendars: [{ label: null, dates: ['1953'] }], merge: null },
+      },
+    });
+    expect(
+      calendarShot({ ...talks, about: 'The Wall opens' }, 'In 1953').set,
+    ).toMatchObject({
+      chart: {
+        spec: { calendars: [{ label: 'Wall opens', dates: ['1953'] }] },
+      },
     });
   });
 

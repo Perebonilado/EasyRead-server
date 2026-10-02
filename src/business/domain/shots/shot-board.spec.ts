@@ -360,8 +360,9 @@ describe('something new every few words (withPace)', () => {
         chart: { kind: 'calendar', spec: { calendars: [{ dates: ['1961'] }] } },
       },
     });
+    // The calendar holds the opening's first words; the counter comes on the fourth.
     expect(paced.shots[1]).toMatchObject({
-      on: 'cut in two',
+      on: 'was cut in',
       set: { kind: 'chart', chart: { kind: 'counter' } },
     });
   });

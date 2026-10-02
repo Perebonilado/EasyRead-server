@@ -2516,10 +2516,15 @@ export function carryMove(shot: PlanShot, on: string): PlanCamera {
   };
 }
 
-/** A date's calendar sheet, named by what happened as the research says it, for a line that says the date. */
+/**
+ * A date's calendar sheet, for a line that says the date: named by what
+ * happened when the research says it in a name's few words, else the date
+ * alone (never a sentence cut short).
+ */
 export function calendarShot(entry: RegistryEntry, on: string): PlanShot {
   const when = splitTarget(entry.name).rest;
-  const name = clip(entry.about.replace(/^(?:the|a|an)\s+/iu, ''), 3);
+  const said = line(entry.about.replace(/^(?:the|a|an)\s+/iu, ''));
+  const name = wordsIn(said) <= TEXT.labelWordsMax ? said : '';
   return {
     on,
     set: {
@@ -2528,7 +2533,10 @@ export function calendarShot(entry: RegistryEntry, on: string): PlanShot {
         kind: 'calendar',
         spec: {
           calendars: [
-            { label: name && !roleOnly(name) ? name : null, dates: [when] },
+            {
+              label: name && !roleOnly(name) && !dateOnly(name) ? name : null,
+              dates: [when],
+            },
           ],
           merge: null,
         },

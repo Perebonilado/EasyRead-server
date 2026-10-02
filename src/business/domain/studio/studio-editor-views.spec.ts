@@ -8,12 +8,14 @@ import {
 } from './studio-editor';
 import { editorialOf } from './studio-editorial';
 import {
+  editorCredits,
   editorDto,
   editorPlay,
   editorialDto,
   packageDto,
   planNext,
 } from './studio-editor-views';
+import { BORDERS_CREDIT, TERRAIN_ATTRIBUTION } from '../shots/terrain-tiles';
 
 const research = researchOf({
   claims: [
@@ -186,6 +188,36 @@ describe("the editor's views", () => {
       claims: ['c1'],
       act: 1,
     });
+  });
+
+  it('credit the map’s sources after the description, the terrain’s when the shots engine drew it', () => {
+    const mapped = {
+      ...editor,
+      world: { ...editor.world!, base: { kind: 'map', region: 'Nigeria' } },
+    } as StudioEditor;
+    expect(editorCredits(editor, true)).toEqual([]);
+    expect(editorCredits(mapped, false)).toEqual([BORDERS_CREDIT]);
+    const credits = editorCredits(mapped, true);
+    expect(credits).toEqual(
+      expect.arrayContaining([BORDERS_CREDIT, ...TERRAIN_ATTRIBUTION]),
+    );
+    const pack = packageDto(editorial, outline, [], credits)!;
+    expect(
+      pack.description.startsWith('Why leap years exist.\n\nCredits\n'),
+    ).toBe(true);
+    expect(pack.description).toContain(
+      'courtesy of the U.S. Geological Survey.',
+    );
+    expect(
+      editorialDto(editorial, outline, [], credits).package?.description,
+    ).toBe(pack.description);
+    expect(
+      editorPlay(mapped, editorial, outline, [], credits).package?.description,
+    ).toBe(pack.description);
+    // With none, the description is as the editor wrote it.
+    expect(packageDto(editorial, outline, [])!.description).toBe(
+      'Why leap years exist.',
+    );
   });
 
   it("give the player an editor's next questions and package, and nothing otherwise", () => {

@@ -71,6 +71,9 @@ export type LlmTask =
   // The shots engine's board (explainer-animation-tech §4.1): a lesson
   // scene's plan of shots, named from closed lists and the scene's registry.
   | 'explainer_shots'
+  // The picture desk (WP11): where an archive picture's subject is, and
+  // what the picture is, so it is cropped to the subject, never past a face.
+  | 'picture_focus'
   | 'topic_quiz'
   | 'item_write'
   | 'item_verify'
@@ -1021,6 +1024,19 @@ export interface LlmGatewayPort {
   shotsBoard(
     input: { parts: string[] } & StudioRevision,
   ): Promise<LlmResult<Record<string, unknown>>>;
+
+  /**
+   * Where an archive picture's subject is (picture_focus; WP11), on a grid
+   * of six columns (A–F) by six rows (1–6): the cells of the people's
+   * faces, the cells of what it is of, how many people show, and what the
+   * picture is (a photograph, a photograph of a print, a screen, a statue,
+   * a painting…). Names cells only; code makes the box (pictures/focus).
+   */
+  pictureFocus(input: {
+    png: Buffer;
+    /** What the desk was told it shows: "Ahmadu Bello, 1960". */
+    about: string;
+  }): Promise<LlmResult<Record<string, unknown>>>;
 
   /** Whether text asks for what no one should be made: flagged, with the categories. */
   moderate(input: {

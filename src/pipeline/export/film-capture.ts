@@ -149,6 +149,57 @@ export function chromePath(env: string | undefined): string {
   return usual.find((path) => existsSync(path)) ?? usual[0];
 }
 
+/**
+ * How the export's browser draws WebGL, which a map shot's MapLibre needs
+ * (explainer-animation-plan §6.1). Headless Chrome has no GPU of its own,
+ * and its software fallback no longer comes by itself, so it is asked for:
+ *  - 'swiftshader': software GL (ANGLE on SwiftShader), on any machine,
+ *    the CPU doing the drawing;
+ *  - 'gpu': the machine's own GPU (Metal on a Mac; Vulkan elsewhere, as on
+ *    a GPU worker), where there is one;
+ *  - 'off': none; a map is drawn flat by the player's canvas fallback.
+ *
+ * Measured on an M3 (2026-10-02), a tilted terrain map at 1920 × 1080,
+ * seek and JPEG together, the median frame: GPU 50 ms; SwiftShader 300 to
+ * 450 ms (its 90th percentile 600 to 800 ms, the Mac shared with other
+ * work); off 80 ms, without the shading. A frame of a new view waits for
+ * its tiles once (5 s on a cold cache).
+ */
+export type ExportGl = 'swiftshader' | 'gpu' | 'off';
+
+/** EXPORT_GL read: one of the three, else software GL, which works headless anywhere. */
+export function exportGl(raw: string | undefined | null): ExportGl {
+  const said = (raw ?? '').trim().toLowerCase();
+  return said === 'gpu' || said === 'off' ? said : 'swiftshader';
+}
+
+/** Chrome's switches for a way of drawing WebGL. */
+export function glArgs(
+  gl: ExportGl,
+  platform: string = process.platform,
+): string[] {
+  switch (gl) {
+    case 'swiftshader':
+      return [
+        '--use-angle=swiftshader',
+        '--enable-unsafe-swiftshader',
+        '--ignore-gpu-blocklist',
+      ];
+    case 'gpu':
+      return platform === 'darwin'
+        ? ['--enable-gpu', '--use-angle=metal', '--ignore-gpu-blocklist']
+        : [
+            '--enable-gpu',
+            '--use-angle=vulkan',
+            '--enable-features=Vulkan',
+            '--disable-vulkan-surface',
+            '--ignore-gpu-blocklist',
+          ];
+    case 'off':
+      return ['--disable-gpu', '--disable-webgl'];
+  }
+}
+
 /** Frames 0 to N, cut into `parts` runs about as long as each other, in order. */
 export function segmentsOf(
   frames: number,
@@ -217,6 +268,8 @@ export class PuppeteerFilmCapture implements FilmCapturePort {
       chrome: string;
       /** How many browsers draw a film at once. */
       pages: number;
+      /** How WebGL is drawn (EXPORT_GL); absent, as the environment says. */
+      gl?: ExportGl;
     },
   ) {}
 
@@ -544,6 +597,8 @@ export class PuppeteerFilmCapture implements FilmCapturePort {
         '--disable-renderer-backgrounding',
         '--disable-backgrounding-occluded-windows',
         `--window-size=${input.width},${input.height}`,
+        // WebGL for a map shot's MapLibre.
+        ...glArgs(this.options.gl ?? exportGl(process.env.EXPORT_GL)),
       ],
     });
     try {

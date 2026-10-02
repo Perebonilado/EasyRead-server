@@ -23,16 +23,48 @@ const look = shotLook({
   theme: 'paper',
 });
 
+type GeoFeature = {
+  properties: { id: string };
+  geometry: { coordinates: unknown };
+};
+
+/** A geo asset's feature by id, or undefined. */
+function featureOf(scene: SceneDto, asset: string, id: string) {
+  const geo = scene.shots!.assets[asset];
+  return geo?.kind === 'geo'
+    ? (geo.features.features as GeoFeature[]).find(
+        (one) => one.properties.id === id,
+      )
+    : undefined;
+}
+
+/** The bounds of a feature's coordinates, west, south, east, north. */
+function boundsOf(coordinates: unknown): number[] {
+  const points: number[][] = [];
+  const walk = (c: unknown) => {
+    if (Array.isArray(c) && typeof c[0] === 'number')
+      points.push(c as number[]);
+    else if (Array.isArray(c)) c.forEach(walk);
+  };
+  walk(coordinates);
+  const xs = points.map((p) => p[0]);
+  const ys = points.map((p) => p[1]);
+  return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+}
+
 /** Whether a target names something the scene really has. */
 function exists(scene: SceneDto, target: ShotTargetDto | undefined): boolean {
   if (!target) return false;
   const assets = scene.shots!.assets;
   if (target.kind === 'asset') {
     const asset = assets[target.asset];
+    if (asset?.kind === 'geo') return !target.part;
     return (
       asset?.kind === 'svg' && (!target.part || !!asset.parts[target.part])
     );
   }
+  if (target.kind === 'feature')
+    return !!featureOf(scene, target.asset, target.id);
   if (target.kind === 'box') return target.box[2] > 0 && target.box[3] > 0;
   return true;
 }
@@ -130,20 +162,19 @@ describe('a scene of shots from the board to the stage', () => {
           expect(exists(scene, item.target)).toBe(true);
   });
 
-  it('pins Berlin where it is on the map, inside the East', () => {
+  it('pins Berlin where it is on the map, a point on the earth inside the East', () => {
     const [mapShot] = scene.shots!.shots;
     const pin = mapShot.info.find((i) => i.recipe === 'pin')!;
-    const asset = scene.shots!.assets[(mapShot.set as { asset: string }).asset];
-    expect(pin.target?.kind).toBe('box');
-    const [x, y, w, h] = (pin.target as { box: number[] }).box;
-    const east =
-      asset.kind === 'svg'
-        ? asset.parts['group-east-germany'].box
-        : [0, 0, 0, 0];
-    expect(x + w / 2).toBeGreaterThan(east[0]);
-    expect(x + w / 2).toBeLessThan(east[0] + east[2]);
-    expect(y + h / 2).toBeGreaterThan(east[1]);
-    expect(y + h / 2).toBeLessThan(east[1] + east[3]);
+    const map = (mapShot.set as { asset: string }).asset;
+    expect(scene.shots!.assets[map].kind).toBe('geo');
+    expect(pin.target?.kind).toBe('geo');
+    const { lng, lat } = pin.target as { lng: number; lat: number };
+    const east = featureOf(scene, map, 'group-east-germany')!;
+    const [w, s, e, n] = boundsOf(east.geometry.coordinates);
+    expect(lng).toBeGreaterThan(w);
+    expect(lng).toBeLessThan(e);
+    expect(lat).toBeGreaterThan(s);
+    expect(lat).toBeLessThan(n);
   });
 
   it('counts the border’s length on the counter’s own number, and frames a quotation whole', () => {

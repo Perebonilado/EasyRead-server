@@ -9,7 +9,6 @@ import type {
   StudioSceneRecord,
   StudioShowRecord,
 } from '../../business/repositories/studio.repository';
-import type { LlmGatewayPort } from '../../business/ports/llm.port';
 import { FakeLlmAdapter } from '../../web/adapters/fake-llm.adapter';
 import { StudioEditorProcessor } from './studio-editor.processor';
 

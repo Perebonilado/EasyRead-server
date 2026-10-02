@@ -23,6 +23,7 @@ import {
   titleKey,
 } from './desk';
 import type { LicenceMode } from './licence';
+import { eventPhotoOf } from './rank';
 import type { PictureQuery } from './types';
 
 const NOW = new Date('2026-10-02T09:00:00Z');
@@ -650,17 +651,54 @@ describe('the picture desk', () => {
       expect(focus.asked).toEqual([query.asked]);
     });
 
-    it('searches an event by its names first, then its other words, the verbs last', () => {
+    it('searches an event by its own names, whole, and its other words, never the verbs that tell it', () => {
       expect(
-        searchWordsOf([
+        searchWordsOf(
           'Baird demonstrates television to members of the Royal Institution',
-        ]),
-      ).toEqual(['Baird', 'Royal', 'Institution', 'television']);
+        ),
+      ).toEqual({
+        names: ['Baird', 'Royal Institution'],
+        plain: ['television', 'members'],
+      });
       expect(
-        searchWordsOf([
+        searchWordsOf("RCA introduces television at the New York World's Fair"),
+      ).toEqual({
+        names: ['RCA', "New York World's Fair"],
+        plain: ['television'],
+      });
+      expect(
+        searchWordsOf('The BBC Television Service opens at Alexandra Palace'),
+      ).toEqual({
+        names: ['BBC Television Service', 'Alexandra Palace'],
+        plain: [],
+      });
+      expect(
+        searchWordsOf(
           'Nigeria becomes independent by act and constitutional order',
-        ]),
-      ).toEqual(['Nigeria', 'independent', 'act', 'constitutional']);
+        ),
+      ).toEqual({
+        names: ['Nigeria'],
+        plain: ['independent', 'act', 'constitutional'],
+      });
+    });
+
+    it('reads short names in capitals as an event’s words: the BBC’s photo of its own opening', () => {
+      expect(
+        eventPhotoOf(
+          {
+            title: 'BBC television, Alexandra Palace, November 1936',
+            description: '',
+            categories: [],
+          },
+          {
+            name: 'The BBC Television Service opens',
+            years: [1936],
+            place: ['Alexandra Palace, London'],
+            words: ['The BBC Television Service opens at Alexandra Palace'],
+          },
+          1936,
+        ),
+      ).toEqual({ ok: true });
     });
   });
 

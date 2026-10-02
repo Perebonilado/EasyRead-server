@@ -386,6 +386,16 @@ export function personPhotoOf(
   return { ok: true };
 }
 
+/** An event's key words: its words' stems, and its short names in capitals ("BBC", "RCA") whole. */
+function keysIn(text: string): Set<string> {
+  const keys = stems(text);
+  for (const m of text.matchAll(
+    /(?<![\p{L}\p{N}])(\p{Lu}{2,3})(?![\p{L}\p{N}])/gu,
+  ))
+    keys.add(m[1].toLowerCase());
+  return keys;
+}
+
 /** A commemoration of an event (a plaque, a memorial) is no photo of the event itself. */
 const COMMEMORATION =
   /\b(?:plaque|memorial|monument|commemorat\w*|statue|museum|exhibit(?:ion)?|replica|anniversary|re-?enactment|stamp|banknote|coin|postage)\b/iu;
@@ -428,9 +438,9 @@ export function eventPhotoOf(
     return { ok: false, reason: 'it commemorates the event; it is not of it' };
   const made = contemptOf(file);
   if (made) return { ok: false, reason: made };
-  const seen = stems(said);
-  const placed = [...stems([query.place ?? []].flat().join(' '))];
-  const keys = [...stems((query.words ?? [query.name]).join(' '))].filter(
+  const seen = keysIn(said);
+  const placed = [...keysIn([query.place ?? []].flat().join(' '))];
+  const keys = [...keysIn((query.words ?? [query.name]).join(' '))].filter(
     (k) => !placed.includes(k),
   );
   const hits = keys.filter((k) => seen.has(k)).length;

@@ -163,8 +163,10 @@ export interface Found {
   person?: WikiPerson;
 }
 
-/** Words an event's search leaves out: the small words, and verbs that name no one and nothing. */
+/** Small words an event's search leaves out. */
 const SEARCH_STOP = new Set([
+  'a',
+  'an',
   'the',
   'and',
   'of',
@@ -187,7 +189,6 @@ const SEARCH_STOP = new Set([
   'was',
   'were',
   'all',
-  'new',
   'first',
   'after',
   'before',
@@ -201,28 +202,56 @@ const SEARCH_STOP = new Set([
 ]);
 
 /**
- * The words to search by for an event, from the research's own: its
- * names first (people, bodies, places: "Baird", "BBC", "Royal
- * Institution"), then its other words in the research's order, the verbs
- * ("demonstrates", "opens") last; at most four.
+ * Verbs a timeline tells its events with ("Baird demonstrates television",
+ * "the BBC opens…"): nothing a photo's title names, so never searched by.
  */
-export function searchWordsOf(words: readonly string[]): string[] {
-  const all = words
-    .flatMap((w) => w.split(/[^\p{L}\p{N}'’]+/u))
-    .map((w) => w.replace(/^['’]+|['’]+$/gu, ''))
-    .filter(
-      (w) =>
-        w.length >= 3 && !SEARCH_STOP.has(w.toLowerCase()) && !/^\d+$/u.test(w),
-    );
-  const unique = [...new Map(all.map((w) => [w.toLowerCase(), w])).values()];
-  const named = unique.filter((w) => /^\p{Lu}/u.test(w));
-  const verb = (w: string) => /[^s]s$/u.test(w) && !/(?:ss|us|is)$/u.test(w);
-  const rest = unique.filter((w) => !/^\p{Lu}/u.test(w));
-  return [
-    ...named,
-    ...rest.filter((w) => !verb(w)),
-    ...rest.filter(verb),
-  ].slice(0, 4);
+const EVENT_VERBS = new Set(
+  'become becomes move moves set sets expose exposes ask asks choose chooses establish establishes introduce introduces announce announces open opens drop drops transmit transmits demonstrate demonstrates launch launches sign signs hold holds win wins lose loses begin begins end ends start starts take takes make makes give gives form forms join joins leave leaves meet meets visit visits return returns adopt adopts approve approves pass passes declare declares elect elects appoint appoints create creates build builds unveil unveils show shows send sends receive receives reach reaches enter enters arrive arrives land lands fall falls rise rises grow grows expand expands invent invents publish publishes call calls found founds close closes ratify ratifies abolish abolishes replace replaces add adds split splits break breaks want wants get gets keep keeps lead leads rule rules run runs turn turns bring brings sell sells pay pays come comes go goes agree agreed agrees vote votes'.split(
+    ' ',
+  ),
+);
+
+/**
+ * The words to search an event by, from the research's own words for it:
+ * its names whole ("Royal Institution", "New York World's Fair", "BBC
+ * Television Service"; a sentence's small first word left out), and its
+ * other words but the verbs that tell it, in the research's order.
+ */
+export function searchWordsOf(text: string): {
+  names: string[];
+  plain: string[];
+} {
+  const words = text
+    .split(/\s+/u)
+    .map((w) => w.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}'’]+$/gu, ''))
+    .filter(Boolean);
+  const names: string[] = [];
+  const plain: string[] = [];
+  let run: string[] = [];
+  const close = () => {
+    if (run.length) names.push(run.join(' '));
+    run = [];
+  };
+  for (const word of words) {
+    const lower = word.toLowerCase();
+    if (/^\p{Lu}/u.test(word) && !(SEARCH_STOP.has(lower) && !run.length)) {
+      run.push(word);
+      continue;
+    }
+    close();
+    if (
+      word.length >= 3 &&
+      !SEARCH_STOP.has(lower) &&
+      !EVENT_VERBS.has(lower) &&
+      !/^\d+$/u.test(word)
+    )
+      plain.push(word.replace(/['’]s$/u, ''));
+  }
+  close();
+  return {
+    names: [...new Set(names.map((n) => n.replace(/['’]s$/u, '')))].slice(0, 3),
+    plain: [...new Set(plain)].slice(0, 3),
+  };
 }
 
 /** A name's plain words, as one string. */
@@ -556,9 +585,9 @@ export class PictureDesk {
     const year = [...(query.years ?? [])].sort((a, b) => a - b)[0];
     if (year === undefined)
       return { found: [], reason: `the research gives ${query.name} no year` };
-    const keys = searchWordsOf(query.words ?? [query.name]);
-    const named = keys.filter((w) => /^\p{Lu}/u.test(w));
-    const plain = keys.find((w) => !/^\p{Lu}/u.test(w));
+    // What to search by: the event's own words (its first is the
+    // research's text for it), never its place's, which come apart.
+    const { names, plain } = searchWordsOf(query.words?.[0] ?? query.name);
     // Where it happened, as its first words ("Alexandra Palace" of
     // "Alexandra Palace, London"): the place a photo of it names.
     const place = [query.place ?? []]
@@ -566,14 +595,19 @@ export class PictureDesk {
       .find(Boolean)
       ?.split(',')[0]
       ?.trim();
+    const lead = names[0] ?? plain[0];
     const asks = [
       // A name and what happened: "Baird television 1926".
-      [keys[0], plain ?? keys[1], year],
-      // Its names together: "BBC Television Service 1936".
-      ...(named.length >= 2 ? [[...named.slice(0, 3), year]] : []),
-      // Its place and what happened: "Alexandra Palace BBC 1936".
-      ...(place ? [[place, plain ?? named[0], year]] : []),
-    ].map((words) => words.filter(Boolean).join(' '));
+      names.length ? [names[0], plain[0]] : plain.slice(0, 2),
+      // Its names together: "RCA New York World's Fair 1939".
+      ...(names.length >= 2 ? [names.slice(0, 2)] : []),
+      // Its place and what happened: "Alexandra Palace BBC Television Service 1936".
+      ...(place && lead && place !== lead
+        ? [[place, lead === place ? plain[0] : lead]]
+        : []),
+    ]
+      .map((words) => [...words.filter(Boolean), year].join(' '))
+      .filter((ask) => ask !== String(year));
     const files: SourceFile[] = [];
     for (const words of [...new Set(asks)])
       files.push(

@@ -182,6 +182,57 @@ describe('whether a picture can serve', () => {
     ).toBe(false);
   });
 
+  it('refuses a thing of theirs, a picture made after they died, and an undated one nobody chose', () => {
+    const balewa = {
+      qid: 'Q335684',
+      name: 'Abubakar Tafawa Balewa',
+      died: 1966,
+    };
+    // A phone's photograph of a framed print on a museum wall, called "own work", 2024.
+    expect(
+      portraitOf(
+        {
+          title: 'Abubakar Tafawa Balewa 1',
+          description:
+            'Sir Abubakar Tafawa Balewa (first prime minister of Nigeria) commissioning first tractor',
+        },
+        balewa,
+        2024,
+      ),
+    ).toEqual({ ok: false, reason: 'made in 2024, after they died in 1966' });
+    expect(
+      portraitOf(
+        { title: "Nnamdi Azikiwe's birthplace, Zungeru", description: '' },
+        { qid: 'Q181782', name: 'Nnamdi Azikiwe', died: 1996 },
+        2010,
+      ).ok,
+    ).toBe(false);
+    expect(
+      portraitOf(
+        { title: 'Statue of Ahmadu Bello, Kaduna', description: '' },
+        bello,
+        2012,
+      ).ok,
+    ).toBe(false);
+    expect(
+      portraitOf({ title: 'Ahmadu Bello portrait', description: '' }, bello),
+    ).toEqual({
+      ok: false,
+      reason: 'it has no date, and nobody chose it as theirs',
+    });
+    // A dated photograph of him alone at his desk, in his life.
+    expect(
+      portraitOf(
+        {
+          title: 'Nnamdi Azikiwe in Office, 1937',
+          description: 'Nnamdi Azikiwe in Office, 1937',
+        },
+        { qid: 'Q181782', name: 'Nnamdi Azikiwe', died: 1996 },
+        1937,
+      ),
+    ).toEqual({ ok: true });
+  });
+
   it('refuses a file that does not say it is of them', () => {
     expect(
       portraitOf({ title: 'Kaduna regional chamber', description: '' }, bello),

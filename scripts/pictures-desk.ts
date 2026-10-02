@@ -27,8 +27,14 @@ import {
   passQuestions,
 } from '../src/business/domain/pictures/episode';
 import type { PictureQuery } from '../src/business/domain/pictures/types';
-import { PICTURE_DESK } from '../src/business/ports/tokens';
-import { STUDIO_REPOSITORY } from '../src/business/repositories/tokens';
+import { STORAGE } from '../src/business/ports/tokens';
+import type { StoragePort } from '../src/business/ports/storage.port';
+import {
+  PICTURE_CACHE_REPOSITORY,
+  STUDIO_REPOSITORY,
+} from '../src/business/repositories/tokens';
+import type { PictureCacheRepository } from '../src/business/repositories/picture-cache.repository';
+import { pictureDeskOf } from '../src/web/adapters/pictures/picture-desk.factory';
 import type { StudioRepository } from '../src/business/repositories/studio.repository';
 
 @Module({ imports: [ConfigModule.forRoot({ isGlobal: true }), CoreModule] })
@@ -70,7 +76,13 @@ async function main(): Promise<void> {
     logger: ['warn', 'error'],
   });
   try {
-    const desk = app.get<PictureDesk>(PICTURE_DESK);
+    // The desk as the worker makes it, its reasons said here.
+    const desk: PictureDesk = pictureDeskOf({
+      setting: (name) => process.env[name],
+      cache: app.get<PictureCacheRepository>(PICTURE_CACHE_REPOSITORY),
+      storage: app.get<StoragePort>(STORAGE),
+      log: (message) => console.log(`  ${message}`),
+    });
     const person = option('--person');
     const place = option('--place-photo');
     if (person) {

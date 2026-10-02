@@ -158,21 +158,34 @@ const namesIt = (words: string, name: string) => {
   return want.length > 0 && want.every((w) => said.includes(` ${w} `));
 };
 
+/** Things of a person's that are not them: where they lie, stand in bronze, lived, or are printed. */
+const NOT_THEM =
+  /\b(?:statue|bust|monument|memorial|grave|tomb|mausoleum|mural|plaque|sculpture|banknote|bank note|stamp|coin|museum|exhibit(?:ion)?|house|home|residence|birthplace|estate|street|road|avenue|university|school|college|hospital|airport|stadium|square|bridge|library|hall|signature|car|motorcade)\b/iu;
+
+/** "Azikiwe's birthplace": a title about one of their things. */
+const THEIRS = /['’]s\s+\p{L}/u;
+
 /**
  * Whether a file can be a person's portrait: it is of them (their own
  * Wikidata picture, a file that says it depicts them, or one named for
- * them), and of them alone (no "and", no "L–R", no one beside them).
+ * them), of them alone (no "and", no "L–R", no one beside them), and of
+ * them, not of a thing of theirs (a statue, a grave, a banknote, a house).
+ * A photograph made after they died is of something else (a statue, a
+ * grave, a picture of a picture on a museum wall), and one with no date
+ * is taken only where their editors chose it or it says it depicts them.
  * Research §3.5: a wrong face is worse than none, so a group photograph is
  * never cut down to one of its faces.
  */
 export function portraitOf(
   file: Pick<SourceFile, 'title' | 'description' | 'depicts' | 'chosen'>,
-  person: { qid: string; name: string },
+  person: { qid: string; name: string; died?: number },
+  year?: number,
 ): { ok: true } | { ok: false; reason: string } {
   const depicts = file.depicts ?? [];
+  const said = depicts.some((d) => d.qid === person.qid);
   const ofThem =
     file.chosen ||
-    depicts.some((d) => d.qid === person.qid) ||
+    said ||
     namesIt(file.title, person.name) ||
     // A surname is enough in a title that names nobody else.
     (nameWords(person.name).length > 1 &&
@@ -182,6 +195,22 @@ export function portraitOf(
     return { ok: false, reason: 'it depicts someone else too' };
   if (GROUP_TITLE.test(file.title) || GROUP_WORDS.test(file.description))
     return { ok: false, reason: 'others are in the picture with them' };
+  if (
+    NOT_THEM.test(file.title) ||
+    THEIRS.test(file.title) ||
+    NOT_THEM.test(file.description)
+  )
+    return { ok: false, reason: 'it is of a thing of theirs, not of them' };
+  if (year !== undefined && person.died !== undefined && year > person.died + 1)
+    return {
+      ok: false,
+      reason: `made in ${year}, after they died in ${person.died}`,
+    };
+  if (year === undefined && !file.chosen && !said)
+    return {
+      ok: false,
+      reason: 'it has no date, and nobody chose it as theirs',
+    };
   return { ok: true };
 }
 

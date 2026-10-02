@@ -75,6 +75,13 @@ export interface DeskDeps {
 
 /** How long the desk trusts its answer to a question before asking again. */
 const LOOKUP_DAYS = 30;
+
+/**
+ * The desk's rules, by number: an answer given under older rules is asked
+ * again (a portrait that is a statue's photograph, once let through, is
+ * not handed out for a month after the rule against it).
+ */
+export const DESK_RULES = 2;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** The width the desk asks a source for: a full frame's with room for a 12% push; a portrait's print; a page. */
@@ -353,7 +360,15 @@ export class PictureDesk {
       }
       const fit =
         use === 'portrait' && person
-          ? portraitOf(file, { qid: person.qid, name: query.name })
+          ? portraitOf(
+              file,
+              {
+                qid: person.qid,
+                name: query.name,
+                ...(person.died !== undefined ? { died: person.died } : {}),
+              },
+              year,
+            )
           : photoOf(file, query, qid, year);
       if (!fit.ok) continue;
       if (Math.max(file.width, file.height) < LEAST_PX[use]) continue;
@@ -625,6 +640,7 @@ export class PictureDesk {
     );
     const fresh =
       asked &&
+      (asked.meta as { rules?: number } | null)?.rules === DESK_RULES &&
       this.now().getTime() - asked.checkedAt.getTime() < LOOKUP_DAYS * DAY_MS;
     if (asked && fresh) {
       const meta = (asked.meta ?? {}) as {
@@ -682,6 +698,7 @@ export class PictureDesk {
           kind: query.kind,
           subject: query.name.slice(0, 255),
           meta: {
+            rules: DESK_RULES,
             picked: record?.id ?? null,
             ...('person' in result && result.person
               ? { person: result.person }

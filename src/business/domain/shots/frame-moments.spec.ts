@@ -159,6 +159,8 @@ describe('the moments a film’s stills are taken at', () => {
           m.why === 'grid' && (m.videoMs - TIMELINE.titleMs) % GRID_MS === 0,
       ),
     ).toBe(true);
+    // None while the title is still going: the first is the grid's second.
+    expect(grid[0].videoMs).toBe(TIMELINE.titleMs + GRID_MS);
     // Nothing on the title, nor past the film.
     expect(
       grid.every(

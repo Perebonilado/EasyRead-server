@@ -83,6 +83,12 @@ export interface StillsInput {
   outDir: string;
   /** Also what is on the frame at each moment (`__render.inspect`). */
   inspect?: boolean;
+  /**
+   * Each still's size against the frame's: 0.5 is half (what the frame
+   * checks read, and five times quicker to take than a whole frame's PNG);
+   * absent, 1. What `inspect` says stays in the frame's own pixels.
+   */
+  scale?: number;
   /** Each still's file name; `still-<ms>.png` when absent. */
   name?: (ms: number, index: number) => string;
   /** How many browsers share the moments; the capture's own count when absent. */
@@ -407,6 +413,7 @@ export class PuppeteerFilmCapture implements FilmCapturePort {
       const name =
         input.name ??
         ((ms: number) => `still-${String(ms).padStart(7, '0')}.png`);
+      const scale = Math.min(1, Math.max(0.1, input.scale ?? 1));
       // A browser for every dozen stills or so, up to the pages asked for.
       const runs = runsOf(
         moments.length,
@@ -457,6 +464,17 @@ export class PuppeteerFilmCapture implements FilmCapturePort {
                     drawer.cdp.send('Page.captureScreenshot', {
                       format: 'png',
                       optimizeForSpeed: true,
+                      ...(scale < 1
+                        ? {
+                            clip: {
+                              x: 0,
+                              y: 0,
+                              width: input.width,
+                              height: input.height,
+                              scale,
+                            },
+                          }
+                        : {}),
                     }),
                     FRAME_MS,
                     'A still',

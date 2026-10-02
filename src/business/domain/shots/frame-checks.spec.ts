@@ -446,6 +446,34 @@ describe('blank frames and flashes', () => {
     expect(codes(drawn)).not.toContain('blank');
   });
 
+  it('calls a frame of nothing but its captions blank: the stage’s own ink is what counts', () => {
+    const pill: FrameBox = [600, 900, 700, 120];
+    const caption: FrameItem = {
+      id: 'caption-1',
+      role: 'caption',
+      box: pill,
+      text: 'Modern airliners',
+      fontPx: 64,
+      opacity: 1,
+    };
+    const pixels = [still([20, 24, 40], [{ box: pill, rgb: BLACK }])];
+    const empty = checkFrames({
+      scene: lesson(),
+      reports: [report([caption])],
+      pixels,
+      shape: 'wide',
+    });
+    expect(codes(empty)).toContain('blank');
+    // The same pixels, the pill not a caption: it is the stage's ink.
+    const drawn = checkFrames({
+      scene: lesson(),
+      reports: [report([])],
+      pixels,
+      shape: 'wide',
+    });
+    expect(codes(drawn)).not.toContain('blank');
+  });
+
   it('finds the brightness jumping and straight back between close stills, but not across a join', () => {
     const at = [3000, 3400, 3800];
     const reports = at.map((ms) => report([engine([0, 0, 1920, 1080])], ms));
@@ -467,6 +495,27 @@ describe('blank frames and flashes', () => {
       joins: [false, true, false],
     });
     expect(codes(joined)).not.toContain('flash');
+  });
+
+  it('names the still a flash is in by its report, a still with no report between', () => {
+    const result = checkFrames({
+      scene: lesson(),
+      reports: [
+        report([engine([0, 0, 1920, 1080])], 3000),
+        null,
+        report([engine([0, 0, 1920, 1080])], 3400),
+        report([engine([0, 0, 1920, 1080])], 3800),
+      ],
+      pixels: [still(WHITE), null, still(BLACK), still(WHITE)],
+      shape: 'wide',
+    });
+    const flash = result.problems.find((p) => p.code === 'flash');
+    expect(flash?.still).toBe(2);
+    expect(result.stills.map((s) => s.codes.includes('flash'))).toEqual([
+      false,
+      true,
+      false,
+    ]);
   });
 });
 
@@ -708,15 +757,31 @@ describe('scores', () => {
     ),
   ];
 
-  it('scores each axis out of 10 by the share of the scene that fails it', () => {
-    const { scores } = checkFrames({ scene, reports, shape: 'wide' });
-    // One still of the three is a strip: composition loses a third of its 10, truth a strip's weight of it.
-    expect(scores.composition).toBe(6.7);
-    // One of the two stills with words has words too small.
-    expect(scores.readability).toBe(5);
+  it('scores each axis out of 10 by how much of the scene fails it, and how badly', () => {
+    const { scores, problems } = checkFrames({ scene, reports, shape: 'wide' });
+    // The strip: 6% of the height against 35%, so 83% short of its floor, in one still of three.
+    const strip = problems.find((p) => p.code === 'focal-small');
+    expect(strip?.severity).toBeCloseTo(1 - 65 / 1080 / FOCAL.wideMinHeight, 2);
+    expect(scores.composition).toBe(
+      Math.round(
+        100 * (1 - FRAME_CHECKS.weights.focal * (strip!.severity! / 3)),
+      ) / 10,
+    );
+    // Words at 40 px against 60 are a third short, in one of the two stills with words.
+    expect(scores.readability).toBe(
+      Math.round(100 * (1 - FRAME_CHECKS.weights.textSmall * (1 / 3 / 2))) / 10,
+    );
+    expect(scores.readability).toBe(7.5);
     expect(scores.cardShare).toBeCloseTo(0.25, 3);
-    // A quarter of the time on a card, and a strip in a third of the stills: more than truth's 10.
-    expect(scores.truth).toBe(0);
+    // A card a quarter of the time leaves a quarter of truth; the strip takes its part of that.
+    const tiny = problems.find((p) => p.code === 'tiny-subject')!.severity!;
+    expect(scores.truth).toBeCloseTo(
+      10 *
+        (1 - FRAME_CHECKS.weights.card * 0.25) *
+        (1 - FRAME_CHECKS.weights.tiny * (tiny / 3)),
+      1,
+    );
+    expect(scores.pace).toBe(10);
     expect(scores.overall).toBeCloseTo(
       (scores.readability + scores.composition + scores.pace + scores.truth) /
         4,

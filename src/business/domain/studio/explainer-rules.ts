@@ -120,24 +120,29 @@ export const FRAME_CHECKS = {
   judgedOpacity: 0.6,
   /** How far past its first and last word the voice's span reaches, for a frame that must show something. */
   voicedPadMs: 500,
-  /** What each failure takes off its axis, per share of the scene it covers (a word card a third of the time is 0). */
+  /**
+   * How much of its axis's 10 each failure takes, times how much of the
+   * scene it covers and how badly (words at two-thirds of their floor in
+   * every still take half of readability's); each takes its part of what
+   * the others leave. A word card a third of the time takes all of truth.
+   */
   weights: {
-    textSmall: 1,
-    captionSmall: 0.25,
-    contrast: 1,
+    textSmall: 1.5,
+    captionSmall: 1,
+    contrast: 1.5,
     overlap: 1,
     safe: 0.5,
-    focal: 1,
+    focal: 1.2,
     noPicture: 1,
     blank: 2,
     flash: 0.5,
     gapShort: 1,
     gapLong: 1.5,
     dwell: 1,
-    firstLate: 0.3,
+    firstLate: 0.5,
     card: 3,
     person: 2,
-    tiny: 1.5,
+    tiny: 1,
   },
 } as const;
 

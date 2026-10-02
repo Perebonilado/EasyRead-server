@@ -49,6 +49,12 @@ export interface Moment {
 const SAME_MS = 120;
 /** The grid's step, for `2s`. */
 export const GRID_MS = 2000;
+/**
+ * How long the video's title takes to go once its hold is over, as the
+ * film comes up from it (the client's HANDLES.open.in): a still before
+ * then is of the title card, not of the film.
+ */
+export const TITLE_GOES_MS = 900;
 
 /** Where a moment of a scene plays in the video. */
 export const videoMsOf = (clip: FilmClip, sceneMs: number): number =>
@@ -116,6 +122,8 @@ export function momentsOf(
 ): Moment[] {
   const out: Moment[] = [];
   const take = (videoMs: number, why: Moment['why']) => {
+    if (videoMs < timeline.titleMs + (timeline.titleMs ? TITLE_GOES_MS : 0))
+      return;
     const at = clipAt(timeline, Math.round(videoMs), scenes);
     if (at) out.push({ videoMs: Math.round(videoMs), ...at, why });
   };

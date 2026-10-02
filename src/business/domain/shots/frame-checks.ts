@@ -160,6 +160,8 @@ export interface FrameProblem {
   /** What was measured, against what the rules ask. */
   value?: number;
   limit?: number;
+  /** How badly, 0 to 1: 1 a failure outright (absent, 1); less for words a little under their floor. */
+  severity?: number;
   /** For something an explainer never shows: which of the rules' bans. */
   banned?: BannedThing;
   message: string;
@@ -276,14 +278,28 @@ const LINEAR = Array.from({ length: 256 }, (_, v) => linearRgb([v, v, v])[0]);
  * A still's brightness and how much of it is ink, from a grid of about
  * 200 × 120 of its pixels: its mean relative luminance, and the share of
  * them whose luma is off the frame's median (its paper) by FRAME_CHECKS.inkLuma.
+ * Ink is the stage's own: what lies in `except` (the captions, the chip,
+ * boxes in the frame's pixels) is left out of it, so a frame of nothing
+ * but its captions is blank.
  */
-export function stillStats(image: StillImage): {
+export function stillStats(
+  image: StillImage,
+  except: { boxes: FrameBox[]; width: number; height: number } | null = null,
+): {
   luminance: number;
   ink: number;
 } {
   const stepX = Math.max(1, Math.floor(image.width / 200));
   const stepY = Math.max(1, Math.floor(image.height / 120));
+  const sx = except ? except.width / image.width : 1;
+  const sy = except ? except.height / image.height : 1;
+  const outside = (x: number, y: number) =>
+    !except?.boxes.some(
+      ([bx, by, bw, bh]) =>
+        x * sx >= bx && x * sx < bx + bw && y * sy >= by && y * sy < by + bh,
+    );
   const lumas: number[] = [];
+  const stage: number[] = [];
   let light = 0;
   for (let y = 0; y < image.height; y += stepY)
     for (let x = 0; x < image.width; x += stepX) {
@@ -291,16 +307,19 @@ export function stillStats(image: StillImage): {
       const r = image.data[at];
       const g = image.data[at + 1];
       const b = image.data[at + 2];
-      lumas.push(0.2126 * r + 0.7152 * g + 0.0722 * b);
+      const luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      lumas.push(luma);
+      if (outside(x, y)) stage.push(luma);
       light += 0.2126 * LINEAR[r] + 0.7152 * LINEAR[g] + 0.0722 * LINEAR[b];
     }
   if (!lumas.length) return { luminance: 0, ink: 0 };
-  const median = medianOf(lumas);
+  if (!stage.length) return { luminance: round3(light / lumas.length), ink: 0 };
+  const median = medianOf(stage);
   const far = FRAME_CHECKS.inkLuma * 255;
-  const ink = lumas.filter((l) => Math.abs(l - median) > far).length;
+  const ink = stage.filter((l) => Math.abs(l - median) > far).length;
   return {
     luminance: round3(light / lumas.length),
-    ink: round3(ink / lumas.length),
+    ink: round3(ink / stage.length),
   };
 }
 
@@ -667,7 +686,16 @@ function checkStill(
       item.role === 'caption' &&
       (item.opacity ?? 1) >= FRAME_CHECKS.judgedOpacity,
   );
-  const stats = image ? stillStats(image) : null;
+  // The stage's own ink: the captions and the chips laid over it are not part of its picture.
+  const stats = image
+    ? stillStats(image, {
+        boxes: report.items
+          .filter((item) => ['caption', 'chip', 'tag'].includes(item.role))
+          .map((item) => item.box),
+        width: W,
+        height: H,
+      })
+    : null;
 
   // The subject: the one the voice is on, big enough to be the picture.
   const named = subjectAt(input.scene, at);
@@ -685,6 +713,15 @@ function checkStill(
       add({
         code: 'focal-small',
         ids: [subject.id],
+        severity: round3(
+          1 -
+            (report.shape === 'tall'
+              ? height / FOCAL.tallMinHeight
+              : Math.max(
+                  height / FOCAL.wideMinHeight,
+                  area / FOCAL.wideMinArea,
+                )),
+        ),
         value: report.shape === 'tall' ? height : area,
         limit:
           report.shape === 'tall' ? FOCAL.tallMinHeight : FOCAL.wideMinArea,
@@ -694,6 +731,7 @@ function checkStill(
       add({
         code: 'tiny-subject',
         ids: [subject.id],
+        severity: round3(1 - area / FRAME_CHECKS.tinyArea),
         value: area,
         limit: FRAME_CHECKS.tinyArea,
         message: `"${subject.id}" is a strip at ${percent(area)} of the frame, not a picture`,
@@ -728,6 +766,7 @@ function checkStill(
     add({
       code: item.role === 'caption' ? 'caption-small' : 'text-small',
       ids: [item.id],
+      severity: round3(1 - item.fontPx / floor),
       value: item.fontPx,
       limit: round1(floor),
       message: `"${item.text}" is set at ${round1(item.fontPx)} px; it is read at ${round1(floor)} px or more`,
@@ -760,6 +799,7 @@ function checkStill(
       add({
         code: 'contrast-low',
         ids: [item.id],
+        severity: round3(Math.min(1, (floor - ratio) / (floor - 1))),
         value: ratio,
         limit: floor,
         message: `${item.text ? `"${item.text}"` : `"${item.id}"`} stands at ${ratio}:1 against what is behind it; ${floor}:1 is the floor`,
@@ -867,11 +907,10 @@ function checkStill(
 
 /** Flashes: neighbouring stills, outside a join, whose brightness jumps by SAFETY.flicker and straight back. */
 function flashesOf(
-  facts: StillFacts[],
+  stills: { fact: StillFacts; index: number }[],
   joins: boolean[] | undefined,
 ): FrameProblem[] {
-  const order = facts
-    .map((fact, index) => ({ fact, index }))
+  const order = stills
     .filter(({ fact, index }) => fact.luminance !== null && !joins?.[index])
     .sort((a, b) => a.fact.ms - b.fact.ms);
   const out: FrameProblem[] = [];
@@ -910,12 +949,16 @@ function checkPace(
   first: boolean,
 ): {
   problems: FrameProblem[];
+  /** The gaps between events, and how short the short ones are, summed (each 0 to 1). */
   gaps: number;
   shortGaps: number;
+  /** How long the stalls run past PACE.maxGapMs, together. */
   longMs: number;
+  /** The words judged for dwell, and how short the short ones fall, summed (each 0 to 1). */
   windows: number;
   shortWindows: number;
-  firstLate: boolean;
+  /** How late the first change is, 0 (in time) to 1. */
+  firstLate: number;
 } {
   const problems: FrameProblem[] = [];
   const add = (problem: Omit<FrameProblem, 'axis'>) =>
@@ -935,10 +978,12 @@ function checkPace(
     const gap = marks[k] - marks[k - 1];
     const closing = k === marks.length - 1;
     if (!closing && gap < PACE.minGapMs) {
-      shortGaps += 1;
+      const severity = round3(1 - gap / PACE.minGapMs);
+      shortGaps += severity;
       add({
         code: 'gap-short',
         ms: marks[k],
+        severity,
         value: gap,
         limit: PACE.minGapMs,
         message: `two cues ${seconds(gap)} apart at ${seconds(marks[k])}: one thing at a time, at least ${seconds(PACE.minGapMs)} apart`,
@@ -951,20 +996,29 @@ function checkPace(
       add({
         code: 'gap-long',
         ms: from,
+        severity: round3(
+          Math.min(1, (marks[k] - from - PACE.maxGapMs) / PACE.maxGapMs),
+        ),
         value: marks[k] - from,
         limit: PACE.maxGapMs,
         message: `nothing new for ${seconds(marks[k] - from)} from ${seconds(from)} while the voice speaks`,
       });
     }
   }
-  let firstLate = false;
+  let firstLate = 0;
   if (first) {
     const next = events.find((at) => at > 50);
     if (next === undefined || next > PACE.firstChangeMs) {
-      firstLate = true;
+      firstLate = round3(
+        Math.min(
+          1,
+          ((next ?? Infinity) - PACE.firstChangeMs) / PACE.firstChangeMs,
+        ),
+      );
       add({
         code: 'first-late',
         ms: next ?? 0,
+        severity: firstLate,
         value: next ?? scene.durationMs,
         limit: PACE.firstChangeMs,
         message: `the episode's first change comes at ${seconds(next ?? scene.durationMs)}; the hook changes something by ${seconds(PACE.firstChangeMs)}`,
@@ -979,11 +1033,13 @@ function checkPace(
   for (const one of windows) {
     const need = dwellMs(one.words);
     if (one.to - one.from >= need) continue;
-    shortWindows += 1;
+    const severity = round3(1 - (one.to - one.from) / need);
+    shortWindows += severity;
     add({
       code: 'dwell-short',
       ms: one.from,
       ids: [one.id],
+      severity,
       value: one.to - one.from,
       limit: need,
       message: `"${one.id}" (${one.words} word${one.words === 1 ? '' : 's'}) is up ${seconds(one.to - one.from)}; it needs ${seconds(need)} to be read`,
@@ -1038,9 +1094,19 @@ function checkBans(scene: SceneDto): FrameProblem[] {
   return out;
 }
 
-/** A score of 10, less each failure's weight times the share of the scene it covers. */
-const scoreOf = (penalty: number) =>
-  round1(Math.min(10, Math.max(0, 10 * (1 - penalty))));
+/**
+ * A score out of 10 from what each failure takes (its weight times how much
+ * of the scene it covers, and how badly): each takes its part of what the
+ * others leave, so two failures cost more than either and never less than 0.
+ */
+const scoreOf = (takes: number[]) =>
+  round1(
+    10 *
+      takes.reduce(
+        (left, take) => left * (1 - Math.min(1, Math.max(0, take))),
+        1,
+      ),
+  );
 
 /** Checks a scene's stills and its data against the rules, and scores it. */
 export function checkFrames(input: FrameCheckInput): FrameCheckResult {
@@ -1048,7 +1114,8 @@ export function checkFrames(input: FrameCheckInput): FrameCheckResult {
   const [v0, v1] = voicedSpan(scene);
   const pad = FRAME_CHECKS.voicedPadMs;
   const problems: FrameProblem[] = [];
-  const facts: StillFacts[] = [];
+  // Each still's facts, by the report it came from (a still with no report has none).
+  const checked: { fact: StillFacts; index: number }[] = [];
   input.reports.forEach((report, index) => {
     if (!report) return;
     const voiced = report.ms >= v0 - pad && report.ms <= v1 + pad;
@@ -1060,64 +1127,85 @@ export function checkFrames(input: FrameCheckInput): FrameCheckResult {
       voiced,
     );
     problems.push(...one.problems);
-    facts.push(one.facts);
+    checked.push({ fact: one.facts, index });
   });
-  problems.push(...flashesOf(facts, input.joins));
+  const flashes = flashesOf(checked, input.joins);
+  for (const flash of flashes) {
+    const still = checked.find((one) => one.index === flash.still);
+    if (still && !still.fact.codes.includes('flash'))
+      still.fact.codes.push('flash');
+  }
+  problems.push(...flashes);
+  const facts = checked.map((one) => one.fact);
   const pace = checkPace(scene, input.first === true);
   problems.push(...pace.problems);
   problems.push(...checkBans(scene));
 
-  // The share of the stills each failure is seen in: of those with words
-  // to read for readability, of those the voice speaks over for the rest.
-  const worded = new Set(
-    input.reports.flatMap((report) =>
-      report?.items.some(
-        (item) =>
-          isText(item) && (item.opacity ?? 1) >= FRAME_CHECKS.judgedOpacity,
-      )
-        ? [report.ms]
-        : [],
+  // How much of the scene each failure covers, and how badly: for each
+  // still, the worst of it there (1 for a failure outright, less for words
+  // a little under their floor), averaged over the stills it is judged in:
+  // those with words to read for readability, those the voice speaks over
+  // for the rest. Each axis keeps what every one of its failures leaves.
+  const worst = new Map<number, Map<FrameCode, number>>();
+  for (const problem of problems) {
+    if (problem.still === undefined) continue;
+    const seen = worst.get(problem.still) ?? new Map<FrameCode, number>();
+    seen.set(
+      problem.code,
+      Math.max(seen.get(problem.code) ?? 0, problem.severity ?? 1),
+    );
+    worst.set(problem.still, seen);
+  }
+  const worded = checked.filter(({ index }) =>
+    input.reports[index]?.items.some(
+      (item) =>
+        isText(item) && (item.opacity ?? 1) >= FRAME_CHECKS.judgedOpacity,
     ),
   );
-  const readable = facts.filter((fact) => worded.has(fact.ms));
-  const spokenOver = facts.filter(
-    (fact) => fact.ms >= v0 - pad && fact.ms <= v1 + pad,
+  const spokenOver = checked.filter(
+    ({ fact }) => fact.ms >= v0 - pad && fact.ms <= v1 + pad,
   );
-  const failing = (among: StillFacts[], codes: FrameCode[]) =>
+  const amount = (among: { index: number }[], codes: FrameCode[]) =>
     among.length
-      ? among.filter((fact) => fact.codes.some((code) => codes.includes(code)))
-          .length / among.length
+      ? among.reduce(
+          (sum, { index }) =>
+            sum +
+            Math.max(
+              0,
+              ...codes.map((code) => worst.get(index)?.get(code) ?? 0),
+            ),
+          0,
+        ) / among.length
       : 0;
-  const flashes = problems.filter((p) => p.code === 'flash').length;
   const W = FRAME_CHECKS.weights;
-  const readability = scoreOf(
-    W.textSmall * failing(readable, ['text-small']) +
-      W.captionSmall * failing(readable, ['caption-small']) +
-      W.contrast * failing(readable, ['contrast-low']) +
-      W.overlap *
-        failing(readable, ['words-overlap', 'covers-subject', 'on-caption']) +
-      W.safe * failing(readable, ['outside-safe']),
-  );
-  const composition = scoreOf(
-    W.focal * failing(spokenOver, ['focal-small']) +
-      W.noPicture * failing(spokenOver, ['no-picture']) +
-      W.blank * failing(spokenOver, ['blank']) +
-      W.flash * Math.min(1, flashes),
-  );
+  const readability = scoreOf([
+    W.textSmall * amount(worded, ['text-small']),
+    W.captionSmall * amount(worded, ['caption-small']),
+    W.contrast * amount(worded, ['contrast-low']),
+    W.overlap *
+      amount(worded, ['words-overlap', 'covers-subject', 'on-caption']),
+    W.safe * amount(worded, ['outside-safe']),
+  ]);
+  const composition = scoreOf([
+    W.focal * amount(spokenOver, ['focal-small']),
+    W.noPicture * amount(spokenOver, ['no-picture']),
+    W.blank * amount(spokenOver, ['blank']),
+    W.flash * flashes.length,
+  ]);
   const spoken = Math.max(1, v1 - v0);
-  const paceScore = scoreOf(
-    W.gapShort * (pace.gaps ? pace.shortGaps / pace.gaps : 0) +
-      W.gapLong * (pace.longMs / spoken) +
-      W.dwell * (pace.windows ? pace.shortWindows / pace.windows : 0) +
-      W.firstLate * (pace.firstLate ? 1 : 0),
-  );
+  const paceScore = scoreOf([
+    W.gapShort * (pace.gaps ? pace.shortGaps / pace.gaps : 0),
+    W.gapLong * (pace.longMs / spoken),
+    W.dwell * (pace.windows ? pace.shortWindows / pace.windows : 0),
+    W.firstLate * pace.firstLate,
+  ]);
   const cardShare = cardShareOf(scene);
   const personShare = personShareOf(scene);
-  const truth = scoreOf(
-    W.card * cardShare +
-      W.person * personShare +
-      W.tiny * failing(spokenOver, ['tiny-subject']),
-  );
+  const truth = scoreOf([
+    W.card * cardShare,
+    W.person * personShare,
+    W.tiny * amount(spokenOver, ['tiny-subject']),
+  ]);
   const axes = { readability, composition, pace: paceScore, truth };
   const overall = round1(
     FRAME_AXES.reduce((sum, axis) => sum + axes[axis], 0) / FRAME_AXES.length,

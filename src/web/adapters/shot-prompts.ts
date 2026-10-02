@@ -15,12 +15,16 @@ import { RULES_PROMPT } from '../../business/domain/studio/explainer-rules';
 import {
   CHART_KINDS,
   CHART_USES,
+  DRAWN_SETS,
   JOIN_USES,
   LIFE_USES,
   MOVE_USES,
   RECIPE_USES,
+  SET_CLIMATES,
   SET_KINDS,
   SET_LANDS,
+  SET_PLACE_USES,
+  SET_STATES,
   SET_TIMES,
   SET_TOWNS,
   SET_USES,
@@ -49,6 +53,30 @@ export const KIT_GUIDE = [
   '  - A vehicle carries what the line says moves (goods, people, an army), of its era.',
   '  - Each actor: id (your name for it), kit, place (a place of the list on the map, a part of the set, or left, centre, right, foreground, background), side, its settings as fields (pose, kind, count, era, who, dress, facing, wagons: only those its kit has), and moves, each on its own exact words, with to (a place, a part, or left, right, off).',
   '  - For example: {"id": "marchers", "kit": "people.crowd", "place": "place:<a place>", "side": "<a side>", "pose": "protest", "count": <the number said>, "moves": [{"move": "enter", "on": "<exact words>"}]}',
+  '  - A building (kit building, its kind a field) stands on a drawn set or the map as a kind of building of its era and climate, never a named one: a factory for industry, a hall for a legislature in general.',
+  '  - A machine (machine.turbofan, or machine with its kind) is a shot\u2019s subject on a display set: name its parts as actor:<its id>.<part> (actor:engine.combustor) to label, spotlight or push to them; a flow on actor:<its id>.core-flow (text "compress": the air squeezed and heated) or .bypass-flow; run on the machine starts it.',
+  '  - An object or a document (kits object and document, their kind a field) is a prop: on a display when the line is about the thing itself, in a drawn set\u2019s scene otherwise. A document shows no words of its own.',
+].join('\n');
+
+/**
+ * How the board stands the illustrated look's characters (WP17; tech §11,
+ * after Richard's cartoon world-history reference): groups as era-dressed
+ * characters in their side's colour, dressed only as the research's look
+ * notes say; a named person as their labelled character; a speech bubble
+ * and eyes on the map, sparingly. Never violence, never caricature.
+ */
+export const CHARACTER_GUIDE = [
+  'Actors: the kit’s cartoon characters listed with the scene, standing on its set or on the map where their people are; at most four a shot, where the line is about people.',
+  '  - A people, an army, a crowd’s front: character.group (two to six, each their own) in their side’s colour (side: a side’s name from the list), dressed and looking as the research’s look notes say (dress: their words, "Roman legionaries, red tunics, banded armour", with their skin or hair only when the notes give it), in their era (era). A count only as the list or the line gives it.',
+  '  - One unnamed role the line speaks of (a soldier, a merchant, a monk): character.person with its role. A named person of the list: character.person with name (the person’s name as the list writes it): drawn from their look notes and labelled with their name the first time; their portrait too when they have one.',
+  '  - Dress and looks only from the look notes and the topic: never a culture’s dress the research does not name, never a skin or a face taken from a place or a people’s name (with no notes, say none: code gives a varied mix), no religious symbol for a people, no caricature. Weapons only as costume: no one is ever shown hurt.',
+  '  - Never the audience, a viewer, a student or a host.',
+  '  - A character’s face (expression: neutral, happy, surprised, angry, smug, worried, thinking) and what they hold (prop) only where the line gives a reason; a move may turn the face at a word (move: surprised, angry, happy, worried, neutral).',
+  '  - Each actor: id (your name for it), kit, place (a place of the list on the map, a part of the set, or left, centre, right, foreground, background), side, its settings as fields (role, era, dress, name, count, pose, expression, prop, facing: only those its kit has), and moves, each on its own exact words, with to (a place, a part, or left, right, off).',
+  '  - For example: {"id": "legion", "kit": "character.group", "place": "place:<a place>", "side": "<a side>", "dress": "<the look notes’ words>", "era": "ancient", "count": 4, "pose": "marching", "moves": [{"move": "walk", "on": "<exact words>", "to": "place:<another>"}]}',
+  'Humour, sparingly (an illustrated show only):',
+  '  - say: a speech bubble of one to six words from a character on the stage (target: its actor id; text: the words), for a short aside the line invites ("Wait!", "Not again."): at most one in twenty seconds, never the voice’s own words, never a fact.',
+  '  - eyes: a region of the map made a character by a pair of eyes (the shot’s "eyes": at a region, to the region or place it glances at, face calm, angry, worried or surprised), for regions eyeing each other; at most two a shot, a few a scene.',
 ].join('\n');
 
 /** A chart's fields, by kind: the scene writer's own names, and how its parts are named. */
@@ -83,22 +111,46 @@ const DECIDE = [
   '- many people (a crowd, workers, voters, migrants): the kit’s silhouettes in their side’s colour, on the map at their place or on a drawn set, counted only by a number the list or the line gives.',
   '- what moves people or goods (a train, a ship, a lorry): the kit’s vehicle of its era, travelling on the map or across a drawn set.',
   '- a scene (a moment of people in a place), a feeling, an atmosphere: the place on the map when the line names one the list gives; else a drawn set of a kind of place (a coast at dusk, a city at night), never a named one, with life; or the shot before carried on with a slow push.',
+  '- how a machine works: a display set with the kit\u2019s machine as the subject (a jet engine cut open, gears, a pump), its parts labelled one at a time on the words that name them, a flow along its path, the camera pushing to the part the line asks about.',
+  '- a thing or a paper the line is about (coins, an oil barrel, a ballot, a treaty): the kit\u2019s object or document, big, on a display.',
+  '- time passing in a place (night falling, a town waking): the drawn set carried on, its light changing on the words (becomes).',
 ].join('\n');
 
-/** How the plan is written. */
+/** How the plan is written: the editorial look's (the illustrated one's, howFor). */
 const HOW = [
   'How to write the plan:',
   '- Shots in the order of the words. A shot’s "on" is the exact words of the narration it starts on, two to five of them, copied exactly; the first shot starts on the first words.',
   '- A shot lasts while its set stays: inside it, information and camera moves come on their own exact words ("on", and "until" when they leave). A new shot only for a new set; at most eight shots a minute.',
   '- Each shot: one set, up to four information items and two camera moves, life only for what the place really has, and one subject ("focal"): a name of the list, a part of its chart, or "set" for the whole chart or map.',
   '- Names only from the list, written as it writes them (place:…, region:…, number:…); a chart’s own parts as part:<its words>. Never a place, a person, a number, a date or a picture the list does not give.',
+  '- Something new every few words, on the words that name it: never more than about eight words of the voice without a new change (a pin, a fill, a label, a mark, a count, a move to what is named). When a shot has nothing more of what the voice is saying to show, cut to a new shot of it: the map on the place or the region it names, a timeline or a calendar for its dates, a quote for someone’s own words. Never hold one picture while the voice talks about something else.',
   '- One change at a time: each information item on its own words, three or four words after the one before; never several on the same words.',
+  '- Fill a region on the words that first name it (by its name, as "northern" for the North, or as the side of the map it is on), never later.',
+  '- A counter only for a number its own line says, from the list: a number the voice never says is never counted, and a counter comes once, never again.',
+  '- "until" only on what lets go (a label, a pin, a mark, a spotlight, a fill as a highlight, a flow, an ask); never on a count, a grow, a draw, a morph, a strike, a stamp or an enter, which stay.',
+  '- Words on the stage are for the viewer: a source says where the numbers come from as the claim’s source does, never a claim’s id ("c7"); an event of a timeline is named by what happened, never by its own date; never a field’s name ("label", "number") as words.',
   '- At most eight words on the stage in a shot, one to three to a label. A label names what it is on (a place’s name, a year, a part’s name), always pinned to it (its target); it never repeats what the voice says. Code writes every number from the list.',
   `- ${KIT_GUIDE}`,
   '- join: how the shot hands over to the next: continue for the same set, cut for a new one, dissolve when time passes, zoom-through into a pin or a part, dip after a grave fact.',
   '- Never a card of words standing in for a picture: no word cards, no keyword cards, no names on blank paper. Never a named person drawn (only their portrait or a trace of them), a cartoon or stock figure for a real group (groups are the kit’s silhouettes), the audience or a viewer, a place the list does not give, or a drawn set named after a real place.',
   '- Care: violence is never shown (a death is a pin, a number and a silence); no caricature of anyone.',
 ].join('\n');
+
+/** The editorial rule of people, and the illustrated look's in its place. */
+const NEVER_EDITORIAL =
+  '- Never a card of words standing in for a picture: no word cards, no keyword cards, no names on blank paper. Never a named person drawn (only their portrait or a trace of them), a cartoon or stock figure for a real group (groups are the kit’s silhouettes), the audience or a viewer, a place the list does not give, or a drawn set named after a real place.';
+const NEVER_ILLUSTRATED =
+  '- Never a card of words standing in for a picture: no word cards, no keyword cards, no names on blank paper. Never a stock figure: groups are the kit’s characters dressed as their look notes say; a named person only as their labelled character or their portrait; never the audience or a viewer, a place the list does not give, or a drawn set named after a real place.';
+
+/** How the plan is written, in the show's look: its kit's guide and its rule of people. */
+function howFor(look: 'editorial' | 'illustrated'): string {
+  return look === 'illustrated'
+    ? HOW.replace(`- ${KIT_GUIDE}`, `- ${CHARACTER_GUIDE}`).replace(
+        NEVER_EDITORIAL,
+        NEVER_ILLUSTRATED,
+      )
+    : HOW;
+}
 
 /** Two worked plans: a place shot and a mechanism shot (research §5A and §5B). */
 const EXAMPLES = [
@@ -164,57 +216,78 @@ const EXAMPLES = [
       shots: [
         {
           on: 'The air is packed',
-          set: {
-            kind: 'chart',
-            chart: {
-              kind: 'flow',
-              flow: {
-                direction: 'across',
-                nodes: [
-                  { label: 'Fan', kind: 'start' },
-                  { label: 'Compressor', kind: 'step' },
-                  { label: 'Combustor', kind: 'step' },
-                  { label: 'Turbine', kind: 'step' },
-                  { label: 'Nozzle', kind: 'end' },
-                ],
-                edges: null,
-              },
+          set: { kind: 'set', place: 'display' },
+          actors: [
+            {
+              id: 'engine',
+              kit: 'machine.turbofan',
+              place: 'centre',
+              moves: [],
             },
-          },
+          ],
           info: [
+            { recipe: 'run', target: 'actor:engine', on: 'The air is packed' },
             {
               recipe: 'flow',
-              target: 'part:Fan',
-              to: 'part:Compressor',
+              target: 'actor:engine.core-flow',
+              text: 'compress',
               on: 'packed tight and hot',
             },
             {
+              recipe: 'label',
+              target: 'actor:engine.compressor',
+              on: 'tight and hot',
+            },
+            {
               recipe: 'spotlight',
-              target: 'part:Combustor',
+              target: 'actor:engine.combustor',
               on: 'What lights it',
             },
-            { recipe: 'ask', target: 'part:Combustor', on: 'What lights it' },
+            {
+              recipe: 'label',
+              target: 'actor:engine.combustor',
+              on: 'lights it',
+            },
+            {
+              recipe: 'ask',
+              target: 'actor:engine.combustor',
+              on: 'What lights it',
+            },
           ],
           camera: [
             { move: 'establish', on: 'The air is packed' },
             {
               move: 'push',
-              target: 'part:Combustor',
+              target: 'actor:engine.combustor',
               amount: 'medium',
               on: 'What lights it',
             },
           ],
           life: [],
           join: 'continue',
-          focal: 'part:Combustor',
+          focal: 'actor:engine',
         },
       ],
     }),
   ].join('\n'),
 ].join('\n\n');
 
-/** The shot board's instructions: the same for every scene, the scene's own in its parts. */
-export function shotBoardPrompt(): string {
+/**
+ * The shot board's instructions: the same for every scene of a show's
+ * look, the scene's own in its parts. An editorial show is never offered
+ * a speech bubble or eyes on the map; an illustrated one's people are its
+ * characters, not silhouettes.
+ */
+export function shotBoardPrompt(
+  look: 'editorial' | 'illustrated' = 'editorial',
+): string {
+  const illustrated = look === 'illustrated';
+  const recipes = Object.fromEntries(
+    Object.entries(RECIPE_USES).filter(([k]) => illustrated || k !== 'say'),
+  );
+  const life = Object.fromEntries(
+    Object.entries(LIFE_USES).filter(([k]) => illustrated || k !== 'eyes'),
+  );
   return [
     [
       'You are the director of an editorial explainer film: the kind of picture a great documentary channel would make, for every audience.',
@@ -226,12 +299,19 @@ export function shotBoardPrompt(): string {
     uses(
       'The sets (one a shot):',
       Object.fromEntries(
-        SET_KINDS.filter((k) => k !== 'plain').map((k) => [k, SET_USES[k]]),
+        SET_KINDS.filter(
+          (k) => k !== 'plain' && (DRAWN_SETS || k !== 'set'),
+        ).map((k) => [k, SET_USES[k]]),
       ),
     ),
-    `A drawn set’s settings: land ${quoted(SET_LANDS)}; time ${quoted(SET_TIMES)}; weather ${quoted(SET_WEATHERS)}; town ${quoted(SET_TOWNS)}; era (a period in words, never a place).`,
+    [
+      `A drawn set’s settings: land ${quoted(SET_LANDS)}; time ${quoted(SET_TIMES)}; weather ${quoted(SET_WEATHERS)}; town ${quoted(SET_TOWNS)}; climate ${quoted(SET_CLIMATES)} or null (never a country); era (a period in words, never a place); place, what stands there:`,
+      ...Object.entries(SET_PLACE_USES).map(([k, v]) => `- ${k}: ${v}`),
+      `becomes ${quoted(SET_STATES)} or null, with becomesOn its exact words: the light changing while the shot is on (the sun setting, the lights coming on).`,
+      'A drawn set is a kind of place, never a named one: no name of a real place, building or event on it, and its words never say it is one. illustration: true only when the set stands for a real event the line tells (a real queue to vote, a real strike), so it carries an "Illustration" tag; null for a mood or a kind of place.',
+    ].join('\n'),
     `The charts (${CHART_KINDS.length}):\n${CHART_GUIDE}`,
-    uses('The information recipes (each on its exact words):', RECIPE_USES),
+    uses('The information recipes (each on its exact words):', recipes),
     uses(
       'The camera’s moves (amount for a push or a pull: "small", "medium" or "large"):',
       MOVE_USES,
@@ -239,11 +319,18 @@ export function shotBoardPrompt(): string {
     uses('The joins:', JOIN_USES),
     uses(
       'Life (quiet, never over a label; only what the place really has):',
-      LIFE_USES,
+      life,
     ),
-    DECIDE,
-    HOW,
+    illustrated
+      ? DECIDE.replace(
+          '- many people (a crowd, workers, voters, migrants): the kit’s silhouettes in their side’s colour, on the map at their place or on a drawn set, counted only by a number the list or the line gives.',
+          '- many people (a people, an army, workers, migrants): the kit’s characters dressed for their era as the look notes say, in their side’s colour, on the map at their place or on a drawn set; a named person as their labelled character.',
+        )
+      : DECIDE,
+    howFor(look),
     EXAMPLES,
     'Answer with the plan only.',
-  ].join('\n\n');
+  ]
+    .filter(Boolean)
+    .join('\n\n');
 }

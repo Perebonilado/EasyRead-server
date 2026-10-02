@@ -28,6 +28,7 @@ import type { TimedBeat } from '../scene-timing';
 import type { LearningStage } from '../scene-stage';
 import type { ExplainerSheet } from '../studio/studio';
 import type { EditorWorld } from '../studio/studio-editor';
+import type { KitLook } from '../kit/style';
 import { buildShots } from './shot-build';
 import { checkTimed, mendTimed } from './shot-check-timed';
 import type { ShotMapSet } from './shot-map';
@@ -52,6 +53,21 @@ export interface ShotsInput {
   first: boolean;
   /** The seed of everything seeded in it: the scene's own id. */
   seed: string;
+  /** How the show draws its people (tech §11): silhouettes or characters. Editorial when absent. */
+  look?: KitLook;
+  /** The named characters the episode's scenes before this one showed: each is labelled once an episode. */
+  named?: string[];
+}
+
+/** The named characters a scene's plan shows (a person of its list, as the board's answer was mended): those its build labels. */
+export function namedIn(plan: ShotPlan | null | undefined): string[] {
+  const names = (plan?.shots ?? []).flatMap((shot) =>
+    (shot.actors ?? []).flatMap((actor) => {
+      const name = actor.params?.name;
+      return typeof name === 'string' && name ? [name] : [];
+    }),
+  );
+  return [...new Set(names)];
 }
 
 /** A shots sheet's make: its plan and the show's world, or null for a sheet of today's storyboard. */
@@ -60,6 +76,9 @@ export function shotsInputOf(
   world: Pick<EditorWorld, 'palette' | 'held' | 'base'> | null | undefined,
   first: boolean,
   seed: string,
+  look?: KitLook | null,
+  /** The named characters the episode's scenes before it showed (namedIn of each). */
+  named?: readonly string[],
 ): ShotsInput | null {
   if (sheet.engine !== 'shots' || !sheet.shots) return null;
   return {
@@ -78,6 +97,8 @@ export function shotsInputOf(
       : null,
     first,
     seed,
+    ...(look ? { look } : {}),
+    ...(named?.length ? { named: [...new Set(named)] } : {}),
   };
 }
 
@@ -156,6 +177,8 @@ export function composeShotScene(
     theme: made.theme,
     map: made.map,
     seed: input.seed,
+    ...(input.look ? { look: input.look } : {}),
+    ...(input.named?.length ? { named: input.named } : {}),
   });
   const notes = [...built.notes];
   const timed = timeShots(built.shots, beats, durationMs, { notes });
@@ -165,7 +188,11 @@ export function composeShotScene(
       ? [[beat.startMs, beats[k + 1]?.startMs ?? durationMs]]
       : [],
   );
-  const options = { first: input.first, holds };
+  // The pace is held over the voice, its first word to its last.
+  const voice: [number, number] = beats.length
+    ? [beats[0].startMs, beats[beats.length - 1].endMs]
+    : [0, durationMs];
+  const options = { first: input.first, holds, voice };
   const mended = mendTimed(timed, durationMs, options);
   notes.push(...mended.mended);
   const shots = mended.shots;

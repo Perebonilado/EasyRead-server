@@ -264,6 +264,8 @@ export interface StudioBrief {
   voicePace?: number;
   /** An explainer's look (scene-themes); absent, chosen by code (studio-look's themeFor). */
   look?: ThemeId;
+  /** How an explainer draws its people: portraits and silhouettes, or cartoon characters; absent, chosen by code with its world (studio-look's lookStyleFor). */
+  lookStyle?: 'editorial' | 'illustrated';
   /**
    * An explainer's host (studio-host), on or off, as the maker said;
    * absent, on for children and off for grown-ups.
@@ -282,6 +284,7 @@ export const BRIEF_CONTROLS = [
   'pace',
   'style',
   'look',
+  'lookStyle',
 ] as const;
 
 export const EMPTY_BRIEF: StudioBrief = {
@@ -405,6 +408,10 @@ export function briefOf(
   const look = has('look')
     ? (oneOf(THEME_IDS)(said.look) ?? base.look)
     : base.look;
+  const lookStyle = has('lookStyle')
+    ? (oneOf(['editorial', 'illustrated'] as const)(said.lookStyle) ??
+      base.lookStyle)
+    : base.lookStyle;
   const host =
     has('host') && typeof said.host === 'boolean' ? said.host : base.host;
   const shape = has('shape')
@@ -422,6 +429,7 @@ export function briefOf(
     ...(style ? { style } : {}),
     ...(voicePace && voicePace !== 1 ? { voicePace } : {}),
     ...(look ? { look } : {}),
+    ...(lookStyle ? { lookStyle } : {}),
     ...(typeof host === 'boolean' ? { host } : {}),
     // Wide is every film's unless the maker chose otherwise: not said.
     ...(shape && shape !== 'wide' ? { shape } : {}),

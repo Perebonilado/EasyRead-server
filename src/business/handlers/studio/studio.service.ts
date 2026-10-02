@@ -11,7 +11,11 @@ import {
 } from '../../domain/studio/studio-story';
 import { narratorRuleOf } from '../../domain/studio/studio-narrator';
 import { heardBrief } from '../../domain/studio/studio-heard';
-import { lookHeard, showTheme } from '../../domain/studio/studio-look';
+import {
+  lookHeard,
+  showLookStyle,
+  showTheme,
+} from '../../domain/studio/studio-look';
 import { audienceChips, whoHeard } from '../../domain/studio/studio-audience';
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { randomBytes, randomUUID } from 'node:crypto';
@@ -219,6 +223,16 @@ const themeOfShow = (show: StudioShowRecord) => {
   return theme ? { theme } : {};
 };
 
+/** How an explainer draws its people, for its show's Style control; nothing for a story. */
+const lookStyleOfShow = (show: StudioShowRecord) => {
+  const lookStyle = showLookStyle(
+    show.brief,
+    show.editor?.world ?? null,
+    show.bible,
+  );
+  return lookStyle ? { lookStyle } : {};
+};
+
 /** A scene the shots engine draws: its map is shaded from the terrain, whose sources the description credits. */
 const drawnByShots = (scene: StudioSceneRecord): boolean =>
   scene.sheet?.kind === 'explainer' && scene.sheet.engine === 'shots';
@@ -357,6 +371,7 @@ export class StudioService {
       briefMissing: briefMissing(show.brief, usesEditor(show)),
       bible,
       ...themeOfShow(show),
+      ...lookStyleOfShow(show),
       // Each episode once: a twin in the other shape is on its episode's
       // film (its Wide/Vertical switch), never an episode of its own.
       episodes: episodes

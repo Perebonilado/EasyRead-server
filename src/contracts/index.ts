@@ -2289,7 +2289,9 @@ export type ShotInfoRecipe =
   | 'mark'
   | 'enter'
   | 'exit'
-  | 'ask';
+  | 'ask'
+  /** A speech bubble of a few words from an actor's head (the illustrated look's, sparingly). */
+  | 'say';
 
 /** How a shot hands over to the next. */
 export type ShotJoin =
@@ -2320,7 +2322,9 @@ export type ShotLifeEffect =
   | 'drift'
   | 'fire'
   | 'sparks'
-  | 'splash';
+  | 'splash'
+  /** A pair of eyes on a region of the map, glancing and blinking: a country made a character (the illustrated look's). */
+  | 'eyes';
 
 /** A scene's shots, the assets they draw on, the look, and the sound effects their motion makes. */
 export interface ShotSceneDto {
@@ -2354,6 +2358,12 @@ export interface ShotLookDto {
   grain: number;
   /** The show's motion personality (research §3.6). */
   motion: 'springy' | 'mechanical' | 'stepped';
+  /**
+   * How its people are drawn (tech §11): 'editorial', verified portraits
+   * and silhouettes; 'illustrated', era-dressed cartoon characters, with
+   * speech bubbles and eyes on the map. Absent is editorial.
+   */
+  style?: 'editorial' | 'illustrated';
 }
 
 export type ShotAssetDto =
@@ -2374,6 +2384,30 @@ export interface ShotSvgAssetDto {
   rig?: ShotRigDto;
   /** What the camera frames by default. Absent, the whole box. */
   focal?: ShotBox;
+  /** A code-drawn set's light and weather over time (kit/sets): how its parts look in each state it can be in. */
+  scenery?: ShotSceneryDto;
+}
+
+/**
+ * A code-drawn set's light and weather (kit/sets): how each part that
+ * changes looks in each state the set can be in (day, dusk, night, dawn,
+ * lights-on), mixed from one to the next as the shot's set changes
+ * (ShotSetDto `changes`); and the parts that drift on their own.
+ */
+export interface ShotSceneryDto {
+  /** The state it is drawn in, as it opens. */
+  state: string;
+  /**
+   * Each state's look, by part: a fill (a shape's, or a gradient stop's
+   * colour), mixed in OKLab; a turn about the part's pivot in degrees
+   * (the sun along its arc, its pivot the arc's middle); an opacity (the
+   * stars, a glow); and for a part whose children are lights (a town's
+   * windows), the share of them lit, 0 to 1, lit one by one in an order
+   * of their own.
+   */
+  states: Record<string, Record<string, { fill?: string; rotate?: number; opacity?: number; lit?: number }>>;
+  /** Parts that drift on their own, in the set's units a second (clouds across, rain down), each round again within `wrap` units. */
+  drift?: Record<string, { dx?: number; dy?: number; wrap?: number }>;
 }
 
 /** A part of a drawn asset that recipes and the camera can address. */
@@ -2383,7 +2417,11 @@ export interface ShotPartDto {
   pivot?: [number, number];
   /** A route's or a stroke's path, in the asset's units, for draw, flow and transfer. */
   path?: string;
-  /** The number it shows, for count and grow. */
+  /**
+   * The number it shows, for count and grow; a machine's turning part's
+   * ratio to its shaft (run; negative turns the other way); a flow path's
+   * share at which its squeeze ends (flow "compress").
+   */
   value?: number;
   /** A colour role from the look: 'ink', 'muted', 'accent', 'held', or a side's name. */
   role?: string;
@@ -2394,6 +2432,12 @@ export interface ShotPartDto {
    * part is there from the shot's start.
    */
   later?: boolean;
+  /**
+   * How far it moves with the camera, for parallax: 1 (or absent) on the
+   * set's own plane, less for what is farther (a far range of hills 0.3,
+   * the sky 0, which stays), more for what is nearer.
+   */
+  depth?: number;
 }
 
 /** A kit piece's states (each a pose per part) and the moves it can make. */
@@ -2421,6 +2465,22 @@ export interface ShotRigDto {
    * the way it faces as drawn.
    */
   vehicle?: { goes: 'road' | 'rail' | 'water' | 'air' | 'up'; facing: 1 | -1 };
+  /**
+   * A machine (kit/machines): its shaft's turns a second at full speed,
+   * and how each moving part goes with it, for the `run` recipe. A `spin`
+   * turns about its pivot at its part's `value` turns to the shaft's; a
+   * `belt` runs its dashes along its path, `value` units a turn; a
+   * `slide` goes back and forth along `axis` by `stroke` units; a `rock`
+   * turns to and fro by `stroke` degrees; a `press` comes down `stroke`
+   * units once a turn. `phase` (radians) sets where in its turn it starts.
+   */
+  machine?: {
+    turns: number;
+    parts: Record<
+      string,
+      { move: 'spin' | 'belt' | 'slide' | 'rock' | 'press'; axis?: [number, number]; stroke?: number; phase?: number }
+    >;
+  };
 }
 
 /** An archive photo or a portrait, from the picture desk. */
@@ -2506,7 +2566,12 @@ export type ShotSetDto =
       treatment?: 'natural' | 'duotone' | 'halftone' | 'cutout';
     }
   | { kind: 'document'; asset: string }
-  | { kind: 'set'; asset: string }
+  | {
+      kind: 'set';
+      asset: string;
+      /** A code-drawn set's changes of state while the shot is on (the sun setting, the lights coming on): each from its moment, over its length. */
+      changes?: { state: string; atMs: number; durMs: number }[];
+    }
   | { kind: 'chart'; asset: string }
   | { kind: 'plain' };
 
@@ -2574,6 +2639,10 @@ export interface ShotLifeDto {
   at?: ShotTargetDto;
   /** A Lottie asset's id, for the effects drawn from one. */
   asset?: string;
+  /** What it turns toward: the place or region a pair of eyes glances at. Absent, they look about. */
+  to?: ShotTargetDto;
+  /** A pair of eyes' brows: calm, angry, worried or surprised. Absent, calm. */
+  face?: 'calm' | 'angry' | 'worried' | 'surprised';
 }
 
 export interface ShotCameraDto {
@@ -3458,6 +3527,8 @@ export interface StudioBriefDto {
   style?: 'picture-book' | 'bold-cartoon' | 'sitcom' | 'adventure' | 'cosy';
   /** An explainer's look, as the maker chose it; absent, chosen by code from the subject and the audience. */
   look?: SceneThemeName;
+  /** How an explainer draws its people, as the maker chose it: portraits and silhouettes, or cartoon characters; absent, chosen by code. */
+  lookStyle?: 'editorial' | 'illustrated';
   /** The document given in the chat, and the pages last chosen of it; absent without one. */
   document?: StudioBriefDocumentDto;
   /** An explainer's host, on or off, as the maker said; absent, on for children and off for grown-ups. */
@@ -4093,6 +4164,8 @@ export interface StudioShowDto {
   bible: StudioBibleDto | null;
   /** The look an explainer plays in: the maker's, or the one code chose; absent for a story. */
   theme?: SceneThemeName;
+  /** How an explainer draws its people: the maker's choice, or the one code chose with its world; absent for a story. */
+  lookStyle?: 'editorial' | 'illustrated';
   episodes: {
     id: string;
     number: number;

@@ -25,7 +25,7 @@ import type {
   ShotSetDto,
   ShotTargetDto,
 } from '../../../contracts';
-import { PACE } from '../studio/explainer-rules';
+import { PACE, dwellMs } from '../studio/explainer-rules';
 
 // ── The shots before their times ──────────────────────────────────────────
 
@@ -70,6 +70,8 @@ export interface UntimedShot {
   join: ShotJoin;
   chip?: ShotCreditDto;
   illustration?: boolean;
+  /** A drawn set's changes of light (kit/sets), on their words: each runs its own length from its word. */
+  changes?: { state: string; on: string; durMs: number }[];
 }
 
 // ── How long things take ──────────────────────────────────────────────────
@@ -98,6 +100,7 @@ export const RECIPE_MS: Readonly<Record<ShotInfoRecipe, number>> = {
   enter: 500,
   exit: 400,
   ask: 600,
+  say: 350,
 };
 
 /**
@@ -173,6 +176,9 @@ export const MIN_SHOT_MS = PACE.minGapMs;
  * otherwise gather every label it ever showed. What builds the picture
  * (a pin, a fill, a line drawn, a part brought on) stays for the run.
  */
+/** How much longer than its reading time a speech bubble stays: the joke lands, then it goes. */
+export const SAY_LINGER_MS = 600;
+
 export const LEAVES_WITH_SHOT: ReadonlySet<ShotInfoRecipe> =
   new Set<ShotInfoRecipe>(['label', 'spotlight', 'mark', 'flow', 'ask']);
 
@@ -440,11 +446,28 @@ export function timeShots(
             );
           else notes.push(`${where}: "${until}" is not said; ${item.id} stays`);
         }
+        // A speech bubble stays as long as its words take to read, a little more, then goes.
+        if (untilMs === undefined && item.recipe === 'say')
+          untilMs = Math.round(
+            Math.min(
+              endMs,
+              timed.atMs +
+                timed.durMs +
+                dwellMs(
+                  (item.text ?? '').split(/\s+/u).filter(Boolean).length,
+                ) +
+                SAY_LINGER_MS,
+            ),
+          );
+        // A stream (a machine's air going through it) runs on with its shot, as its machine does.
+        const stream =
+          item.recipe === 'flow' &&
+          /^(compress|stream)$/i.test((item.text ?? '').trim());
         if (untilMs === undefined && LEAVES_WITH_SHOT.has(item.recipe))
           untilMs = Math.round(
             item.recipe === 'mark' || item.recipe === 'spotlight'
               ? Math.min(endMs, timed.atMs + timed.durMs + CUE_HOLD_MS)
-              : item.recipe === 'flow'
+              : item.recipe === 'flow' && !stream
                 ? Math.min(endMs, timed.atMs + timed.durMs + CUE_HOLD_MS / 3)
                 : endMs,
           );
@@ -521,11 +544,26 @@ export function timeShots(
         .sort((a, b) => a.atMs - b.atMs),
     }));
 
+    // A drawn set's change of light starts on its word and runs its own
+    // length (a sunset is slow, and carries on into the shots after).
+    const set =
+      one.shot.set.kind === 'set' && one.shot.changes?.length
+        ? {
+            ...one.shot.set,
+            changes: one.shot.changes.map((change) => ({
+              state: change.state,
+              atMs: Math.round(
+                clamp(wordMs(change.on) - SETTLE_LEAD_MS, startMs, endMs),
+              ),
+              durMs: Math.round(change.durMs),
+            })),
+          }
+        : one.shot.set;
     const shot: ShotDto = {
       id: one.shot.id,
       startMs,
       endMs,
-      set: one.shot.set,
+      set,
       actors,
       info,
       life: one.shot.life,
@@ -573,6 +611,20 @@ export function retimeShots(
       ...shot,
       startMs,
       endMs,
+      // A drawn set's changes keep their start on their word.
+      set:
+        shot.set.kind === 'set' && shot.set.changes
+          ? {
+              ...shot.set,
+              changes: shot.set.changes.map((change) => ({
+                ...change,
+                atMs: inside(
+                  map(change.atMs + SETTLE_LEAD_MS) - SETTLE_LEAD_MS,
+                  0,
+                ),
+              })),
+            }
+          : shot.set,
       info: shot.info.map((item) => {
         // A process keeps its start on its word; a change its settling.
         const atMs = STARTS_ON_WORD.has(item.recipe)

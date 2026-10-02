@@ -103,9 +103,66 @@ export function shortLabel(raw: unknown, most: number): string {
     : clip(raw, most);
 }
 
-/** A label's words, or null when it has none. */
-const label = (raw: unknown, most: number): string | null =>
-  clip(raw, most) || null;
+/**
+ * Words that name a part's role, never what it shows: a label reading
+ * "label" or "number" is the board's word for the field leaking onto the
+ * stage.
+ */
+const ROLE_WORDS = new Set([
+  'label',
+  'labels',
+  'number',
+  'numbers',
+  'title',
+  'name',
+  'text',
+  'part',
+  'caption',
+  'value',
+  'unit',
+  'heading',
+  'tag',
+  'item',
+  'items',
+  'side',
+  'step',
+]);
+
+/** Whether words are only the name of a role ("label", "number"): no words at all to a viewer. */
+export const roleOnly = (text: string): boolean => {
+  const keys = keysOf(text);
+  return keys.length > 0 && keys.every((k) => ROLE_WORDS.has(k));
+};
+
+/** A label's words, or null when it has none (or only a role's name). */
+const label = (raw: unknown, most: number): string | null => {
+  const words = clip(raw, most);
+  return words && !roleOnly(words) ? words : null;
+};
+
+/** A claim's id given where words belong ("c42", "claim:c7, c9"): never shown. */
+export const isClaimId = (text: string): boolean =>
+  /^\s*(?:(?:claim\s*:?\s*)?c\d{1,4}\s*[,;&]?\s*(?:and\s+)?)+$/iu.test(text);
+
+/** Whether a name is only a date said again ("1945" for 1945's event): a date never names itself. */
+const sameDate = (name: string, when: string) =>
+  keysOf(name).join(' ') === keysOf(when).join(' ');
+
+/** A date by itself ("1957", "early 1960", "12 December 1959"): words that name no thing. */
+const DATE_TEXT =
+  /^(?:(?:early|mid|late)\s+)?(?:\d{1,2}\s+)?(?:(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+)?(?:1\d{3}|20\d{2})s?$/iu;
+export const dateOnly = (text: string): boolean =>
+  DATE_TEXT.test(text.replace(/[,.]/gu, '').replace(/\s+/gu, ' ').trim());
+
+/** Dates and nothing else ("1957 and 1958", "1957–58"): words that name no thing. */
+const datesOnly = (text: string): boolean => {
+  const parts = text
+    .split(/\s*(?:,|&|\band\b|\bto\b|–|—|-)\s*/iu)
+    .filter(Boolean);
+  return (
+    parts.length > 0 && parts.every((p) => dateOnly(p) || /^\d{2}$/u.test(p))
+  );
+};
 
 /** A number as a model writes it: 45, "45", "1,500"; null for none. */
 function looseNumber(raw: unknown): number | string | null {
@@ -143,10 +200,15 @@ export function chartOf(raw: unknown): PlanChart | null {
   const said = record(raw);
   const kind = chartKindOf(said.kind);
   if (!kind) return null;
-  const own = said[kind];
+  // The kind's own field as the board writes it ("counter": {…}); a plan's
+  // chart as stored ({kind, spec}); else the fields at the top.
+  const own =
+    said[kind] ?? (record(said.spec) === said.spec ? said.spec : null);
   const fields = own === undefined || own === null ? said : own;
   const spec = specOf(kind, fields);
-  const source = line(said.source ?? record(fields).source, 90);
+  // A source is where the numbers come from, in words: never a claim's id.
+  const given = line(said.source ?? record(fields).source, 90);
+  const source = isClaimId(given) ? '' : given;
   const colour = line(said.colour ?? record(fields).colour, 24);
   return {
     kind,
@@ -182,13 +244,27 @@ function specOf(kind: ChartKind, raw: unknown): Record<string, unknown> {
     case 'calendar':
       return {
         calendars: list(said.calendars)
-          .map((one) => ({
-            label: label(record(one).label, LABEL_WORDS),
-            dates: labels(record(one).dates, 4, 4),
-          }))
+          .map((one) => {
+            const dates = labels(record(one).dates, 4, 4);
+            const named = label(record(one).label, LABEL_WORDS);
+            return {
+              // A calendar is named by what it is for, never by a date.
+              label:
+                named &&
+                !dates.some((d) => sameDate(named, d)) &&
+                !datesOnly(named)
+                  ? named
+                  : null,
+              dates,
+            };
+          })
           .filter((one) => one.dates.length)
           .slice(0, 3),
-        merge: line(said.merge, 30) || null,
+        // What the sheets merge into is named, never by their dates.
+        merge:
+          line(said.merge, 30) && !datesOnly(line(said.merge, 30))
+            ? line(said.merge, 30)
+            : null,
       };
     case 'seats':
       return {
@@ -270,10 +346,15 @@ function specOf(kind: ChartKind, raw: unknown): Record<string, unknown> {
       const events = Array.isArray(raw) ? raw : list(said.events);
       return {
         events: events
-          .map((one) => ({
-            when: line(record(one).when ?? record(one).date, 30),
-            name: clip(record(one).name ?? record(one).label, LABEL_WORDS),
-          }))
+          .map((one) => {
+            const when = line(record(one).when ?? record(one).date, 30);
+            const name = label(
+              record(one).name ?? record(one).label,
+              LABEL_WORDS,
+            );
+            // An event is named by what happened, never by its own date.
+            return { when, name: name && !sameDate(name, when) ? name : '' };
+          })
           .filter((one) => one.when)
           .slice(0, 6),
       };
@@ -312,7 +393,7 @@ function specOf(kind: ChartKind, raw: unknown): Record<string, unknown> {
         speaker: label(said.speaker ?? said.who, 4),
         when: line(said.when ?? said.date, 30) || null,
         // The claim its words are, for the check that they are its words.
-        claim: line(said.claim, 12) || null,
+        ...(line(said.claim, 12) ? { claim: line(said.claim, 12) } : {}),
       };
     }
   }

@@ -43,6 +43,7 @@ export const RECIPE_USES: Record<ShotInfoRecipe, string> = {
   enter: 'a part comes on',
   exit: 'a part leaves',
   ask: 'a question the voice asks, held over what is still open, then a moment of quiet',
+  say: 'a speech bubble of one to six words from a character (target the actor; its words in text): an illustrated show only, at most one in twenty seconds, for a short line of humour or surprise ("Wait!"), never the voice’s words',
 };
 export const INFO_RECIPES = Object.keys(RECIPE_USES) as ShotInfoRecipe[];
 
@@ -93,6 +94,7 @@ export const LIFE_USES: Record<ShotLifeEffect, string> = {
   fire: 'a real fire the voice speaks of',
   sparks: 'real sparks: welding, a furnace, a spark plug',
   splash: 'a real splash of water',
+  eyes: 'a region of the map made a character by a pair of eyes glancing at another: written in the shot’s "eyes" (at, to, face), never in its life; an illustrated show only, sparingly',
 };
 export const LIFE_EFFECTS = Object.keys(LIFE_USES) as ShotLifeEffect[];
 
@@ -134,6 +136,15 @@ export const CHART_USES = {
 export type ChartKind = keyof typeof CHART_USES;
 export const CHART_KINDS = Object.keys(CHART_USES) as ChartKind[];
 
+/**
+ * Whether code can draw a set (WP10's kit/sets; shot-build's drawSet): it
+ * can, so a drawn set is offered to the board. Turned off, a drawn set is
+ * not offered, and a plan's drawn set is dropped for a picture that can be
+ * drawn (the build would only fall back to the shot before, holding while
+ * the voice talks on).
+ */
+export const DRAWN_SETS = true;
+
 /** A code-drawn set's settings (kit/sets), as the board names them. */
 export const SET_LANDS: readonly PlanSetScene['land'][] = [
   'plain',
@@ -164,6 +175,34 @@ export const SET_TOWNS: readonly NonNullable<PlanSetScene['town']>[] = [
   'village',
   'town',
   'city',
+];
+/** What a drawn set's place is for, with when the board names it. */
+export const SET_PLACE_USES: Record<NonNullable<PlanSetScene['place']>, string> = {
+  open: 'open land, a village or a town as its town says',
+  farm: 'a farm: barn, silo, fields',
+  port: 'a port across the water: cranes, warehouses, containers',
+  industry: 'a works and its terraces, chimneys smoking',
+  market: 'market stalls before houses',
+  city: 'a city of towers and blocks',
+  oilfield: 'an oil field: pump jacks and tanks',
+  'assembly-hall': 'inside an assembly or parliament: rows round the well, the chair on its dais',
+  'ceremony-ground': 'a ceremony ground: a stand with bunting, a flagpole, floodlights, chairs',
+  display: 'a clean studio backdrop for a machine or a thing shown on its own, big (a jet engine cut open, a pump, a ballot)',
+};
+export const SET_PLACES = Object.keys(SET_PLACE_USES) as NonNullable<PlanSetScene['place']>[];
+/** The states a drawn set's light can change to while a shot is on. */
+export const SET_STATES: readonly NonNullable<PlanSetScene['becomes']>['state'][] = [
+  'day',
+  'dusk',
+  'night',
+  'dawn',
+  'lights-on',
+];
+export const SET_CLIMATES: readonly NonNullable<PlanSetScene['climate']>[] = [
+  'temperate',
+  'arid',
+  'tropical',
+  'cold',
 ];
 
 /** A push's or a pull's size. */

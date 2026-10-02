@@ -20,10 +20,14 @@ import {
   AMOUNTS,
   CAMERA_MOVES,
   CHART_KINDS,
+  DRAWN_SETS,
   INFO_RECIPES,
   LIFE_EFFECTS,
   SET_KINDS,
+  SET_CLIMATES,
   SET_LANDS,
+  SET_PLACES,
+  SET_STATES,
   SET_TIMES,
   SET_TOWNS,
   SET_WEATHERS,
@@ -116,7 +120,9 @@ export const shotChartSchema = z
 
 /** A shot's set: its kind, and the fields of that kind (the others null). Blank paper is never offered. */
 export const shotSetSchema = z.object({
-  kind: oneOf(SET_KINDS.filter((k) => k !== 'plain')),
+  kind: oneOf(
+    SET_KINDS.filter((k) => k !== 'plain' && (DRAWN_SETS || k !== 'set')),
+  ),
   // A map: the show's own; flat or tilted, with its terrain or not.
   tilt: oneOf(['flat', 'tilted'] as const),
   terrain: z.boolean().nullable().catch(null),
@@ -129,6 +135,13 @@ export const shotSetSchema = z.object({
   weather: oneOf(SET_WEATHERS),
   town: oneOf(SET_TOWNS),
   era: maybe(),
+  place: oneOf(SET_PLACES),
+  climate: oneOf(SET_CLIMATES),
+  // The light changing while the shot is on, and the exact words it changes on.
+  becomes: oneOf(SET_STATES),
+  becomesOn: maybe(),
+  // It stands for a real event: it carries an "Illustration" tag.
+  illustration: z.boolean().nullable().catch(null),
 });
 
 export const shotInfoSchema = z.object({
@@ -162,6 +175,11 @@ export const shotActorSchema = z.object({
   dress: maybe(),
   facing: maybe(),
   wagons: looseNumber(),
+  // An illustrated show's characters: their role, face, what they hold, and a named person's name.
+  role: maybe(),
+  expression: maybe(),
+  prop: maybe(),
+  name: maybe(),
   moves: z
     .array(z.object({ move: words(), on: words(), to: maybe() }))
     .catch([]),
@@ -179,6 +197,9 @@ export const shotBoardSchema = z.object({
         life: z.array(oneOf(LIFE_EFFECTS)).catch([]),
         join: oneOf(SHOT_JOINS),
         focal: maybe(),
+        eyes: z
+          .array(z.object({ at: maybe(), to: maybe(), face: maybe() }))
+          .catch([]),
       }),
     )
     .catch([]),

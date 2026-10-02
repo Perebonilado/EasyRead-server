@@ -137,9 +137,14 @@ import {
   describeWorld,
 } from '../../business/domain/studio/studio-editor-words';
 import {
+  bandOf,
   recipeOf,
   stageOf,
 } from '../../business/domain/studio/studio-audience';
+import {
+  lookStyleFor,
+  showLookStyle,
+} from '../../business/domain/studio/studio-look';
 import {
   checkExplainer,
   checkSheet,
@@ -599,12 +604,23 @@ export class StudioEditorProcessor {
     });
     await this.record(episode.id, answer.usage, 'explainer_edit');
     // Its places and people real ones, each with a claim of the research.
-    const world = worldOf(answer.value, editor.research);
     const value = answer.value;
     const subject =
       (typeof value.subject === 'string' && value.subject.trim()) ||
       editor.question ||
       show.brief.idea;
+    const made = worldOf(answer.value, editor.research);
+    // How its people are drawn, chosen now with its world (tech §11):
+    // characters for history and culture and the young, portraits and
+    // silhouettes for the news, money, power and science.
+    const world = {
+      ...made,
+      style: lookStyleFor({
+        subject: `${subject} ${editor.question ?? ''}`,
+        band: bandOf(show.brief) ?? 'general-adult',
+        era: made.era,
+      }),
+    };
     // The show's cast and sets for its illustrated scenes, its host kept
     // as the show had them (on for children, as every explainer).
     const before = show.bible;
@@ -1512,6 +1528,10 @@ export class StudioEditorProcessor {
         rows: lines,
         research: show.editor?.research ?? null,
         world: show.editor?.world ?? null,
+        // The show's look decides the kit: characters or silhouettes.
+        look:
+          showLookStyle(show.brief, show.editor?.world, show.bible) ??
+          'editorial',
         pictures: picturesFor(lines, pictures),
         scene: {
           index: k,

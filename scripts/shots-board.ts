@@ -8,14 +8,17 @@
  * boarded once, so their rows are there).
  *
  *   npx ts-node --transpile-only scripts/shots-board.ts --episode <id>
- *     [--scene <n>] [--save] [--out <dir>]
+ *     [--scene <n>] [--save] [--out <dir>] [--replay <dir>]
  *
  * --scene boards one scene, by its number from 1; --out writes each
- * scene's plan and registry as JSON beside the printout. GPT-5.4 mini, a
- * call or two a scene, about a cent each.
+ * scene's plan and registry as JSON beside the printout, with the board's
+ * own answers. --replay takes the board's answers from an --out of before
+ * instead of asking it again (nothing spent, nothing in the ledger), so a
+ * change to the checks and mends can be seen, and saved, on the same
+ * answers. GPT-5.4 mini, a call or two a scene, about a cent each.
  */
 import 'reflect-metadata';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
@@ -36,10 +39,12 @@ import {
 } from '../src/business/domain/studio/studio';
 import { boardShots } from '../src/business/domain/shots/shot-board';
 import { checkPlan } from '../src/business/domain/shots/shot-check';
+import { kitIdsFor } from '../src/business/domain/kit/registry';
 import { sceneNarration } from '../src/business/domain/shots/shot-phrases';
 import { promptList } from '../src/business/domain/shots/shot-registry';
 import type { PlanSet, PlanShot } from '../src/business/domain/shots/types';
-import { StudioEditorProcessor } from '../src/pipeline/processors/studio-editor.processor';
+import { shotsSheet } from '../src/pipeline/processors/studio-editor.processor';
+import { sceneFingerprint } from '../src/business/handlers/studio/studio-views';
 
 @Module({
   imports: [ConfigModule.forRoot({ isGlobal: true }), CoreModule],
@@ -99,6 +104,7 @@ async function main() {
   const only = option('--scene') ? Number(option('--scene')) - 1 : null;
   const save = flag('--save');
   const out = option('--out') ? resolve(option('--out')!) : null;
+  const replay = option('--replay') ? resolve(option('--replay')!) : null;
   const app = await NestFactory.createApplicationContext(ShotsBoardModule, {
     logger: ['warn', 'error'],
   });
@@ -126,6 +132,33 @@ async function main() {
         ? episode.editorial.rows.slice(scene.rows[0], scene.rows[1] + 1)
         : [];
       const started = Date.now();
+      // The board's answers of before, given again in order, when replayed.
+      const answers: Record<string, unknown>[] | null = replay
+        ? ((
+            JSON.parse(
+              readFileSync(join(replay, `scene-${k + 1}.json`), 'utf8'),
+            ) as { answers?: Record<string, unknown>[] }
+          ).answers ?? null)
+        : null;
+      if (replay && !answers?.length) {
+        console.log(`Scene ${k + 1}: no answers kept to replay\n`);
+        continue;
+      }
+      let given = 0;
+      const gateway: Pick<LlmGatewayPort, 'shotsBoard'> = answers
+        ? {
+            shotsBoard: () =>
+              Promise.resolve({
+                value: answers[Math.min(given++, answers.length - 1)],
+                usage: {
+                  model: 'replay',
+                  tokensIn: 0,
+                  tokensOut: 0,
+                  latencyMs: 0,
+                },
+              }),
+          }
+        : llm;
       const board = await boardShots(
         {
           rows,
@@ -140,7 +173,7 @@ async function main() {
           },
           audience: show.brief.audience,
         },
-        llm,
+        gateway,
       );
       const cost = board.usage.reduce(
         (n, u) =>
@@ -157,6 +190,9 @@ async function main() {
       dollars += cost;
       const left = checkPlan(board.plan, sceneNarration(rows), board.registry, {
         map: Boolean(world?.base),
+        kit: kitIdsFor('editorial'),
+        lines: rows,
+        opening: k === 0,
       });
       console.log(
         [
@@ -196,6 +232,7 @@ async function main() {
               plan: board.plan,
               problems: board.problems,
               registry: board.registry.entries(),
+              answers: board.answers,
             },
             null,
             2,
@@ -212,27 +249,9 @@ async function main() {
           );
           continue;
         }
-        // Saved as the worker's board saves it, the plan just made given
-        // back as the board's answer: the same sheet, its calls in the ledger.
+        // Saved as the worker's board saves it: the very plan printed above,
+        // its sheet the shots engine's, its calls in the ledger.
         const ledger = app.get<AiCallLogRepository>(AI_CALL_LOG_REPOSITORY);
-        const editor = new StudioEditorProcessor({
-          studio,
-          llm: {
-            shotsBoard: () =>
-              Promise.resolve({
-                value: { shots: board.plan.shots },
-                usage: board.usage[0],
-              }),
-          } as unknown as LlmGatewayPort,
-          calls: ledger,
-          queue: { enqueueStudio: () => Promise.resolve() },
-          setting: (name) => process.env[name],
-          material: null,
-          logger: {
-            log: (l) => console.log(`  · ${l}`),
-            warn: (l) => console.log(`  ! ${l}`),
-          },
-        });
         const bible: StudioBible = show.bible ?? {
           characters: [],
           sets: [],
@@ -241,9 +260,32 @@ async function main() {
           maths: false,
           pictures: [],
         };
-        await editor.shotsBoard(show, episode, bible, row, k);
-        for (const usage of board.usage.slice(1))
-          await editor.record(episode.id, usage, 'explainer_shots');
+        const sheet = shotsSheet(
+          scene,
+          rows,
+          board.plan,
+          board.registry.entries(),
+        );
+        await studio.updateScene(row.id, {
+          sheet,
+          sheetHash: sceneFingerprint(sheet, bible, show.brief),
+          problems: [],
+          status: 'ready',
+          error: null,
+        });
+        for (const usage of replay ? [] : board.usage)
+          await ledger
+            .record({
+              documentId: episode.id,
+              task: 'explainer_shots',
+              model: usage.model,
+              tokensIn: usage.tokensIn,
+              tokensOut: usage.tokensOut,
+              tokensCached: usage.tokensCached ?? null,
+              latencyMs: usage.latencyMs,
+              outcome: 'ok',
+            })
+            .catch(() => undefined);
         console.log(`  saved onto scene row ${row.id}\n`);
       }
     }

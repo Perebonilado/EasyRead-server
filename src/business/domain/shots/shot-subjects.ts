@@ -499,11 +499,13 @@ export function momentShot(
         on,
         set: {
           kind: 'set',
+          // A paper drawn for a real one (a charter for a constitution)
+          // is an illustration; a thing of a kind (coins) is no claim.
           set: {
             land: 'plain',
             time: 'day',
             place: 'display',
-            illustration: true,
+            ...(thing.kit === 'document' ? { illustration: true } : {}),
           },
         },
         actors: [

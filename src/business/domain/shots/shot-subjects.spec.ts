@@ -222,15 +222,23 @@ describe('the drawn set of the moment a line tells', () => {
         kit,
       }),
     ).toMatchObject({
-      set: { set: { place: 'display' } },
+      set: { set: { place: 'display', illustration: true } },
       actors: [{ id: 'thing', kit: 'document', params: { kind: 'charter' } }],
       focal: 'actor:thing',
     });
-    expect(
-      momentShot('Regions kept the money they raised.', 'Regions kept', {
-        kit,
-      })?.actors,
-    ).toMatchObject([{ kit: 'object', params: { kind: 'coins' } }]);
+    // A thing of a kind is no claim: no illustration tag.
+    const coins = momentShot(
+      'Regions kept the money they raised.',
+      'Regions kept',
+      { kit },
+    );
+    expect(coins?.actors).toMatchObject([
+      { kit: 'object', params: { kind: 'coins' } },
+    ]);
+    expect(coins?.set).toEqual({
+      kind: 'set',
+      set: { land: 'plain', time: 'day', place: 'display' },
+    });
     // Without the kit's pieces, no thing: the kind of place, or nothing.
     expect(
       momentShot('The 1951 constitution gave the regions weight.', 'The 1951'),

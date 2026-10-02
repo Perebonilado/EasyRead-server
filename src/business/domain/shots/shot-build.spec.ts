@@ -138,6 +138,22 @@ describe('the plan built', () => {
     });
   });
 
+  it('draws a chart once for every shot that shows it', () => {
+    const counter = PLAN.shots[1];
+    const twice = buildShots(
+      { shots: [counter, { ...counter, on: 'Why did self-government' }] },
+      registry,
+      ctx,
+    );
+    expect(Object.keys(twice.assets)).toEqual(['chart-1']);
+    expect(twice.assets['chart-1']).toBeDefined();
+    expect(twice.shots.map((s) => s.set)).toEqual([
+      { kind: 'chart', asset: 'chart-1' },
+      { kind: 'chart', asset: 'chart-1' },
+    ]);
+    expect(twice.shots[0].join).toBe('continue');
+  });
+
   it('makes a shot it cannot draw a safe one: the set before carried on, the camera moving in', () => {
     const portrait = built.shots[3];
     expect(portrait.set).toEqual(built.shots[2].set);

@@ -270,7 +270,8 @@ export function buildShots(
   const look = shotLook(ctx);
   const assets: Record<string, ShotAssetDto> = {};
   const notes: string[] = [];
-  const charts = new Map<string, string>();
+  /** Each chart drawn, by its kind and spec: drawn once, shown by every shot that asks for it. */
+  const charts = new Map<string, { id: string; dto: ShotSvgAssetDto }>();
   const pictures = new Map<string, string>();
 
   /** A planned set drawn, or null when it cannot be. */
@@ -296,10 +297,7 @@ export function buildShots(
         const key = JSON.stringify([planned.chart.kind, planned.chart.spec]);
         const kept = charts.get(key);
         if (kept)
-          return {
-            set: { kind: 'chart', asset: kept },
-            asset: { id: kept, dto: assets[kept] },
-          };
+          return { set: { kind: 'chart', asset: kept.id }, asset: kept };
         const dto = chartAsset(
           planned.chart.kind,
           planned.chart.spec ?? {},
@@ -311,7 +309,7 @@ export function buildShots(
           return null;
         }
         const id = `chart-${charts.size + 1}`;
-        charts.set(key, id);
+        charts.set(key, { id, dto });
         return { set: { kind: 'chart', asset: id }, asset: { id, dto } };
       }
       case 'photo':
@@ -435,13 +433,13 @@ export function buildShots(
         );
         continue;
       }
-      const pieceId = `actor-${i + 1}-${actors.length + 1}`;
-      assets[pieceId] = piece;
       const at = actorAt(one.place);
       if (!at) {
         notes.push(`shot ${i + 1}: actor ${one.id} has nowhere to stand`);
         continue;
       }
+      const pieceId = `actor-${i + 1}-${actors.length + 1}`;
+      assets[pieceId] = piece;
       actors.push({
         id: one.id,
         asset: pieceId,
@@ -610,6 +608,7 @@ export function buildShots(
       const value = one.value ?? (counts ? entry?.value : undefined);
       const unit = wordsUpTo(one.unit ?? (counts ? entry?.unit : undefined), 2);
       const colour = one.colour ? sideOf(one.colour) : null;
+      const replace = wordsUpTo(one.replace, TEXT.labelWordsMax);
       info.push({
         id: `${id}-i${k + 1}`,
         recipe: one.recipe,
@@ -622,9 +621,7 @@ export function buildShots(
           : {}),
         ...(unit ? { unit } : {}),
         ...(colour ? { colour } : {}),
-        ...(one.replace
-          ? { replace: wordsUpTo(one.replace, TEXT.labelWordsMax) }
-          : {}),
+        ...(replace ? { replace } : {}),
         on: one.on,
         ...(one.until ? { until: one.until } : {}),
       });

@@ -138,6 +138,8 @@ import { AuthController } from './web/controllers/auth.controller';
 import { DocumentsController } from './web/controllers/documents.controller';
 import { EventsController } from './web/controllers/events.controller';
 import { HealthController } from './web/controllers/health.controller';
+import { TilesController } from './web/controllers/tiles.controller';
+import { TerrainTilesService } from './business/handlers/studio/terrain-tiles.service';
 import { ExportsController } from './web/controllers/exports.controller';
 import { HighlightController } from './web/controllers/highlight.controller';
 import { ChatController } from './web/controllers/chat.controller';
@@ -169,6 +171,9 @@ import { VisualsController } from './web/controllers/visuals.controller';
 import { StudioController } from './web/controllers/studio.controller';
 import { StudioService } from './business/handlers/studio/studio.service';
 import { StudioDocumentsController } from './web/controllers/studio-documents.controller';
+import { StudioExportController } from './web/controllers/studio-export.controller';
+import { StudioPicturesController } from './web/controllers/studio-pictures.controller';
+import { StudioExportService } from './business/handlers/studio/studio-export.service';
 import { StudioDocumentsService } from './business/handlers/studio/studio-documents.service';
 import { StudioDocumentsQuery } from './query/studio-documents.query';
 import {
@@ -402,6 +407,8 @@ const queries = [
     VisualsController,
     StudioController,
     StudioDocumentsController,
+    StudioExportController,
+    StudioPicturesController,
     GuidedController,
     InstitutionsController,
     AdminInstitutionsController,
@@ -411,12 +418,15 @@ const queries = [
     TutorsController,
     EventsController,
     HealthController,
+    TilesController,
   ],
   providers: [
     ...handlers,
     ...queries,
     StudioService,
     StudioDocumentsService,
+    StudioExportService,
+    TerrainTilesService,
     StudioDocumentsQuery,
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: AuthGuard },

@@ -17,6 +17,7 @@ import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { randomBytes, randomUUID } from 'node:crypto';
 import type {
   SceneDto,
+  StudioAngleRequest,
   StudioEpisodeDto,
   StudioMessageDto,
   StudioMessagePageDto,
@@ -31,6 +32,7 @@ import {
   EMPTY_BRIEF,
   SOURCE_CHARS,
   bibleOf,
+  isIllustrated,
   briefMissing,
   BRIEF_CONTROLS,
   briefOf,
@@ -79,6 +81,26 @@ import {
 } from '../../domain/drawing-failures';
 import { joinFor } from '../../domain/studio/studio-edit';
 import { clipJoin } from '../../domain/studio/studio-clip';
+import {
+  EMPTY_EDITOR,
+  editorSwitchOn,
+  usesEditor,
+  type StudioEditor,
+} from '../../domain/studio/studio-editor';
+import { withAngle } from '../../domain/studio/studio-editor-checks';
+import { freshEditorial } from '../../domain/studio/studio-editorial';
+import {
+  angleHeard,
+  makeHeard,
+  plannedHeard,
+} from '../../domain/studio/studio-editor-heard';
+import { describeEditorForProducer } from '../../domain/studio/studio-editor-words';
+import {
+  editorDto,
+  editorCredits,
+  editorPlay,
+  editorialDto,
+} from '../../domain/studio/studio-editor-views';
 import { storyBibleFor } from '../../domain/studio/studio-stage';
 import {
   describeForProducer,
@@ -116,6 +138,7 @@ import { EntitlementsService } from '../documents/entitlements.service';
 import { StudioCastService, optionPreview } from './studio-cast.service';
 import { explainerPlay } from './studio-engage';
 import { StudioDocumentsService } from './studio-documents.service';
+import { StudioExportService } from './studio-export.service';
 import { EVENT_LINES, historyOf, logEvent } from './studio-log';
 import {
   episodeShape,
@@ -196,6 +219,10 @@ const themeOfShow = (show: StudioShowRecord) => {
   return theme ? { theme } : {};
 };
 
+/** A scene the shots engine draws: its map is shaded from the terrain, whose sources the description credits. */
+const drawnByShots = (scene: StudioSceneRecord): boolean =>
+  scene.sheet?.kind === 'explainer' && scene.sheet.engine === 'shots';
+
 @Injectable()
 export class StudioService {
   private readonly logger = new Logger(StudioService.name);
@@ -212,6 +239,8 @@ export class StudioService {
     private readonly voices: SceneVoiceService,
     /** The show's document, its pages chosen in words (studio-documents). */
     @Optional() private readonly documents?: StudioDocumentsService,
+    /** Its films made into video files (studio-export), listed with each episode. */
+    @Optional() private readonly videos?: StudioExportService,
   ) {}
 
   // ── Whose it is ─────────────────────────────────────────────────────────
@@ -325,7 +354,7 @@ export class StudioService {
       title: show.title,
       format: show.format,
       brief: briefDto(show.brief),
-      briefMissing: briefMissing(show.brief),
+      briefMissing: briefMissing(show.brief, usesEditor(show)),
       bible,
       ...themeOfShow(show),
       // Each episode once: a twin in the other shape is on its episode's
@@ -351,6 +380,8 @@ export class StudioService {
       messages: messages.map(messageDto),
       moreMessages: thread.length > THREAD,
       balance,
+      // An explainer the editor plans: its question, research, plan, world.
+      ...(usesEditor(show) ? { editor: editorDto(show.editor) } : {}),
     };
   }
 
@@ -386,7 +417,28 @@ export class StudioService {
     const twin = other
       ? twinDto(other, otherRows, lead, show.bible, show.brief)
       : null;
-    const dto = episodeDto(episode, scenes, show.bible, show.brief, twin);
+    const made = episodeDto(episode, scenes, show.bible, show.brief, twin);
+    // An episode the editor wrote: its script, fact check and package, its
+    // chapters on the film's clock.
+    const written = episode.editorial
+      ? {
+          ...made,
+          editorial: editorialDto(
+            episode.editorial,
+            episode.outline?.scenes ?? [],
+            scenes.map((s) => ({
+              id: s.id,
+              position: s.position,
+              durationMs: s.durationMs,
+              made: Boolean(s.sceneKey),
+            })),
+            editorCredits(show.editor, scenes.some(drawnByShots)),
+          ),
+        }
+      : made;
+    // Its videos, the latest first: absent when it has none.
+    const videos = (await this.videos?.listFor(episode)) ?? [];
+    const dto = videos.length ? { ...written, exports: videos } : written;
     if (!episode.twinOf) return dto;
     // A twin's script is its lead's: nothing to make here but what the
     // lead has made, and each scene stale as its lead's has changed.
@@ -417,6 +469,9 @@ export class StudioService {
       userId,
       title: 'New show',
       brief: EMPTY_BRIEF,
+      // Planned by the editor once it is an explainer (STUDIO_EDITOR, on
+      // unless set off); kept for the show's life.
+      editor: editorSwitchOn(process.env.STUDIO_EDITOR) ? EMPTY_EDITOR : null,
     });
     await this.studio.createEpisode({
       showId: show.id,
@@ -715,6 +770,16 @@ export class StudioService {
       phase: episode.phase,
       episode: episode.number,
       waiting: await this.waitingFor(show),
+      // A show the editor plans: where its planning is, and what to do now.
+      ...(usesEditor(show) && show.editor
+        ? {
+            editor: describeEditorForProducer(show.editor, {
+              number: episode.number,
+              phase: episode.phase,
+              editorial: episode.editorial ?? null,
+            }),
+          }
+        : {}),
     });
     let draft: StudioTurnDraft;
     try {
@@ -827,8 +892,33 @@ export class StudioService {
       scenes.some((s) => s.sceneKey)
     )
       draft = { ...draft, action: 'repace', request: said };
+    // The editor's desk, heard by code first (studio-editor-heard): the
+    // question picked from those offered, "make it" on a written script,
+    // one of the plan's episodes named.
+    let angle: number | null | undefined;
+    if (!draft.refuse && !pasted && usesEditor(show) && show.editor) {
+      const editor = show.editor;
+      if (editor.stage === 'angles' && !editor.question)
+        angle = angleHeard(said, editor.angles);
+      else if (
+        episode.editorial &&
+        episode.phase === 'outline' &&
+        makeHeard(said)
+      )
+        draft = { ...draft, action: 'make' };
+      else if (
+        editor.plan &&
+        (draft.action === 'none' ||
+          draft.action === 'episode' ||
+          draft.action === 'outline') &&
+        plannedHeard(said, editor.plan)
+      )
+        draft = { ...draft, action: 'episode', request: said };
+    }
     try {
-      if (!draft.refuse)
+      if (angle !== undefined)
+        ({ note, tried } = await this.angleChosen(show, angle));
+      else if (!draft.refuse)
         switch (draft.action) {
           case 'pages': {
             if (!this.documents || !show.brief.document) {
@@ -866,7 +956,9 @@ export class StudioService {
             );
             break;
           case 'approve':
-            note = await this.approveEpisode(show, episode);
+            note = this.isEditorScript(show, episode)
+              ? await this.makeEditorEpisode(userId, show, episode)
+              : await this.approveEpisode(show, episode);
             break;
           case 'cast': {
             // A change to one character's look is that character drawn
@@ -991,7 +1083,9 @@ export class StudioService {
             break;
           }
           case 'make':
-            note = await this.makeEpisode(userId, show, episode);
+            note = this.isEditorScript(show, episode)
+              ? await this.makeEditorEpisode(userId, show, episode)
+              : await this.makeEpisode(userId, show, episode);
             break;
           case 'episode':
             episode = await this.newEpisode(show, draft.request ?? said);
@@ -1149,6 +1243,7 @@ export class StudioService {
   ): Promise<string | null> {
     if (episode.phase === 'script' || episode.phase === 'made')
       return 'The scenes are written now: tell me which scene to change, and how.';
+    if (usesEditor(show)) return this.askEditor(show, episode, request);
     const missing = briefMissing(show.brief);
     if (missing.length)
       return `Before the outline, tell me ${missing.map((m) => STILL_TO_SAY[m] ?? m).join(', and ')}.`;
@@ -1160,6 +1255,197 @@ export class StudioService {
       kind: 'outline',
       ...(request && episode.outline ? { request } : {}),
       ...(story && show.brief.format !== 'explainer' ? { story: true } : {}),
+    });
+    return null;
+  }
+
+  // ── The editor's desk (studio-editor) ──────────────────────────────────
+
+  /**
+   * An editor's show asked to go on (the outline's action): its planning
+   * begun with the questions it could answer, when the brief is complete;
+   * an episode's script written, or written again as the maker asks. A
+   * note when it cannot be now.
+   */
+  private async askEditor(
+    show: StudioShowRecord,
+    episode: StudioEpisodeRecord,
+    request: string | null,
+  ): Promise<string | null> {
+    const missing = briefMissing(show.brief, true);
+    if (missing.length)
+      return `Before I plan it, tell me ${missing.map((m) => STILL_TO_SAY[m] ?? m).join(', and ')}.`;
+    const editor = show.editor ?? EMPTY_EDITOR;
+    const busy =
+      'I am still working on the last change; ask me again once it is done.';
+    if (!editor.stage) {
+      if (!(await this.studio.claimEpisode(episode.id, 'angles'))) return busy;
+      await this.enqueue(show, episode, { kind: 'angles' });
+      return null;
+    }
+    if (editor.stage === 'angles' && !editor.question)
+      return 'Pick one of the questions on the card first, or tell me to choose.';
+    // Planning that stopped (a job given up on) carries on where it stopped;
+    // planning under way is left to finish.
+    if (!editor.research || !editor.plan || !editor.world) {
+      const kind = !editor.research
+        ? 'research'
+        : !editor.plan
+          ? 'plan'
+          : 'world';
+      if (!(await this.studio.claimEpisode(episode.id, kind)))
+        return 'I am still planning the show: the first episode’s script comes straight after.';
+      await this.enqueue(show, episode, { kind });
+      return null;
+    }
+    if (episode.editorial) {
+      if (!(await this.studio.claimEpisode(episode.id, 'edit'))) return busy;
+      await this.enqueue(show, episode, {
+        kind: 'edit',
+        ...(request ? { request } : {}),
+      });
+      return null;
+    }
+    await this.planEpisode(show, episode, request ?? episode.title);
+    return null;
+  }
+
+  /**
+   * An editor's new episode: the plan's own, named by its title or its
+   * question, written now; anything else, the episodes not made yet
+   * planned again around it (the research topped up for it), then written.
+   */
+  private async planEpisode(
+    show: StudioShowRecord,
+    episode: StudioEpisodeRecord,
+    request: string,
+  ): Promise<void> {
+    const plan = show.editor?.plan;
+    if (!plan) return;
+    const planned = plannedHeard(request, plan);
+    if (!planned) {
+      if (await this.studio.claimEpisode(episode.id, 'research'))
+        await this.enqueue(show, episode, { kind: 'replan', request });
+      return;
+    }
+    if (!(await this.studio.claimEpisode(episode.id, 'edit'))) return;
+    const now = (await this.studio.findShow(show.id))?.editor ?? show.editor!;
+    const editor: StudioEditor = {
+      ...now,
+      plan: {
+        ...(now.plan ?? plan),
+        episodes: (now.plan ?? plan).episodes.map((e) =>
+          e.number === planned.number ? { ...e, episodeId: episode.id } : e,
+        ),
+      },
+    };
+    await this.studio.updateShow(show.id, { editor });
+    show.editor = editor;
+    await this.studio.updateEpisode(episode.id, {
+      title: planned.title,
+      editorial: freshEditorial(planned.number, planned.question),
+    });
+    await this.enqueue(show, episode, { kind: 'edit' });
+  }
+
+  /** The maker's pick among the questions offered (POST /studio/shows/:id/angle): taken, and the research begun. */
+  async pickAngle(
+    userId: string,
+    showId: string,
+    request: StudioAngleRequest,
+  ): Promise<StudioShowDto> {
+    const show = await this.requireShow(userId, showId);
+    const pick =
+      typeof request.pick === 'number' && Number.isInteger(request.pick)
+        ? request.pick
+        : null;
+    const { note } = await this.angleChosen(show, pick);
+    if (note) throw new ValidationError(note);
+    return this.showDto((await this.studio.findShow(show.id)) ?? show);
+  }
+
+  /**
+   * The question the show answers, from the angles offered (or the best,
+   * left to the Studio), and its research set going on the show's first
+   * episode, where its planning runs. What was set going, in code's own
+   * words, or why not.
+   */
+  private async angleChosen(
+    show: StudioShowRecord,
+    pick: number | null,
+  ): Promise<{ note: string | null; tried: string | null }> {
+    const editor = show.editor;
+    if (!usesEditor(show) || !editor || editor.stage !== 'angles')
+      return {
+        note: 'There are no questions to choose from yet.',
+        tried: null,
+      };
+    if (editor.question)
+      return { note: 'The question is chosen already.', tried: null };
+    const chosen = withAngle(editor, pick);
+    if (!chosen)
+      return {
+        note: 'There are no questions to choose from yet.',
+        tried: null,
+      };
+    const first = (await this.studio.listEpisodes(show.id))
+      .filter((e) => !e.twinOf)
+      .sort((a, b) => a.number - b.number)[0];
+    if (!first) throw new NotFoundError('Episode');
+    if (!(await this.studio.claimEpisode(first.id, 'research')))
+      return { note: 'One moment: I am still working on it.', tried: null };
+    await this.studio.updateShow(show.id, { editor: chosen });
+    show.editor = chosen;
+    await this.enqueue(show, first, { kind: 'research' });
+    await this.log(show, first, {
+      what: 'asked',
+      step: 'brief',
+      line: `Going with: “${chosen.question}”`,
+    });
+    return {
+      note: null,
+      tried: `Going with “${chosen.question}”. I’ll research it now, then plan the episodes.`,
+    };
+  }
+
+  /** Whether an episode is an editor's written script, waiting to be made. */
+  private isEditorScript(
+    show: StudioShowRecord,
+    episode: StudioEpisodeRecord,
+  ): boolean {
+    return (
+      usesEditor(show) &&
+      episode.phase === 'outline' &&
+      Boolean(episode.editorial && episode.outline?.editor)
+    );
+  }
+
+  /**
+   * "Make it" on an editor's written script: approved, its scenes boarded
+   * on the rows and the film made straight after, in one go (the script
+   * job with `make`). Within the month's film, as a make is. A note when
+   * it cannot be now.
+   */
+  private async makeEditorEpisode(
+    userId: string,
+    show: StudioShowRecord,
+    given: StudioEpisodeRecord,
+  ): Promise<string | null> {
+    if (given.busy) return 'One moment: I am still working on it.';
+    const episode = await this.settleShape(show, given);
+    const seconds = (episode.outline?.scenes ?? []).reduce(
+      (n, s) => n + s.seconds,
+      0,
+    );
+    (await this.entitlements.forUser(userId)).assertStudioAvailable(seconds);
+    if (!(await this.studio.claimEpisode(episode.id, 'script')))
+      return 'One moment: I am still working on it.';
+    await this.studio.updateEpisode(episode.id, { phase: 'script' });
+    await this.enqueue(show, episode, { kind: 'script', make: true });
+    await this.log(show, episode, {
+      what: 'approved',
+      step: 'script',
+      line: 'Script approved: boarding the scenes, then making the film',
     });
     return null;
   }
@@ -1344,6 +1630,12 @@ export class StudioService {
 
   async approve(userId: string, episodeId: string): Promise<StudioEpisodeDto> {
     const { show, episode } = await this.requireEpisode(userId, episodeId);
+    // An editor's script: approved and made in one go.
+    if (this.isEditorScript(show, episode)) {
+      const note = await this.makeEditorEpisode(userId, show, episode);
+      if (note) throw new ValidationError(note);
+      return this.episode(userId, episodeId);
+    }
     const note = await this.approveEpisode(show, episode);
     if (note) throw new ValidationError(note);
     if (episode.phase === 'outline' || episode.phase === 'cast') {
@@ -1414,6 +1706,10 @@ export class StudioService {
     body: unknown,
   ): Promise<StudioEpisodeDto> {
     const { show, episode } = await this.requireEpisode(userId, episodeId);
+    if (episode.outline?.editor)
+      throw new ValidationError(
+        'The script is this episode’s outline: tell me what to change in the chat.',
+      );
     if (episode.phase !== 'outline' && episode.phase !== 'cast')
       throw new ValidationError(
         'The scenes are written: change them on their cards.',
@@ -2164,6 +2460,11 @@ export class StudioService {
 
   async make(userId: string, episodeId: string): Promise<StudioEpisodeDto> {
     const { show, episode } = await this.requireEpisode(userId, episodeId);
+    if (this.isEditorScript(show, episode)) {
+      const note = await this.makeEditorEpisode(userId, show, episode);
+      if (note) throw new ValidationError(note);
+      return this.episode(userId, episodeId);
+    }
     const note = await this.makeEpisode(userId, show, episode);
     if (note) throw new ValidationError(note);
     if (episode.twinOf) return this.episode(userId, episodeId);
@@ -2195,6 +2496,11 @@ export class StudioService {
       // In the shape the brief asks for (its twin begun when it is planned).
       shape: shapesOf(show.brief).lead,
     });
+    // An editor's show: the plan's episode it names, or planned around it.
+    if (usesEditor(show)) {
+      if (show.editor?.plan) await this.planEpisode(show, episode, request);
+      return episode;
+    }
     if (
       !briefMissing(show.brief).length &&
       (await this.studio.claimEpisode(episode.id, 'outline'))
@@ -2215,11 +2521,19 @@ export class StudioService {
     const episode = (await this.studio.findEpisode(created.id)) ?? created;
     if (words)
       await this.heard(show, episode, `Episode ${episode.number}`, words);
-    const writing = episode.busy === 'outline';
+    const writing = episode.busy === 'outline' || episode.busy === 'edit';
     await this.log(show, episode, {
       what: 'episode',
       step: writing ? 'outline' : 'brief',
-      line: `Episode ${episode.number} begun${writing ? ': writing its outline' : ''}`,
+      line: `Episode ${episode.number} begun${
+        episode.busy === 'edit'
+          ? ': writing its script'
+          : episode.busy === 'research'
+            ? ': researching what you asked, and planning around it'
+            : writing
+              ? ': writing its outline'
+              : ''
+      }`,
     });
     return this.episodeView(show, episode);
   }
@@ -2262,8 +2576,23 @@ export class StudioService {
       ...(episodeShape(episode) === 'tall' ? { shape: 'tall' as const } : {}),
       ...themeOfShow(show),
       ...(score ? { score } : {}),
-      // An explainer's host and "What next?" (Ask 9).
+      // An explainer's host and "What next?" (Ask 9); an editor's episode's
+      // next are the plan's waiting episodes, and its package.
       ...explainerPlay(show, episode.outline),
+      ...(show.editor && episode.editorial
+        ? editorPlay(
+            show.editor,
+            episode.editorial,
+            episode.outline?.scenes ?? [],
+            scenes.map((one) => ({
+              id: one.id,
+              position: one.position,
+              durationMs: one.durationMs,
+              made: Boolean(one.sceneKey),
+            })),
+            editorCredits(show.editor, scenes.some(drawnByShots)),
+          )
+        : {}),
       scenes: made.map((s, i) => {
         // From the scene the film shows before it, by code (an explainer's
         // may carry a thing across, go into a part or push on); the first
@@ -2282,10 +2611,15 @@ export class StudioService {
         // Into and out of an explainer's story clip (studio-clip): a
         // dissolve or an iris in, and out of it the clip shrinks into its
         // card on the next lesson's stage.
+        // An editor's illustrated scene is no clip (studio-edit illustratedJoin).
+        const clipOf = (one: StudioSceneRecord) =>
+          isIllustrated(episode.outline?.scenes[one.position])
+            ? null
+            : one.sheet;
         const joined = i
           ? (clipJoin(
-              made[i - 1].sheet,
-              s.sheet,
+              clipOf(made[i - 1]),
+              clipOf(s),
               show.brief.format,
               showTheme(show.brief, show.bible),
             ) ??
@@ -2393,6 +2727,24 @@ export class StudioService {
 
   async playShared(token: string): Promise<StudioPlayDto> {
     const { show, episode } = await this.shared(token);
+    const scenes = await this.studio.listScenes(episode.id);
+    const { watermarked } = await this.entitlements.studioBalance(show.userId);
+    const lead = episode.twinOf
+      ? await this.studio.findEpisode(episode.twinOf)
+      : null;
+    return this.playOf(show, episode, scenes, watermarked, lead);
+  }
+
+  /**
+   * The film as its player plays it, for the render page that makes it a
+   * video file (studio-export): whoever holds a render key for it, which
+   * the caller has checked. The free plan's films carry the Studio's name
+   * there too.
+   */
+  async playForRender(episodeId: string): Promise<StudioPlayDto> {
+    const episode = await this.studio.findEpisode(episodeId);
+    const show = episode ? await this.studio.findShow(episode.showId) : null;
+    if (!episode || !show) throw new NotFoundError('Film');
     const scenes = await this.studio.listScenes(episode.id);
     const { watermarked } = await this.entitlements.studioBalance(show.userId);
     const lead = episode.twinOf

@@ -196,12 +196,9 @@ describe('an explainer with a story clip, made on the worker with the fake write
   it('outlines lesson → clip → lesson with a cast the kits draw, writes each as what it is, and draws the clinic once', async () => {
     const w = worker();
     await w.run({ kind: 'outline' });
-    // The clips' people, and the show's host (studio-host: on for children).
-    expect(w.show.bible?.characters.map((c) => c.id)).toEqual([
-      'host',
-      'amara',
-      'sam',
-    ]);
+    // The clips' people, and no host: the audience is never on screen
+    // (studio-host, explainer-animation-plan §10).
+    expect(w.show.bible?.characters.map((c) => c.id)).toEqual(['amara', 'sam']);
     const outline = w.episodes.get('e1')!.outline!;
     expect(outline.scenes.map((s) => s.kind ?? 'lesson')).toEqual([
       'lesson',

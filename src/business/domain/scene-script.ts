@@ -55,6 +55,7 @@ import {
   type LearningStage,
   type StageRecipe,
 } from './scene-stage';
+import { AUDIENCE_RECIPES, STAGE_BAND } from './studio/studio-audience';
 import { checkLines } from './maths-work';
 import { numberPicture, type NumberPicture } from './scene-numbers';
 import { checkArithmetic, markTerms, type MathLine } from './scene-math';
@@ -82,6 +83,69 @@ import {
 } from './scene-molecule-names';
 import { findPhrase, isVerbatim } from './scene-quote';
 import { MAX_EVENTS, type TimelineSpec } from './scene-timeline';
+import {
+  counterPartNames,
+  counterStateNames,
+  readCounter,
+  type CounterDraft,
+  type CounterSpec,
+} from './scene-counter';
+import {
+  iconsPartNames,
+  iconsStateNames,
+  readIcons,
+  type IconsDraft,
+  type IconsSpec,
+} from './scene-icons';
+import {
+  namecardPartNames,
+  readNamecard,
+  type NamecardDraft,
+  type NamecardSpec,
+} from './scene-namecard';
+import {
+  calendarPartNames,
+  calendarStateNames,
+  readCalendar,
+  type CalendarDraft,
+  type CalendarSpec,
+} from './scene-calendar';
+import {
+  readSeats,
+  seatsPartNames,
+  type SeatsDraft,
+  type SeatsSpec,
+} from './scene-seats';
+import {
+  readStrike,
+  strikePartNames,
+  strikeStateNames,
+  type StrikeDraft,
+  type StrikeSpec,
+} from './scene-strike';
+import {
+  readTransfer,
+  transferPartNames,
+  transferStateNames,
+  type TransferDraft,
+  type TransferSpec,
+} from './scene-transfer';
+import {
+  documentPartNames,
+  documentStateNames,
+  readDocument,
+  type DocumentDraft,
+  type DocumentSpec,
+} from './scene-document';
+import {
+  readSplit,
+  splitPartNames,
+  splitStateNames,
+  type SplitDraft,
+  type SplitSpec,
+} from './scene-split';
+import { tokenOf, type PaletteEntry, type PaletteToken } from './scene-palette';
+import { applyPalette, showPalette } from './scene-palette-apply';
 import {
   SHEET_PARTS,
   nameKey,
@@ -330,6 +394,8 @@ export interface SceneBeat {
   music?: SceneMusic;
   /** The music runs high from here: a chase, a rush, danger close. */
   energy?: 'high';
+  /** A deliberate hold (an editor's episode): the picture stays as it is while it is said, and that is no fault. */
+  hold?: true;
 }
 
 /**
@@ -488,7 +554,103 @@ export interface MapThing {
   /** Its caption. */
   name: string;
   map: MapSpec;
+  /** The smallest text its audience reads, in stage units: what its names are written at, at least. */
+  text?: number;
 }
+
+/** A number that rolls up to its value, with what it counts (scene-counter). */
+export interface CounterThing {
+  id: string;
+  kind: 'counter';
+  name: string;
+  counter: CounterSpec;
+  /** The smallest text its audience reads, in stage units (scene-exact-style). */
+  text?: number;
+}
+
+/** A unit chart: a number as that many icons, multiplying into a grid (scene-icons). */
+export interface IconsThing {
+  id: string;
+  kind: 'icons';
+  name: string;
+  icons: IconsSpec;
+  text?: number;
+}
+
+/** Who someone is: their portrait, name, role and one line, in their colour (scene-namecard). */
+export interface NamecardThing {
+  id: string;
+  kind: 'namecard';
+  name: string;
+  namecard: NamecardSpec;
+  text?: number;
+}
+
+/** When: tear-off calendars that flip and slide together into one date (scene-calendar). */
+export interface CalendarThing {
+  id: string;
+  kind: 'calendar';
+  name: string;
+  calendar: CalendarSpec;
+  text?: number;
+}
+
+/** A chamber's seats in their groups' colours, filling seat by seat (scene-seats). */
+export interface SeatsThing {
+  id: string;
+  kind: 'seats';
+  name: string;
+  seats: SeatsSpec;
+  text?: number;
+}
+
+/** Words struck out and replaced on a cue (scene-strike). */
+export interface StrikeThing {
+  id: string;
+  kind: 'strike';
+  name: string;
+  strike: StrikeSpec;
+  text?: number;
+}
+
+/** Things moving along an arc from one box to another (scene-transfer). */
+export interface TransferThing {
+  id: string;
+  kind: 'transfer';
+  name: string;
+  transfer: TransferSpec;
+  text?: number;
+}
+
+/** An official paper or a newspaper, stamped on a cue (scene-document). */
+export interface DocumentThing {
+  id: string;
+  kind: 'document';
+  name: string;
+  document: DocumentSpec;
+  text?: number;
+}
+
+/** Two sides set against each other along a line, one changing on a cue (scene-split). */
+export interface SplitThing {
+  id: string;
+  kind: 'split';
+  name: string;
+  split: SplitSpec;
+  text?: number;
+}
+
+/** The infographic kinds (infographic-editor-plan §3, stage 6): drawn by code from what the writer names. */
+export type InfographicThing =
+  | CounterThing
+  | IconsThing
+  | NamecardThing
+  | CalendarThing
+  | SeatsThing
+  | StrikeThing
+  | TransferThing
+  | DocumentThing
+  | SplitThing;
 
 /** A thing drawn by code and not by the artist. */
 export type CodeThing =
@@ -500,7 +662,28 @@ export type CodeThing =
   | MapThing
   | FlagThing
   | FlowThing
-  | MoleculeThing;
+  | MoleculeThing
+  | InfographicThing;
+
+/** The infographic kinds, as the writer names them. */
+export const INFOGRAPHIC_KINDS = [
+  'counter',
+  'icons',
+  'namecard',
+  'calendar',
+  'seats',
+  'strike',
+  'transfer',
+  'document',
+  'split',
+] as const;
+export type InfographicKind = (typeof INFOGRAPHIC_KINDS)[number];
+
+/** Whether a thing is one of the infographic kinds. */
+export const isInfographicThing = (thing: {
+  kind: string;
+}): thing is InfographicThing =>
+  (INFOGRAPHIC_KINDS as readonly string[]).includes(thing.kind);
 
 /** The kinds code draws itself. */
 export const CODE_KINDS = [
@@ -513,6 +696,7 @@ export const CODE_KINDS = [
   'flag',
   'flow',
   'molecule',
+  ...INFOGRAPHIC_KINDS,
 ] as const;
 
 /** Whether a thing is one code draws, not the artist. */
@@ -627,6 +811,15 @@ export function partNames(thing: SceneThing): string[] {
   if (thing.kind === 'flow') return flowPartNames(thing.flow);
   if (thing.kind === 'molecule')
     return moleculePartNames(thing.molecule.smiles);
+  if (thing.kind === 'counter') return counterPartNames(thing.counter);
+  if (thing.kind === 'icons') return iconsPartNames(thing.icons);
+  if (thing.kind === 'namecard') return namecardPartNames(thing.namecard);
+  if (thing.kind === 'calendar') return calendarPartNames(thing.calendar);
+  if (thing.kind === 'seats') return seatsPartNames(thing.seats);
+  if (thing.kind === 'strike') return strikePartNames(thing.strike);
+  if (thing.kind === 'transfer') return transferPartNames(thing.transfer);
+  if (thing.kind === 'document') return documentPartNames(thing.document);
+  if (thing.kind === 'split') return splitPartNames(thing.split);
   if (thing.kind === 'character' || thing.kind === 'person')
     return [...SHEET_PARTS];
   return [];
@@ -637,6 +830,13 @@ export function stateNames(thing: SceneThing): string[] {
   if (thing.kind === 'drawing') return thing.states.map((s) => s.name);
   if (thing.kind === 'math')
     return thing.lines.slice(1).map((_, k) => `line ${k + 2}`);
+  if (thing.kind === 'counter') return counterStateNames(thing.counter);
+  if (thing.kind === 'icons') return iconsStateNames(thing.icons);
+  if (thing.kind === 'calendar') return calendarStateNames(thing.calendar);
+  if (thing.kind === 'strike') return strikeStateNames(thing.strike);
+  if (thing.kind === 'transfer') return transferStateNames(thing.transfer);
+  if (thing.kind === 'document') return documentStateNames(thing.document);
+  if (thing.kind === 'split') return splitStateNames(thing.split);
   if (thing.kind === 'character' || thing.kind === 'person')
     return [...FACES, ...FIGURE_SIGNS];
   return [];
@@ -810,6 +1010,8 @@ export interface SceneStep {
    * stairs) is this step's change of place.
    */
   interact?: SceneStepInteraction[];
+  /** A deliberate hold: what it shows stays still until the next change, and that is no fault. */
+  hold?: true;
 }
 
 /** An interaction as the stager asks it: who, what, with which feature, and how long it has. */
@@ -829,6 +1031,12 @@ export interface SceneScript {
   fitReason: string | null;
   title: string;
   mood: SceneMood;
+  /**
+   * An editor's episode, paced as the playbook paces a film: something new
+   * every three to five seconds, a quiet over five seconds filled. Absent,
+   * paced as a lesson always was.
+   */
+  pace?: ScenePace;
   beats: SceneBeat[];
   cast: SceneThing[];
   steps: SceneStep[];
@@ -930,6 +1138,8 @@ export interface SceneScriptDraft {
     /** The music from this sentence on, or null to carry on. */
     music?: SceneMusic | null;
     energy?: 'low' | 'high' | null;
+    /** A deliberate hold: the picture stays as it is while this sentence is said (no filler, no pacing fault). */
+    hold?: boolean | null;
   }[];
   cast: {
     id: string;
@@ -949,7 +1159,8 @@ export interface SceneScriptDraft {
       | 'molecule'
       | 'character'
       | 'person'
-      | 'place';
+      | 'place'
+      | InfographicKind;
     /** A drawing's caption, a stat's caption, the words themselves. */
     name: string;
     brief: string | null;
@@ -1007,6 +1218,20 @@ export interface SceneScriptDraft {
     flow?: FlowDraft | null;
     /** A molecule: its common name; code knows its structure (scene-molecule-names). */
     molecule?: string | null;
+    /** The infographic kinds (scene-counter … scene-split), each by what it shows. */
+    counter?: CounterDraft | null;
+    icons?: IconsDraft | null;
+    namecard?: NamecardDraft | null;
+    calendar?: CalendarDraft | null;
+    seats?: SeatsDraft | null;
+    strike?: StrikeDraft | null;
+    transfer?: TransferDraft | null;
+    document?: DocumentDraft | null;
+    split?: SplitDraft | null;
+    /** A data picture's source, written small under it ("K.W.J. Post, 1963"). */
+    source?: string | null;
+    /** Its colour: a theme token's name (accent, chart0 … chart5, good, bad, muted), never a hex. */
+    colour?: string | null;
   }[];
   steps: {
     beat: number;
@@ -1018,8 +1243,19 @@ export interface SceneScriptDraft {
       | { from: string; to: string; label: string | null; flow: boolean }[]
       | null;
     effects: { target: string; do: SceneEffectKind }[] | null;
+    /** A deliberate hold: what this step shows stays still until the next change, and is no pacing fault. */
+    hold?: boolean | null;
   }[];
+  /**
+   * How it is paced, set by code (never by the writer): "infographic" for
+   * an editor's episode, paced as the playbook paces a film (something new
+   * every three to five seconds); absent, as a lesson always was.
+   */
+  pace?: ScenePace | null;
 }
+
+/** How a scene is paced: as an editor's infographic episode (the playbook's 3–5 seconds). */
+export type ScenePace = 'infographic';
 
 // ── Words ─────────────────────────────────────────────────────────────────
 
@@ -1103,6 +1339,121 @@ export function fitLayout(asked: SceneLayout, count: number): SceneLayout {
       ? asked
       : 'row';
   return asked === 'stack' && count <= 4 ? 'stack' : 'row';
+}
+
+/**
+ * A script with some of its things left out (explainer-animation-plan
+ * §10): an explainer's thing that cannot be shown truthfully is gone from
+ * its cast and its storyboard, never set as a card of its name. A stage
+ * that showed only them is no change, so the stage keeps what it had; one
+ * that showed others too keeps those, laid out for as many, and their
+ * arrows, comings and goings, cells and effects go with them. A step left
+ * with nothing to do is gone. And a scene never opens on nothing: when
+ * the first thing it showed is left out, its next picture comes on in its
+ * place.
+ */
+export function withoutThings<
+  T extends Pick<SceneScript, 'cast' | 'steps'> &
+    Partial<Pick<SceneScript, 'backdrop' | 'opening' | 'board'>>,
+>(script: T, ids: ReadonlySet<string>): T {
+  if (!script.cast.some((thing) => ids.has(thing.id))) return script;
+  const kept = (id: string) => !ids.has(id);
+  const keptIn = <V>(record: Record<string, V>) =>
+    Object.fromEntries(Object.entries(record).filter(([id]) => kept(id)));
+  const stageOf = (stage: SceneStage): SceneStage | null => {
+    const show = stage.show.filter(kept);
+    const backdrop =
+      stage.backdrop !== undefined && kept(stage.backdrop)
+        ? stage.backdrop
+        : undefined;
+    if (!show.length && backdrop === undefined) return null;
+    const out: SceneStage = {
+      ...stage,
+      layout: fitLayout(stage.layout, show.length),
+      show,
+      arrows: stage.arrows.filter((a) => kept(a.from) && kept(a.to)),
+    };
+    if (backdrop === undefined) delete out.backdrop;
+    for (const key of ['cutIn', 'arrive', 'leave'] as const) {
+      const left = stage[key]?.filter(kept);
+      if (left?.length) out[key] = left;
+      else delete out[key];
+    }
+    if (stage.at) out.at = keptIn(stage.at);
+    if (stage.depth) out.depth = keptIn(stage.depth);
+    if (stage.going)
+      out.going = Object.fromEntries(
+        Object.entries(keptIn(stage.going)).map(([id, how]) => {
+          if (how.toward === undefined || kept(how.toward)) return [id, how];
+          const rest = { ...how };
+          delete rest.toward;
+          return [id, rest];
+        }),
+      );
+    if (stage.board) {
+      const frame = Array.isArray(stage.board.frame)
+        ? stage.board.frame.filter(kept)
+        : stage.board.frame;
+      out.board = {
+        ...stage.board,
+        cells: keptIn(stage.board.cells),
+        faded: stage.board.faded.filter(kept),
+        frame: Array.isArray(frame) && !frame.length ? 'whole' : frame,
+      };
+    }
+    return out;
+  };
+  const steps = script.steps.map((step): SceneStep => ({
+    ...step,
+    stage: step.stage ? stageOf(step.stage) : null,
+    effects: step.effects
+      .filter((effect) => kept(effect.target))
+      .map((effect) =>
+        effect.part !== null && !kept(effect.part)
+          ? { ...effect, part: null }
+          : effect,
+      ),
+    ...(step.interact
+      ? { interact: step.interact.filter((one) => kept(one.who)) }
+      : {}),
+  }));
+  // What the scene opened on was left out: its next picture opens it.
+  const first = script.steps.findIndex((step) => step.stage);
+  if (first >= 0 && !steps[first].stage) {
+    const next = steps.findIndex((step, k) => k > first && step.stage);
+    if (next > first) {
+      steps[first] = { ...steps[first], stage: steps[next].stage };
+      steps[next] = { ...steps[next], stage: null };
+    }
+  }
+  return {
+    ...script,
+    cast: script.cast.filter((thing) => kept(thing.id)),
+    steps: steps.filter(
+      (step) =>
+        step.stage || step.effects.length || (step.interact?.length ?? 0) > 0,
+    ),
+    ...(script.backdrop && !kept(script.backdrop) ? { backdrop: null } : {}),
+    ...(script.opening
+      ? {
+          opening: {
+            show: script.opening.show.filter(kept),
+            backdrop:
+              script.opening.backdrop && kept(script.opening.backdrop)
+                ? script.opening.backdrop
+                : null,
+          },
+        }
+      : {}),
+    ...(script.board
+      ? {
+          board: {
+            ...script.board,
+            carried: script.board.carried.filter(kept),
+          },
+        }
+      : {}),
+  };
 }
 
 // ── The mend ──────────────────────────────────────────────────────────────
@@ -1339,8 +1690,24 @@ function comingsAndGoings(
 export interface MendOptions {
   /** The page, to hold a quotation to its own words. */
   material?: string;
+  /**
+   * A show's colours (an editor's world palette, {thing, token}): each
+   * thing code draws that it names keeps its token in every scene, and the
+   * rest take colours it has not given (scene-palette-apply).
+   */
+  palette?: readonly PaletteEntry[] | null;
+  /** The colour that show holds back for its payoff; absent, HELD_TOKEN. */
+  held?: PaletteToken | null;
   /** The formats the document may use; a kind of another is set in type. */
   formats?: readonly SceneFormat[];
+  /**
+   * A Studio explainer's storyboard (explainer-animation-plan §10): what
+   * cannot be shown truthfully is left out, never set in type as a card
+   * of its name, and no one is drawn (no person, no stand-in for the
+   * viewer, no stock figure for a group), so the stage keeps what it had.
+   * Absent, a book's page, mended as it always was.
+   */
+  explainer?: boolean;
   /** The story's characters, when the book is a story: who a character may be. */
   characters?: readonly {
     id: string;
@@ -1402,6 +1769,10 @@ export function mendCast(
   byId: Map<string, SceneThing>;
   resolve: (ref: string) => string | null;
 } {
+  // The show's colours, when it has a palette.
+  const palette = options.palette?.length
+    ? showPalette(options.palette, options.held ?? undefined)
+    : null;
   // Ids: safe, unique, and every way the writer might refer to one.
   const idFor = new Map<string, string>();
   const used = new Set<string>();
@@ -1426,12 +1797,27 @@ export function mendCast(
     idFor.set(raw.id.toLowerCase(), id);
     idFor.set(slug(raw.id), id);
     const name = clean(raw.name) || clean(raw.id);
+    // An explainer's thing that cannot be shown truthfully, or that is
+    // someone, is left out (explainer-animation-plan §10): no one refers
+    // to it any more, so its steps drop it and the stage keeps what it
+    // had. A book's page sets it in type, as it always did.
+    const explainer = options.explainer === true;
+    const forget = () => {
+      used.delete(id);
+      for (const key of [raw.id, raw.id.toLowerCase(), slug(raw.id)])
+        if (idFor.get(key) === id) idFor.delete(key);
+    };
+    const leaveOut = (why: string) => {
+      forget();
+      mended.push(`${id}: ${why}; left out`);
+    };
     if (raw.kind === 'stat') {
       const value = clean(raw.value);
       if (value) {
         cast.push({ id, kind: 'stat', value, caption: name });
         return;
       }
+      if (explainer) return leaveOut('a number with no value');
       mended.push(`${id}: a number with no value is set as words`);
       cast.push({ id, kind: 'words', text: name, style: 'keyword' });
       return;
@@ -1468,7 +1854,9 @@ export function mendCast(
           `${id}: "${name}" is a map of a real place; drawn by code, of ${asMap.region.name || 'its places'}`,
         );
         cast.push({ id, kind: 'map', name, map: asMap });
-      } else {
+      } else if (explainer)
+        leaveOut(`"${name}" is a map of a real place code cannot read`);
+      else {
         mended.push(
           `${id}: "${name}" is a map of a real place code cannot read; set in type`,
         );
@@ -1515,6 +1903,7 @@ export function mendCast(
       problems.push(
         `The equation "${raw.id}" has no lines: give equation as one to four lines of LaTeX.`,
       );
+      if (explainer) return leaveOut('an equation with no lines');
       mended.push(`${id}: an equation with no lines; set in type`);
       cast.push({ id, kind: 'words', text: name, style: 'keyword' });
       return;
@@ -1528,10 +1917,14 @@ export function mendCast(
         options.material,
         options.stage === 'early',
         textFloorOf(options.stage),
+        explainer,
       );
       mended.push(...made.mended);
       problems.push(...made.problems);
-      cast.push(made.thing);
+      // One it could not make is left out (an explainer's), said so above.
+      if (!made.thing) return forget();
+      // In the show's colours, where it has them.
+      cast.push(palette ? applyPalette(made.thing, palette) : made.thing);
       return;
     }
     // A story's place drawn as a picture is the place: the scene behind
@@ -1574,6 +1967,10 @@ export function mendCast(
     if (raw.kind === 'character') {
       if (known) mended.push(`${id}: the story's character ${known.id}`);
       const who = storyEntry(options.characters ?? [], raw.ref, name);
+      if (!who && explainer)
+        return leaveOut(
+          `"${raw.ref ?? name}" is not one of the story's characters`,
+        );
       if (!who) {
         mended.push(
           `${id}: "${raw.ref ?? name}" is not one of the story's characters; set in type`,
@@ -1603,6 +2000,11 @@ export function mendCast(
       });
       return;
     }
+    // An explainer draws no one: not the viewer, not a stock figure for a
+    // group, not a likeness of someone real (a portrait comes with the
+    // shots engine). The voice names them; the picture holds.
+    if (raw.kind === 'person' && explainer)
+      return leaveOut(`"${name}" is a person, and an explainer draws no one`);
     if (raw.kind === 'person') {
       if (!raw.figure)
         mended.push(`${id}: a person with no figure, drawn plainly`);
@@ -1645,6 +2047,8 @@ export function mendCast(
       !(raw.states ?? []).length
         ? someoneIn(name)
         : null;
+    if (someone && explainer)
+      return leaveOut(`"${name}" is someone, and an explainer draws no one`);
     if (someone) {
       mended.push(`${id}: "${name}" is someone; drawn as a person`);
       cast.push({
@@ -1668,6 +2072,10 @@ export function mendCast(
     // outline of a person…") is them, drawn by the kit: what else the
     // brief asks for is left to the voice.
     const about = raw.kind === 'drawing' && !someone ? personIn(asked) : null;
+    if (about && explainer)
+      return leaveOut(
+        'its brief is about someone, and an explainer draws no one',
+      );
     if (about) {
       mended.push(`${id}: its brief is about someone; drawn as a person`);
       cast.push({
@@ -1691,14 +2099,18 @@ export function mendCast(
         `${id}: its brief mentions people; the artist leaves them out`,
       );
     // And the writer, told which drawing asks for someone, shows them as
-    // people when it writes the page again.
+    // people when it writes the page again; an explainer's, that no one is
+    // drawn at all.
     const wanted = asked ? peopleAskedFor(asked) : null;
     if (wanted)
       problems.push(
-        `The drawing "${raw.id}" asks the artist for people ("${wanted}"), and the artist draws no one: show each person as a person (a pose for how they are placed, "in bed" for someone in bed; signs for what they go through, shown at the words; count for a few), with a face that fits, and let drawings show only things.`,
+        explainer
+          ? `The drawing "${raw.id}" asks the artist for people ("${wanted}"): an explainer draws no one. Show the thing itself, or what is real about them: where it happened on the map, a document, a number, their exact words as a quote.`
+          : `The drawing "${raw.id}" asks the artist for people ("${wanted}"), and the artist draws no one: show each person as a person (a pose for how they are placed, "in bed" for someone in bed; signs for what they go through, shown at the words; count for a few), with a face that fits, and let drawings show only things.`,
       );
     if (!brief) {
       problems.push(`The drawing "${raw.id}" has no brief: say what to draw.`);
+      if (explainer) return leaveOut('a drawing with no brief');
       cast.push({ id, kind: 'words', text: name, style: 'keyword' });
       return;
     }
@@ -1778,6 +2190,8 @@ export function mendScript(
       ? beat.delivery
       : ('explain' as const),
     ...musicOf(beat, kept[index + 1], !!options.characters?.length),
+    // A deliberate hold the editor asked for: no filler, no pacing fault.
+    ...(beat.hold === true ? { hold: true as const } : {}),
   }));
 
   // The cast: every thing made sound, and every way the writer might refer to one.
@@ -1853,6 +2267,14 @@ export function mendScript(
 
   const steps: SceneStep[] = [];
   let onStage: string[] = [];
+  /**
+   * An explainer's first picture, when all it showed was left out: where
+   * it was asked for, for its next picture to open the scene in its place
+   * (explainer-animation-plan §10), never an empty stage.
+   */
+  let opening: { at: SceneStep['at']; word: number; index: number } | null =
+    null;
+  let staged = false;
   for (const one of anchored) {
     const { raw } = one;
     let stage: SceneStage | null = null;
@@ -1936,6 +2358,18 @@ export function mendScript(
         }
         onStage = show;
       }
+      if (
+        options.explainer &&
+        !staged &&
+        !opening &&
+        !show.length &&
+        backdrop === undefined
+      )
+        opening = {
+          at: { beat: one.beat, phrase: one.phrase },
+          word: one.word,
+          index: steps.length,
+        };
     }
     const effects: SceneEffect[] = [];
     for (const effect of raw.effects ?? []) {
@@ -1944,12 +2378,33 @@ export function mendScript(
         mended.push(`step ${one.index + 1}: ${found}`);
       else effects.push(found);
     }
-    if (!stage && !effects.length) continue;
+    const held = raw.hold === true;
+    if (stage && !staged && opening) {
+      // The first picture left out: this one comes on where it was asked.
+      mended.push(
+        `step ${one.index + 1}: opens the scene, at "${opening.at.phrase}"`,
+      );
+      steps.splice(opening.index, 0, {
+        at: opening.at,
+        word: opening.word,
+        stage,
+        effects: [],
+      });
+      stage = null;
+      staged = true;
+    }
+    if (stage) staged = true;
+    if (!stage && !effects.length) {
+      // A hold asked on a moment that changes nothing holds its sentence.
+      if (held && beats[one.beat]) beats[one.beat].hold = true;
+      continue;
+    }
     steps.push({
       at: { beat: one.beat, phrase: one.phrase },
       word: one.word,
       stage,
       effects,
+      ...(held ? { hold: true as const } : {}),
     });
   }
 
@@ -2126,7 +2581,8 @@ export function mendScript(
     }
     const drawings = cast.filter((thing) => thing.kind === 'drawing');
     if (drawings.length > MAX_DRAWINGS) {
-      // The ones on stage longest keep their drawings; the rest are set in type.
+      // The ones on stage longest keep their drawings; the rest are set in
+      // type, or an explainer's left out, the stage keeping what it had.
       const firstSeen = (id: string) => {
         const at = steps.findIndex((step) => step.stage?.show.includes(id));
         return at < 0 ? Number.POSITIVE_INFINITY : at;
@@ -2137,19 +2593,29 @@ export function mendScript(
           .slice(0, MAX_DRAWINGS)
           .map((thing) => thing.id),
       );
-      cast.forEach((thing, index) => {
-        if (thing.kind === 'drawing' && !keep.has(thing.id)) {
-          cast[index] = {
-            id: thing.id,
-            kind: 'words',
-            text: thing.name,
-            style: 'keyword',
-          };
-          mended.push(
-            `${thing.id}: more than ${MAX_DRAWINGS} drawings; set in type`,
-          );
-        }
-      });
+      if (options.explainer) {
+        const extra = new Set(
+          drawings.filter((t) => !keep.has(t.id)).map((t) => t.id),
+        );
+        const left = withoutThings({ cast, steps }, extra);
+        cast.splice(0, cast.length, ...left.cast);
+        steps.splice(0, steps.length, ...left.steps);
+        for (const id of extra)
+          mended.push(`${id}: more than ${MAX_DRAWINGS} drawings; left out`);
+      } else
+        cast.forEach((thing, index) => {
+          if (thing.kind === 'drawing' && !keep.has(thing.id)) {
+            cast[index] = {
+              id: thing.id,
+              kind: 'words',
+              text: thing.name,
+              style: 'keyword',
+            };
+            mended.push(
+              `${thing.id}: more than ${MAX_DRAWINGS} drawings; set in type`,
+            );
+          }
+        });
     }
   }
 
@@ -2180,6 +2646,8 @@ export function mendScript(
       ),
       steps,
       ...(props.length ? { props } : {}),
+      // An editor's episode keeps the playbook's pace (set by code, never the writer).
+      ...(draft.pace === 'infographic' ? { pace: 'infographic' as const } : {}),
     },
     problems,
     mended,
@@ -2618,7 +3086,8 @@ export function storyEntry<
 /**
  * A thing code draws, made sound: working whose sums hold, a graph whose
  * function has values, a quotation that is the page's own words. One the
- * document's formats do not include is set in type instead.
+ * document's formats do not include is set in type instead; an
+ * explainer's (`leaveOut`) is no thing at all, never a card of its name.
  */
 function codeThing(
   id: string,
@@ -2630,18 +3099,25 @@ function codeThing(
   young = false,
   /** The smallest text its audience reads, in stage units: what flags, flows and molecules are drawn at. */
   textFloor?: number,
-): { thing: SceneThing; problems: string[]; mended: string[] } {
+  /** An explainer's: one that cannot be made is left out (explainer-animation-plan §10). */
+  leaveOut = false,
+): { thing: SceneThing | null; problems: string[]; mended: string[] } {
   const problems: string[] = [];
   const mended: string[] = [];
   const words = (why: string) => ({
-    thing: {
-      id,
-      kind: 'words' as const,
-      text: name || raw.id,
-      style: 'keyword' as const,
-    },
+    thing: leaveOut
+      ? null
+      : {
+          id,
+          kind: 'words' as const,
+          text: name || raw.id,
+          style: 'keyword' as const,
+        },
     problems,
-    mended: [...mended, `${id}: ${why}; set in type`],
+    mended: [
+      ...mended,
+      `${id}: ${why}; ${leaveOut ? 'left out' : 'set in type'}`,
+    ],
   });
   if (raw.kind === 'math') {
     // Working on any page that works a calculation: a law page's interest,
@@ -2739,6 +3215,9 @@ function codeThing(
             .map((p) => ({ x: p.x, name: clean(p.name) })),
           xLabel: clean(plot.xLabel) || null,
           yLabel: clean(plot.yLabel) || null,
+          ...(clean(raw.source)
+            ? { source: clean(raw.source).slice(0, 90) }
+            : {}),
         },
       },
       problems,
@@ -2771,7 +3250,12 @@ function codeThing(
         id,
         kind: 'timeline',
         name: clean(raw.name),
-        timeline: { events },
+        timeline: {
+          events,
+          ...(clean(raw.source)
+            ? { source: clean(raw.source).slice(0, 90) }
+            : {}),
+        },
       },
       problems,
       mended,
@@ -2788,7 +3272,8 @@ function codeThing(
       );
       return words('a chart with fewer than two numbers');
     }
-    if (material) {
+    // A chart that names its source is held to it, not to the page.
+    if (material && !clean(raw.source)) {
       const given = numbersIn(material).map(Math.abs);
       const unknown = bars.filter(
         (b) =>
@@ -2810,6 +3295,10 @@ function codeThing(
           kind: raw.chart?.kind === 'line' ? 'line' : 'bar',
           unit: clean(raw.chart?.unit) || null,
           bars,
+          ...(tokenOf(raw.colour) ? { colour: tokenOf(raw.colour) } : {}),
+          ...(clean(raw.source)
+            ? { source: clean(raw.source).slice(0, 90) }
+            : {}),
         },
       },
       problems,
@@ -2827,7 +3316,13 @@ function codeThing(
       return words('a map of nowhere known');
     }
     return {
-      thing: { id, kind: 'map', name: clean(raw.name), map: spec },
+      thing: {
+        id,
+        kind: 'map',
+        name: clean(raw.name),
+        map: spec,
+        ...(textFloor ? { text: textFloor } : {}),
+      },
       problems,
       mended,
     };
@@ -2891,6 +3386,12 @@ function codeThing(
       mended,
     };
   }
+  if ((INFOGRAPHIC_KINDS as readonly string[]).includes(raw.kind)) {
+    const made = infographicThing(id, raw, name, material, textFloor);
+    if ('why' in made) return words(made.why);
+    problems.push(...made.problems);
+    return { thing: made.thing, problems, mended };
+  }
   if (!formats.has('reading')) return words('not a book to read closely');
   // A quotation keeps its line breaks; only spaces within a line are tidied.
   const text = (raw.quote ?? '')
@@ -2927,6 +3428,158 @@ function codeThing(
     problems,
     mended,
   };
+}
+
+/**
+ * Whether the page gives a number: as written, or as its unit scales it
+ * ("45" with "million" is the page's "45,000,000"). What a data picture's
+ * numbers are held to, as a chart's are.
+ */
+export function pageGives(
+  material: string,
+  value: number,
+  unit: string | null = null,
+): boolean {
+  const given = numbersIn(material).map(Math.abs);
+  const said = (unit ?? '').toLowerCase();
+  const scale = /\b(?:billion|bn)\b/.test(said)
+    ? 1e9
+    : /\bmillion\b/.test(said)
+      ? 1e6
+      : /\bthousand\b/.test(said)
+        ? 1e3
+        : 1;
+  const near = (a: number, b: number) =>
+    Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(b));
+  const v = Math.abs(value);
+  return given.some((n) => near(n, v) || (scale > 1 && near(n, v * scale)));
+}
+
+/**
+ * One of the infographic kinds made sound from the writer's fields: its
+ * own object read by its module (unknown names dropped, lists capped,
+ * numbers made numbers), its source line and colour token with it. Its
+ * numbers, when it gives no source, are held to the page as a chart's are.
+ * One that cannot be read is why it is set in type instead.
+ */
+function infographicThing(
+  id: string,
+  raw: SceneScriptDraft['cast'][number],
+  name: string,
+  material: string | undefined,
+  textFloor: number | undefined,
+): { thing: InfographicThing; problems: string[] } | { why: string } {
+  const extra = { colour: raw.colour, source: raw.source };
+  // Each kind draws its own words: none takes the stage's caption too (its
+  // name would be said twice), and a counter or a strike with no words of
+  // its own takes the writer's name for them.
+  const own = '';
+  const named = clean(raw.name) || null;
+  const text = textFloor ? { text: textFloor } : {};
+  const problems: string[] = [];
+  /** A number the page does not give, said for the writer once per thing. */
+  const unsourced = (what: string, values: number[], unit: string | null) => {
+    if (!material || clean(raw.source)) return;
+    const missing = values.filter((v) => !pageGives(material, v, unit));
+    if (missing.length)
+      problems.push(
+        `The ${what} "${raw.id}" shows numbers the page does not give: ${missing.join(', ')}. Show only the page's own numbers, or give the source they come from.`,
+      );
+  };
+  switch (raw.kind as InfographicKind) {
+    case 'counter': {
+      const read = readCounter(raw.counter, extra);
+      if (!read) return { why: 'a counter with no number' };
+      const counter = { ...read, label: read.label ?? named };
+      unsourced(
+        'counter',
+        [counter.value, ...(counter.then !== null ? [counter.then] : [])],
+        counter.unit,
+      );
+      return {
+        thing: { id, kind: 'counter', name: own, counter, ...text },
+        problems,
+      };
+    }
+    case 'icons': {
+      const icons = readIcons(raw.icons, name, extra);
+      if (!icons) return { why: 'a unit chart that counts nothing' };
+      unsourced(
+        'icons',
+        [icons.count, ...(icons.highlight ? [icons.highlight.count] : [])],
+        icons.unit,
+      );
+      return {
+        thing: { id, kind: 'icons', name: own, icons, ...text },
+        problems,
+      };
+    }
+    case 'namecard': {
+      const namecard = readNamecard(raw.namecard, name, extra);
+      if (!namecard) return { why: 'a name card with no one named' };
+      return {
+        thing: { id, kind: 'namecard', name: own, namecard, ...text },
+        problems,
+      };
+    }
+    case 'calendar': {
+      const calendar = readCalendar(raw.calendar, extra);
+      if (!calendar) return { why: 'a calendar with no date' };
+      return {
+        thing: { id, kind: 'calendar', name: own, calendar, ...text },
+        problems,
+      };
+    }
+    case 'seats': {
+      const seats = readSeats(raw.seats, name, extra);
+      if (!seats) return { why: 'a chamber with no seats' };
+      unsourced(
+        'seats',
+        seats.groups.map((g) => g.seats),
+        null,
+      );
+      return {
+        thing: { id, kind: 'seats', name: own, seats, ...text },
+        problems,
+      };
+    }
+    case 'strike': {
+      const read = readStrike(raw.strike, extra);
+      if (!read)
+        return { why: 'words struck out with nothing to replace them' };
+      const strike = { ...read, label: read.label ?? named };
+      return {
+        thing: { id, kind: 'strike', name: own, strike, ...text },
+        problems,
+      };
+    }
+    case 'transfer': {
+      const transfer = readTransfer(raw.transfer, name, extra);
+      if (!transfer) return { why: 'things moving with no two ends' };
+      return {
+        thing: { id, kind: 'transfer', name: own, transfer, ...text },
+        problems,
+      };
+    }
+    case 'document': {
+      const document = readDocument(raw.document, name, extra);
+      if (!document) return { why: 'a document with no title' };
+      return {
+        thing: { id, kind: 'document', name: own, document, ...text },
+        problems,
+      };
+    }
+    case 'split': {
+      const split = readSplit(raw.split);
+      if (!split) return { why: 'a split screen without two sides' };
+      return {
+        thing: { id, kind: 'split', name: own, split, ...text },
+        problems,
+      };
+    }
+    default:
+      return { why: 'no kind code draws' };
+  }
 }
 
 /** The most lines one working holds: more is a second working. */
@@ -3039,9 +3692,14 @@ export function quietStretches(script: SceneScript, limit = 30): string[] {
   });
   // What a learner sees change: the stage, a part named, a state shown.
   // A pulse on what is already there is not something new to look at.
+  const heldFrom = new Set<number>();
   for (const step of script.steps)
-    if (step.stage || step.effects.some((e) => e.do !== 'pulse'))
-      positions.push(offsets[step.at.beat] + step.word);
+    if (step.stage || step.effects.some((e) => e.do !== 'pulse')) {
+      const at = offsets[step.at.beat] + step.word;
+      positions.push(at);
+      // A step held on purpose: the stretch it starts is no fault.
+      if (step.hold) heldFrom.add(at);
+    }
   // A character's line opens a bubble, and they start to speak.
   script.beats.forEach((beat, k) => {
     for (const line of beat.lines ?? [])
@@ -3049,18 +3707,71 @@ export function quietStretches(script: SceneScript, limit = 30): string[] {
         offsets[k] + wordsOf(beat.say.slice(0, line.span[0])).length,
       );
   });
+  // A sentence held on purpose stands apart: no fault within it, and the
+  // stretches either side counted on their own.
+  const heldBeats: [number, number][] = [];
+  script.beats.forEach((beat, k) => {
+    if (!beat.hold) return;
+    const span: [number, number] = [
+      offsets[k],
+      offsets[k] + wordsOf(beat.say).length,
+    ];
+    heldBeats.push(span);
+    positions.push(span[0], span[1]);
+  });
   positions.sort((a, b) => a - b);
   positions.push(before);
   const out: string[] = [];
   let last = 0;
   for (const at of positions) {
-    if (at - last > limit)
+    const held =
+      heldFrom.has(last) ||
+      heldBeats.some(([from, to]) => last >= from && at <= to);
+    if (at - last > limit && !held)
       out.push(
         `${at - last} spoken words pass with nothing new to see, from word ${last} (about ${Math.round((at - last) / 2.5)} seconds): give each small idea in them its own change on its first words (a part pointed at, a state shown, a new thing, a zoom).`,
       );
     last = at;
   }
   return out;
+}
+
+/** In an editor's episode, the playbook's most seconds with nothing new to see. */
+export const INFOGRAPHIC_STILL_SECONDS = 5;
+/** And its most seconds, on average, before the stage itself changes. */
+export const INFOGRAPHIC_STAGE_SECONDS = 6;
+
+/** Words at an audience's pace for some seconds: a grown-up's (150 a minute) when it is not known. */
+function wordsInSeconds(
+  seconds: number,
+  stage: LearningStage | null | undefined,
+): number {
+  const wpm = stage ? AUDIENCE_RECIPES[STAGE_BAND[stage]].wpm : 150;
+  return Math.max(6, Math.round((seconds * wpm) / 60));
+}
+
+/**
+ * Spoken words a scene may pass with nothing new to see: STILL_WORDS for
+ * a lesson; in an editor's episode the playbook's three-to-five-second
+ * rule, five seconds at its audience's pace (twelve words at a grown-up's).
+ */
+export function stillWordsFor(
+  script: Pick<SceneScript, 'pace'>,
+  stage?: LearningStage | null,
+): number {
+  return script.pace === 'infographic'
+    ? wordsInSeconds(INFOGRAPHIC_STILL_SECONDS, stage)
+    : STILL_WORDS;
+}
+
+/** Spoken words a scene's stage may go without changing what it shows, on average: WORDS_A_STAGE, or six seconds' in an editor's episode. */
+export function stageWordsFor(
+  script: Pick<SceneScript, 'pace'>,
+  stage?: LearningStage | null,
+): number {
+  return script.pace === 'infographic'
+    ? wordsInSeconds(INFOGRAPHIC_STAGE_SECONDS, stage)
+    : WORDS_A_STAGE;
 }
 
 /**
@@ -3072,10 +3783,15 @@ export function quietStretches(script: SceneScript, limit = 30): string[] {
  */
 export const WORDS_ALONE = 12;
 
-/** Each stretch where the stage shows only word cards for more than `limit` spoken words, said for the writer. */
+/**
+ * Each stretch where the stage shows only word cards for more than `limit`
+ * spoken words, said for the writer: an explainer's told what may show
+ * the idea without drawing anyone (explainer-animation-plan §10).
+ */
 export function wordsAloneStretches(
   script: SceneScript,
   limit = WORDS_ALONE,
+  explainer = false,
 ): string[] {
   const cards = new Map(
     script.cast.flatMap((thing) =>
@@ -3100,7 +3816,7 @@ export function wordsAloneStretches(
     if (until - stage.at <= limit) return;
     const words = stage.show.map((id) => `"${cards.get(id)}"`).join(', ');
     out.push(
-      `${until - stage.at} spoken words pass with only words on the stage (${words}), from word ${stage.at} (about ${Math.round((until - stage.at) / 2.5)} seconds): show the idea as a picture that builds up as the voice goes (a drawing, a person, a chart), with its words as its label. A word card alone is only for following a list the voice reads out, each arriving as it is named.`,
+      `${until - stage.at} spoken words pass with only words on the stage (${words}), from word ${stage.at} (about ${Math.round((until - stage.at) / 2.5)} seconds): show the idea as a picture that builds up as the voice goes (${explainer ? 'a drawing of the thing, a map, a chart, a counter, a document' : 'a drawing, a person, a chart'}), with its words as its label${explainer ? ', or leave the picture before it on the stage' : ''}. A word card alone is only for following a list the voice reads out, each arriving as it is named.`,
     );
   });
   return out;
@@ -3132,11 +3848,14 @@ export const WORDS_A_STAGE = 30;
  * A lesson whose stage itself hardly changes: points and states on one
  * picture are not enough for a page of any length. Nothing for a short one.
  */
-export function fewStageChanges(script: SceneScript): string[] {
+export function fewStageChanges(
+  script: SceneScript,
+  perStage = WORDS_A_STAGE,
+): string[] {
   const words = script.beats.reduce((n, b) => n + wordsOf(b.say).length, 0);
   const stages = script.steps.filter((step) => step.stage).length;
-  const wanted = Math.floor(words / WORDS_A_STAGE);
-  if (words < 2 * WORDS_A_STAGE || stages >= wanted) return [];
+  const wanted = Math.floor(words / perStage);
+  if (words < 2 * perStage || stages >= wanted) return [];
   return [
     `The stage changes ${stages} times in ${words} spoken words; change what is shown, or how it is laid out, about every sentence or two (${wanted} times or more): bring on each thing, term or list item as it is named, and send off what the voice is done with.`,
   ];

@@ -16,6 +16,7 @@ import { LectureBoardProcessor } from './pipeline/processors/lecture-board.proce
 import { LectureFollowProcessor } from './pipeline/processors/lecture-follow.processor';
 import { SceneProcessor } from './pipeline/processors/scene.processor';
 import { StudioProcessor } from './pipeline/processors/studio.processor';
+import { StudioExportProcessor } from './pipeline/processors/studio-export.processor';
 import { StudioMaterialService } from './pipeline/processors/studio-material';
 import { LectureFollowService } from './pipeline/processors/lecture-follow.service';
 import { LectureBoardService } from './pipeline/processors/lecture-board.service';
@@ -49,6 +50,7 @@ import { WorkerRunner } from './pipeline/worker-runner.service';
     LectureFollowProcessor,
     SceneProcessor,
     StudioProcessor,
+    StudioExportProcessor,
     StudioMaterialService,
     LectureFollowService,
     LectureBoardService,

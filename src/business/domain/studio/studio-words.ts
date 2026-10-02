@@ -215,9 +215,11 @@ export function describeForProducer(input: {
   looking?: string | null;
   /** New drawings of characters waiting to be chosen from: whose, how many, and what was asked. */
   waiting?: { name: string; options: number; words: string }[];
+  /** A show the editor plans (studio-editor-words describeEditorForProducer): where its planning is. */
+  editor?: string | null;
 }): string {
   const story = input.brief.format !== 'explainer';
-  const missing = briefMissing(input.brief);
+  const missing = briefMissing(input.brief, Boolean(input.editor));
   const parts = [
     `Episode ${input.episode}.`,
     `The brief:\n${describeBrief({ ...input.brief, source: input.brief.source ? `(${input.brief.source.length} characters of their own text)` : null })}`,
@@ -251,6 +253,7 @@ export function describeForProducer(input: {
         )
         .join('\n')}`,
     );
+  if (input.editor) parts.push(input.editor);
   if (input.looking)
     parts.push(
       `The maker is looking at ${input.looking} as they write: "it" or "this" most likely means that.`,

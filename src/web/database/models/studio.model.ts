@@ -23,6 +23,10 @@ export class StudioShowModel extends BaseModel {
   @Column({ type: DataType.UUID, allowNull: true })
   declare documentId: string | null;
 
+  /** An explainer the editor plans: its angles, research, plan and world, as JSON (studio-editor). */
+  @Column({ type: DataType.TEXT('medium'), allowNull: true })
+  declare editor: string | null;
+
   @Column({ type: DataType.DATE, allowNull: true })
   declare deletedAt: Date | null;
 
@@ -84,6 +88,10 @@ export class StudioEpisodeModel extends BaseModel {
   /** The episode it is the twin of, in the other shape: that one's script and voice are its. */
   @Column({ type: DataType.UUID, allowNull: true })
   declare twinOf: string | null;
+
+  /** An episode the editor wrote: its beat sheet, hooks, two-column script and package, as JSON (studio-editorial). */
+  @Column({ type: DataType.TEXT('medium'), allowNull: true })
+  declare editorial: string | null;
 
   declare createdAt: Date;
   declare updatedAt: Date;

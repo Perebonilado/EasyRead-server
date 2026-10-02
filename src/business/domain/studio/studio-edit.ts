@@ -13,6 +13,7 @@
 import type { FilmShape } from '../scene-shape';
 import type { StudioJoinName, StudioJoinWithDto } from '../../../contracts';
 import { groupId } from '../scene-ids';
+import { sameMapFrame } from '../scene-map';
 import type {
   ExplainerSheet,
   OutlineScene,
@@ -62,10 +63,10 @@ export interface JoinPlan {
 /** One side of a join: the scene's sheet, and its outline scene where known (its teaching, and the part it goes into). */
 export interface JoinSide {
   sheet: SceneSheet | null;
-  scene?: Pick<
-    OutlineScene,
-    'title' | 'summary' | 'teach' | 'points' | 'into'
-  > | null;
+  scene?:
+    | (Pick<OutlineScene, 'title' | 'summary' | 'teach' | 'points' | 'into'> &
+        Partial<Pick<OutlineScene, 'kind'>>)
+    | null;
   /** E5's continuous build: this scene carries on the diagram before. */
   build?: 'start' | 'continue' | null;
 }
@@ -131,6 +132,15 @@ const SET_BY_CODE: ReadonlySet<Cast['kind']> = new Set([
   'equation',
   'flow',
   'molecule',
+  'counter',
+  'icons',
+  'namecard',
+  'calendar',
+  'seats',
+  'strike',
+  'transfer',
+  'document',
+  'split',
 ]);
 
 /** A list's place in its order, from a scene's title: "Step 2", "Part three", "3. …", "Second, …". */
@@ -225,12 +235,16 @@ function namesPartOf(side: JoinSide, parts: readonly string[]): string | null {
  *  - zoom-through: the next scene names a part of what the last one ended
  *    on ("inside the nucleus"), or its outline says `into` it;
  *  - morph: the same thing in both, at the end of one and the start of
- *    the next (its place, and a chart's or graph's numbers, change);
+ *    the next (its place, and a chart's or graph's numbers, change), and
+ *    two maps in a show's one frame (scene-map), which line up exactly;
  *  - match: what the last ended on and the next opens on are one of the
  *    show's pictures, or the same shape (a chart and a chart);
  *  - push: two steps of one list ("Step 2", "Step 3"); in a tall film a
  *    push-up, the next coming up from below as a phone's feed scrolls
  *    (studio-vertical-plan §4.6);
+ *  - an editor's illustrated scenes (illustratedJoin): from one shot of
+ *    a place to the next of the same place, a cut; anywhere else, and
+ *    into or out of a lesson, a dissolve;
  *  - a story's scenes as joinOf has them.
  */
 export function joinFor(
@@ -243,6 +257,8 @@ export function joinFor(
   if (after.build === 'continue') return { join: 'continue' };
   const a = before?.sheet ?? null;
   const b = after.sheet;
+  const illustrated = illustratedJoin(before, after);
+  if (illustrated) return illustrated;
   if (b?.transition === 'fade') return { join: 'dip' };
   if (a?.kind !== 'explainer' || b?.kind !== 'explainer')
     return { join: joinOf(a, b) };
@@ -270,10 +286,13 @@ export function joinFor(
   const opens = now.first
     .map((id) => castB.get(id))
     .filter((c): c is Cast => Boolean(c));
+  // Two maps in the show's one frame are one map, however each is
+  // captioned: the film carries it across, and what it colours changes.
   const sameThing = (x: Cast, y: Cast) =>
-    x.kind === y.kind &&
-    nameKey(x.name) !== '' &&
-    nameKey(x.name) === nameKey(y.name);
+    (x.kind === y.kind &&
+      nameKey(x.name) !== '' &&
+      nameKey(x.name) === nameKey(y.name)) ||
+    (x.kind === 'map' && y.kind === 'map' && sameMapFrame(x.map, y.map));
   const ranked = [...ends].sort(
     (x, y) => Number(SET_BY_CODE.has(y.kind)) - Number(SET_BY_CODE.has(x.kind)),
   );
@@ -308,5 +327,28 @@ export function joinFor(
   const two = placeInList(after.scene?.title ?? b.title);
   if (one && two && one.list === two.list && two.n === one.n + 1)
     return { join: shape === 'tall' ? 'push-up' : 'push' };
+  return { join: 'dissolve' };
+}
+
+/**
+ * How the film goes into, between and out of an editor's illustrated
+ * scenes: a shot of a place cut straight to the next of the same place,
+ * a dip where the writer marks time passing between two; any other move,
+ * and every way into or out of a lesson, a dissolve. Null where neither
+ * side is illustrated.
+ */
+export function illustratedJoin(
+  before: JoinSide | null,
+  after: JoinSide,
+): JoinPlan | null {
+  const was = before?.scene?.kind === 'illustrated';
+  const now = after.scene?.kind === 'illustrated';
+  if (!was && !now) return null;
+  const a = before?.sheet ?? null;
+  const b = after.sheet;
+  if (was && now && a?.kind === 'story' && b?.kind === 'story') {
+    if (b.transition === 'fade') return { join: 'dip' };
+    return { join: a.set === b.set ? 'cut' : 'dissolve' };
+  }
   return { join: 'dissolve' };
 }

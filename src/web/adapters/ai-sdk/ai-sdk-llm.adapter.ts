@@ -33,6 +33,9 @@ import type {
   StudioCheckVerdict,
   StudioRevision,
   StudioTurnDraft,
+  EditorFound,
+  EditorSearchStep,
+  EditorWriteStep,
 } from '../../../business/ports/llm.port';
 import {
   groupId,
@@ -46,7 +49,7 @@ import {
   type DrawingKind,
   type DrawingVerdict,
 } from '../../../business/domain/drawing-score';
-import { PROMPTS } from '../prompts';
+import { PROMPTS, explainerWrite } from '../prompts';
 import { STUDIO_PROMPTS } from '../studio-prompts';
 import type { z } from 'zod';
 import {
@@ -64,6 +67,37 @@ import {
   studioTurnSchema,
 } from './studio-schemas';
 import { ModelRegistry, type ModelRef } from './models';
+import {
+  editorAnglesSchema,
+  editorBeatsSchema,
+  editorFactsSchema,
+  editorHooksSchema,
+  editorPackageSchema,
+  editorPlanSchema,
+  editorReadSchema,
+  editorResearchSchema,
+  editorScriptSchema,
+  editorWorldSchema,
+} from './editor-schemas';
+import {
+  EDITOR_PROMPTS,
+  boardIllustratedPrompt,
+  boardLessonPrompt,
+} from '../editor-prompts';
+import { shotBoardPrompt } from '../shot-prompts';
+import { shotBoardSchema } from './shot-schemas';
+import { pictureFocusPrompt, pictureFocusSchema } from './picture-schemas';
+import {
+  effortOptions,
+  filled,
+  foundOf,
+  lenient,
+  misshapen,
+  revisedPrompt,
+  searchesOf,
+  usageOf,
+  type Effort,
+} from './editor-calls';
 import {
   blocksSchema,
   mathsBlocksSchema,
@@ -857,6 +891,7 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     profile?: string;
     story?: string;
     notes?: string;
+    explainer?: boolean;
     previous?: SceneScriptDraft;
     problems?: string[];
   }): Promise<LlmResult<SceneScriptDraft>> {
@@ -867,7 +902,9 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
       generateObject({
         model,
         schema: sceneScriptSchema,
-        system: PROMPTS.sceneWrite,
+        // A Studio explainer's writer is told the explainer's craft; a
+        // book's page keeps the writer's own (explainer-animation-plan §10).
+        system: input.explainer ? explainerWrite() : PROMPTS.sceneWrite,
         prompt: [
           `Document: ${input.documentTitle}`,
           `Chapter: ${input.topicTitle}`,
@@ -985,8 +1022,12 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
     setting = 'SCENE_WRITE_THINKING',
     otherwise: 'on' | 'off' = 'off',
   ) {
-    if (ref.provider !== 'deepseek') return {};
     const on = this.config.get<string>(setting, otherwise) === 'on';
+    // On a GPT mini (the Studio's words since 2026-10-01) the setting is
+    // its reasoning effort: off is low, so the producer answers quickly.
+    if (ref.provider === 'openai')
+      return effortOptions('openai', undefined, on ? 'medium' : 'low');
+    if (ref.provider !== 'deepseek') return {};
     return {
       providerOptions: {
         deepseek: { thinking: { type: on ? 'enabled' : 'disabled' } },
@@ -2744,6 +2785,370 @@ export class AiSdkLlmAdapter implements LlmGatewayPort, OnModuleInit {
       );
       return { flagged: false, categories: [] };
     }
+  }
+
+  // ── The editor's desk (infographic-editor-plan) ───────────────────────
+
+  /** A task's reasoning, as its setting says: OpenAI's effort, DeepSeek's thinking. */
+  private effort(ref: ModelRef, setting: string, otherwise: Effort) {
+    return effortOptions(
+      ref.provider,
+      this.config.get<string>(setting) ?? undefined,
+      otherwise,
+    );
+  }
+
+  /** One step of a show's planning or an episode's editing, on the editor model (explainer_edit). */
+  async editorWrite(
+    input: { step: EditorWriteStep; parts: string[] } & StudioRevision,
+  ): Promise<LlmResult<Record<string, unknown>>> {
+    const started = Date.now();
+    const ai = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('explainer_edit');
+    const schema = {
+      plan: editorPlanSchema,
+      world: editorWorldSchema,
+      beats: editorBeatsSchema,
+      hooks: editorHooksSchema,
+      script: editorScriptSchema,
+      read: editorReadSchema,
+      package: editorPackageSchema,
+    }[input.step];
+    // Streamed: a plan or a script thought through at medium effort runs
+    // three or four minutes, near the HTTP client's five for a first byte.
+    const result = await this.againIfMisshapen(() =>
+      this.streamedObject(ai, {
+        model,
+        schema: schema as z.ZodTypeAny,
+        system: EDITOR_PROMPTS[input.step],
+        prompt: revisedPrompt(input.parts, input),
+        maxRetries: this.maxRetries(),
+        ...this.effort(ref, 'EXPLAINER_EDIT_EFFORT', 'medium'),
+      }),
+    );
+    // A developer's look at what the editor answered, before it is made
+    // sound (EDITOR_DUMP_DIR): one file a call, named for its step.
+    const dump = this.config.get<string>('EDITOR_DUMP_DIR');
+    if (dump) {
+      const { writeFile, mkdir } = await import('node:fs/promises');
+      await mkdir(dump, { recursive: true });
+      await writeFile(
+        `${dump}/${input.step}-${Date.now()}.json`,
+        JSON.stringify(
+          {
+            object: result.object,
+            finishReason: result.finishReason,
+            usage: result.usage,
+          },
+          null,
+          1,
+        ),
+      );
+    }
+    return {
+      value: result.object as Record<string, unknown>,
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
+  /**
+   * A step that searches the web (explainer_research): the model searches
+   * with OpenAI's own tool and answers in its shape in the same call; an
+   * answer that will not take its shape so is searched as notes and shaped
+   * after. Only the pages the searches found may stand as a claim's
+   * source. A provider with no search answers from what it knows.
+   */
+  async editorSearch(input: {
+    step: EditorSearchStep;
+    parts: string[];
+    searches?: number;
+  }): Promise<
+    LlmResult<{ value: Record<string, unknown>; found: EditorFound[] }>
+  > {
+    const started = Date.now();
+    const ai = await this.registry.modules();
+    const { model, ref } =
+      await this.registry.languageModel('explainer_research');
+    const schema = {
+      angles: editorAnglesSchema,
+      research: editorResearchSchema,
+      facts: editorFactsSchema,
+    }[input.step] as z.ZodTypeAny;
+    const system = EDITOR_PROMPTS[input.step];
+    const prompt = input.parts.filter(Boolean).join('\n\n');
+    // The research is thought through (it decides how widely to search);
+    // the angles' look round and the fact check stay quick.
+    const effort = this.effort(
+      ref,
+      'EXPLAINER_RESEARCH_EFFORT',
+      input.step === 'research' ? 'medium' : 'low',
+    );
+    const most = Math.max(
+      1,
+      input.searches ??
+        Number(this.config.get<string>('EXPLAINER_RESEARCH_SEARCHES', '30')),
+    );
+    const said = this.config.get<string>(
+      'EXPLAINER_RESEARCH_CONTEXT',
+      'medium',
+    );
+    const searchContextSize =
+      said === 'low' || said === 'high' ? said : ('medium' as const);
+    const search = await this.registry.webSearch('explainer_research', {
+      searchContextSize,
+    });
+    if (!search) {
+      const result = await this.againIfMisshapen(() =>
+        ai.generateObject({
+          model,
+          schema,
+          system,
+          prompt,
+          maxRetries: this.maxRetries(),
+          ...effort,
+        }),
+      );
+      return {
+        value: { value: result.object as Record<string, unknown>, found: [] },
+        usage: this.usage(ref, result.usage, started),
+      };
+    }
+    const options = {
+      openai: { ...(effort.providerOptions?.openai ?? {}), maxToolCalls: most },
+    };
+    // The provider's own tool, as it made it: run by OpenAI, never by us.
+    const tools = { web_search: search } as unknown as Parameters<
+      typeof ai.generateText
+    >[0]['tools'];
+    try {
+      const result = await this.streamedSearch(ai, {
+        model,
+        system,
+        prompt,
+        tools,
+        providerOptions: options,
+        output: ai.Output.object({ schema }),
+        maxRetries: this.maxRetries(),
+      });
+      return {
+        value: {
+          value: (result.output ?? {}) as Record<string, unknown>,
+          found: foundOf(result.searched),
+        },
+        usage: {
+          ...this.usage(ref, result.usage, started),
+          searches: searchesOf(result.searched),
+        },
+      };
+    } catch (error) {
+      if (!misshapen(error)) throw error;
+      this.logger.warn(
+        `the ${input.step} answer did not take its shape beside the search; searched as notes, then shaped${misfit(error)}`,
+      );
+    }
+    const notes = await this.streamedSearch(ai, {
+      model,
+      system,
+      prompt: `${prompt}\n\nWrite your findings as notes in plain text, each with the address of the page it came from.`,
+      tools,
+      providerOptions: options,
+      maxRetries: this.maxRetries(),
+    });
+    const searched = notes.searched;
+    const found = foundOf(searched);
+    const shaped = await this.againIfMisshapen(() =>
+      ai.generateObject({
+        model,
+        schema,
+        system,
+        prompt: [
+          prompt,
+          `Your research notes:\n${notes.text}`,
+          `The pages your searches found (the only ones a source may be):\n${found.map((f) => `- ${f.title} ${f.url}`).join('\n') || '- none'}`,
+          'Answer in the shape asked, from these notes alone.',
+        ].join('\n\n'),
+        maxRetries: this.maxRetries(),
+        ...effort,
+      }),
+    );
+    return {
+      value: { value: shaped.object as Record<string, unknown>, found },
+      usage: {
+        ...this.usage(ref, usageOf(notes.usage, shaped.usage), started),
+        searches: searchesOf(searched),
+      },
+    };
+  }
+
+  /**
+   * An answer in its shape, streamed: it comes as it is written, so a long
+   * one never waits past the HTTP client's five minutes for its first
+   * byte. Read after as a generated object is: the object (a misshapen one
+   * throws as generateObject's does), why it finished, what it cost.
+   */
+  private async streamedObject(
+    ai: typeof import('ai'),
+    request: Record<string, unknown>,
+  ): Promise<{
+    object: unknown;
+    finishReason: string;
+    usage: LanguageModelUsage;
+  }> {
+    const seen: { error?: Error } = {};
+    const result = ai.streamObject({
+      ...request,
+      onError: ({ error }: { error: unknown }) => {
+        seen.error ??=
+          error instanceof Error ? error : new Error(String(error));
+      },
+    } as Parameters<typeof ai.streamObject>[0]);
+    // Its partial objects are not wanted: read through to the end.
+    for await (const part of result.partialObjectStream) void part;
+    if (seen.error) throw seen.error;
+    const [object, finishReason, usage] = await Promise.all([
+      result.object as PromiseLike<unknown>,
+      result.finishReason,
+      result.usage,
+    ]);
+    return { object, finishReason, usage };
+  }
+
+  /**
+   * A search streamed: its answer comes as it is written, so a long search
+   * (a deep research log can take many minutes) never waits past the HTTP
+   * client's five minutes for its first byte, as a generated one did
+   * ("Headers Timeout Error", three times over). What it found, what it
+   * wrote and what it cost, read as a generated result reads them.
+   */
+  private async streamedSearch(
+    ai: typeof import('ai'),
+    request: Record<string, unknown>,
+  ): Promise<{
+    output: unknown;
+    text: string;
+    searched: Parameters<typeof foundOf>[0];
+    usage: LanguageModelUsage;
+  }> {
+    // What went wrong while it streamed, kept for after: the first error.
+    const seen: { error?: Error } = {};
+    const result = ai.streamText({
+      ...(request as Parameters<typeof ai.streamText>[0]),
+      onError: ({ error }: { error: unknown }) => {
+        seen.error ??=
+          error instanceof Error ? error : new Error(String(error));
+      },
+    });
+    await result.consumeStream();
+    if (seen.error) throw seen.error;
+    const [steps, sources, toolCalls, toolResults, text, usage] =
+      await Promise.all([
+        result.steps,
+        result.sources,
+        result.toolCalls,
+        result.toolResults,
+        result.text,
+        result.totalUsage,
+      ]);
+    const output: unknown = request.output ? await result.output : undefined;
+    return {
+      output,
+      text,
+      searched: {
+        steps,
+        sources,
+        toolCalls,
+        toolResults,
+      } as unknown as Parameters<typeof foundOf>[0],
+      usage,
+    };
+  }
+
+  /** A scene's board on the written script (explainer_board): a lesson's storyboard, or an illustrated scene's shots. */
+  async editorBoard(
+    input: { kind: 'lesson' | 'illustrated'; parts: string[] } & StudioRevision,
+  ): Promise<LlmResult<Record<string, unknown>>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('explainer_board');
+    const lesson = input.kind === 'lesson';
+    // The lesson writer's own schema, or a story's sheet's, read leniently:
+    // a key the board leaves out is given what the schema would give it.
+    const full = (
+      lesson ? sceneScriptSchema : studioSceneSchema
+    ) as z.ZodTypeAny;
+    const result = await this.againIfMisshapen(() =>
+      generateObject({
+        model,
+        schema: lenient(full),
+        system: lesson ? boardLessonPrompt() : boardIllustratedPrompt(),
+        prompt: revisedPrompt(input.parts, input),
+        maxRetries: this.maxRetries(),
+        ...this.effort(ref, 'EXPLAINER_BOARD_EFFORT', 'low'),
+      }),
+    );
+    return {
+      value: filled(result.object, full) as Record<string, unknown>,
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
+  /**
+   * A lesson scene's plan of shots (explainer_shots): named from the
+   * closed lists in its instructions and the scene's registry in its
+   * parts, read leniently and filled as the board's storyboard is.
+   */
+  async shotsBoard(
+    input: { parts: string[] } & StudioRevision,
+  ): Promise<LlmResult<Record<string, unknown>>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('explainer_shots');
+    const full = shotBoardSchema as z.ZodTypeAny;
+    const result = await this.againIfMisshapen(() =>
+      generateObject({
+        model,
+        schema: lenient(full),
+        system: shotBoardPrompt(),
+        prompt: revisedPrompt(input.parts, input),
+        maxRetries: this.maxRetries(),
+        ...this.effort(ref, 'EXPLAINER_SHOTS_EFFORT', 'low'),
+      }),
+    );
+    return {
+      value: filled(result.object, full) as Record<string, unknown>,
+      usage: this.usage(ref, result.usage, started),
+    };
+  }
+
+  async pictureFocus(input: {
+    png: Buffer;
+    about: string;
+  }): Promise<LlmResult<Record<string, unknown>>> {
+    const started = Date.now();
+    const { generateObject } = await this.registry.modules();
+    const { model, ref } = await this.registry.languageModel('picture_focus');
+    const result = await generateObject({
+      model,
+      schema: pictureFocusSchema,
+      system: pictureFocusPrompt(),
+      messages: [
+        {
+          role: 'user' as const,
+          content: [
+            { type: 'file' as const, data: input.png, mediaType: 'image/png' },
+            {
+              type: 'text' as const,
+              text: `The archive says this picture shows: ${input.about.slice(0, 200)}`,
+            },
+          ],
+        },
+      ],
+      maxRetries: this.maxRetries(),
+    });
+    return {
+      value: result.object,
+      usage: this.usage(ref, result.usage, started),
+    };
   }
 
   /** Recorded per call, so cost is answerable per document and per task. */

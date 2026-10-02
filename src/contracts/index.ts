@@ -1191,7 +1191,13 @@ export type SceneThingDto =
       callouts?: Record<string, string>;
       /** Of those, the parts whose label waits until the voice points at the part. */
       calloutsLater?: string[];
-      /** Drawn by code, not by the artist: working, a graph, the text's own words, a timeline, a chart, a map, flags, a flow or a molecule. */
+      /**
+       * Drawn by code, not by the artist: working, a graph, the text's own
+       * words, a timeline, a chart, a map, flags, a flow or a molecule; or
+       * one of the infographic kinds: a counter, a unit chart of icons, a
+       * name card, calendars, a chamber's seats, words struck out, things
+       * moving between two boxes, a document, a split screen.
+       */
       source?:
         | 'math'
         | 'plot'
@@ -1201,7 +1207,16 @@ export type SceneThingDto =
         | 'map'
         | 'flag'
         | 'flow'
-        | 'molecule';
+        | 'molecule'
+        | 'counter'
+        | 'icons'
+        | 'namecard'
+        | 'calendar'
+        | 'seats'
+        | 'strike'
+        | 'transfer'
+        | 'document'
+        | 'split';
       /** A story's place: the scene behind the stage, never in a slot. */
       backdrop?: true;
       /**
@@ -2221,6 +2236,382 @@ export interface SceneDto {
    * moment with no entrance. Absent on any other scene.
    */
   board?: { carried: string[] };
+  /**
+   * The engine that plays it. Absent, the stage of things and steps above.
+   * 'shots', an explainer made of shots (explainer-animation-tech.md): its
+   * whole picture is in `shots`, while its voice, beats, ideas, timing and
+   * music stay where they are on every scene. Such a scene's `things`,
+   * `steps` and `effects` are empty and its stagings have no places.
+   */
+  engine?: 'shots';
+  shots?: ShotSceneDto;
+}
+
+// ---------------------------------------------------------------------------
+// The shots engine (explainer-animation-tech.md §2). An explainer scene is a
+// run of shots; each shot is four layers (a set, actors, information, life)
+// and a camera, every change timed to the voice's words. The board names
+// everything from closed lists; code resolves the geometry, the times and the
+// assets, and the client plays it as a pure function of time.
+// ---------------------------------------------------------------------------
+
+/** A box in an asset's own units (its viewBox), or in a set's: x, y, w, h. */
+export type ShotBox = [number, number, number, number];
+
+/** The camera's moves (research §3.2's camera verbs). */
+export type ShotCameraMove =
+  | 'establish'
+  | 'travel'
+  | 'push'
+  | 'pull'
+  | 'follow'
+  | 'cut-to'
+  | 'zoom-through'
+  | 'return'
+  | 'hold';
+
+/** The information layer's recipes: build, change, attention, entrances and the ask. */
+export type ShotInfoRecipe =
+  | 'draw'
+  | 'label'
+  | 'pin'
+  | 'fill'
+  | 'seam'
+  | 'count'
+  | 'grow'
+  | 'transfer'
+  | 'morph'
+  | 'run'
+  | 'strike'
+  | 'stamp'
+  | 'flow'
+  | 'spotlight'
+  | 'mark'
+  | 'enter'
+  | 'exit'
+  | 'ask';
+
+/** How a shot hands over to the next. */
+export type ShotJoin =
+  | 'continue'
+  | 'cut'
+  | 'match'
+  | 'morph'
+  | 'zoom-through'
+  | 'dissolve'
+  | 'dip'
+  | 'push';
+
+/** The life layer's effects: motion that carries no information, capped so it never competes with what does. */
+export type ShotLifeEffect =
+  | 'clouds'
+  | 'cloud-shadows'
+  | 'rain'
+  | 'snow'
+  | 'wind'
+  | 'smoke'
+  | 'steam'
+  | 'dust'
+  | 'shimmer'
+  | 'flicker'
+  | 'crowd'
+  | 'flags'
+  | 'grain'
+  | 'drift'
+  | 'fire'
+  | 'sparks'
+  | 'splash';
+
+/** A scene's shots, the assets they draw on, the look, and the sound effects their motion makes. */
+export interface ShotSceneDto {
+  version: 1;
+  look: ShotLookDto;
+  /** By id; shots, actors and targets name them. */
+  assets: Record<string, ShotAssetDto>;
+  shots: ShotDto[];
+  /** One per heard motion (a pin's tick, a stamp's thump), on the voice's clock, snapped to the score's beat when one is near. */
+  sounds: ShotSoundDto[];
+}
+
+/** The show's look, as the shots draw it (its visual system and style). */
+export interface ShotLookDto {
+  /**
+   * Paper, ink, a muted ink, the accent held back for the payoff, and each
+   * side's colour by name (a region, a party, a substance), from the show's
+   * visual system.
+   */
+  palette: {
+    paper: string;
+    ink: string;
+    muted: string;
+    accent: string;
+    held?: string;
+    sides: Record<string, string>;
+  };
+  /** One display face and one text face. */
+  fonts: { display: string; text: string };
+  /** Paper grain over everything, 0 (none) to 1. */
+  grain: number;
+  /** The show's motion personality (research §3.6). */
+  motion: 'springy' | 'mechanical' | 'stepped';
+}
+
+export type ShotAssetDto =
+  | ShotSvgAssetDto
+  | ShotImageAssetDto
+  | ShotGeoAssetDto
+  | ShotLottieAssetDto;
+
+/** Drawn by code: a chart, a document, a set, a kit piece. */
+export interface ShotSvgAssetDto {
+  kind: 'svg';
+  /** Sanitised markup; every part a shot can address carries data-part="<id>". */
+  svg: string;
+  /** Its viewBox: the units of every box, point and path in it. */
+  box: ShotBox;
+  parts: Record<string, ShotPartDto>;
+  /** A kit piece's rig: its states and the moves it can make. Absent on a chart or a set. */
+  rig?: ShotRigDto;
+  /** What the camera frames by default. Absent, the whole box. */
+  focal?: ShotBox;
+}
+
+/** A part of a drawn asset that recipes and the camera can address. */
+export interface ShotPartDto {
+  box: ShotBox;
+  /** Where it turns, as fractions of its box (0–1). */
+  pivot?: [number, number];
+  /** A route's or a stroke's path, in the asset's units, for draw, flow and transfer. */
+  path?: string;
+  /** The number it shows, for count and grow. */
+  value?: number;
+  /** A colour role from the look: 'ink', 'muted', 'accent', 'held', or a side's name. */
+  role?: string;
+  /**
+   * A part of the picture's later state (the words that replace struck
+   * ones, a stamp, the date several dates come to): drawn in the asset as
+   * the picture ends, but hidden until a recipe brings it on. Absent, the
+   * part is there from the shot's start.
+   */
+  later?: boolean;
+}
+
+/** A kit piece's states (each a pose per part) and the moves it can make. */
+export interface ShotRigDto {
+  states: Record<
+    string,
+    Record<
+      string,
+      { rotate?: number; dx?: number; dy?: number; scale?: number; opacity?: number }
+    >
+  >;
+  moves: string[];
+  /**
+   * The figures it is drawn with, to the kit's one standard (kit/rig.ts):
+   * each one's part prefix ("" for a piece of one, "f2." in a group) and
+   * the way it faces as drawn (1 right, -1 left, 0 toward the camera), so
+   * the stage can walk, point and wave any of them from its parts alone.
+   */
+  figures?: { prefix: string; facing: 1 | -1 | 0 }[];
+  /** A crowd's people and far rows, by part: each shifts a little on its own while it stands. */
+  idle?: string[];
+  /**
+   * A vehicle: how it goes (its wheels turn with the ground it covers, a
+   * ship rides the swell, a plane tilts into a climb, a rocket rises) and
+   * the way it faces as drawn.
+   */
+  vehicle?: { goes: 'road' | 'rail' | 'water' | 'air' | 'up'; facing: 1 | -1 };
+}
+
+/** An archive photo or a portrait, from the picture desk. */
+export interface ShotImageAssetDto {
+  kind: 'image';
+  url: string;
+  width: number;
+  height: number;
+  /** A depth map (white near, black far) the camera moves through in planes; absent, one plane. */
+  depthUrl?: string;
+  /** The subject's box in pixels: a face, a person, the object. */
+  focal?: ShotBox;
+  /** Its own content inside its scan's border (a negative's black edge), in pixels: what is shown; absent, all of it. */
+  crop?: ShotBox;
+  credit: ShotCreditDto;
+}
+
+/** A map's geography: regions, seams, routes and pins, for a client-side map. */
+export interface ShotGeoAssetDto {
+  kind: 'geo';
+  /** GeoJSON; every feature has an `id` property a shot can name. */
+  features: { type: 'FeatureCollection'; features: unknown[] };
+  /** West, south, east, north: the show map's frame. */
+  bounds: [number, number, number, number];
+  /** The period its borders are drawn for; absent, today's. */
+  period?: string;
+}
+
+/** A Lottie effect (fire, a splash), its colours swapped to the look's. */
+export interface ShotLottieAssetDto {
+  kind: 'lottie';
+  url: string;
+  colours?: Record<string, string>;
+}
+
+/** Where a picture came from, for the chip on screen and the description. */
+export interface ShotCreditDto {
+  /** The chip's words, e.g. "RB211-22 cutaway · Smithsonian NASM · CC0". */
+  text: string;
+  licence: string;
+  source: string;
+  url?: string;
+}
+
+export interface ShotDto {
+  id: string;
+  startMs: number;
+  endMs: number;
+  set: ShotSetDto;
+  actors: ShotActorDto[];
+  info: ShotInfoDto[];
+  life: ShotLifeDto[];
+  camera: ShotCameraDto[];
+  /** What the camera frames when no move says otherwise: the shot's subject. */
+  focal?: ShotTargetDto;
+  /** How it hands over to the next shot, over `joinMs`. */
+  join: ShotJoin;
+  joinMs: number;
+  /** A source chip shown while the shot is on. */
+  chip?: ShotCreditDto;
+  /** A drawn picture of a real event or place: it carries an "Illustration" tag. */
+  illustration?: boolean;
+}
+
+export type ShotSetDto =
+  | {
+      kind: 'map';
+      asset: string;
+      style: 'atlas' | 'relief' | 'night';
+      /** Degrees from straight down; 0 is flat. */
+      tilt: number;
+      bearing: number;
+      terrain: boolean;
+    }
+  | { kind: 'photo'; asset: string; treatment: 'natural' | 'duotone' | 'halftone' | 'cutout' }
+  | {
+      kind: 'portrait';
+      asset: string;
+      name: string;
+      dates?: string;
+      role?: string;
+      /** How the print is shown: a black-and-white one in the show's ink and paper; absent, as it is. */
+      treatment?: 'natural' | 'duotone' | 'halftone' | 'cutout';
+    }
+  | { kind: 'document'; asset: string }
+  | { kind: 'set'; asset: string }
+  | { kind: 'chart'; asset: string }
+  | { kind: 'plain' };
+
+/** A kit piece on the set: a silhouette, a crowd, a building, a vehicle, a machine. */
+export interface ShotActorDto {
+  id: string;
+  asset: string;
+  /** Where it stands: in the set's units, or on the map. */
+  at: { x: number; y: number } | { lng: number; lat: number };
+  /** Its height in the set's units; on a map, as a share of the frame's short side (its height when wide, its width when tall), as text is sized. */
+  size: number;
+  z: number;
+  state?: string;
+  /** A side's colour by name from the look, worn by a silhouette or painted on a piece. */
+  side?: string;
+  moves: ShotMoveDto[];
+}
+
+/** One of an actor's moves: a rig move ('walk', 'point', 'run'), or 'enter' / 'exit'. */
+export interface ShotMoveDto {
+  move: string;
+  atMs: number;
+  durMs: number;
+  to?: ShotTargetDto;
+  /** The state it ends in. */
+  state?: string;
+}
+
+/** What a recipe, a move or the camera points at. */
+export type ShotTargetDto =
+  | { kind: 'asset'; asset: string; part?: string }
+  | { kind: 'actor'; actor: string; part?: string }
+  | { kind: 'geo'; lng: number; lat: number }
+  | { kind: 'feature'; asset: string; id: string }
+  | { kind: 'box'; box: ShotBox };
+
+/** One timed piece of information: a label, a count, a flow, a mark. */
+export interface ShotInfoDto {
+  id: string;
+  recipe: ShotInfoRecipe;
+  target?: ShotTargetDto;
+  /** Where a transfer or a flow goes. */
+  to?: ShotTargetDto;
+  atMs: number;
+  durMs: number;
+  /** When it leaves; absent, it stays to the shot's end. */
+  untilMs?: number;
+  text?: string;
+  /** A count's number, from `from` (0 when absent), with its unit. */
+  value?: number;
+  from?: number;
+  unit?: string;
+  /** A colour role from the look: 'ink', 'muted', 'accent', 'held', or a side's name. */
+  colour?: string;
+  /** What a strike writes in place of what it crosses out. */
+  replace?: string;
+}
+
+export interface ShotLifeDto {
+  effect: ShotLifeEffect;
+  seed: number;
+  /** 0 to 1: how much of it, under the rules' cap. */
+  amount: number;
+  /** Where it comes from (a chimney, a crowd); absent, the whole set. */
+  at?: ShotTargetDto;
+  /** A Lottie asset's id, for the effects drawn from one. */
+  asset?: string;
+}
+
+export interface ShotCameraDto {
+  move: ShotCameraMove;
+  atMs: number;
+  durMs: number;
+  target?: ShotTargetDto;
+  /** A push's or a pull's size, as a fraction of the frame (0.05 is 5%). */
+  amount?: number;
+}
+
+/** A sound effect a motion makes. */
+export interface ShotSoundDto {
+  atMs: number;
+  /** The effect's id in the effects library. */
+  sound: string;
+  /** 0 to 1, where 1 is the library's level. */
+  gain: number;
+  /**
+   * How long it sounds, for one that lasts as its motion does: a pencil
+   * along its stroke, a whoosh over its move, a swell under its flow, a
+   * count's ticks over its count. Absent, the effect's own length.
+   */
+  durMs?: number;
+  /**
+   * What makes it: an info item's id (a count's ticks follow its count),
+   * or `<shot id>:camera:<n>`, `<shot id>:join`, `<shot id>:set`,
+   * `<info id>:reveal`.
+   */
+  of?: string;
+  /**
+   * How far either way (ms) the player may move it onto the music's beat;
+   * absent or 0, it stays on its motion. The picture never moves, so a
+   * landing's is small and a soft sound's wider.
+   */
+  snapMs?: number;
+  /** A big reveal's: rather on a bar's first beat, within `snapMs`. */
+  downbeat?: boolean;
 }
 
 export interface VisualSceneDto {
@@ -3028,7 +3419,19 @@ export type StudioFormatName = 'story' | 'explainer';
 export type StudioPhase =
   'brief' | 'story' | 'outline' | 'cast' | 'script' | 'made';
 export type StudioBusyName =
-  'bible' | 'story' | 'outline' | 'script' | 'scene' | 'make';
+  | 'bible'
+  | 'story'
+  | 'outline'
+  | 'script'
+  | 'scene'
+  | 'make'
+  // The editor's desk (infographic-editor-plan): the show's planning, an episode's editing, a film made a video file.
+  | 'angles'
+  | 'research'
+  | 'plan'
+  | 'world'
+  | 'edit'
+  | 'export';
 export type StudioSceneStatusName =
   'writing' | 'ready' | 'making' | 'made' | 'failed';
 
@@ -3286,6 +3689,10 @@ export interface StudioOutlineSceneDto {
   points: string[];
   /** Made from a document: the pages it teaches. */
   pages?: StudioPageRange;
+  /** An explainer's scene: a lesson, a story clip, or an illustrated scene of people and places under the narration (the editor's). Absent, a lesson. */
+  kind?: 'lesson' | 'clip' | 'illustrated';
+  /** An editor's episode: the rows of its script the scene is, first and last, from 0. */
+  rows?: [number, number];
 }
 
 export interface StudioOutlineDto {
@@ -3569,6 +3976,10 @@ export interface StudioEpisodeDto {
   twin: StudioTwinDto | null;
   /** The episode this one is the twin of, when it is one: its script, scenes and voice are that one's. */
   twinOf?: string | null;
+  /** An episode the editor wrote: its beat sheet, script and package; absent otherwise. */
+  editorial?: StudioEditorialDto | null;
+  /** Its films made into video files, the latest first; absent when none. */
+  exports?: StudioExportDto[];
 }
 
 /** An episode's twin in the other shape, as the film's Wide/Vertical switch shows it. */
@@ -3619,7 +4030,14 @@ export type StudioEventName =
   /** A document given in the chat: its card, then the card to choose its pages. */
   | 'document'
   /** Pages of it chosen for an episode, or a series of them. */
-  | 'pages';
+  | 'pages'
+  /** The editor's desk: the questions offered, the research done, the show planned, its world drawn up, an episode written, a video file made. */
+  | 'angles'
+  | 'research'
+  | 'plan'
+  | 'world'
+  | 'editorial'
+  | 'export';
 
 export interface StudioEventDto {
   what: StudioEventName;
@@ -3694,6 +4112,8 @@ export interface StudioShowDto {
   /** Whether the thread goes back further than `messages`. */
   moreMessages: boolean;
   balance: StudioBalanceDto;
+  /** An explainer the editor plans: its question, research, plan and world; absent otherwise. */
+  editor?: StudioEditorDto | null;
 }
 
 export interface StudioShowCardDto {
@@ -3774,6 +4194,8 @@ export interface StudioPlayDto {
   host?: StudioHostDto;
   /** An explainer's "What next?" questions, each a next episode, on its end card. */
   next?: string[];
+  /** An editor's episode: the chapters at its acts, and what goes with it when shared; absent otherwise. */
+  package?: StudioPackageDto;
 }
 
 /** The host as the player shows them: their name, and each face as the kit draws it. */
@@ -3812,3 +4234,205 @@ export type StudioTurnLine =
       episode: StudioEpisodeDto;
     }
   | { error: string };
+
+// ── The editor's desk (infographic-editor-plan.md) ──────────────────────
+//
+// An explainer the Studio plans as an editor would: a show is one topic,
+// planned once (the driving question, the research, the story spine and
+// the map of its episodes, the look of its world), and made as episodes
+// of three to five minutes, one at a time, each written as a two-column
+// script (what is said, what is shown) before anything is drawn.
+
+/** How far a show's planning has come: the question offered, researched, planned, its world drawn up, ready for episodes. */
+export type StudioEditorStage = 'angles' | 'research' | 'plan' | 'world' | 'ready';
+
+/** One question a video on the topic could answer, scored 1 to 5 on the playbook's four tests. */
+export interface StudioAngleDto {
+  question: string;
+  /** The video in two sentences, as the maker would tell it to a friend. */
+  pitch: string;
+  scores: { gap: number; tension: number; visual: number; payoff: number };
+  /** The four scores added by code, out of 20. */
+  total: number;
+  verdict: string;
+}
+
+/** Where a claim was found. */
+export interface StudioSourceDto {
+  url: string;
+  title: string;
+}
+
+/** What kind of fact a claim is: each is checked as its kind needs. */
+export type StudioClaimKind =
+  | 'date'
+  | 'number'
+  | 'quote'
+  | 'name'
+  | 'event'
+  | 'claim';
+
+/** One fact from the research log, with where it came from. */
+export interface StudioClaimDto {
+  id: string;
+  text: string;
+  kind: StudioClaimKind;
+  confidence: 'high' | 'medium' | 'low';
+  sources: StudioSourceDto[];
+  /** What the fact check found, once it has run on a script that uses it; null before. */
+  status: 'verified' | 'unverified' | 'soften' | 'cut' | null;
+  /** Who says so, for a contested claim the script must attribute; null otherwise. */
+  who: string | null;
+}
+
+/** The show's research, as the maker can read it (the film's "Sources"). */
+export interface StudioResearchDto {
+  claims: StudioClaimDto[];
+  timeline: { date: string; event: string }[];
+  myths: { belief: string; truth: string }[];
+  /** How many web searches it took. */
+  searched: number;
+}
+
+/** One planned episode of the show: its own question, answered in it. */
+export interface StudioPlanEpisodeDto {
+  number: number;
+  title: string;
+  question: string;
+  /** The open loop it ends on, into the next (the last ends on the show's payoff). */
+  endsOn: string;
+  /** How long its material runs, worked out by code: 3 to 5. */
+  minutes: number;
+  /** The episode made for it, once one is; null while it waits. */
+  episodeId: string | null;
+}
+
+/** The show's plan: its story in six sentences, its episodes, and what was left out of all of them. */
+export interface StudioPlanDto {
+  spine: string[];
+  episodes: StudioPlanEpisodeDto[];
+  leftOut: string[];
+}
+
+/** The look of the show's world, drawn once for every episode. */
+export interface StudioWorldDto {
+  /** "1945–1975", "today". */
+  era: string;
+  /** Each recurring thing's colour, from the theme's tokens: the same in every frame. */
+  palette: { thing: string; colour: string }[];
+  /** The colour held back for the payoff, and what it is for; null when none is. */
+  held: { colour: string; for: string } | null;
+  places: { id: string; name: string; look: string }[];
+  people: { id: string; name: string; role: string; likeness: string }[];
+}
+
+/** The show as the editor plans it; absent on a story, and on an explainer made before the editor. */
+export interface StudioEditorDto {
+  stage: StudioEditorStage;
+  /** The question the show answers, once chosen. */
+  question: string | null;
+  /** The questions offered, the best first: the maker picks one of the first three. */
+  angles: StudioAngleDto[];
+  takeaway: string | null;
+  research: StudioResearchDto | null;
+  plan: StudioPlanDto | null;
+  world: StudioWorldDto | null;
+}
+
+/**
+ * What a line of the script shows, by the playbook's decision rule: a
+ * place on the map, when on a timeline or calendar, how many in a chart
+ * or counter, who on a name card, why as a flow or things moving, a
+ * comparison side by side, exact words on a quote card, or a scene of
+ * people and places (a feeling, an atmosphere, an event).
+ */
+export type StudioRowVisual =
+  | 'place'
+  | 'when'
+  | 'how-many'
+  | 'who'
+  | 'why'
+  | 'comparison'
+  | 'exact-words'
+  | 'scene';
+
+/** One row of the two-column script: a sentence, and what is seen while it is said. */
+export interface StudioScriptRowDto {
+  say: string;
+  visual: StudioRowVisual;
+  /** What the viewer sees, as an instruction to the animator. */
+  show: string;
+  /** The research log's claims it rests on, by id. */
+  claims: string[];
+  /** Its act, from 1. */
+  act: number;
+}
+
+/** How far an episode's editing has come. */
+export type StudioEditorialStage =
+  | 'beats'
+  | 'hooks'
+  | 'script'
+  | 'read'
+  | 'facts'
+  | 'board'
+  | 'ready';
+
+/** What goes with an episode when it is shared: its title, thumbnail, description and chapters. */
+export interface StudioPackageDto {
+  title: string;
+  /** The other titles drafted, the best first. */
+  titles: string[];
+  description: string;
+  /** Chapters at the start of each act, from the film's own clock once made. */
+  chapters: { atMs: number; title: string }[];
+  /** The thumbnail: a frame of the film and a few words over it. */
+  thumbnail: { words: string; sceneId: string | null; atMs: number | null };
+  hashtags: string[];
+  pinned: string;
+}
+
+/** An episode as the editor wrote it; absent on an episode made before the editor. */
+export interface StudioEditorialDto {
+  /** Which of the plan's episodes it is. */
+  number: number;
+  question: string;
+  stage: StudioEditorialStage;
+  acts: { title: string; seconds: number }[];
+  hook: string | null;
+  rows: StudioScriptRowDto[];
+  /** What the fact check did to the claims the script uses. */
+  facts: { checked: number; softened: number; cut: number } | null;
+  package: StudioPackageDto | null;
+}
+
+/** A film made into a video file to download and post. */
+export interface StudioExportDto {
+  id: string;
+  episodeId: string;
+  /** One episode, or every made episode of the show end to end, with chapters. */
+  scope: 'episode' | 'show';
+  shape: FilmShape;
+  status: 'queued' | 'rendering' | 'done' | 'failed';
+  /** 0 to 1 while rendering. */
+  progress: number;
+  /** Where to download it, once done. */
+  url: string | null;
+  /** Its size in bytes, once done. */
+  bytes: number | null;
+  error: string | null;
+  createdAt: string;
+}
+
+/** Asking for a film as a video file. */
+export interface StudioExportRequest {
+  scope: 'episode' | 'show';
+  shape?: FilmShape;
+  /** Captions burned into the picture (on by default: most social video plays muted). */
+  captions?: boolean;
+}
+
+/** The maker's pick among the questions offered: by its place in the list, or null to leave it to the Studio. */
+export interface StudioAngleRequest {
+  pick: number | null;
+}

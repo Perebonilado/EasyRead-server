@@ -66,6 +66,7 @@ import {
   mapShape,
   n1,
   rect,
+  rimFilter,
   rounded,
   scale,
   sub,
@@ -1381,30 +1382,6 @@ function drawFigure(
 
 // ── Pieces ────────────────────────────────────────────────────────────────
 
-/**
- * The filter that lights a figure's outline from the side the light
- * comes from: the figure's own shape, less itself moved away from the
- * light, is the lit edge; the light's colour is laid over it, so it is a
- * lighter edge of whatever colour is there. In the piece's units, so it
- * scales with the figure.
- */
-function rimFilter(
-  id: string,
-  style: KitStyle,
-  width: number,
-  strength: number,
-): string {
-  const [dx, dy] = awayFrom(style.rim.angle, width);
-  return (
-    `<filter id="${id}" x="-0.1" y="-0.1" width="1.2" height="1.2" color-interpolation-filters="sRGB">` +
-    `<feOffset in="SourceAlpha" dx="${n1(dx)}" dy="${n1(dy)}" result="away"/>` +
-    '<feComposite in="SourceAlpha" in2="away" operator="out" result="edge"/>' +
-    `<feFlood flood-color="${style.rim.colour}" flood-opacity="${Math.round(strength * 100) / 100}"/>` +
-    '<feComposite in2="edge" operator="in" result="lit"/>' +
-    '<feMerge><feMergeNode in="SourceGraphic"/><feMergeNode in="lit"/></feMerge></filter>'
-  );
-}
-
 /** A canvas for one piece: its fills from its colour, ids counted within it, and its rim filters. */
 function canvasOf(style: KitStyle, colour: string, H = 172): Canvas {
   let k = 0;
@@ -1422,8 +1399,8 @@ function canvasOf(style: KitStyle, colour: string, H = 172): Canvas {
       rims.set(key, id);
       defs += rimFilter(
         id,
-        style,
-        style.rim.width * H * (1 - key * 0.5),
+        awayFrom(style.rim.angle, style.rim.width * H * (1 - key * 0.5)),
+        style.rim.colour,
         style.rim.strength * (1 - key * 0.6),
       );
       return id;

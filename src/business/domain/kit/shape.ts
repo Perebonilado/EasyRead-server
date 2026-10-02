@@ -312,3 +312,27 @@ export function groundShadow(
     `<ellipse cx="${n1(centre[0])}" cy="${n1(centre[1])}" rx="${n1(rx)}" ry="${n1(ry)}" fill="url(#${id})"/>`
   );
 }
+
+/**
+ * The filter that lights a drawing's outline from the side the light
+ * comes from: its own shape, less itself moved away from the light, is
+ * the lit edge, and the light's colour is laid over that edge, so it is
+ * a lighter edge of whatever colour is there. On a figure's body or a
+ * vehicle's, only the outline is lit, however its parts are posed; in
+ * the drawing's units, so it scales with it.
+ */
+export function rimFilter(
+  id: string,
+  away: Pt,
+  colour: string,
+  strength: number,
+): string {
+  return (
+    `<filter id="${id}" x="-0.1" y="-0.1" width="1.2" height="1.2" color-interpolation-filters="sRGB">` +
+    `<feOffset in="SourceAlpha" dx="${n1(away[0])}" dy="${n1(away[1])}" result="away"/>` +
+    '<feComposite in="SourceAlpha" in2="away" operator="out" result="edge"/>' +
+    `<feFlood flood-color="${colour}" flood-opacity="${Math.round(strength * 100) / 100}"/>` +
+    '<feComposite in2="edge" operator="in" result="lit"/>' +
+    '<feMerge><feMergeNode in="SourceGraphic"/><feMergeNode in="lit"/></feMerge></filter>'
+  );
+}

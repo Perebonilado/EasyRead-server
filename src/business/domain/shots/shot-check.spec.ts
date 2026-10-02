@@ -1346,6 +1346,48 @@ describe('people and vehicles on the stage (the kit)', () => {
   });
 });
 
+describe("a calendar's words", () => {
+  it('never names a calendar, or what its sheets merge into, by dates alone', () => {
+    const read = planOf(
+      {
+        shots: [
+          {
+            on: 'In 1987',
+            set: {
+              kind: 'chart',
+              chart: {
+                kind: 'calendar',
+                spec: {
+                  calendars: [
+                    { label: '1961', dates: ['1987'] },
+                    { label: 'Wall opens', dates: ['1989'] },
+                  ],
+                  merge: '1987 and 1989',
+                },
+              },
+            },
+            focal: 'set',
+          },
+        ],
+      },
+      narration,
+    );
+    expect(read.shots[0].set).toEqual({
+      kind: 'chart',
+      chart: {
+        kind: 'calendar',
+        spec: {
+          calendars: [
+            { label: null, dates: ['1987'] },
+            { label: 'Wall opens', dates: ['1989'] },
+          ],
+          merge: null,
+        },
+      },
+    });
+  });
+});
+
 describe('a plan as stored, read again', () => {
   it('reads its charts as they are kept ({kind, spec}), and mends to the same plan', () => {
     const plan = good();

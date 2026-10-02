@@ -154,6 +154,16 @@ const DATE_TEXT =
 export const dateOnly = (text: string): boolean =>
   DATE_TEXT.test(text.replace(/[,.]/gu, '').replace(/\s+/gu, ' ').trim());
 
+/** Dates and nothing else ("1957 and 1958", "1957–58"): words that name no thing. */
+const datesOnly = (text: string): boolean => {
+  const parts = text
+    .split(/\s*(?:,|&|\band\b|\bto\b|–|—|-)\s*/iu)
+    .filter(Boolean);
+  return (
+    parts.length > 0 && parts.every((p) => dateOnly(p) || /^\d{2}$/u.test(p))
+  );
+};
+
 /** A number as a model writes it: 45, "45", "1,500"; null for none. */
 function looseNumber(raw: unknown): number | string | null {
   if (typeof raw === 'number') return Number.isFinite(raw) ? raw : null;
@@ -238,15 +248,23 @@ function specOf(kind: ChartKind, raw: unknown): Record<string, unknown> {
             const dates = labels(record(one).dates, 4, 4);
             const named = label(record(one).label, LABEL_WORDS);
             return {
-              // A calendar is named by what it is for, never by its own date.
+              // A calendar is named by what it is for, never by a date.
               label:
-                named && !dates.some((d) => sameDate(named, d)) ? named : null,
+                named &&
+                !dates.some((d) => sameDate(named, d)) &&
+                !datesOnly(named)
+                  ? named
+                  : null,
               dates,
             };
           })
           .filter((one) => one.dates.length)
           .slice(0, 3),
-        merge: line(said.merge, 30) || null,
+        // What the sheets merge into is named, never by their dates.
+        merge:
+          line(said.merge, 30) && !datesOnly(line(said.merge, 30))
+            ? line(said.merge, 30)
+            : null,
       };
     case 'seats':
       return {

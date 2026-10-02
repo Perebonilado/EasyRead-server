@@ -66,9 +66,9 @@ export const KIT_GUIDE = [
  */
 export const CHARACTER_GUIDE = [
   'Actors: the kit’s cartoon characters listed with the scene, standing on its set or on the map where their people are; at most four a shot, where the line is about people.',
-  '  - A people, an army, a crowd’s front: character.group (two to six, each their own) in their side’s colour (side: a side’s name from the list), dressed as the research’s look notes say (dress: their words, "Roman legionaries, red tunics, banded armour"), in their era (era). A count only as the list or the line gives it.',
+  '  - A people, an army, a crowd’s front: character.group (two to six, each their own) in their side’s colour (side: a side’s name from the list), dressed and looking as the research’s look notes say (dress: their words, "Roman legionaries, red tunics, banded armour", with their skin or hair only when the notes give it), in their era (era). A count only as the list or the line gives it.',
   '  - One unnamed role the line speaks of (a soldier, a merchant, a monk): character.person with its role. A named person of the list: character.person with name (the person’s name as the list writes it): drawn from their look notes and labelled with their name the first time; their portrait too when they have one.',
-  '  - Dress only from the look notes and the topic: never a culture’s dress the research does not name, no religious symbol for a people, no caricature. Weapons only as costume: no one is ever shown hurt.',
+  '  - Dress and looks only from the look notes and the topic: never a culture’s dress the research does not name, never a skin or a face taken from a place or a people’s name (with no notes, say none: code gives a varied mix), no religious symbol for a people, no caricature. Weapons only as costume: no one is ever shown hurt.',
   '  - Never the audience, a viewer, a student or a host.',
   '  - A character’s face (expression: neutral, happy, surprised, angry, smug, worried, thinking) and what they hold (prop) only where the line gives a reason; a move may turn the face at a word (move: surprised, angry, happy, worried, neutral).',
   '  - Each actor: id (your name for it), kit, place (a place of the list on the map, a part of the set, or left, centre, right, foreground, background), side, its settings as fields (role, era, dress, name, count, pose, expression, prop, facing: only those its kit has), and moves, each on its own exact words, with to (a place, a part, or left, right, off).',
@@ -211,7 +211,14 @@ const EXAMPLES = [
         {
           on: 'The air is packed',
           set: { kind: 'set', place: 'display' },
-          actors: [{ id: 'engine', kit: 'machine.turbofan', place: 'centre', moves: [] }],
+          actors: [
+            {
+              id: 'engine',
+              kit: 'machine.turbofan',
+              place: 'centre',
+              moves: [],
+            },
+          ],
           info: [
             { recipe: 'run', target: 'actor:engine', on: 'The air is packed' },
             {
@@ -220,10 +227,26 @@ const EXAMPLES = [
               text: 'compress',
               on: 'packed tight and hot',
             },
-            { recipe: 'label', target: 'actor:engine.compressor', on: 'tight and hot' },
-            { recipe: 'spotlight', target: 'actor:engine.combustor', on: 'What lights it' },
-            { recipe: 'label', target: 'actor:engine.combustor', on: 'lights it' },
-            { recipe: 'ask', target: 'actor:engine.combustor', on: 'What lights it' },
+            {
+              recipe: 'label',
+              target: 'actor:engine.compressor',
+              on: 'tight and hot',
+            },
+            {
+              recipe: 'spotlight',
+              target: 'actor:engine.combustor',
+              on: 'What lights it',
+            },
+            {
+              recipe: 'label',
+              target: 'actor:engine.combustor',
+              on: 'lights it',
+            },
+            {
+              recipe: 'ask',
+              target: 'actor:engine.combustor',
+              on: 'What lights it',
+            },
           ],
           camera: [
             { move: 'establish', on: 'The air is packed' },

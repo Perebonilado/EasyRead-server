@@ -1015,7 +1015,9 @@ function looksFor(
       ) &&
       r.chance(0.3));
   const a: Age = age ?? ageOf(words) ?? (r.chance(0.12) ? 'elder' : 'adult');
-  const skin = skinOf(words) ?? skinBase ?? Math.floor(r() * SKIN.length);
+  // A group's figure comes with its own tone (groupSkins); one alone takes
+  // the words' (a likeness, the look notes) or the seed's: never a place's.
+  const skin = skinBase ?? skinOf(words) ?? Math.floor(r() * SKIN.length);
   const hairColourName =
     said.colour ??
     (a === 'elder'
@@ -1262,6 +1264,39 @@ function personPiece(
   );
 }
 
+/** The stream a group's skin tones are drawn from: their own, so nothing else drawn moves them. */
+const SKIN_STREAM = 7919;
+
+/**
+ * A group's skin tones (each an index of SKIN), each figure its own: near
+ * the tone its words give (a likeness, or the research's look notes as the
+ * board passes them for a group), else a seeded, varied mix from light to
+ * dark. Only words about skin move them (skinOf): never a place, a people's
+ * name or an era.
+ */
+export function groupSkins(
+  seed: number,
+  count: number,
+  words: string,
+): number[] {
+  const r = rand(subSeed(seed, SKIN_STREAM));
+  const last = SKIN.length - 1;
+  const said = skinOf(words);
+  if (said !== null)
+    return Array.from({ length: count }, () =>
+      Math.max(0, Math.min(last, said + Math.round(r.between(-1.2, 1.2)))),
+    );
+  // A mix: one tone from each band of the range, shuffled along the row.
+  const mix = Array.from({ length: count }, (_, k) =>
+    Math.min(last, Math.floor(((k + r()) / count) * SKIN.length)),
+  );
+  for (let k = mix.length - 1; k > 0; k -= 1) {
+    const j = Math.floor(r() * (k + 1));
+    [mix[k], mix[j]] = [mix[j], mix[k]];
+  }
+  return mix;
+}
+
 /** Two to six characters of a side, each their own: standing together, cheering, or marching in profile. */
 function groupPiece(
   params: KitParams,
@@ -1274,8 +1309,14 @@ function groupPiece(
   const facing: 1 | -1 | 0 = side ? (params.facing === 'left' ? -1 : 1) : 0;
   const ink = inkOf(style);
   const r = rand(seed);
-  // One people, varied: a skin tone round a middle the seed chooses, each its own.
-  const skinBase = Math.floor(r() * SKIN.length);
+  // Each its own skin: near the tone the look notes give, else a seeded mix.
+  const skins = groupSkins(
+    seed,
+    count,
+    [params.dress, params.looks]
+      .filter((w) => typeof w === 'string' && w)
+      .join(', '),
+  );
   const parts: RigPart[] = [];
   const shadows: string[] = [];
   const boxes: ShotBox[] = [];
@@ -1284,13 +1325,9 @@ function groupPiece(
   const spacing = side ? 44 : 50;
   for (let k = 0; k < count; k += 1) {
     const prefix = `f${k + 1}.`;
-    const skin = Math.max(
-      0,
-      Math.min(SKIN.length - 1, skinBase + Math.round(r.between(-1.6, 1.6))),
-    );
     const spec = characterSpec(params, style, subSeed(seed, k + 1), {
       sideMain: true,
-      skinBase: skin,
+      skinBase: skins[k],
       pose,
       // In step: a column marches together, each a little off.
       phase: side ? (k % 2) * 0.04 : 0,
@@ -1413,7 +1450,7 @@ const DRESS_PARAM = {
   text: 90,
   default: '',
   about:
-    'what they wear, in the research’s own words (a culture’s dress only where the research names it)',
+    'what they wear, and their skin or hair where the look notes give it, in the research’s own words (a culture’s dress only where the research names it, never a look from a place)',
 };
 const EXPRESSION_PARAM = {
   values: EXPRESSIONS,

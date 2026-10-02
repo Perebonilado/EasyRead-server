@@ -12,12 +12,13 @@ import {
   FACE_STATES,
   characterSpec,
   drawCharacter,
+  groupSkins,
   marchTurns,
 } from './characters';
 import { KIT, kitGuide, kitIdsFor, makeKit, paramsOf } from './registry';
 import { partTree, validateRig } from './rig';
 import { kitStyle } from './style';
-import { CLOTH, EXPRESSIONS, outfitOf } from './wardrobe';
+import { CLOTH, EXPRESSIONS, SKIN, outfitOf } from './wardrobe';
 
 const LOOK: ShotLookDto = {
   palette: {
@@ -185,6 +186,30 @@ describe('the illustrated characters', () => {
     const a = make('character.group', { count: 3 }, 21).svg;
     const b = make('character.group', { count: 3 }, 22).svg;
     expect(a).not.toEqual(b);
+  });
+
+  it('gives a group the look notes’ skin, a little varied, else a seeded mix from light to dark: never a place’s', () => {
+    for (const seed of [1, 2, 3, 4, 5, 6]) {
+      // No notes: one tone from each band of the range, so a row is a mix.
+      const mix = groupSkins(seed, 4, 'Roman legionaries, red tunics');
+      expect(Math.max(...mix) - Math.min(...mix)).toBeGreaterThanOrEqual(5);
+      expect(groupSkins(seed, 4, 'Roman legionaries, red tunics')).toEqual(mix);
+      // A place or a people's name never moves it: only words about skin do.
+      expect(groupSkins(seed, 4, 'Nubian archers of Kush')).toEqual(mix);
+      expect(groupSkins(seed, 4, 'Vikings in Norway')).toEqual(mix);
+      // The notes' tone, each a step either side at most.
+      const said = groupSkins(seed, 5, 'Roman legionaries, olive skin');
+      for (const tone of said)
+        expect(Math.abs(tone - 4)).toBeLessThanOrEqual(1);
+      // And the group wears them.
+      const group = make(
+        'character.group',
+        { count: 4, dress: 'Vikings' },
+        seed,
+      );
+      for (const tone of groupSkins(seed, 4, 'Vikings'))
+        expect(group.svg).toContain(SKIN[tone]);
+    }
   });
 
   it('draws the same piece for the same settings and seed, every time', () => {

@@ -11,6 +11,8 @@
  */
 import type { FilmShape } from '../../../contracts';
 import type { LlmGatewayPort, LlmUsage } from '../../ports/llm.port';
+import { kitGuide, kitIdsFor } from '../kit/registry';
+import type { KitLook } from '../kit/style';
 import { readMapBase } from '../scene-map';
 import type { EditorResearch, EditorWorld } from '../studio/studio-editor';
 import type { EditorialRow } from '../studio/studio-editorial';
@@ -65,7 +67,9 @@ export interface BoardShotsInput {
   audience?: string | null;
   /** Pictures the picture desk cleared (WP11). */
   pictures?: readonly RegistryEntry[];
-  /** The kit's ids (WP9): none yet. */
+  /** The show's look (tech §11): which pieces of the kit it may use. Editorial when absent. */
+  look?: KitLook;
+  /** The kit's ids it may use: by default every piece drawn for its look. */
   kit?: readonly string[];
 }
 
@@ -101,7 +105,7 @@ const registryFor = (input: BoardShotsInput) =>
 
 /** What the checks are told of the scene: its kit, and whether the show has its map. */
 const optionsFor = (input: BoardShotsInput): PlanOptions => ({
-  kit: input.kit ?? [],
+  kit: input.kit ?? kitIdsFor(input.look ?? 'editorial'),
   map: Boolean(readMapBase(input.world?.base)),
 });
 
@@ -128,6 +132,7 @@ export function shotParts(
       ? `The colour held back: "held", only for ${world.held.for}.`
       : '',
     `What you may name (nothing else):\n${promptList(registry)}`,
+    kitPart(input),
     [
       "The lines, in order (say: the voice's exact words; about: what the line is about; claims: what it rests on; show: what the editor wants seen, its idea only):",
       ...lines.map((line, k) =>
@@ -141,6 +146,18 @@ export function shotParts(
       ),
     ].join('\n'),
   ].filter(Boolean);
+}
+
+/** The kit the scene may stand on its sets, for its look: each piece with its settings and moves; none, no actors. */
+function kitPart(input: BoardShotsInput): string {
+  const ids = input.kit ?? kitIdsFor(input.look ?? 'editorial');
+  const guide = kitGuide(input.look ?? 'editorial')
+    .split('\n')
+    .filter((row) => ids.some((id) => row.startsWith(`- ${id}:`)))
+    .join('\n');
+  return guide
+    ? `The kit (pieces that may stand on a set or on the map; settings and moves as written):\n${guide}`
+    : 'The kit has nothing for this show: plan no actors.';
 }
 
 /** A shot moved onto other words: its own, and each of its changes that were on its words. */

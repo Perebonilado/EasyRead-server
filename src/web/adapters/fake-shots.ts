@@ -103,10 +103,37 @@ export function fakeShotsAnswer(
     const region = regions.find((r) => says(line.say, r.split(' ')[0]));
     if (place || region) {
       const target = place ? `place:${place}` : `region:${region}`;
+      // People gathered there, when the kit has crowds: counted by the line's own number.
+      const gathered =
+        place &&
+        /^- people\.crowd:/mu.test(all) &&
+        /\b(crowds?|people|gathered|marched|protesters|workers)\b/iu.test(
+          line.say,
+        );
+      const said =
+        /\b(\d{1,3}(?:,\d{3})+|\d+)\s+(?:[a-z]+\s+)?(?:people|workers|protesters|marchers)\b/iu.exec(
+          line.say,
+        )?.[1];
       return [
         {
           on,
           set: { kind: 'map', tilt: 'flat' },
+          ...(gathered
+            ? {
+                actors: [
+                  {
+                    id: 'crowd',
+                    kit: 'people.crowd',
+                    place: target,
+                    pose: /march|protest/iu.test(line.say)
+                      ? 'protest'
+                      : 'standing',
+                    count: said ? Number(said.replace(/,/gu, '')) : null,
+                    moves: [{ move: 'enter', on }],
+                  },
+                ],
+              }
+            : {}),
           info: [{ recipe: place ? 'pin' : 'fill', target, on }],
           camera: [{ move: 'push', target, amount: 'small', on }],
           life: ['cloud-shadows'],

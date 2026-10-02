@@ -28,6 +28,8 @@ import type { ShotInfoRecipe } from '../../../contracts';
 import { numbersIn } from '../scene-chart';
 import { readMapBase } from '../scene-map';
 import { placesIn } from '../scene-map-places';
+import { eraOf } from '../kit/eras';
+import { KIT, actorMove } from '../kit/registry';
 import { TEXT } from '../studio/explainer-rules';
 import type { EditorWorld } from '../studio/studio-editor';
 import type { EditorialRow } from '../studio/studio-editorial';
@@ -341,6 +343,18 @@ function cameraOf(raw: unknown): PlanCamera | null {
   };
 }
 
+/** The settings an actor's flat fields may carry (the board's schema writes each as its own field). */
+const ACTOR_SETTINGS = [
+  'pose',
+  'kind',
+  'count',
+  'era',
+  'who',
+  'dress',
+  'facing',
+  'wagons',
+] as const;
+
 function actorOf(
   raw: unknown,
   kit: readonly string[],
@@ -350,12 +364,26 @@ function actorOf(
   const piece = line(said.kit, 60);
   if (!kit.includes(piece)) return null;
   const params: Record<string, string | number | boolean> = {};
-  for (const [key, value] of Object.entries(record(said.params)).slice(0, 8))
+  const given = { ...record(said.params) };
+  for (const key of ACTOR_SETTINGS)
+    if (said[key] !== undefined && said[key] !== null) given[key] = said[key];
+  for (const [key, value] of Object.entries(given).slice(0, 10))
     if (['string', 'number', 'boolean'].includes(typeof value))
       params[key.slice(0, 24)] =
         typeof value === 'string'
           ? value.slice(0, 40)
           : (value as number | boolean);
+  // An era in words ("the 1950s", "Victorian") as the kit names eras.
+  if (typeof params.era === 'string') {
+    const era = eraOf(params.era);
+    if (era) params.era = era;
+    else delete params.era;
+  }
+  if (params.count !== undefined) {
+    const count = numberIn(params.count);
+    if (count === undefined) delete params.count;
+    else params.count = count;
+  }
   const moves = list(said.moves)
     .map((one) => ({
       move: line(record(one).move, 24),
@@ -374,6 +402,169 @@ function actorOf(
     ...(Object.keys(params).length ? { params } : {}),
     ...(place ? { place } : {}),
     ...(side ? { side } : {}),
+    ...(moves.length ? { moves } : {}),
+  };
+}
+
+// ── People on the stage ───────────────────────────────────────────────────
+
+/**
+ * The person of the scene's list a stretch of the narration names (from
+ * word `start` to `end`), by their whole name or their family name: one
+ * silhouette or a pair there would be read as them.
+ */
+function personNamed(
+  n: Narration,
+  registry: TargetRegistry,
+  start: number,
+  end: number,
+): string | null {
+  for (const e of registry.entries()) {
+    if (e.kind !== 'person') continue;
+    const name = splitTarget(e.name).rest;
+    const last = keysOf(name).at(-1);
+    if (
+      phraseAt(n, name, start, end) >= 0 ||
+      (last && last.length > 2 && phraseAt(n, last, start, end) >= 0)
+    )
+      return name;
+  }
+  return null;
+}
+
+/** Words for people, that make a number before them a count of people. */
+const PEOPLE_WORDS =
+  /^(?:people|persons?|men|women|children|workers|voters|protesters|marchers|soldiers|troops|migrants|refugees|delegates|members|demonstrators|residents|citizens|villagers|farmers|miners|strikers|families|pilgrims|prisoners|settlers|passengers|fans|spectators|crowds?|inhabitants|employees|staff|students|sailors|slaves|labourers|laborers|immigrants|emigrants|travellers|travelers)$/u;
+const SCALES: Readonly<Record<string, number>> = {
+  thousand: 1e3,
+  million: 1e6,
+  billion: 1e9,
+};
+
+/**
+ * The counts of people the scene gives: a number in its lines with a
+ * word for people after it ("300 people", "45,000 striking workers",
+ * "3 million voters"), or a research number about people. A year or a
+ * length is never a crowd's count.
+ */
+function peopleCounts(
+  narration: string,
+  registry: TargetRegistry,
+): Set<number> {
+  const out = new Set<number>();
+  const words = narration
+    .split(/\s+/u)
+    .map((w) =>
+      w.toLowerCase().replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, ''),
+    );
+  words.forEach((word, i) => {
+    const [found] = numbersIn(word);
+    if (found === undefined) return;
+    let value = found;
+    let j = i + 1;
+    if (SCALES[words[j]]) {
+      value *= SCALES[words[j]];
+      j += 1;
+    }
+    // A word for people within three words, before any other number.
+    for (const w of words.slice(j, j + 3)) {
+      if (/\d/u.test(w)) break;
+      if (PEOPLE_WORDS.test(w)) {
+        out.add(value);
+        break;
+      }
+    }
+  });
+  for (const e of registry.entries())
+    if (
+      e.kind === 'number' &&
+      e.value !== undefined &&
+      `${e.unit ?? ''} ${e.about}`
+        .toLowerCase()
+        .split(/[^\p{L}]+/u)
+        .some((w) => PEOPLE_WORDS.test(w))
+    )
+      out.add(e.value);
+  return out;
+}
+
+/**
+ * What is wrong with an actor (research §3.5): a move it cannot make;
+ * for people, a silhouette standing for a named person (on a person's
+ * place or name, or one or two figures on a line that names someone),
+ * the audience on screen, or a count neither the list nor the line gives.
+ */
+function actorFaults(
+  actor: PlanActor,
+  registry: TargetRegistry,
+  counts: Set<number>,
+  named: string | null,
+): { code: string; message: string; drop: boolean }[] {
+  const entry = KIT[actor.kit];
+  if (!entry) return [];
+  const out: { code: string; message: string; drop: boolean }[] = [];
+  for (const move of actor.moves ?? [])
+    if (!entry.moves.includes(actorMove(move.move)))
+      out.push({
+        code: 'unknown-move',
+        message: `${actor.id} (${actor.kit}) cannot ${move.move}; its moves are ${entry.moves.join(', ')}.`,
+        drop: false,
+      });
+  if (!entry.people) return out;
+  const own = [actor.place, actor.id].map((name) =>
+    name ? registry.resolve(name) : null,
+  );
+  const person = own.find((e) => e?.kind === 'person');
+  const few = actor.kit === 'people.person' || actor.kit === 'people.pair';
+  if (person || (few && named))
+    out.push({
+      code: 'silhouette-person',
+      message: `${actor.id} is a silhouette where the line is about ${person ? splitTarget(person.name).rest : named}: a named person is shown only by their portrait or a trace of them, never a figure.`,
+      drop: true,
+    });
+  const words = [actor.id, ...Object.values(actor.params ?? {})].join(' ');
+  if (AUDIENCE.test(words))
+    out.push({
+      code: 'audience',
+      message: `${actor.id} puts the audience on screen; no one watching is ever shown.`,
+      drop: true,
+    });
+  const count = actor.params?.count;
+  if (
+    entry.counts &&
+    typeof count === 'number' &&
+    count > 0 &&
+    !counts.has(count)
+  )
+    out.push({
+      code: 'untrue-count',
+      message: `${actor.id} counts ${count}, which neither the list nor the line gives as a count of people: count only such a number, or none.`,
+      drop: false,
+    });
+  return out;
+}
+
+/** An actor made sound: dropped when it breaks a rule of people, its untrue count and the moves it cannot make taken away. */
+function soundActor(
+  actor: PlanActor,
+  registry: TargetRegistry,
+  counts: Set<number>,
+  named: string | null,
+): PlanActor | null {
+  const faults = actorFaults(actor, registry, counts, named);
+  if (faults.some((f) => f.drop)) return null;
+  const entry = KIT[actor.kit];
+  const params = { ...(actor.params ?? {}) };
+  if (faults.some((f) => f.code === 'untrue-count')) delete params.count;
+  const moves = (actor.moves ?? []).filter(
+    (m) => !entry || entry.moves.includes(actorMove(m.move)),
+  );
+  const { params: _p, moves: _m, ...rest } = actor;
+  void _p;
+  void _m;
+  return {
+    ...rest,
+    ...(Object.keys(params).length ? { params } : {}),
     ...(moves.length ? { moves } : {}),
   };
 }
@@ -825,6 +1016,7 @@ export function checkPlan(
     options.map ??
     registry.entries().some((e) => e.kind === 'region' || e.kind === 'seam');
   const given = givenNumbers(narration, registry);
+  const counts = peopleCounts(narration, registry);
   if (!plan.shots.length) {
     say(
       -1,
@@ -874,6 +1066,14 @@ export function checkPlan(
             ? `${S}: "${actor.kit}" is no kit piece.`
             : `${S}: there are no actors yet; plan none.`,
         );
+      else
+        for (const fault of actorFaults(
+          actor,
+          registry,
+          counts,
+          at >= 0 ? personNamed(n, registry, at, next) : null,
+        ))
+          say(k, fault.code, `${S}: ${fault.message}`);
     if (shot.info.length > SHOT_LIMITS.info)
       say(
         k,
@@ -1148,6 +1348,7 @@ export const SERIOUS = new Set([
   'chart-empty',
   'word-card',
   'person-unseen',
+  'silhouette-person',
   'named-set',
   'untrue-number',
   'untrue-quote',
@@ -1479,6 +1680,7 @@ export function mendPlan(
     options.map ??
     registry.entries().some((e) => e.kind === 'region' || e.kind === 'seam');
   const given = givenNumbers(narration, registry);
+  const counts = peopleCounts(narration, registry);
   if (!n.keys.length) return { shots: [] };
 
   // Each shot on its own: its set, names, words and numbers.
@@ -1545,6 +1747,10 @@ export function mendPlan(
         ...a,
         info: [...a.info, ...b.info],
         camera: [...a.camera, ...b.camera],
+        actors: [
+          ...a.actors,
+          ...b.actors.filter((x) => !a.actors.some((y) => y.id === x.id)),
+        ].slice(0, SHOT_LIMITS.actors),
         life: [...new Set([...a.life, ...b.life])].slice(0, SHOT_LIMITS.life),
         join: b.join,
       };
@@ -1593,7 +1799,28 @@ export function mendPlan(
       const spot = within(move.on) ?? { at: start, length: own.length };
       return { ...move, on: said(spot) };
     });
-    return { ...p.shot, on: phraseText(n, own.at, own.length), info, camera };
+    const named = personNamed(n, registry, start, end);
+    const actors = p.shot.actors
+      .map((actor) => soundActor(actor, registry, counts, named))
+      .filter((a): a is PlanActor => a !== null)
+      .map((actor) =>
+        actor.moves
+          ? {
+              ...actor,
+              moves: actor.moves.map((move) => ({
+                ...move,
+                on: said(within(move.on) ?? { at: start, length: own.length }),
+              })),
+            }
+          : actor,
+      );
+    return {
+      ...p.shot,
+      on: phraseText(n, own.at, own.length),
+      info,
+      camera,
+      actors,
+    };
   });
 
   // The same set carried into the next shot continues it.

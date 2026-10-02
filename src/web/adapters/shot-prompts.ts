@@ -36,10 +36,20 @@ const uses = (title: string, table: Record<string, string>) =>
   [title, ...Object.entries(table).map(([k, v]) => `- ${k}: ${v}`)].join('\n');
 
 /**
- * The kit's pieces the board may put on a set (kit/registry, WP9), with
- * when each is used; none yet, so no actors are planned.
+ * How the board stands the kit's pieces on a set (kit/registry; research
+ * §3.5): groups as silhouettes in their side's colour, counted honestly,
+ * never a named person, never the audience. Which pieces a scene may use
+ * comes with it (shot-board's kit part, for the show's look).
  */
-export const KIT_GUIDE = '';
+export const KIT_GUIDE = [
+  'Actors: pieces of the kit listed with the scene, standing on its set or on the map; at most four a shot, only where the line is about people or things that move in general.',
+  '  - Groups of people are silhouettes in their side’s colour (side: a side’s name from the list). A crowd’s count is a number the list or the line gives, or none: never a number of your own.',
+  '  - A silhouette never stands for a named person: a named person is their portrait or a trace of them. One person or a pair only for an unnamed role the line speaks of (a voter, a worker), never on a line that names someone.',
+  '  - Never the audience, a viewer, a student or a host.',
+  '  - A vehicle carries what the line says moves (goods, people, an army), of its era.',
+  '  - Each actor: id (your name for it), kit, place (a place of the list on the map, a part of the set, or left, centre, right, foreground, background), side, its settings as fields (pose, kind, count, era, who, dress, facing, wagons: only those its kit has), and moves, each on its own exact words, with to (a place, a part, or left, right, off).',
+  '  - For example: {"id": "marchers", "kit": "people.crowd", "place": "place:<a place>", "side": "<a side>", "pose": "protest", "count": <the number said>, "moves": [{"move": "enter", "on": "<exact words>"}]}',
+].join('\n');
 
 /** A chart's fields, by kind: the scene writer's own names, and how its parts are named. */
 const CHART_GUIDE = [
@@ -70,6 +80,8 @@ const DECIDE = [
   '- why: a flow from the cause to its effect, the wave travelling along it ("flow"); a transfer only where a claim says something moves from one to another.',
   '- a comparison: a split of the two sides.',
   '- exact words: a quote of a quote claim’s words.',
+  '- many people (a crowd, workers, voters, migrants): the kit’s silhouettes in their side’s colour, on the map at their place or on a drawn set, counted only by a number the list or the line gives.',
+  '- what moves people or goods (a train, a ship, a lorry): the kit’s vehicle of its era, travelling on the map or across a drawn set.',
   '- a scene (a moment of people in a place), a feeling, an atmosphere: the place on the map when the line names one the list gives; else a drawn set of a kind of place (a coast at dusk, a city at night), never a named one, with life; or the shot before carried on with a slow push.',
 ].join('\n');
 
@@ -82,9 +94,9 @@ const HOW = [
   '- Names only from the list, written as it writes them (place:…, region:…, number:…); a chart’s own parts as part:<its words>. Never a place, a person, a number, a date or a picture the list does not give.',
   '- One change at a time: each information item on its own words, three or four words after the one before; never several on the same words.',
   '- At most eight words on the stage in a shot, one to three to a label. A label names what it is on (a place’s name, a year, a part’s name), always pinned to it (its target); it never repeats what the voice says. Code writes every number from the list.',
-  `- ${KIT_GUIDE || 'No actors yet: plan none.'}`,
+  `- ${KIT_GUIDE}`,
   '- join: how the shot hands over to the next: continue for the same set, cut for a new one, dissolve when time passes, zoom-through into a pin or a part, dip after a grave fact.',
-  '- Never a card of words standing in for a picture: no word cards, no keyword cards, no names on blank paper. Never a person drawn, a stock figure for a real group, the audience or a viewer, a place the list does not give, or a drawn set named after a real place.',
+  '- Never a card of words standing in for a picture: no word cards, no keyword cards, no names on blank paper. Never a named person drawn (only their portrait or a trace of them), a cartoon or stock figure for a real group (groups are the kit’s silhouettes), the audience or a viewer, a place the list does not give, or a drawn set named after a real place.',
   '- Care: violence is never shown (a death is a pin, a number and a silence); no caricature of anyone.',
 ].join('\n');
 

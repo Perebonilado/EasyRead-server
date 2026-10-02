@@ -15,7 +15,6 @@
  * unknown values fall back to known ones, lists are capped, text is
  * trimmed. What cannot be made sound is left for the check to name.
  */
-import type { RegistryEntry, ShotPlan } from '../shots/types';
 import { createHash } from 'node:crypto';
 import {
   personaOf,
@@ -264,8 +263,6 @@ export interface StudioBrief {
   voicePace?: number;
   /** An explainer's look (scene-themes); absent, chosen by code (studio-look's themeFor). */
   look?: ThemeId;
-  /** How an explainer draws its people: portraits and silhouettes, or cartoon characters; absent, chosen by code with its world (studio-look's lookStyleFor). */
-  lookStyle?: 'editorial' | 'illustrated';
   /**
    * An explainer's host (studio-host), on or off, as the maker said;
    * absent, on for children and off for grown-ups.
@@ -284,7 +281,6 @@ export const BRIEF_CONTROLS = [
   'pace',
   'style',
   'look',
-  'lookStyle',
 ] as const;
 
 export const EMPTY_BRIEF: StudioBrief = {
@@ -408,10 +404,6 @@ export function briefOf(
   const look = has('look')
     ? (oneOf(THEME_IDS)(said.look) ?? base.look)
     : base.look;
-  const lookStyle = has('lookStyle')
-    ? (oneOf(['editorial', 'illustrated'] as const)(said.lookStyle) ??
-      base.lookStyle)
-    : base.lookStyle;
   const host =
     has('host') && typeof said.host === 'boolean' ? said.host : base.host;
   const shape = has('shape')
@@ -429,30 +421,19 @@ export function briefOf(
     ...(style ? { style } : {}),
     ...(voicePace && voicePace !== 1 ? { voicePace } : {}),
     ...(look ? { look } : {}),
-    ...(lookStyle ? { lookStyle } : {}),
     ...(typeof host === 'boolean' ? { host } : {}),
     // Wide is every film's unless the maker chose otherwise: not said.
     ...(shape && shape !== 'wide' ? { shape } : {}),
   };
 }
 
-/**
- * What a brief still needs before its outline can be written; none when
- * it is complete. A show the editor plans (studio-editor) never asks how
- * long an explainer runs: its episodes are three to five minutes, as long
- * as their material.
- */
-export function briefMissing(
-  brief: StudioBrief,
-  /** The show is the editor's: an explainer's length is its material's. */
-  editor = false,
-): (keyof StudioBrief)[] {
+/** What a brief still needs before its outline can be written; none when it is complete. */
+export function briefMissing(brief: StudioBrief): (keyof StudioBrief)[] {
   const missing: (keyof StudioBrief)[] = [];
   if (!brief.format) missing.push('format');
   if (!brief.idea) missing.push('idea');
   if (!brief.audience) missing.push('audience');
-  if (!brief.minutes && !(editor && brief.format === 'explainer'))
-    missing.push('minutes');
+  if (!brief.minutes) missing.push('minutes');
   if (!brief.tone) missing.push('tone');
   return missing;
 }
@@ -1012,10 +993,8 @@ export interface OutlineScene {
   /**
    * An explainer's scene that is a story clip (studio-clip, Ask 5): a
    * short acted moment in `set` with `cast`, showing what `teach` says in
-   * one line, written as a story's scene is. Or, in an episode the editor
-   * wrote (studio-editor-cut), an illustrated scene: a narrated shot of a
-   * world place with its people, under the narrator, with no dialogue.
-   * Absent, a lesson scene (and a story's scene in a story).
+   * one line, written as a story's scene is. Absent, a lesson scene (and a
+   * story's scene in a story).
    */
   kind?: OutlineKind;
   /** A clip's: the narrator's line in the lesson after it that points back to it. Absent otherwise. */
@@ -1027,28 +1006,14 @@ export interface OutlineScene {
    * (studio-build withBuilds). Absent or null, a scene of its own.
    */
   build?: 'start' | 'continue' | null;
-  /** An editor's episode: the rows of its script the scene is, first and last, from 0. */
-  rows?: [number, number];
 }
 
-/**
- * What an explainer's scene is, as the outline's writer may say it: a
- * lesson page, or a short acted story clip. The editor's own scenes may
- * also be illustrated ones (OutlineKind), cut by code, never written so.
- */
+/** What an explainer's scene is: a lesson page, or a short acted story clip. */
 export const OUTLINE_KINDS = ['lesson', 'clip'] as const;
-export type OutlineKind = (typeof OUTLINE_KINDS)[number] | 'illustrated';
+export type OutlineKind = (typeof OUTLINE_KINDS)[number];
 
 /** How long a story clip runs, least and most, in seconds (studio-clip gates it). */
 export const CLIP_SECONDS = [6, 20] as const;
-
-/** How long an editor's illustrated scene runs, least and most, in seconds: a shot or a short run of them. */
-export const ILLUSTRATED_SECONDS = [4, 30] as const;
-
-/** Whether an outline's scene is an illustrated one (the editor's): a story's sheet, narrated, never a clip. */
-export const isIllustrated = (
-  scene: Pick<OutlineScene, 'kind'> | null | undefined,
-) => scene?.kind === 'illustrated';
 
 export interface StudioOutline {
   title: string;
@@ -1067,17 +1032,9 @@ export interface StudioOutline {
    * the outline; absent for a story, or when none were.
    */
   next?: string[];
-  /**
-   * Written by the editor (studio-editor-cut): cut from the episode's
-   * two-column script, its scenes up to EDITOR_MAX_SCENES, each the rows
-   * it is. Absent on every other outline.
-   */
-  editor?: true;
 }
 
 export const MAX_SCENES = 12;
-/** An editor's episode is cut into more, shorter scenes: its shots and the diagrams between them. */
-export const EDITOR_MAX_SCENES = 40;
 /** A scene runs at least this, and at most this, in seconds. */
 export const SCENE_SECONDS = [10, 90] as const;
 
@@ -1086,17 +1043,13 @@ export function outlineOf(raw: unknown): StudioOutline {
     raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
   const story = storyOf(said.story);
   const next = nextQuestionsOf(said.next, text(said.title, 80));
-  // The editor's outline: more scenes, its illustrated ones and the rows
-  // each scene is kept; every other outline reads exactly as it did.
-  const editor = said.editor === true;
   return {
     ...(story ? { story } : {}),
     ...(next.length ? { next } : {}),
-    ...(editor ? { editor: true as const } : {}),
     title: text(said.title, 80) || 'Untitled',
     logline: text(said.logline, 300),
     scenes: (Array.isArray(said.scenes) ? said.scenes : [])
-      .slice(0, editor ? EDITOR_MAX_SCENES : MAX_SCENES)
+      .slice(0, MAX_SCENES)
       .flatMap((one: unknown): OutlineScene[] => {
         if (!one || typeof one !== 'object') return [];
         const s = one as Record<string, unknown>;
@@ -1106,18 +1059,9 @@ export function outlineOf(raw: unknown): StudioOutline {
         const seconds = Number(s.seconds);
         // A story clip is short: it may run below a lesson scene's least.
         const clip = s.kind === 'clip';
-        const illustrated = editor && s.kind === 'illustrated';
-        const least = clip
-          ? CLIP_SECONDS[0]
-          : illustrated
-            ? ILLUSTRATED_SECONDS[0]
-            : SCENE_SECONDS[0];
-        const most = illustrated ? ILLUSTRATED_SECONDS[1] : SCENE_SECONDS[1];
+        const least = clip ? CLIP_SECONDS[0] : SCENE_SECONDS[0];
         const pages = Array.isArray(s.pages)
           ? s.pages.map(Number).filter((n) => Number.isFinite(n) && n >= 1)
-          : [];
-        const rows = Array.isArray(s.rows)
-          ? s.rows.map(Number).filter((n) => Number.isInteger(n) && n >= 0)
           : [];
         return [
           {
@@ -1129,7 +1073,7 @@ export function outlineOf(raw: unknown): StudioOutline {
               .filter(Boolean)
               .slice(0, 6),
             seconds: Number.isFinite(seconds)
-              ? Math.round(Math.min(most, Math.max(least, seconds)))
+              ? Math.round(Math.min(SCENE_SECONDS[1], Math.max(least, seconds)))
               : clip
                 ? CLIP_SECONDS[1]
                 : 30,
@@ -1137,11 +1081,7 @@ export function outlineOf(raw: unknown): StudioOutline {
             points: (Array.isArray(s.points) ? s.points : [])
               .map((p) => text(p, 240))
               .filter(Boolean)
-              .slice(0, editor ? 16 : 6),
-            ...(editor && rows.length === 2 && rows[0] <= rows[1]
-              ? { rows: [rows[0], rows[1]] as [number, number] }
-              : {}),
-            ...(illustrated ? { kind: 'illustrated' as const } : {}),
+              .slice(0, 6),
             ...(pages.length
               ? {
                   pages: [
@@ -1450,20 +1390,6 @@ export interface ExplainerSheet {
   title: string;
   transition: Transition;
   draft: SceneScriptDraft;
-  /**
-   * 'shots' when the shots engine makes it (explainer-animation-tech.md):
-   * its picture is the plan in `shots`, and `draft` holds only its beats
-   * (one per script row, word for word) with no things or steps. Absent,
-   * today's storyboard in `draft`. Decided once, at the board, so a remake,
-   * a twin or a recompose makes it the same way.
-   */
-  engine?: 'shots';
-  /** The board's plan of shots: every name from a closed list or from `registry`. */
-  shots?: ShotPlan;
-  /** What the plan may name, resolved when it was boarded: places, people, numbers, regions, pictures. */
-  registry?: RegistryEntry[];
-  /** Each beat's research claims (by the draft's beat index): the link from what is said to what is shown. */
-  rowClaims?: string[][];
 }
 
 export type SceneSheet = StorySheet | ExplainerSheet;
@@ -1681,12 +1607,6 @@ export function explainerSheetOf(raw: unknown): ExplainerSheet {
     said.draft && typeof said.draft === 'object'
       ? (said.draft as SceneScriptDraft)
       : null;
-  const shots =
-    said.shots &&
-    typeof said.shots === 'object' &&
-    Array.isArray((said.shots as Record<string, unknown>).shots)
-      ? (said.shots as ShotPlan)
-      : null;
   return {
     kind: 'explainer',
     title: text(said.title, 80) || text(draft?.title, 80) || 'A scene',
@@ -1700,24 +1620,6 @@ export function explainerSheetOf(raw: unknown): ExplainerSheet {
       cast: [],
       steps: [],
     },
-    // The shots engine's fields are kept only together: a plan without its
-    // switch, or the switch without a plan, is read as today's storyboard.
-    ...(said.engine === 'shots' && shots
-      ? {
-          engine: 'shots' as const,
-          shots,
-          registry: Array.isArray(said.registry)
-            ? (said.registry as RegistryEntry[])
-            : [],
-          rowClaims: Array.isArray(said.rowClaims)
-            ? (said.rowClaims as unknown[]).map((claims) =>
-                Array.isArray(claims)
-                  ? claims.filter((id): id is string => typeof id === 'string')
-                  : [],
-              )
-            : [],
-        }
-      : {}),
   };
 }
 

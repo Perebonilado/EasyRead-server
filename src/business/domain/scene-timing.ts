@@ -35,12 +35,6 @@ export const FIRST_WORD_LEAD_MS = 450;
 export const MIN_GAP_MS = 450;
 /** Longer than this with nothing changing, and something is added. */
 export const MAX_QUIET_MS = 6000;
-/**
- * In an editor's episode (SceneScript.pace "infographic"), the playbook's
- * rule: a visual change every three to five seconds, so a still stretch
- * past five is filled.
- */
-export const INFOGRAPHIC_QUIET_MS = 5000;
 /** How far outside its sentence's span a measured word may fall before the sentence is pinned. */
 export const PIN_SLACK_MS = 150;
 
@@ -436,14 +430,12 @@ export function spaced(times: number[], durationMs: number): number[] {
 export function quietGaps(
   times: number[],
   durationMs: number,
-  /** Longer than this is a quiet: MAX_QUIET_MS, or an editor's episode's INFOGRAPHIC_QUIET_MS. */
-  limit = MAX_QUIET_MS,
 ): [number, number][] {
   const points = [...times].sort((a, b) => a - b);
   const gaps: [number, number][] = [];
   for (let i = 0; i < points.length; i += 1) {
     const next = i + 1 < points.length ? points[i + 1] : durationMs;
-    if (next - points[i] > limit) gaps.push([points[i], next]);
+    if (next - points[i] > MAX_QUIET_MS) gaps.push([points[i], next]);
   }
   return gaps;
 }

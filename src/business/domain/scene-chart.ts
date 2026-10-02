@@ -9,7 +9,6 @@
  */
 import { measureText } from './scene-font';
 import { groupId } from './scene-ids';
-import { colourOr, type PaletteToken } from './scene-palette';
 import { ticks } from './scene-plot';
 import { PAPER } from './scene-themes';
 
@@ -17,12 +16,7 @@ export interface ChartSpec {
   kind: 'bar' | 'line';
   /** What the numbers are in, written after each: "%", "million", "°C". */
   unit: string | null;
-  /** Each bar's label and value, and its colour when a show's palette names it (a theme token). */
-  bars: { label: string; value: number; colour?: PaletteToken | null }[];
-  /** A line's colour, when the show gives it one. */
-  colour?: PaletteToken | null;
-  /** Its source, written small under it (drawn by scene-code). */
-  source?: string | null;
+  bars: { label: string; value: number }[];
 }
 
 /** The most bars one chart holds. */
@@ -53,12 +47,9 @@ const CANVAS = {
 const INK = PAPER.ink;
 const MUTED = PAPER.muted;
 const GRID = PAPER.grid;
-/**
- * Each bar its own colour of the chart palette, in order (Okabe–Ito's,
- * seen by colour-blind viewers too), or the show's colour for what it is.
- */
-const barColour = (i: number, token?: PaletteToken | null) =>
-  colourOr(token, PAPER.chart[i % PAPER.chart.length]);
+/** Each bar its own colour of the chart palette, in order (Okabe–Ito's, seen by colour-blind viewers too). */
+const barColour = (i: number) => PAPER.chart[i % PAPER.chart.length];
+const LINE_COLOUR = PAPER.accent;
 const HALO = PAPER.card;
 
 const escape = (text: string) =>
@@ -190,7 +181,6 @@ export function renderChart(
   };
   const valueLabel = (bar: ChartSpec['bars'][number], x: number, y: number) =>
     `<text x="${r(x)}" y="${r(bar.value >= 0 ? y - 14 : y + VALUE_SIZE + 8)}" font-size="${VALUE_SIZE}" font-weight="700" fill="${INK}" text-anchor="middle">${escape(valueText(bar.value, spec.unit))}</text>`;
-  const LINE_COLOUR = colourOr(spec.colour, PAPER.accent);
   if (spec.kind === 'line') {
     const points = bars.map((bar, i) => [cx(i), py(bar.value)] as const);
     const length = points
@@ -236,7 +226,7 @@ export function renderChart(
       const delay = 0.3 + i * 0.22;
       out.push(
         `<g id="${id}">` +
-          `<rect class="grow ${bar.value >= 0 ? 'up' : 'down'}" style="animation-delay:${delay.toFixed(2)}s" x="${r(cx(i) - width / 2)}" y="${r(top)}" width="${r(width)}" height="${r(height)}" rx="8" fill="${barColour(i, bar.colour)}"/>` +
+          `<rect class="grow ${bar.value >= 0 ? 'up' : 'down'}" style="animation-delay:${delay.toFixed(2)}s" x="${r(cx(i) - width / 2)}" y="${r(top)}" width="${r(width)}" height="${r(height)}" rx="8" fill="${barColour(i)}"/>` +
           `<g class="show" style="animation-delay:${(delay + 0.5).toFixed(2)}s">${valueLabel(bar, cx(i), py(bar.value))}</g>` +
           `</g>`,
       );

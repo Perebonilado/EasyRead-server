@@ -7,10 +7,7 @@ import type {
 } from '../domain/studio/studio';
 import type { SheetProblem } from '../domain/studio/studio-check';
 import type { DocumentPick } from '../domain/studio/studio-document';
-import type { StudioEditor } from '../domain/studio/studio-editor';
-import type { StudioEditorial } from '../domain/studio/studio-editorial';
 import type { FilmShape } from '../domain/scene-shape';
-import type { SceneFrames } from '../domain/shots/critic-loop';
 
 /**
  * Where an episode has got to: its brief being talked through, its
@@ -26,24 +23,9 @@ export const EPISODE_PHASES = [
 ] as const;
 export type EpisodePhase = (typeof EPISODE_PHASES)[number];
 
-/**
- * What an episode is busy with: writing its cast, developing its story,
- * its outline or its scenes, or making the film; and the editor's desk
- * (studio-editor): the show's questions, research, plan and world, worked
- * on its first episode, and an episode's script edited.
- */
+/** What an episode is busy with: writing its cast, developing its story, its outline or its scenes, or making the film. */
 export type EpisodeBusy =
-  | 'bible'
-  | 'story'
-  | 'outline'
-  | 'script'
-  | 'scene'
-  | 'make'
-  | 'angles'
-  | 'research'
-  | 'plan'
-  | 'world'
-  | 'edit';
+  'bible' | 'story' | 'outline' | 'script' | 'scene' | 'make';
 
 /** A scene: being written, written and checked, being made, made, or failed. */
 export type StudioSceneStatus =
@@ -86,8 +68,6 @@ export interface StudioShowRecord {
   bible: StudioBible | null;
   /** The document given to it in the chat, if any. */
   documentId?: string | null;
-  /** An explainer the editor plans (studio-editor); null or absent for a story and a show made before the editor. */
-  editor?: StudioEditor | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -114,8 +94,6 @@ export interface StudioEpisodeRecord {
   shape?: FilmShape;
   /** The episode it is the twin of, in the other shape: that one's script and voice are its. Absent or null for an episode of its own. */
   twinOf?: string | null;
-  /** An episode the editor wrote (studio-editorial); null or absent otherwise. */
-  editorial?: StudioEditorial | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -140,8 +118,6 @@ export interface StudioSceneRecord {
   activity?: StudioActivity | null;
   /** A twin episode's scene: the scene of the episode it is the twin of that it is the same scene of. */
   twinOf?: string | null;
-  /** What the critic's loop did to it (a scene of shots), its last rounds; absent or null before any. */
-  frames?: SceneFrames | null;
   updatedAt: Date;
 }
 
@@ -163,16 +139,7 @@ export interface StudioEventRecord {
     | 'failed'
     | 'checked'
     | 'document'
-    | 'pages'
-    // The editor's desk: the questions offered, the research done, the
-    // show planned, its world drawn up, an episode's script written.
-    | 'angles'
-    | 'research'
-    | 'plan'
-    | 'world'
-    | 'editorial'
-    /** A film made into a video file: "Your video is ready". */
-    | 'export';
+    | 'pages';
   /** The step it belongs to: a phase, or the story's own step (the Story card), which no episode's phase is. */
   step: EpisodePhase | 'story';
   sceneId?: string;
@@ -222,8 +189,6 @@ export interface StudioRepository {
     userId: string;
     title: string;
     brief: StudioBrief;
-    /** A show the editor will plan once it is an explainer (STUDIO_EDITOR). */
-    editor?: StudioEditor | null;
   }): Promise<StudioShowRecord>;
   /** A show that is not deleted. */
   findShow(id: string): Promise<StudioShowRecord | null>;
@@ -234,7 +199,7 @@ export interface StudioRepository {
     patch: Partial<
       Pick<
         StudioShowRecord,
-        'title' | 'format' | 'brief' | 'bible' | 'documentId' | 'editor'
+        'title' | 'format' | 'brief' | 'bible' | 'documentId'
       >
     >,
   ): Promise<void>;
@@ -272,7 +237,6 @@ export interface StudioRepository {
         | 'thumbKey'
         | 'pages'
         | 'shape'
-        | 'editorial'
       >
     >,
   ): Promise<void>;
@@ -305,7 +269,6 @@ export interface StudioRepository {
         | 'thumbKey'
         | 'madeHash'
         | 'durationMs'
-        | 'frames'
       >
     >,
   ): Promise<void>;

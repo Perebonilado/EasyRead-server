@@ -69,15 +69,12 @@ import {
   type OwnWord,
 } from '../scene-own';
 import {
+  STILL_WORDS,
   fewStageChanges,
-  stageWordsFor,
-  stillWordsFor,
   genderOf,
   mendScript,
   quietStretches,
   wordsAloneStretches,
-  WORDS_ALONE,
-  type MendOptions,
   type SceneScript,
 } from '../scene-script';
 import type { LearningStage } from '../scene-stage';
@@ -3487,25 +3484,12 @@ export function checkExplainer(
     stage: LearningStage | null;
     maths: boolean;
     planned: number | null;
-    /** An editor's show: its world's colours, each thing it names kept in its token, and the one it holds back. */
-    palette?: MendOptions['palette'];
-    held?: MendOptions['held'];
   },
 ): { script: SceneScript; problems: SheetProblem[] } {
   const mended = mendScript(sheet.draft, {
     material: studioMaterial(sheet, options.teach, options.source ?? null),
-    // An explainer quotes exact words as a quote: the one picture of what
-    // someone said that is always true (explainer-animation-plan §5.3).
-    formats: options.maths
-      ? ['explainer', 'maths', 'reading']
-      : ['explainer', 'reading'],
+    formats: options.maths ? ['explainer', 'maths'] : ['explainer'],
     stage: options.stage,
-    // What cannot be shown truthfully is left out, never a card, and no
-    // one is drawn (explainer-animation-plan §10).
-    explainer: true,
-    ...(options.palette?.length
-      ? { palette: options.palette, held: options.held ?? null }
-      : {}),
   });
   // What the storyboard gets wrong keeps the scene from being made; a
   // picture that sits still a while is sent back to the writer once, and
@@ -3517,18 +3501,10 @@ export function checkExplainer(
       beat: null,
       level: 'error' as const,
     })),
-    // An editor's episode is held to the playbook's pace (three to five
-    // seconds), a lesson to its own.
     ...[
-      ...quietStretches(
-        mended.script,
-        stillWordsFor(mended.script, options.stage),
-      ),
-      ...wordsAloneStretches(mended.script, WORDS_ALONE, true),
-      ...fewStageChanges(
-        mended.script,
-        stageWordsFor(mended.script, options.stage),
-      ),
+      ...quietStretches(mended.script, STILL_WORDS),
+      ...wordsAloneStretches(mended.script),
+      ...fewStageChanges(mended.script),
     ].map((message) => ({
       rule: 'storyboard' as const,
       message,
@@ -3554,11 +3530,9 @@ export function checkExplainer(
     problems.push({
       rule: 'picture',
       message:
-        // Never "show it as a keyword card": an explainer leaves out what
-        // it cannot draw truthfully (explainer-animation-plan §10).
         wrong.why === 'comparison'
-          ? `The drawing "${wrong.id}" is labelled "${wrong.name}" but draws the comparison the voice makes (${wrong.with}), not ${wrong.name} itself: draw what its label says, or leave it out: the picture before it holds, or the map shows it.`
-          : `The drawing "${wrong.id}" is labelled "${wrong.name}" but is drawn just as "${wrong.with}" is: draw what its label says, or leave it out: the picture before it holds, or the map shows it.`,
+          ? `The drawing "${wrong.id}" is labelled "${wrong.name}" but draws the comparison the voice makes (${wrong.with}), not ${wrong.name} itself: draw what its label says, or show it as a keyword card.`
+          : `The drawing "${wrong.id}" is labelled "${wrong.name}" but is drawn just as "${wrong.with}" is: draw what its label says, or show it as a keyword card.`,
       beat: null,
       level: 'warning',
     });
@@ -3703,10 +3677,8 @@ export function repairedWith(
 
 /**
  * An explainer scene made sound whatever its writer left wrong: a chart,
- * a timeline, a graph, a map or a quotation the check turns down is left
- * out, so nothing made up is drawn, and the film is made. Never a card of
- * its name in its place (explainer-animation-plan §10): its steps drop it
- * as they drop any name not in the cast, and the stage keeps what it had.
+ * a timeline, a graph, a map or a quotation the check turns down is shown as its
+ * name in type instead, so nothing made up is drawn, and the film is made.
  */
 export function repairExplainer(
   sheet: ExplainerSheet,
@@ -3715,7 +3687,7 @@ export function repairExplainer(
   const refused = new Set(
     errorsIn(checkExplainer(sheet, options).problems).flatMap((p) => {
       const named =
-        /^The (?:chart|timeline|graph|quotation|map|flow|equation|counter|icons|seats) "([^"]+)"/.exec(
+        /^The (?:chart|timeline|graph|quotation|map|flow|equation) "([^"]+)"/.exec(
           p.message,
         );
       return named ? [named[1]] : [];
@@ -3723,15 +3695,33 @@ export function repairExplainer(
   );
   // A drawing that would not show what its label says (three brake
   // calipers captioned "Parental support", "Education", "Positive peer
-  // influence") is left out too: never a puzzle, and never its label in
-  // type standing in for it.
+  // influence") is its label in type: true, and never a puzzle.
   for (const wrong of pictureMismatches(sheet)) refused.add(wrong.id);
   if (!refused.size) return sheet;
   return {
     ...sheet,
     draft: {
       ...sheet.draft,
-      cast: sheet.draft.cast.filter((thing) => !refused.has(thing.id)),
+      cast: sheet.draft.cast.map((thing) =>
+        refused.has(thing.id)
+          ? {
+              ...thing,
+              kind: 'words',
+              style: 'keyword',
+              plot: null,
+              chart: null,
+              timeline: null,
+              quote: null,
+              phrases: null,
+              lines: null,
+              map: null,
+              flag: null,
+              equation: null,
+              flow: null,
+              molecule: null,
+            }
+          : thing,
+      ),
     },
   };
 }

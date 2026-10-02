@@ -1,12 +1,8 @@
 import { atlasOf, d3Geo } from './scene-map';
-import { naturalAreas } from './scene-map-data';
 import {
   ATLAS_COUNTRIES,
   PLACES,
-  areasNamed,
-  areasOf,
   countriesNamed,
-  countriesOfAreas,
   highlightCountries,
   mapFromWords,
   placeNamed,
@@ -220,75 +216,5 @@ describe('where things are, for a map', () => {
       places: ['Lima'],
     });
     expect(mapFromWords('A map', 'A map of nowhere at all')).toBeNull();
-  });
-
-  it("keeps Natural Earth's areas inside world-atlas's countries, each once", () => {
-    const { areas, byKey } = naturalAreas();
-    expect(areas.length).toBeGreaterThan(4500);
-    expect(byKey.size).toBe(areas.length);
-    for (const area of areas) expect(ATLAS_COUNTRIES).toContain(area.country);
-    // Every state of Nigeria, and the capital's territory.
-    expect(areasOf('Nigeria')).toHaveLength(37);
-    expect(areasOf('Germany')).toHaveLength(16);
-    expect(countriesOfAreas(['NG-KN', 'DE-BY', 'nowhere'])).toEqual([
-      'Nigeria',
-      'Germany',
-    ]);
-  });
-
-  it('finds an area by its name, its other names, and with or without its kind', () => {
-    const keys = (said: string, within?: string[]) =>
-      areasNamed(said, within)?.keys ?? null;
-    expect(keys('Kano', ['Nigeria'])).toEqual(['NG-KN']);
-    expect(keys('Kano State', ['Nigeria'])).toEqual(['NG-KN']);
-    // Natural Earth's own spelling is Nassarawa; the state's is Nasarawa.
-    expect(keys('Nasarawa', ['Nigeria'])).toEqual(['NG-NA']);
-    expect(keys('Federal Capital Territory', ['Nigeria'])).toEqual(['NG-FC']);
-    // Accents folded, and the English name or the local one.
-    for (const said of ['Thuringia', 'Thüringen', 'Thuringen', 'THÜRINGEN'])
-      expect(keys(said, ['Germany'])).toEqual(['DE-TH']);
-    expect(keys('Bavaria')).toEqual(['DE-BY']);
-    expect(keys('Bayern')).toEqual(['DE-BY']);
-    expect(keys('Baden-Wurttemberg', ['Germany'])).toEqual(['DE-BW']);
-    // An old name.
-    expect(keys('Orissa', ['India'])).toEqual(['IN-OR']);
-    expect(keys('North-West Frontier Province')).toEqual(['PK-KP']);
-    // Niger on a map of Nigeria is Niger State.
-    expect(keys('Niger', ['Nigeria'])).toEqual(['NG-NI']);
-    expect(keys('Atlantis')).toBeNull();
-    expect(keys('Wakanda State', ['Nigeria'])).toBeNull();
-  });
-
-  it('reads an area inside the countries in view, its own name before another', () => {
-    const keys = (said: string, within?: string[]) =>
-      areasNamed(said, within)?.keys ?? null;
-    expect(keys('Punjab', ['India'])).toEqual(['IN-PB']);
-    expect(keys('Punjab', ['Pakistan'])).toEqual(['PK-PB']);
-    expect(keys('Punjab', ['India', 'Pakistan'])?.sort()).toEqual([
-      'IN-PB',
-      'PK-PB',
-    ]);
-    // The state, not the capital whose English name is Washington.
-    expect(keys('Washington', ['United States of America'])).toEqual(['US-WA']);
-    expect(keys('Georgia', ['United States of America'])).toEqual(['US-GA']);
-    expect(keys('Kano', ['Germany'])).toBeNull();
-  });
-
-  it('reads a part of a country, and a larger region, as all their areas', () => {
-    const scotland = areasNamed('Scotland', ['United Kingdom']);
-    expect(scotland?.countries).toEqual(['United Kingdom']);
-    expect(scotland?.keys.length).toBeGreaterThan(25);
-    expect(areasNamed('Wales')?.keys.length).toBeGreaterThan(15);
-    const usa = ['United States of America'];
-    expect(areasNamed('the Midwest', usa)?.keys).toHaveLength(12);
-    expect(areasNamed('Northeast', usa)?.keys).toContain('US-NY');
-    expect(areasNamed('South', usa)?.keys).toContain('US-TX');
-    // "The South" is many countries' own: read only where the map is.
-    expect(areasNamed('South')).toBeNull();
-    // Italy's regions by their English names.
-    const lombardy = areasNamed('Lombardy', ['Italy']);
-    expect(lombardy?.keys.length).toBeGreaterThan(5);
-    expect(lombardy?.countries).toEqual(['Italy']);
-    expect(areasNamed('Catalonia', ['Spain'])?.keys).toHaveLength(4);
   });
 });

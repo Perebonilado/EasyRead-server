@@ -191,18 +191,19 @@ function worker(audience: 'young children' | 'adults') {
 }
 
 describe("a children's explainer's host, ideas and end, made on the worker with the fake writer", () => {
-  it('gives the show no host and offers no looks: the audience is never on screen', async () => {
+  it('gives the show a host and offers their three looks on the choosing card', async () => {
     const w = worker('young children');
     await w.run({ kind: 'outline' });
-    // No host or mascot, even for children (explainer-animation-plan §10).
-    expect(w.show.bible?.characters.some((c) => c.host)).toBe(false);
-    expect(w.work().candidates[HOST_ID]).toBeUndefined();
+    const host = w.show.bible?.characters.find((c) => c.host);
+    expect(host).toMatchObject({ id: HOST_ID, kind: 'person' });
+    expect(w.work().candidates[HOST_ID]).toMatchObject({ first: true });
+    expect(w.work().candidates[HOST_ID].options).toHaveLength(3);
     const offered = w.messages.find(
       (m) =>
         (m.meta as { event?: { characterId?: string } } | null)?.event
           ?.characterId === HOST_ID,
     );
-    expect(offered).toBeUndefined();
+    expect(offered?.content).toMatch(/will host the show/);
     // Its "What next?" comes with the outline: no call of its own.
     expect(w.episodes.get('e1')!.outline!.next).toHaveLength(3);
     expect(w.recorded.filter((t) => t === 'studio_write')).toHaveLength(2);
@@ -259,9 +260,10 @@ describe("a children's explainer's host, ideas and end, made on the worker with 
     } as never);
     expect(scene.ideas?.[0]).toMatchObject({ beat: 0 });
 
-    // The player's extras: "What next?", and no host in the corner.
+    // The player's extras: the host's faces and "What next?", and nothing more.
     const extras = explainerPlay(w.show, episode.outline);
-    expect(Object.keys(extras).sort()).toEqual(['next']);
+    expect(Object.keys(extras).sort()).toEqual(['host', 'next']);
+    expect(extras.host?.faces.neutral).toMatch(/^<svg/);
     expect(extras.next).toHaveLength(3);
   });
 

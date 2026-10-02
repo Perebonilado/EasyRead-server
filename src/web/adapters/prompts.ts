@@ -14,8 +14,6 @@ import {
 import { landmarkBrief } from '../../business/domain/scene-set-landmarks';
 import { MAX_REVERSE } from '../../business/domain/scene-set-reverse';
 import { STYLE_PACK_IDS } from '../../business/domain/scene-style-packs';
-import { ICON_NAMES } from '../../business/domain/scene-icon-set';
-import { PALETTE_TOKENS } from '../../business/domain/scene-palette';
 
 /**
  * Prompts, kept in one file and versioned with the code.
@@ -179,164 +177,6 @@ export const FIGURE_GUIDE = [
   'so each is known at a glance. Dress them for their time: a tunic or a',
   'robe in the ancient world, never a hoodie. Nothing about how someone',
   'looks is made fun of.',
-].join(' ');
-
-/**
- * How the writer, or the editor's board, asks a map for more than
- * countries (scene-map): areas inside a country, named regions made of
- * them drawn as one shape each, the border two regions share as a seam,
- * pins with a number, and the year the map is about. Code looks every
- * name up and leaves off one it does not know; a show's maps share one
- * frame and one set of named regions, which code gives them.
- */
-export const MAP_GROUPS_GUIDE = [
-  'A map shows more than whole countries. map.areas colours areas inside',
-  'a country as map.highlight colours countries, each with name, label',
-  'and group: a state, a province, a region of it, or a part of a',
-  'country, by its usual name ("Bavaria", "California", "Kerala",',
-  '"Scotland", "the Midwest"). map.groups are named regions drawn as one',
-  'shape each, its name written in it: name, members (the areas and',
-  'countries it is made of, by name: "East Germany" is Mecklenburg-',
-  'Vorpommern, Brandenburg, Saxony-Anhalt, Thuringia, Saxony and Berlin)',
-  'and colour, a theme colour by its name (accent, accent2, chart0 to',
-  'chart5, good, bad, muted) or null for the next one. A region of the',
-  'past is drawn as the areas of today that were in it. In a show, its',
-  "map's regions are already made: name one with members null, and it",
-  'keeps its shape and its colour in every scene. map.seams draws the',
-  'border two regions (or countries, or areas) share as a line of its',
-  'own: between the two names, style "dashed" for a line drawn or agreed,',
-  '"glow" for a front or a fault line; point at "id.<first> and <second>"',
-  'as the voice reaches it. map.pins puts a pin on a place, an area or a',
-  'country, with a label of one to three words and number, a figure the',
-  'voice says ("174", "45 million"), on a card beside it, or null; point',
-  'at "id.<label>", else "id.<place>". map.year is the year the map is',
-  "about, or null: a map of the past is drawn with today's borders and",
-  "says so itself, so never say its borders are that year's. Colour only",
-  'what the voice is about: two or three named things at once, each',
-  'pointed at as it is named. The voice names a region by its name, never',
-  'by where it sits on the picture.',
-].join(' ');
-
-/**
- * The infographic kinds as the cast list names them (infographic-editor-
- * plan §3, stage 6): what each draws, and its fields. Code lays each out,
- * times its motion and colours it; the writer only names what it shows.
- * In the old writer's cast list (sceneWrite) and in the editor's guide.
- */
-export const INFOGRAPHIC_KINDS_CAST = [
-  'Nine more kinds draw an idea as an infographic does, all by code from',
-  'what you name, never by the artist. Each is a picture of the one idea a',
-  'sentence carries; at most eight words on it.',
-  '"counter" is one number that rolls up to its value as it arrives:',
-  'counter.value is the number as it reads (45 for "45 million"),',
-  'counter.unit what it is in ("million", "%", "km", "people") or null,',
-  'counter.prefix a currency or a word before it ("$", "£", "about",',
-  '"over") or null, counter.label what it counts in at most six words, or',
-  'null, and counter.then a later value it rolls on to, shown with a show',
-  'effect on "id.then" as the voice reaches it, or null. Point at',
-  '"id.number" or "id.label".',
-  '"icons" is a unit chart: a count as that many icons, multiplying into a',
-  `grid as it arrives. icons.icon is one of ${ICON_NAMES.map((n) => `"${n}"`).join(', ')};`,
-  'icons.count the real number; icons.per how many one icon stands for, or',
-  'null for code to choose; icons.unit what is counted ("soldiers") or',
-  'null; icons.label its caption or null; icons.highlight a part of the',
-  'count picked out later, shown with "id.highlight" as the voice says it,',
-  'with icons.highlightLabel (at most four words), or both null. Point at',
-  '"id.icons".',
-  '"namecard" is who someone is while the voice tells their part:',
-  'namecard.name, namecard.role (at most eight words) and namecard.line',
-  '(at most ten words: what they stand for in the story), each or null;',
-  "their initials stand in the portrait, their colour is the show's for",
-  'them. Point at "id.name", "id.role", "id.line" or "id.portrait".',
-  '"calendar" is when, as tear-off calendars: calendar.calendars one to',
-  'three, each a label of at most four words or null, and dates one to',
-  'four in order as you would write them ("1 October 1960", "May 1953",',
-  '"1957", "Day 44"); a later date flips on with a show effect on',
-  '"id.<the date as written>"; calendar.merge is the one date several',
-  'calendars slide together into, shown with "id.merge", or null.',
-  '"seats" is a vote or an assembly: a chamber\'s seats in their groups\'',
-  'colours, filling seat by seat. seats.layout "hemicycle" (a parliament\'s',
-  'half circle) or "chamber" (two benches facing); seats.groups in order,',
-  'each name, seats (a number) and colour or null; seats.majority true to',
-  'draw the majority line; seats.label the chamber and its year. Point at',
-  '"id.<group name>" or "id.majority".',
-  '"strike" is a decision or a promise changed: strike.from the words that',
-  'stood, strike.to the words that replace them (each at most five',
-  'words), strike.label at most four words over them or null. Show',
-  '"id.replaced" on the words that change it.',
-  '"transfer" is why, as things moving from one to another: money, papers,',
-  'people. transfer.from and transfer.to the two ends (at most four words',
-  'each), transfer.token the icon that moves ("coin" for money, "paper"',
-  'for letters or petitions, "person" for people, "dot" for anything',
-  'else), transfer.label a word or two on its path or null, and',
-  'transfer.shut true when the flow stops in the scene, shown with',
-  '"id.shut" on the words that stop it. Point at "id.<from>", "id.<to>" or',
-  '"id.tokens".',
-  '"document" is an official paper or a newspaper: document.style "paper"',
-  'or "newspaper", document.title its title or the paper\'s name,',
-  "document.headline one headline in type or null (never an article's",
-  'text: its lines are drawn as grey bars), document.stamp at most three',
-  'words stamped on it ("NOT RECOMMENDED", "APPROVED"), shown with',
-  '"id.stamp" on the words, or null.',
-  '"split" is a comparison: the screen split between two sides.',
-  'split.sides exactly two, each a label of at most four words, items one',
-  'to four of at most four words each, and icon one of the icons or null;',
-  'split.change a later list for one side, shown with "id.change": side 1',
-  'or 2, label or null, items. Point at "id.<side label>" or "id.<item>".',
-  'On a counter, icons, seats, a chart, a graph or a timeline, source is',
-  'where its numbers come from ("UN World Population Prospects, 2024"),',
-  'written small under it, or null when the page itself gives them.',
-  `colour is the thing's colour when the show gives it one: one of ${PALETTE_TOKENS.map((t) => `"${t}"`).join(', ')}, never a hex; else null.`,
-  'Fields of these kinds are null on every other kind.',
-].join(' ');
-
-/**
- * How an editor picks the picture for each line (the playbook's decision
- * rule), with the infographic kinds and one example of each: for the
- * editor's storyboard and any writer that plans an infographic film.
- */
-export const INFOGRAPHIC_KINDS_GUIDE = [
-  "Choose each line's picture by what the line is about. A place: the",
-  'map. When: a calendar for a date or two, a timeline for several. How',
-  'many: a counter for one number, icons for a count a viewer can picture',
-  '(soldiers, schools, ships), a chart for three or more numbers',
-  'compared. Who: a namecard. Why, cause and effect: a flow of steps, or',
-  'a transfer when something moves from one to another. A comparison: a',
-  'split. A feeling, an atmosphere, an event with people in it: a scene',
-  'with people (or a drawing). Exact words: a quote. A decision or a',
-  'promise changed: a strike. An official paper, a report, a newspaper: a',
-  'document. A vote, an assembly, a parliament: seats.',
-  'Numbers go on the screen; what they mean goes in the voice: never say',
-  'what the picture shows ("this chart shows"), say what it means. Each',
-  'picture shows one idea, at most eight words on it, and changes as the',
-  "voice moves on: a later look (a calendar's next date, a strike, a",
-  "stamp, a counter's later number, a highlight) is shown on the words",
-  'that bring it. A thing the show gives a colour keeps it: name it as the',
-  'show names it.',
-  INFOGRAPHIC_KINDS_CAST,
-  'One example of each, its fields only:',
-  'counter: {"value": 8, "unit": "billion", "prefix": "about", "label":',
-  '"people alive today", "then": null}, source "UN World Population',
-  'Prospects, 2024".',
-  'icons (a share shown with its whole): {"icon": "child", "count": 4,',
-  '"per": 1, "unit": "children", "label": "Of every 4 children",',
-  '"highlight": 1, "highlightLabel": "1 never finishes school"}.',
-  'namecard: {"name": "Marie Curie", "role": "Physicist and chemist",',
-  '"line": "First person to win two Nobel Prizes"}.',
-  'calendar: {"calendars": [{"label": "Launch", "dates": ["16 July',
-  '1969"]}, {"label": "On the Moon", "dates": ["20 July 1969"]}],',
-  '"merge": null}.',
-  'seats: {"layout": "hemicycle", "groups": [{"name": "Party A", "seats":',
-  '174, "colour": null}, {"name": "Party B", "seats": 138, "colour":',
-  'null}], "majority": true, "label": "The assembly, 1959"}.',
-  'strike: {"from": "IF", "to": "HOW", "label": "The question"}.',
-  'transfer: {"from": "Every town", "to": "The capital", "token": "coin",',
-  '"label": "taxes", "shut": false}.',
-  'document: {"style": "paper", "title": "Report of the Commission",',
-  '"headline": "New states?", "stamp": "NOT RECOMMENDED"}.',
-  'split: {"sides": [{"label": "Before", "items": ["Paper forms", "Long',
-  'queues"], "icon": "paper"}, {"label": "After", "items": ["Online in',
-  'minutes"], "icon": "computer"}], "change": null}.',
 ].join(' ');
 
 export const PROMPTS = {
@@ -1705,7 +1545,6 @@ export const PROMPTS = {
       'off. name is its caption. Point at "id.<country>", "id.<place>" or',
       '"id.<route name>" as the voice names each, and show only what the',
       'voice talks about.',
-      MAP_GROUPS_GUIDE,
       '"flag" is a real country\'s flag, drawn by code from the true flag:',
       'flag lists one to six countries by name ("Kenya", "Brazil",',
       '"Japan"); point at "id.<country>" as the voice names each.',
@@ -1728,7 +1567,6 @@ export const PROMPTS = {
       'bond". A real flag is always a flag, an equation an equation (or',
       "math, to work a sum), a molecule's structure a molecule, and steps",
       'with names a flow: never a drawing.',
-      INFOGRAPHIC_KINDS_CAST,
       'Fields a kind does not use are null.',
     ].join(' '),
     [
@@ -3375,56 +3213,3 @@ export const PROMPTS = {
     'no commentary.',
   ].join(' '),
 } as const;
-
-/**
- * Where the lesson writer's craft (sceneWrite) tells a book's page to set
- * something in type or to draw someone, and what a Studio explainer is
- * told instead (explainer-animation-plan §10): nothing stands in for a
- * picture as a card of its name, since what cannot be shown truthfully is
- * left out and the picture before it holds, or the map shows it; and no
- * one is drawn, not the viewer, not a stock figure for a group, not a
- * likeness of someone real.
- */
-export const EXPLAINER_SWAPS: readonly (readonly [string | RegExp, string])[] =
-  [
-    [
-      'Where nothing plain shows the name, make it a keyword instead.',
-      'Where nothing plain shows the name, leave it out: the picture before it holds, or the map shows it.',
-    ],
-    [
-      /Only a human being is a "person"\.[\s\S]*?a Roman soldier in a tunic and a helmet\./u,
-      [
-        'No one is drawn in an explainer: never a "person", never a drawing',
-        'of anyone, of a group or of a crowd, and never anyone standing in for',
-        'the viewer, who is never on screen. A computer, a program, or a role a',
-        'machine plays in the subject (in computing: a client, a server, a',
-        'worker, a node, a host, an agent, a bot) is a "drawing" of the device',
-        'or the box it runs on, however human its name sounds. What people did',
-        'is shown by what is real: where it happened on the map, the document',
-        'they signed, the number that changed, their exact words as a quote;',
-        'the voice says who they were. A real place is the map (kind "map")',
-        'with the place pinned, never a drawing of it, and never a place made',
-        'up for the story.',
-      ].join(' '),
-    ],
-    [
-      '"words" is a key term or a title of at most four words, style keyword or title: a label for each item of a list the voice reads out, so the learner can follow along, each arriving as it is named. It is never the picture of an idea: a card alone on the stage while the voice talks is dead air.',
-      '"words" is only a label for each item of a list the voice reads out, at most four words, style keyword, so the viewer can follow along, each arriving as it is named. It is never the picture of an idea, a place or a person, and never a title card: where nothing can be shown truthfully, leave it out, and the picture before it holds.',
-    ],
-    ['a state shown, a keyword, a zoom.', 'a state shown, a zoom.'],
-    [
-      'or a keyword card where there is nothing to draw, building up a row.',
-      'or its name as a label of the list where there is nothing to draw, building up a row.',
-    ],
-  ];
-
-/**
- * The lesson writer's craft as a Studio explainer's writers are told it:
- * sceneWrite with EXPLAINER_SWAPS made. A book's pages keep sceneWrite.
- */
-export function explainerWrite(write: string = PROMPTS.sceneWrite): string {
-  return EXPLAINER_SWAPS.reduce<string>(
-    (text, [book, explainer]) => text.replace(book, explainer),
-    write,
-  );
-}

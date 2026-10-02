@@ -76,16 +76,12 @@ const WIDE_BEFORE: Record<string, string> = {
   'adolescent-0-audit': '8001023547a986fd',
   'adolescent-1': 'b4b9c2590b8a728d',
   'adolescent-1-audit': '8230f81e984c7c19',
-  // The explainer floor (explainer-animation-plan §10): scene 2's three
-  // brakes that drew the comparison, not their labels, are left out rather
-  // than set as cards; scene 4's teen and clinician figures are left out,
-  // its next picture opening it in their place.
-  'adolescent-2': 'c31b6a7a09b6f5bd',
+  'adolescent-2': '27f6e7edf0c37564',
   'adolescent-2-audit': '41c5799707d0e02b',
   'adolescent-3': 'f04d7c4a9ede1d65',
   'adolescent-3-audit': '5cfc8bd06e5544a5',
-  'adolescent-4': '8e9455b0f56d38e8',
-  'adolescent-4-audit': '1da977d0a7f1e1d7',
+  'adolescent-4': '2b73eff726b21b1a',
+  'adolescent-4-audit': 'b53f7f45aac00dbc',
   'adolescent-5': '24ae68ea9697b0c9',
   'adolescent-5-audit': '25366d089780002d',
   'water-0': '9b24775166e26d80',

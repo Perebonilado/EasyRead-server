@@ -8,6 +8,7 @@ import {
   deskPass,
   entryOf,
   eventName,
+  eventNames,
   keyEvents,
   namesPerson,
   namesThing,
@@ -384,6 +385,27 @@ describe("an episode's desk pass", () => {
       expect(events.map((e) => e.year)).toEqual([
         1904, 1905, 1906, 1907, 1908, 1909, 1910, 1911,
       ]);
+    });
+
+    it('names an event’s own names: its people by surname, its bodies, never a sentence’s first word alone', () => {
+      expect(
+        eventNames(
+          'Baird demonstrates television to members of the Royal Institution',
+          ['John Logie Baird', 'Philo Farnsworth'],
+        ),
+      ).toEqual(['baird', 'Royal Institution']);
+      expect(
+        eventNames('The BBC Television Service opens at Alexandra Palace', []),
+      ).toEqual(['BBC', 'BBC Television Service', 'Alexandra Palace']);
+      expect(
+        eventNames('Lyttleton Constitution establishes federalism', []),
+      ).toEqual(['Lyttleton Constitution']);
+      expect(
+        eventNames(
+          'Postwar labor unrest and anti-colonial pressure expand',
+          [],
+        ),
+      ).toEqual([]);
     });
 
     it('names an event shortly, cut where it turns', () => {

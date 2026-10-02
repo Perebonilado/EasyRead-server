@@ -36,7 +36,7 @@ import type { LlmUsage } from '../../ports/llm.port';
 import { clip, line } from '../shots/shot-parts';
 import type { RegistryEntry } from '../shots/types';
 import { clipWords, roleWords } from './credit';
-import { titleKey } from './desk';
+import { samePicture, titleKey } from './desk';
 import { nameWords, stems, textWords } from './match';
 import type { PictureQuery, PictureRecord } from './types';
 
@@ -175,6 +175,43 @@ export function eventName(text: string): string {
     if (out.length >= 6) break;
   }
   return clip(out.join(' '), 6);
+}
+
+/**
+ * An event's own names, a photo of it must carry one of: the research's
+ * people its words name (by surname), its short names in capitals (BBC,
+ * RCA), and the runs of capitalised words that are names (the Royal
+ * Institution; the Lyttleton Constitution at its start, where one
+ * capital word is only a sentence's first).
+ */
+export function eventNames(text: string, people: readonly string[]): string[] {
+  const out = new Set<string>();
+  for (const person of people)
+    if (namesPerson(text, person)) {
+      const words = nameWords(person);
+      out.add(words[words.length - 1]);
+    }
+  const words = line(text, 200).split(' ');
+  let run: string[] = [];
+  let first = true;
+  const close = () => {
+    if (run.length && (!first || run.length >= 2)) out.add(run.join(' '));
+    if (run.length) first = false;
+    run = [];
+  };
+  for (const [i, raw] of words.entries()) {
+    const word = raw.replace(/^[^\p{L}]+|[^\p{L}'’]+$/gu, '');
+    if (!word) continue;
+    if (/^\p{Lu}{2,}$/u.test(word)) out.add(word);
+    if (/^\p{Lu}/u.test(word) && !(i === 0 && /^(?:the|a|an)$/iu.test(word)))
+      run.push(word.replace(/['’]s$/u, ''));
+    else {
+      close();
+      first = false;
+    }
+  }
+  close();
+  return [...out];
 }
 
 /**
@@ -333,6 +370,7 @@ export function passQuestions(input: PassInput): PassQuestion[] {
   for (const { event, year } of keyEvents(rows, research)) {
     const where = line(event.place ?? '', 80);
     const text = line(event.event, 200);
+    const named = eventNames(text, names);
     out.push({
       for: 'photo',
       shows: { kind: 'event', name: text },
@@ -350,6 +388,7 @@ export function passQuestions(input: PassInput): PassQuestion[] {
           ? { place: [where, region].filter((p): p is string => Boolean(p)) }
           : {}),
         words: [text, ...(where ? [where] : [])],
+        ...(named.length ? { names: named } : {}),
         asked: `an event: ${text} (${line(event.date, 40)}${where ? `, ${where}` : ''})`,
       },
     });
@@ -525,8 +564,10 @@ export async function deskPass(
   const entries: EpisodePictures['entries'] = [];
   const names = new Set<string>();
   const used = new Set<string>();
-  // A file and its crop, or its copy under another name, are one picture.
+  // A file and its crop, or its copy under another name, are one picture:
+  // by their titles, or by their prints when the titles differ.
   const titles = new Set<string>();
+  const prints: string[] = [];
   for (const question of passQuestions(input)) {
     const ask = {
       depth: opts.depth ?? true,
@@ -542,7 +583,8 @@ export async function deskPass(
       if (
         used.has(record.id) ||
         (record.sha1 && used.has(record.sha1)) ||
-        (title && titles.has(title))
+        (title && titles.has(title)) ||
+        prints.some((p) => samePicture(p, record.print))
       )
         continue;
       const entry = entryOf(question, record, names);
@@ -551,6 +593,7 @@ export async function deskPass(
       used.add(record.id);
       if (record.sha1) used.add(record.sha1);
       if (title) titles.add(title);
+      if (record.print) prints.push(record.print);
       entries.push({ entry, offer: question.offer });
       opts.log?.(`pictures: ${entry.name}: ${record.chip}`);
     }

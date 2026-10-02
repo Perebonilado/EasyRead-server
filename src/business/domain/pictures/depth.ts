@@ -100,6 +100,135 @@ export function isMono(pixels: PicturePixels): boolean {
   return coloured / n < 0.03;
 }
 
+/**
+ * How tightly a picture's colour clusters round one hue, 0 to 1, among
+ * its pixels with colour at all (the resultant length of their hues,
+ * weighted by how coloured each is): a sepia or a toned print is near 1,
+ * a photograph in colour (sky, brick, grass) well under it. 1 when no
+ * pixel has colour.
+ */
+export function hueConcentration(pixels: PicturePixels): number {
+  const { data, width, height } = pixels;
+  let x = 0;
+  let y = 0;
+  let weight = 0;
+  for (let i = 0; i < width * height; i += 1) {
+    const r = data[i * 4];
+    const g = data[i * 4 + 1];
+    const b = data[i * 4 + 2];
+    const max = Math.max(r, g, b);
+    const chroma = max - Math.min(r, g, b);
+    if (chroma <= 24) continue;
+    const h =
+      max === r
+        ? ((g - b) / chroma + 6) % 6
+        : max === g
+          ? (b - r) / chroma + 2
+          : (r - g) / chroma + 4;
+    const angle = (h / 6) * 2 * Math.PI;
+    x += chroma * Math.cos(angle);
+    y += chroma * Math.sin(angle);
+    weight += chroma;
+  }
+  return weight ? Math.hypot(x, y) / weight : 1;
+}
+
+/** How tightly a toned print's hues cluster, at least. */
+const TONED = 0.9;
+
+/**
+ * Whether a picture is a photograph's monochrome: grey, or toned in one
+ * hue (sepia, cyanotype, selenium), as every archive print before colour
+ * film was common is. A modern colour photograph of an old place is not.
+ */
+export function isMonochrome(pixels: PicturePixels): boolean {
+  return isMono(pixels) || hueConcentration(pixels) >= TONED;
+}
+
+/** The side, in cells, of a picture's print. */
+export const PRINT_SIDE = 16;
+
+/**
+ * A picture's print, for knowing it again under another file's name: the
+ * grey of its content's middle (its scan's border and a fifth of each
+ * edge left out, so a crop or a caption strip barely moves it) in a
+ * 16 × 16 grid, as hex.
+ */
+export function printOf(
+  pixels: PicturePixels,
+  content: [number, number, number, number] = [0, 0, 1, 1],
+): string {
+  const { data, width, height } = pixels;
+  const [cx, cy, cw, ch] = content;
+  const x0 = (cx + cw * 0.1) * width;
+  const y0 = (cy + ch * 0.1) * height;
+  const w = cw * 0.8 * width;
+  const h = ch * 0.8 * height;
+  const cells: number[] = [];
+  for (let j = 0; j < PRINT_SIDE; j += 1)
+    for (let i = 0; i < PRINT_SIDE; i += 1) {
+      const xa = Math.floor(x0 + (i * w) / PRINT_SIDE);
+      const xb = Math.max(xa + 1, Math.floor(x0 + ((i + 1) * w) / PRINT_SIDE));
+      const ya = Math.floor(y0 + (j * h) / PRINT_SIDE);
+      const yb = Math.max(ya + 1, Math.floor(y0 + ((j + 1) * h) / PRINT_SIDE));
+      let sum = 0;
+      let n = 0;
+      for (let y = ya; y < Math.min(yb, height); y += 1)
+        for (let x = xa; x < Math.min(xb, width); x += 1) {
+          const k = (y * width + x) * 4;
+          sum += 0.299 * data[k] + 0.587 * data[k + 1] + 0.114 * data[k + 2];
+          n += 1;
+        }
+      cells.push(n ? Math.round(sum / n) : 0);
+    }
+  return cells.map((v) => v.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * How alike two prints are, -1 to 1: the best correlation of their greys
+ * as one is slid up to two cells each way over the other (a crop moves a
+ * picture by that much). Two files of one photograph score near 1; two
+ * photographs of one man at one desk, well under.
+ */
+export function printsAlike(a: string, b: string): number {
+  const read = (hex: string) =>
+    Array.from({ length: PRINT_SIDE * PRINT_SIDE }, (_, i) =>
+      parseInt(hex.slice(i * 2, i * 2 + 2), 16),
+    );
+  if (a.length !== b.length || a.length !== PRINT_SIDE * PRINT_SIDE * 2)
+    return 0;
+  const p = read(a);
+  const q = read(b);
+  let best = -1;
+  for (let dy = -2; dy <= 2; dy += 1)
+    for (let dx = -2; dx <= 2; dx += 1) {
+      const xs: number[] = [];
+      const ys: number[] = [];
+      for (let j = 0; j < PRINT_SIDE; j += 1)
+        for (let i = 0; i < PRINT_SIDE; i += 1) {
+          const u = i + dx;
+          const v = j + dy;
+          if (u < 0 || v < 0 || u >= PRINT_SIDE || v >= PRINT_SIDE) continue;
+          xs.push(p[j * PRINT_SIDE + i]);
+          ys.push(q[v * PRINT_SIDE + u]);
+        }
+      const n = xs.length;
+      const mx = xs.reduce((s, v) => s + v, 0) / n;
+      const my = ys.reduce((s, v) => s + v, 0) / n;
+      let sxy = 0;
+      let sxx = 0;
+      let syy = 0;
+      for (let k = 0; k < n; k += 1) {
+        sxy += (xs[k] - mx) * (ys[k] - my);
+        sxx += (xs[k] - mx) ** 2;
+        syy += (ys[k] - my) ** 2;
+      }
+      const r = sxx && syy ? sxy / Math.sqrt(sxx * syy) : 0;
+      if (r > best) best = r;
+    }
+  return Math.round(best * 1000) / 1000;
+}
+
 /** The most of each edge a scan's border is taken to be, and how far past it its soft inner edge runs. */
 const BORDER_MOST = 0.15;
 const BORDER_SOFT = 0.02;

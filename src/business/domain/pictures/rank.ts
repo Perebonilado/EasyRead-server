@@ -386,6 +386,16 @@ export function personPhotoOf(
   return { ok: true };
 }
 
+/**
+ * Verbs a timeline tells its events with ("Baird demonstrates television",
+ * "the BBC opens…"): nothing a photo's title names, so never searched by.
+ */
+export const EVENT_VERBS = new Set(
+  'become becomes move moves set sets expose exposes ask asks choose chooses establish establishes introduce introduces announce announces open opens drop drops transmit transmits demonstrate demonstrates launch launches sign signs hold holds win wins lose loses begin begins end ends start starts take takes make makes give gives form forms join joins leave leaves meet meets visit visits return returns adopt adopts approve approves pass passes declare declares elect elects appoint appoints create creates build builds unveil unveils show shows send sends receive receives reach reaches enter enters arrive arrives land lands fall falls rise rises grow grows expand expands invent invents publish publishes call calls found founds close closes ratify ratifies abolish abolishes replace replaces add adds split splits break breaks want wants get gets keep keeps lead leads rule rules run runs turn turns bring brings sell sells pay pays come comes go goes agree agreed agrees vote votes'.split(
+    ' ',
+  ),
+);
+
 /** An event's key words: its words' stems, and its short names in capitals ("BBC", "RCA") whole. */
 function keysIn(text: string): Set<string> {
   const keys = stems(text);
@@ -422,7 +432,7 @@ function namesThing(said: string, name: string): boolean {
  */
 export function eventPhotoOf(
   file: Pick<SourceFile, 'title' | 'description' | 'categories'>,
-  query: Pick<PictureQuery, 'name' | 'years' | 'place' | 'words'>,
+  query: Pick<PictureQuery, 'name' | 'years' | 'place' | 'words' | 'names'>,
   year: number | undefined,
 ): { ok: true } | { ok: false; reason: string } {
   const years = query.years ?? [];
@@ -440,9 +450,24 @@ export function eventPhotoOf(
   if (made) return { ok: false, reason: made };
   const seen = keysIn(said);
   const placed = [...keysIn([query.place ?? []].flat().join(' '))];
-  const keys = [...keysIn((query.words ?? [query.name]).join(' '))].filter(
+  // Its own words, but the verbs that tell it: "demonstrates" is in a
+  // Dutch "Demonstratie" of aircraft too.
+  const told = (query.words ?? [query.name])
+    .join(' ')
+    .split(/\s+/u)
+    .filter((w) => !EVENT_VERBS.has(w.toLowerCase().replace(/[^\p{L}]/gu, '')))
+    .join(' ');
+  const keys = [...keysIn(told)].filter((k) => !placed.includes(k));
+  // Its names (its people, its bodies), but where it happened: a photo of
+  // it names one of them.
+  const names = [...keysIn((query.names ?? []).join(' '))].filter(
     (k) => !placed.includes(k),
   );
+  if (names.length && !names.some((n) => seen.has(n)))
+    return {
+      ok: false,
+      reason: `it names none of the event’s own (${names.slice(0, 3).join(', ')})`,
+    };
   const hits = keys.filter((k) => seen.has(k)).length;
   const there = placed.some((p) => seen.has(p));
   const enough =

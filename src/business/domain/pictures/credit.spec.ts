@@ -178,6 +178,32 @@ describe("a picture's words", () => {
     expect(
       yearOf(file({ title: 'Lagos street', date: '', description: '' })),
     ).toBeUndefined();
+    // A Navy print put on Flickr in 2015, dated by its scan: no year.
+    expect(
+      yearOf(
+        file({
+          title: '330-ps-7978-usn-708689 16257864287 o',
+          date: '2015-02-24',
+          uploaded: '2015-03-01',
+          description: '',
+          categories: ['PD US Navy'],
+        }),
+      ),
+    ).toBeUndefined();
+    // A crowd upload dated the year it went online keeps its year.
+    expect(
+      yearOf(
+        file({
+          title: 'Ocean Beach',
+          date: '2015-02-24',
+          uploaded: '2015-03-01',
+          description: '',
+          artist: 'A Walker',
+          credit: 'Own work',
+          categories: ['San Francisco'],
+        }),
+      ),
+    ).toBe(2015);
   });
 
   it("writes a person's years and who they were in three words", () => {

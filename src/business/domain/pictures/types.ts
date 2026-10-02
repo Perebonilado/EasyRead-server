@@ -37,6 +37,12 @@ export interface PictureQuery {
    */
   words?: readonly string[];
   /**
+   * The names a photo of an event must carry one of (the people, the
+   * bodies and the named things it tells of, but where it happened): a
+   * photo of a 1926 demonstration of aircraft is no photo of Baird's.
+   */
+  names?: readonly string[];
+  /**
    * What the desk's look at a picture is asked it shows, in the research's
    * words ("an event: Nigeria becomes independent, 1 October 1960, Lagos"):
    * a picture of an event or a thing is taken only when the look agrees.
@@ -223,4 +229,6 @@ export interface PictureRecord {
   use?: PictureUseOf;
   /** Its title at its source, in words: what the board's list says it shows. */
   title?: string;
+  /** Its print (pictures/depth's printOf): the same photograph under another file is known by it. */
+  print?: string;
 }

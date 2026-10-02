@@ -44,7 +44,13 @@ import {
   sourceOf,
   yearOf,
 } from './credit';
-import { contentBox, isMono } from './depth';
+import {
+  contentBox,
+  isMono,
+  isMonochrome,
+  printOf,
+  printsAlike,
+} from './depth';
 import {
   agreeDoubt,
   focalFromFocus,
@@ -59,6 +65,7 @@ import {
 import { licenceUnder, type LicenceMode } from './licence';
 import { matchPerson, matchPlace, nameWords, textWords } from './match';
 import {
+  EVENT_VERBS,
   eventPhotoOf,
   LEAST_PX,
   personPhotoOf,
@@ -121,7 +128,7 @@ const LOOKUP_DAYS = 30;
  * again (a portrait that is a statue's photograph, once let through, is
  * not handed out for a month after the rule against it).
  */
-export const DESK_RULES = 12;
+export const DESK_RULES = 13;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** The width the desk asks a source for: a full frame's with room for a 12% push; a portrait's print; a page. */
@@ -200,16 +207,6 @@ const SEARCH_STOP = new Set([
   'that',
   'this',
 ]);
-
-/**
- * Verbs a timeline tells its events with ("Baird demonstrates television",
- * "the BBC opens…"): nothing a photo's title names, so never searched by.
- */
-const EVENT_VERBS = new Set(
-  'become becomes move moves set sets expose exposes ask asks choose chooses establish establishes introduce introduces announce announces open opens drop drops transmit transmits demonstrate demonstrates launch launches sign signs hold holds win wins lose loses begin begins end ends start starts take takes make makes give gives form forms join joins leave leaves meet meets visit visits return returns adopt adopts approve approves pass passes declare declares elect elects appoint appoints create creates build builds unveil unveils show shows send sends receive receives reach reaches enter enters arrive arrives land lands fall falls rise rises grow grows expand expands invent invents publish publishes call calls found founds close closes ratify ratifies abolish abolishes replace replaces add adds split splits break breaks want wants get gets keep keeps lead leads rule rules run runs turn turns bring brings sell sells pay pays come comes go goes agree agreed agrees vote votes'.split(
-    ' ',
-  ),
-);
 
 /**
  * The words to search an event by, from the research's own words for it:
@@ -300,6 +297,20 @@ function agreedOf(
 
 /** How many questions' answers a copy keeps. */
 const AGREES_KEPT = 12;
+
+/** How alike two prints must be to be one photograph under two names (two files of one scored 0.99; two photographs, under 0.72). */
+export const SAME_PICTURE = 0.9;
+
+/** Whether two pictures are one photograph, by their prints. */
+export const samePicture = (a?: string, b?: string): boolean =>
+  Boolean(a && b && printsAlike(a, b) >= SAME_PICTURE);
+
+/**
+ * The year before which a photograph of a place or an event is a print in
+ * grey or one tone: colour film was rare until then, so a colour picture
+ * "of 1936" is the place photographed since, its title naming the year.
+ */
+export const COLOUR_FROM = 1940;
 
 /** A copy's record with what was seen of it now, its answers to earlier questions kept (the newest last). */
 function withSeen(
@@ -1120,7 +1131,8 @@ export class PictureDesk {
       () => this.deps.pixels.pixels(bytes, 256),
       null,
     );
-    const crop = small ? cropOf(contentBox(small), size) : undefined;
+    const content = small ? contentBox(small) : null;
+    const crop = content ? cropOf(content, size) : undefined;
     // Where its subject is, as a model that sees names it (once a copy).
     let focus: Focus | null = null;
     if (this.deps.focus && this.deps.pixels.png) {
@@ -1164,7 +1176,13 @@ export class PictureDesk {
             : looked
               ? 'looked'
               : 'centre',
-        ...(small ? { mono: isMono(small) } : {}),
+        ...(small
+          ? {
+              mono: isMono(small),
+              monochrome: isMonochrome(small),
+              print: printOf(small, content ?? undefined),
+            }
+          : {}),
         ...(crop ? { crop } : {}),
         ...(focus ? { focus } : {}),
         // Whether it shows what it was asked to, kept by the question.
@@ -1185,6 +1203,13 @@ export class PictureDesk {
     asked?: string,
   ): string | null {
     const focus = (meta?.focus ?? null) as Focus | null;
+    if (
+      (candidate.kind === 'place' || candidate.kind === 'event') &&
+      candidate.year !== undefined &&
+      candidate.year < COLOUR_FROM &&
+      meta?.monochrome === false
+    )
+      return `a photograph in colour said to be of ${candidate.year}: the place since`;
     if (candidate.use === 'portrait')
       return focus ? portraitDoubt(focus) : null;
     if (asked) {
@@ -1285,6 +1310,7 @@ export class PictureDesk {
       ...(role ? { role } : {}),
       ...(use ? { use } : {}),
       ...(title ? { title } : {}),
+      ...(typeof meta.print === 'string' ? { print: meta.print } : {}),
     };
   }
 
@@ -1401,13 +1427,20 @@ export class PictureDesk {
             }),
           null,
         );
-        if (
-          record &&
-          !records.some(
-            (r) => r.id === record.id || (r.sha1 && r.sha1 === record.sha1),
-          )
-        )
-          records.push(record);
+        if (!record) continue;
+        const twin = records.find(
+          (r) =>
+            r.id === record.id ||
+            (r.sha1 && r.sha1 === record.sha1) ||
+            samePicture(r.print, record.print),
+        );
+        if (twin) {
+          this.log(
+            `pictures: ${record.sourceId} is ${twin.sourceId} again: one picture`,
+          );
+          continue;
+        }
+        records.push(record);
       }
     };
     const most = MOST[query.kind];

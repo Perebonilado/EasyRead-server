@@ -207,7 +207,8 @@ export function creditOf(
  * first year its description gives. Undefined when none can be trusted.
  */
 export function yearOf(
-  file: Pick<SourceFile, 'title' | 'date' | 'description' | 'uploaded'>,
+  file: Pick<SourceFile, 'title' | 'date' | 'description' | 'uploaded'> &
+    Partial<Pick<SourceFile, 'artist' | 'credit' | 'categories'>>,
 ): number | undefined {
   const years = (text: string) =>
     [
@@ -227,7 +228,20 @@ export function yearOf(
       dated >= uploaded - 1 &&
       described !== undefined &&
       described < dated - 1;
-    if (!scan) return dated;
+    // An archive's photograph dated the year it went online is dated by
+    // its scan (a Navy print put on Flickr in 2015 is no photo of 2015).
+    const archived =
+      dated >= 2004 &&
+      uploaded !== undefined &&
+      Math.abs(dated - uploaded) <= 1 &&
+      file.categories !== undefined &&
+      institutionOf({
+        artist: file.artist ?? '',
+        credit: file.credit ?? '',
+        description: file.description,
+        categories: file.categories,
+      }) !== null;
+    if (!scan && !archived) return dated;
   }
   if (described !== undefined) return described;
   return inTitle.length ? Math.min(...inTitle) : undefined;

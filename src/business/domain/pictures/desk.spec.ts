@@ -24,7 +24,7 @@ import {
 } from './desk';
 import type { LicenceMode } from './licence';
 import { eventPhotoOf } from './rank';
-import type { PictureQuery } from './types';
+import type { PictureQuery, SourceFile } from './types';
 
 const NOW = new Date('2026-10-02T09:00:00Z');
 
@@ -721,5 +721,126 @@ describe('the picture desk', () => {
     expect(inCountry('United Kingdom')).toBe('the United Kingdom');
     expect(inCountry('Netherlands')).toBe('the Netherlands');
     expect(inCountry('Nigeria')).toBe('Nigeria');
+  });
+
+  describe('looked at: tone and likeness', () => {
+    /**
+     * Pixels made up by the file's name: "colour" a modern photograph in
+     * colour, "twin" one photograph (a blot on a light ground), "other"
+     * another; anything else grey.
+     */
+    const grid = (at: (x: number, y: number) => [number, number, number]) => {
+      const data = new Uint8Array(32 * 32 * 4);
+      for (let y = 0; y < 32; y += 1)
+        for (let x = 0; x < 32; x += 1)
+          data.set([...at(x, y), 255], (y * 32 + x) * 4);
+      return { data, width: 32, height: 32 };
+    };
+    const pixels = {
+      ...FAKE_PIXELS,
+      pixels: (bytes: Buffer) => {
+        const said = decodeURIComponent(bytes.toString());
+        if (/colour/u.test(said))
+          return Promise.resolve(
+            grid((x) =>
+              x % 3 === 0
+                ? [90, 150, 230]
+                : x % 3 === 1
+                  ? [180, 90, 60]
+                  : [70, 160, 70],
+            ),
+          );
+        if (/twin/u.test(said))
+          return Promise.resolve(
+            grid((x, y) => {
+              const v = Math.hypot(x - 16, y - 13) < 6 ? 60 : 210 - y * 3;
+              return [v, v, v];
+            }),
+          );
+        if (/other/u.test(said))
+          return Promise.resolve(
+            grid((x, y) => {
+              const v = x < 10 ? 30 : y < 15 ? 230 : 120 + ((x * y) % 50);
+              return [v, v, v];
+            }),
+          );
+        return FAKE_PIXELS.pixels(bytes, 256);
+      },
+    };
+    const deskOf = (files: SourceFile[], focus = new FakeFocus()) => {
+      const logs: string[] = [];
+      const desk = new PictureDesk({
+        sources: new FakeSources([BELLO], [], files),
+        cache: new MemoryCache(),
+        storage: new MemoryStorage(),
+        pixels,
+        focus: focus.ask,
+        licence: 'off',
+        now: () => NOW,
+        log: (m) => logs.push(m),
+      });
+      return { desk, logs };
+    };
+
+    it('refuses a photograph in colour said to be of an event before colour film: the place photographed since', async () => {
+      const bbc: PictureQuery = {
+        name: 'The BBC Television Service opens',
+        kind: 'event',
+        years: [1936],
+        place: ['Alexandra Palace, London'],
+        words: ['The BBC Television Service opens at Alexandra Palace'],
+        names: ['BBC'],
+        asked:
+          'an event: The BBC Television Service opens at Alexandra Palace (2 November 1936)',
+      };
+      const { desk, logs } = deskOf([
+        commonsFile({
+          sourceId: 'File:BBC television at Alexandra Palace 1936 colour.jpg',
+          categories: ['1936 in London'],
+          date: '1936',
+        }),
+        commonsFile({
+          sourceId: 'File:BBC television studio at Alexandra Palace 1936.jpg',
+          categories: ['1936 in London'],
+          date: '1936',
+        }),
+      ]);
+      const all = await desk.lookupAll(bbc);
+      expect(all.map((r) => r.sourceId)).toEqual([
+        'File:BBC television studio at Alexandra Palace 1936.jpg',
+      ]);
+      expect(logs.join('\n')).toMatch(
+        /1936 colour\.jpg will not do: a photograph in colour said to be of 1936/u,
+      );
+    });
+
+    it('takes one photograph once, though two files hold it', async () => {
+      const { desk, logs } = deskOf([
+        ...FILES,
+        commonsFile({
+          sourceId: 'File:Ahmadu Bello at Kaduna twin, 1957.jpg',
+          categories: ['Ahmadu Bello', 'PD US Government'],
+          date: '1957',
+        }),
+        commonsFile({
+          sourceId: 'File:Sir Ahmadu Bello, Premier, twin print 1957.jpg',
+          categories: ['Ahmadu Bello', 'PD US Government'],
+          date: '1957',
+        }),
+        commonsFile({
+          sourceId: 'File:Ahmadu Bello other, Kano 1953.jpg',
+          categories: ['Ahmadu Bello', 'PD US Government'],
+          date: '1953',
+        }),
+      ]);
+      const all = await desk.lookupAll(BELLO_Q);
+      const photos = all
+        .filter((r) => r.use === 'photo')
+        .map((r) => r.sourceId);
+      expect(photos.filter((f) => /twin/u.test(f))).toHaveLength(1);
+      // Both twins rank first (1957, the research's year): the second is passed over.
+      expect(photos).toContain('File:Ahmadu Bello other, Kano 1953.jpg');
+      expect(logs.join('\n')).toMatch(/twin.* is .*twin.* again: one picture/u);
+    });
   });
 });

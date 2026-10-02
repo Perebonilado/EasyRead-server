@@ -508,3 +508,48 @@ describe('what is never a picture of anyone or anything', () => {
     });
   });
 });
+
+describe('an event is of its own people, bodies and things, not of its verbs', () => {
+  const baird = {
+    name: 'Baird demonstrates television',
+    years: [1926],
+    place: ['Frith Street, London'],
+    words: [
+      'Baird demonstrates television to members of the Royal Institution',
+      'Frith Street, London',
+    ],
+    names: ['baird', 'Royal Institution'],
+  };
+
+  it('refuses a Dutch 1926 demonstration of aircraft for Baird’s of television', () => {
+    expect(
+      eventPhotoOf(
+        {
+          title:
+            "Demonstratie van twee experimentele vliegtuigen het staartloze vliegtuig en de 'windmolen'",
+          description: 'Londen, 1926',
+          categories: ['1926 in London'],
+        },
+        baird,
+        1926,
+      ),
+    ).toEqual({
+      ok: false,
+      reason: 'it names none of the event’s own (baird, royal, instit)',
+    });
+  });
+
+  it('takes a photo naming Baird and his television that year', () => {
+    expect(
+      eventPhotoOf(
+        {
+          title: 'John Logie Baird and his television apparatus, 1926',
+          description: '',
+          categories: [],
+        },
+        baird,
+        1926,
+      ),
+    ).toEqual({ ok: true });
+  });
+});

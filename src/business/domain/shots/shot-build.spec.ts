@@ -144,6 +144,8 @@ describe('the plan built', () => {
     expect(portrait.camera[0]).toMatchObject({
       move: 'push',
       amount: CAMERA_AMOUNT.small,
+      // Where the camera last was: the seam the shot before pushed in on.
+      target: { kind: 'asset', asset: 'map', part: 'seam-federal-balance' },
     });
     expect(built.notes.join('\n')).toContain(
       'no cleared picture of "person:Ahmadu Bello"',

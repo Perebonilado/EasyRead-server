@@ -389,11 +389,16 @@ export function buildShots(
             : {}),
           ...(before.shot.chip ? { chip: before.shot.chip } : {}),
         };
+        // Where the camera last was on it: the last thing it was aimed
+        // at, else the subject.
+        const aim =
+          [...before.shot.camera].reverse().find((c) => c.target)?.target ??
+          before.shot.focal;
         safeMove = {
           move: 'push',
           on: planned.on,
           amount: CAMERA_AMOUNT.small,
-          ...(before.shot.focal ? { target: before.shot.focal } : {}),
+          ...(aim ? { target: aim } : {}),
         };
         notes.push(
           `shot ${i + 1}: safe shot, shot ${built.length}'s set carried on`,

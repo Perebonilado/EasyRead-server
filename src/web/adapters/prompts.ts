@@ -3375,3 +3375,56 @@ export const PROMPTS = {
     'no commentary.',
   ].join(' '),
 } as const;
+
+/**
+ * Where the lesson writer's craft (sceneWrite) tells a book's page to set
+ * something in type or to draw someone, and what a Studio explainer is
+ * told instead (explainer-animation-plan §10): nothing stands in for a
+ * picture as a card of its name, since what cannot be shown truthfully is
+ * left out and the picture before it holds, or the map shows it; and no
+ * one is drawn, not the viewer, not a stock figure for a group, not a
+ * likeness of someone real.
+ */
+export const EXPLAINER_SWAPS: readonly (readonly [string | RegExp, string])[] =
+  [
+    [
+      'Where nothing plain shows the name, make it a keyword instead.',
+      'Where nothing plain shows the name, leave it out: the picture before it holds, or the map shows it.',
+    ],
+    [
+      /Only a human being is a "person"\.[\s\S]*?a Roman soldier in a tunic and a helmet\./u,
+      [
+        'No one is drawn in an explainer: never a "person", never a drawing',
+        'of anyone, of a group or of a crowd, and never anyone standing in for',
+        'the viewer, who is never on screen. A computer, a program, or a role a',
+        'machine plays in the subject (in computing: a client, a server, a',
+        'worker, a node, a host, an agent, a bot) is a "drawing" of the device',
+        'or the box it runs on, however human its name sounds. What people did',
+        'is shown by what is real: where it happened on the map, the document',
+        'they signed, the number that changed, their exact words as a quote;',
+        'the voice says who they were. A real place is the map (kind "map")',
+        'with the place pinned, never a drawing of it, and never a place made',
+        'up for the story.',
+      ].join(' '),
+    ],
+    [
+      '"words" is a key term or a title of at most four words, style keyword or title: a label for each item of a list the voice reads out, so the learner can follow along, each arriving as it is named. It is never the picture of an idea: a card alone on the stage while the voice talks is dead air.',
+      '"words" is only a label for each item of a list the voice reads out, at most four words, style keyword, so the viewer can follow along, each arriving as it is named. It is never the picture of an idea, a place or a person, and never a title card: where nothing can be shown truthfully, leave it out, and the picture before it holds.',
+    ],
+    ['a state shown, a keyword, a zoom.', 'a state shown, a zoom.'],
+    [
+      'or a keyword card where there is nothing to draw, building up a row.',
+      'or its name as a label of the list where there is nothing to draw, building up a row.',
+    ],
+  ];
+
+/**
+ * The lesson writer's craft as a Studio explainer's writers are told it:
+ * sceneWrite with EXPLAINER_SWAPS made. A book's pages keep sceneWrite.
+ */
+export function explainerWrite(write: string = PROMPTS.sceneWrite): string {
+  return EXPLAINER_SWAPS.reduce<string>(
+    (text, [book, explainer]) => text.replace(book, explainer),
+    write,
+  );
+}

@@ -2621,6 +2621,9 @@ export class StudioProcessor {
           ? ' This scene starts a diagram the scenes after it add to: give each thing a short name, and link them with arrows.'
           : '';
     const ask = {
+      // Told the explainer's craft: no card in place of a picture, no one
+      // drawn (explainer-animation-plan §10).
+      explainer: true,
       documentTitle: show.title,
       topicTitle: outline.title,
       material: own
@@ -2645,7 +2648,10 @@ export class StudioProcessor {
         scene?.points.length
           ? `The small ideas, each with what to show:\n- ${scene.points.join('\n- ')}`
           : '',
-        describeBible(bible, false),
+        // Its subject and pictures, never the cast: the show's people and
+        // places are its story clips' alone, and a lesson draws no one
+        // (explainer-animation-plan §10).
+        describeBible({ ...bible, characters: [], sets: [] }, false),
       ]
         .filter(Boolean)
         .join('\n\n'),

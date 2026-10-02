@@ -620,6 +620,12 @@ export interface LlmGatewayPort {
     plain?: string;
     /** The page's part of its chapter's teacher's notes. */
     notes?: string;
+    /**
+     * A Studio explainer's lesson: its writer is told the explainer's
+     * craft (explainerWrite: no card in place of a picture, no one
+     * drawn). Absent, a book's page, as always.
+     */
+    explainer?: boolean;
     previous?: SceneScriptDraft;
     problems?: string[];
   }): Promise<LlmResult<SceneScriptDraft>>;
